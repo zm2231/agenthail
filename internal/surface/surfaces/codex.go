@@ -530,3 +530,55 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 
 var localHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
+
+// Tail returns the last N user/assistant exchanges from a Codex thread.
+func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.close()
+	if err := c.ensureHooked(ctx, conn); err != nil {
+		return nil, err
+	}
+	resp, err := c.rpc(ctx, conn, "thread/read", map[string]any{
+		"threadId":     sess.ID,
+		"includeTurns": true,
+	}, 5*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("thread/read: %w", err)
+	}
+	result, _ := resp["result"].(map[string]any)
+	thread, _ := result["thread"].(map[string]any)
+	turns, _ := thread["turns"].([]any)
+
+	var exchanges []surface.Exchange
+	for _, t := range turns {
+		m, _ := t.(map[string]any)
+		items, _ := m["items"].([]any)
+		var ex surface.Exchange
+		for _, it := range items {
+			im, _ := it.(map[string]any)
+			itp, _ := im["type"].(string)
+			if txt, ok := im["text"].(string); ok && txt != "" {
+				if itp == "userMessage" || itp == "user" {
+					if ex.User == "" {
+						ex.User = txt
+					}
+				} else if itp == "agentMessage" || itp == "assistant" {
+					if ex.Assistant == "" {
+						ex.Assistant = txt
+					}
+				}
+			}
+		}
+		if ex.User != "" || ex.Assistant != "" {
+			exchanges = append(exchanges, ex)
+		}
+	}
+
+	if len(exchanges) > n {
+		exchanges = exchanges[len(exchanges)-n:]
+	}
+	return exchanges, nil
+}

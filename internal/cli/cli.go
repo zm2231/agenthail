@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdSend(rest)
 	case "reply":
 		return a.cmdReply(rest)
+	case "last", "tail":
+		return a.cmdLast(rest)
 	case "stream":
 		return a.cmdStream(rest)
 	case "goal":
@@ -88,6 +91,7 @@ Session commands:
   send <target> "message"       Send a message (--from <name>, --stream, --reply, --json)
   stream <target>               Tail live activity
   reply <target>                Fetch last assistant reply
+  last <target> [count]        Show last N exchanges (default 3)
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context
   model <target> [name]         Get or set model
@@ -392,6 +396,44 @@ func (a *App) cmdReply(args []string) error {
 		return err
 	}
 	fmt.Println(reply.Text)
+	return nil
+}
+
+func (a *App) cmdLast(args []string) error {
+	positional := stripFlags(args)
+	if len(positional) < 1 {
+		return fmt.Errorf("usage: agenthail last <target> [count]")
+	}
+	ctx := context.Background()
+	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	n := 3 // default: last 3 exchanges
+	if len(positional) > 1 {
+		if v, e := strconv.Atoi(positional[1]); e == nil && v > 0 && v <= 50 {
+			n = v
+		}
+	}
+	exchanges, err := surf.Tail(ctx, sess, n)
+	if err != nil {
+		return err
+	}
+	if len(exchanges) == 0 {
+		fmt.Println("(no conversation history)")
+		return nil
+	}
+	label := a.resolveDisplay(sess.ID)
+	fmt.Printf("── %s ──\n", label)
+	for _, ex := range exchanges {
+		if ex.User != "" {
+			fmt.Printf("you  ▸ %s\n", truncate(strings.ReplaceAll(ex.User, "\n", " "), 200))
+		}
+		if ex.Assistant != "" {
+			fmt.Printf(" ai  ▸ %s\n", truncate(strings.ReplaceAll(ex.Assistant, "\n", " "), 200))
+		}
+		fmt.Println()
+	}
 	return nil
 }
 

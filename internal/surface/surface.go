@@ -41,9 +41,18 @@ type SendResult struct {
 }
 
 type ReplyResult struct {
-	Text  string `json:"text"`
-	Done  bool   `json:"done"`
-	Error string `json:"error"`
+	Text     string `json:"text"`
+	UserText string `json:"userText"`  // last user message (for context)
+	Done     bool   `json:"done"`
+	Error    string `json:"error"`
+}
+
+// Exchange is one user-assistant turn pair.
+// Either User or Assistant may be empty if the conversation starts mid-turn.
+type Exchange struct {
+	User      string    `json:"user"`
+	Assistant string    `json:"assistant"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type StreamEvent struct {
@@ -69,6 +78,7 @@ type Surface interface {
 	Resolve(ctx context.Context, target string) (*Session, error)
 	Send(ctx context.Context, sess *Session, message string) (*SendResult, error)
 	Reply(ctx context.Context, sess *Session, limit int) (*ReplyResult, error)
+	Tail(ctx context.Context, sess *Session, n int) ([]Exchange, error)
 	Stream(ctx context.Context, sess *Session, uuid string, onEvent func(StreamEvent), timeout time.Duration) error
 	GoalSet(ctx context.Context, sess *Session, text string) error
 	GoalClear(ctx context.Context, sess *Session) error

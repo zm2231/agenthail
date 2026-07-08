@@ -438,3 +438,71 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// Tail scans the transcript for the last N user/assistant exchanges.
+func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
+	path := sess.Transcript
+	if path == "" {
+		path = c.transcriptPath(sess)
+	}
+	if path == "" || !fileExists(path) {
+		return nil, fmt.Errorf("no local transcript")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+
+	// Collect all user/assistant text messages
+	type msg struct {
+		role string
+		text string
+	}
+	var msgs []msg
+	for sc.Scan() {
+		var rec map[string]any
+		if json.Unmarshal(sc.Bytes(), &rec) != nil {
+			continue
+		}
+		typ, _ := rec["type"].(string)
+		if typ != "user" && typ != "assistant" {
+			continue
+		}
+		msgData, _ := rec["message"].(map[string]any)
+		content, _ := msgData["content"].([]any)
+		for _, item := range content {
+			if m, ok := item.(map[string]any); ok && m["type"] == "text" {
+				if t, ok := m["text"].(string); ok && strings.TrimSpace(t) != "" {
+					// Filter: skip command caveats for user messages
+					if typ == "user" && (strings.HasPrefix(t, "<local-command") || strings.HasPrefix(t, "<command-") || strings.HasPrefix(t, "<system")) {
+						break
+					}
+					msgs = append(msgs, msg{role: typ, text: t})
+					break
+				}
+			}
+		}
+	}
+
+	// Pair user+assistant into exchanges
+	var exchanges []surface.Exchange
+	for i := 0; i < len(msgs); i++ {
+		if msgs[i].role == "user" {
+			ex := surface.Exchange{User: msgs[i].text}
+			if i+1 < len(msgs) && msgs[i+1].role == "assistant" {
+				ex.Assistant = msgs[i+1].text
+				i++
+			}
+			exchanges = append(exchanges, ex)
+		}
+	}
+
+	// Return last n
+	if len(exchanges) > n {
+		exchanges = exchanges[len(exchanges)-n:]
+	}
+	return exchanges, nil
+}

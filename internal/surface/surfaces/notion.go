@@ -576,3 +576,142 @@ func max(a, b int) int {
 	}
 	return b
 }
+// Tail returns the last N user/assistant exchanges from a Notion thread.
+func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) ([]surface.Exchange, error) {
+	n.ensureContext()
+	if sess.ID == "" {
+		return nil, fmt.Errorf("notion tail: no thread ID")
+	}
+
+	// 1. Get thread record -> message IDs
+	body, _ := json.Marshal(map[string]any{
+		"requests": []map[string]any{{
+			"pointer": map[string]any{"table": "thread", "id": sess.ID},
+			"version": -1,
+		}},
+	})
+	status, respBody, err := sidecarPostWithCookies(
+		n.inferenceURL("syncRecordValues"),
+		n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("notion tail: %w", err)
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("notion tail (HTTP %d)", status)
+	}
+	var threadResp struct {
+		RecordMap struct {
+			Thread map[string]struct {
+				Value struct {
+					Value struct {
+						Messages []string `json:"messages"`
+					} `json:"value"`
+				} `json:"value"`
+			} `json:"thread"`
+		} `json:"recordMap"`
+	}
+	if err := json.Unmarshal([]byte(respBody), &threadResp); err != nil {
+		return nil, fmt.Errorf("notion tail: parse thread: %w", err)
+	}
+	threadRec, ok := threadResp.RecordMap.Thread[sess.ID]
+	if !ok || len(threadRec.Value.Value.Messages) == 0 {
+		return nil, fmt.Errorf("notion tail: no messages")
+	}
+	msgIDs := threadRec.Value.Value.Messages
+	// Cap to last 20 (API limit per call)
+	if len(msgIDs) > 20 {
+		msgIDs = msgIDs[len(msgIDs)-20:]
+	}
+
+	// 2. Fetch message records
+	reqs := make([]map[string]any, len(msgIDs))
+	for i, id := range msgIDs {
+		reqs[i] = map[string]any{
+			"pointer":  map[string]any{"table": "thread_message", "id": id},
+			"version":  -1,
+		}
+	}
+	body2, _ := json.Marshal(map[string]any{"requests": reqs})
+	status2, respBody2, err := sidecarPostWithCookies(
+		n.inferenceURL("syncRecordValues"),
+		n.headers(), string(body2), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("notion tail: fetch messages: %w", err)
+	}
+	if status2 != 200 {
+		return nil, fmt.Errorf("notion tail fetch (HTTP %d)", status2)
+	}
+
+	// Parse with json.RawMessage for step.value (heterogeneous types)
+	var msgResp struct {
+		RecordMap struct {
+			ThreadMessage map[string]struct {
+				Value struct {
+					Value struct {
+						Step struct {
+							Type  string          `json:"type"`
+							Value json.RawMessage `json:"value"`
+						} `json:"step"`
+					} `json:"value"`
+				} `json:"value"`
+			} `json:"thread_message"`
+		} `json:"recordMap"`
+	}
+	if err := json.Unmarshal([]byte(respBody2), &msgResp); err != nil {
+		return nil, fmt.Errorf("notion tail: parse messages: %w", err)
+	}
+
+	// 3. Extract user/assistant text in message order
+	var exchanges []surface.Exchange
+	for _, mid := range msgIDs {
+		rec, ok := msgResp.RecordMap.ThreadMessage[mid]
+		if !ok {
+			continue
+		}
+		step := rec.Value.Value.Step
+		if step.Type == "user" {
+			// step.value is [["text"]] for user messages
+			var items [][]string
+			if json.Unmarshal(step.Value, &items) == nil && len(items) > 0 && len(items[0]) > 0 {
+				text := strings.TrimSpace(items[0][0])
+				if text != "" {
+					// Start new exchange
+					if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
+						exchanges = append(exchanges, surface.Exchange{User: text})
+					} else {
+						exchanges[len(exchanges)-1].User = text
+					}
+				}
+			}
+		} else if step.Type == "agent-inference" {
+			// step.value is []{type, content}
+			var items []struct {
+				Type    string `json:"type"`
+				Content string `json:"content"`
+			}
+			if json.Unmarshal(step.Value, &items) != nil {
+				continue
+			}
+			for _, item := range items {
+				if item.Type == "text" && item.Content != "" {
+					text := langTagRe.ReplaceAllString(item.Content, "")
+					text = strings.TrimSpace(text)
+					if text != "" {
+						if len(exchanges) == 0 {
+							exchanges = append(exchanges, surface.Exchange{Assistant: text})
+						} else if exchanges[len(exchanges)-1].Assistant == "" {
+							exchanges[len(exchanges)-1].Assistant = text
+						} else {
+							exchanges = append(exchanges, surface.Exchange{Assistant: text})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(exchanges) > msgCount {
+		exchanges = exchanges[len(exchanges)-msgCount:]
+	}
+	return exchanges, nil
+}
