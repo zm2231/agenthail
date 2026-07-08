@@ -166,9 +166,9 @@ func (a *App) cmdList(args []string) error {
 				b, _ := json.Marshal(sess)
 				fmt.Println(string(b))
 			} else {
-				display := sess.Cwd
-				if display == "" && sess.Name != "" {
-					display = sess.Name
+				display := sess.Name
+				if display == "" {
+					display = sess.Cwd
 				}
 				fmt.Printf("%-6s pid=%-6d %-40s %-40s\n", sess.Surface, sess.PID, truncate(sess.ID, 40), truncate(display, 40))
 			}

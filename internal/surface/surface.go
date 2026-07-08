@@ -2,6 +2,7 @@ package surface
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -76,6 +77,37 @@ type Surface interface {
 	Steer(ctx context.Context, sess *Session, message string) error
 	Capabilities() Capabilities
 }
+
+// DeriveName returns an explicit name if non-empty, otherwise the first line
+// of the given preview/summary text truncated to maxLen. Returns "" if both are empty.
+func DeriveName(explicit, preview string, maxLen int) string {
+	if explicit != "" {
+		return truncate(explicit, maxLen)
+	}
+	return firstLine(preview, maxLen)
+}
+
+func firstLine(s string, maxLen int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+		return truncate(s, maxLen)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// TruncateString is the exported version of truncate for use by surface implementations.
+func TruncateString(s string, n int) string { return truncate(s, n) }
 
 var ErrUnsupported = errUnsupported{}
 

@@ -252,7 +252,7 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 		sess := surface.Session{
 			ID:      str(m, "id"),
 			Surface: surface.KindCodex,
-			Name:    str(m, "name"),
+			Name:    surface.DeriveName(str(m, "name"), str(m, "preview"), 60),
 			Cwd:     str(m, "cwd"),
 			Status:  codexStatus(str(m, "status")),
 		}

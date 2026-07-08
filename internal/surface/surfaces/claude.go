@@ -1,6 +1,7 @@
 package surfaces
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -101,6 +102,59 @@ func (c *Claude) resolveTranscript(s *surface.Session, conversationID string) st
 	return filepath.Join(projectDir(s.Cwd), conversationID+".jsonl")
 }
 
+// firstUserMessage scans the transcript for the first real user message
+// (skipping command caveats and system messages) and returns it truncated.
+func (c *Claude) firstUserMessage(path string) string {
+	if path == "" || !fileExists(path) {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+	for sc.Scan() {
+		var e struct {
+			Type string `json:"type"`
+			Msg  struct {
+				Content any `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			continue
+		}
+		if e.Type != "user" {
+			continue
+		}
+		text := ""
+		switch c := e.Msg.Content.(type) {
+		case string:
+			text = c
+		case []any:
+			for _, item := range c {
+				if m, ok := item.(map[string]any); ok {
+					if t, _ := m["type"].(string); t == "text" {
+						if s, _ := m["text"].(string); s != "" {
+							text = s
+							break
+						}
+					}
+				}
+			}
+		}
+		// Skip command caveats and system messages
+		if strings.HasPrefix(text, "<local-command") || strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<system") {
+			continue
+		}
+		if text = strings.TrimSpace(text); text != "" {
+			return surface.TruncateString(text, 60)
+		}
+	}
+	return ""
+}
+
 func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 	sessionsDir := filepath.Join(c.home, ".claude", "sessions")
 	entries, err := os.ReadDir(sessionsDir)
@@ -138,6 +192,9 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		}
 		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"))
 		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
+		if sess.Name == "" {
+			sess.Name = c.firstUserMessage(sess.Transcript)
+		}
 		out = append(out, sess)
 	}
 	return out, nil
