@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -151,33 +153,113 @@ func stripFlags(args []string) []string {
 func (a *App) cmdList(args []string) error {
 	jsonOut := hasFlag(args, "--json")
 	ctx := context.Background()
-	any := false
+
+	var allSessions []surface.Session
 	for _, s := range a.allSurfaces() {
 		sessions, err := s.List(ctx)
 		if err != nil {
 			continue
 		}
 		for _, sess := range sessions {
-			any = true
 			if a.Registry != nil {
 				a.Registry.RegisterSession(sess)
 			}
+			allSessions = append(allSessions, sess)
 			if jsonOut {
 				b, _ := json.Marshal(sess)
 				fmt.Println(string(b))
-			} else {
-				display := sess.Name
-				if display == "" {
-					display = sess.Cwd
-				}
-				fmt.Printf("%-6s pid=%-6d %-40s %-40s\n", sess.Surface, sess.PID, truncate(sess.ID, 40), truncate(display, 40))
 			}
 		}
 	}
-	if !any && !jsonOut {
-		fmt.Println("(no active sessions)")
+	if jsonOut {
+		if len(allSessions) == 0 {
+			fmt.Println("[]")
+		}
+		return nil
+	}
+	if len(allSessions) == 0 {
+		fmt.Println("no sessions found")
+		return nil
+	}
+
+	// Build alias map (sessionID -> alias name)
+	aliased := make(map[string]string)
+	if a.Registry != nil {
+		rows, _ := a.Registry.ListAliases()
+		for _, r := range rows {
+			aliased[r.SessionID] = r.Name
+		}
+	}
+
+	// Filter: hide Notion threads older than 7 days unless --all
+	if !hasFlag(args, "--all") {
+		cutoff := time.Now().AddDate(0, 0, -7)
+		filtered := allSessions[:0]
+		for _, s := range allSessions {
+			if s.Surface == surface.KindNotion && !s.LastActive.IsZero() && s.LastActive.Before(cutoff) {
+				continue
+			}
+			filtered = append(filtered, s)
+		}
+		allSessions = filtered
+	}
+
+	// Sort by last active (most recent first), sessions with zero time go last
+	sort.SliceStable(allSessions, func(i, j int) bool {
+		if allSessions[i].LastActive.IsZero() {
+			return false
+		}
+		if allSessions[j].LastActive.IsZero() {
+			return true
+		}
+		return allSessions[i].LastActive.After(allSessions[j].LastActive)
+	})
+
+	max := 15
+	if hasFlag(args, "--all") {
+		max = len(allSessions)
+	}
+	if len(allSessions) > max {
+		allSessions = allSessions[:max]
+	}
+
+	fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", "PROJECT", "LAST")
+	fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n", "-------", "----", "--------------", "----------------------------", "--------------------", "----------")
+	for _, s := range allSessions {
+		stat := "○"
+		if s.PID > 0 {
+			stat = "●"
+		}
+		agent := ""
+		if alias, ok := aliased[s.ID]; ok {
+			agent = "@" + alias
+		}
+		project := filepath.Base(s.Cwd)
+		if project == "." {
+			project = "-"
+		}
+		last := relTime(s.LastActive)
+		fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n",
+			s.Surface, stat, truncate(agent, 14), truncate(s.Name, 28), truncate(project, 20), last)
 	}
 	return nil
+}
+
+func relTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	d := time.Since(t)
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
