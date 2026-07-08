@@ -10,6 +10,7 @@ type SurfaceKind string
 const (
 	KindClaude SurfaceKind = "claude"
 	KindCodex  SurfaceKind = "codex"
+	KindNotion SurfaceKind = "notion"
 )
 
 type SessionStatus string

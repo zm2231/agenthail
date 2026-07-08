@@ -166,7 +166,11 @@ func (a *App) cmdList(args []string) error {
 				b, _ := json.Marshal(sess)
 				fmt.Println(string(b))
 			} else {
-				fmt.Printf("%-6s pid=%-6d %-40s %s\n", sess.Surface, sess.PID, truncate(sess.ID, 40), truncate(sess.Cwd, 40))
+				display := sess.Cwd
+				if display == "" && sess.Name != "" {
+					display = sess.Name
+				}
+				fmt.Printf("%-6s pid=%-6d %-40s %-40s\n", sess.Surface, sess.PID, truncate(sess.ID, 40), truncate(display, 40))
 			}
 		}
 	}
@@ -466,6 +470,8 @@ func (a *App) cmdLaunch(args []string) error {
 		return launchCodex()
 	case "claude":
 		return fmt.Errorf("claude must be launched manually (open the app or visit claude.ai/code)")
+	case "notion":
+		return fmt.Errorf("notion must be launched manually (open app.notion.com in your browser and log in)")
 	default:
 		return fmt.Errorf("unknown surface '%s' (try: codex)", target)
 	}

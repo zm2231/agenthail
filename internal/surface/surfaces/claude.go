@@ -16,8 +16,9 @@ import (
 )
 
 type Claude struct {
-	profile string
-	home    string
+	profile     string
+	home        string
+	cookieBridge string
 }
 
 func NewClaude(profile, home string) *Claude {
@@ -27,7 +28,7 @@ func NewClaude(profile, home string) *Claude {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{profile: profile, home: home}
+	return &Claude{profile: profile, home: home, cookieBridge: cookieBridgePath("cookie")}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -185,9 +186,9 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	bodyBytes, _ := json.Marshal(body)
 	headers := c.headerMap("", sess.ID)
 	headers["content-type"] = "application/json"
-	status, respBody, err := cyclePost(
+	status, respBody, err := sidecarPostWithCookies(
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
-		headers, string(bodyBytes), 30*time.Second)
+		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -351,9 +352,9 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 	bodyBytes, _ := json.Marshal(body)
 	headers := c.headerMap("", sess.ID)
 	headers["content-type"] = "application/json"
-	status, respBody, err := cyclePost(
+	status, respBody, err := sidecarPostWithCookies(
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
-		headers, string(bodyBytes), 10*time.Second)
+		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 10*time.Second)
 	if err != nil {
 		return err
 	}

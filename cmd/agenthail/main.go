@@ -22,12 +22,17 @@ func main() {
 	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
 	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
 	codex := surfaces.NewCodex("")
+	notion := surfaces.NewNotion(
+		envOr("AGENTHAIL_NOTION_SPACE", ""),
+		envOr("AGENTHAIL_NOTION_USER", ""),
+	)
 
 	app := cli.App{
 		Registry: reg,
 		Surfaces: []cli.SurfaceEntry{
 			{Name: "claude", Surface: claude},
 			{Name: "codex", Surface: codex},
+			{Name: "notion", Surface: notion},
 		},
 		DefaultTimeout: 30 * time.Second,
 	}
