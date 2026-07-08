@@ -84,8 +84,8 @@ Usage:
   agenthail <command> [target] [args] [options]
 
 Session commands:
-  list                          List active sessions
-  send <target> "message"       Send a message (--stream, --reply, --json)
+  list [--all]                   List active sessions (default 15, sorted by recency)
+  send <target> "message"       Send a message (--from <name>, --stream, --reply, --json)
   stream <target>               Tail live activity
   reply <target>                Fetch last assistant reply
   goal <target> [text|clear]    Set or clear a goal
@@ -97,13 +97,15 @@ Session commands:
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
+  identify rm <name>             Remove an alias
   identify list                 Show all names
 
 Channels:
   channel create <name>         Create a channel
   channel add <name> <target>   Add a session to a channel
-  channel list                  List channels + members
-  channel send <name> "msg"     Broadcast to all members of a channel
+  channel rm <name> <target>   Remove a session from a channel (--all deletes)
+  channel list                  List channels + members (shows @alias names)
+  channel send <name> "msg"     Broadcast to all members (--from <name>)
 
 Routing (auto-relay):
   relay add <from> <to> [regex] Send-to-on-completion rule
@@ -140,12 +142,30 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-func stripFlags(args []string) []string {
-	var out []string
-	for _, a := range args {
-		if !strings.HasPrefix(a, "--") {
-			out = append(out, a)
+// flagVal returns the value following a --flag, or "" if not present.
+func flagVal(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
 		}
+	}
+	return ""
+}
+
+// stripFlags removes -- flags and their values, returning only positional args.
+// Flags that take values (--from, --model) are skipped along with their value.
+func stripFlags(args []string) []string {
+	valueFlags := map[string]bool{"--from": true, "--model": true}
+	var out []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "--") {
+			if valueFlags[a] && i+1 < len(args) {
+				i++ // skip the value
+			}
+			continue
+		}
+		out = append(out, a)
 	}
 	return out
 }
@@ -284,7 +304,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 func (a *App) cmdSend(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 2 {
-		return fmt.Errorf("usage: agenthail send <target> \"message\"")
+		return fmt.Errorf(`usage: agenthail send <target> "message" [--from <name>] [--stream] [--reply] [--json]`)
 	}
 	target := positional[0]
 	message := strings.Join(positional[1:], " ")
@@ -292,6 +312,12 @@ func (a *App) cmdSend(args []string) error {
 	wantReply := hasFlag(args, "--reply")
 	jsonOut := hasFlag(args, "--json")
 	ctx := context.Background()
+
+	// --from <name>: inject sender attribution into the message
+	fromLabel := flagVal(args, "--from")
+	if fromLabel != "" {
+		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
+	}
 
 	sess, surf, err := a.resolveTarget(ctx, target)
 	if err != nil {
@@ -314,7 +340,7 @@ func (a *App) cmdSend(args []string) error {
 			fmt.Printf(`{"queued":true,"target":"%s"}`, sess.ID)
 			fmt.Println()
 		} else {
-			fmt.Printf("queued for %s (busy; delivered on turn completion)\n", truncate(sess.ID, 24))
+			fmt.Printf("queued for %s (busy; delivered on turn completion)\n", a.resolveDisplay(sess.ID))
 		}
 		return nil
 	}
@@ -493,7 +519,7 @@ func (a *App) cmdQueue(args []string) error {
 	if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
 		return err
 	}
-	fmt.Printf("queued for %s (delivered on next turn completion by the daemon)\n", truncate(sess.ID, 24))
+	fmt.Printf("queued for %s (delivered on next turn completion by the daemon)\n", a.resolveDisplay(sess.ID))
 	return nil
 }
 

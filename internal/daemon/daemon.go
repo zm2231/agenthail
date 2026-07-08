@@ -28,6 +28,21 @@ type Daemon struct {
 	log            *log.Logger
 }
 
+// resolveDisplay returns a human-readable label for a session ID.
+func (d *Daemon) resolveDisplay(sessionID string) string {
+	if d.Registry != nil {
+		if alias, err := d.Registry.ReverseAlias(sessionID); err == nil && alias != "" {
+			return "@" + alias
+		}
+		if sfc, name, _, err := d.Registry.GetSession(sessionID); err == nil {
+			if name != "" {
+				return sfc + "/" + truncate(name, 20)
+			}
+		}
+	}
+	return truncate(sessionID, 24)
+}
+
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	return &Daemon{
 		Registry:      reg,
@@ -115,8 +130,8 @@ func (d *Daemon) fireRelays(ctx context.Context, from *surface.Session, text str
 			d.log.Printf("relay target %s not found", truncate(r.ToSession, 16))
 			continue
 		}
-		payload := fmt.Sprintf("[relay from %s %s] %s", from.Surface, truncate(from.ID, 8), text)
-		d.log.Printf("relay %s -> %s", truncate(from.ID, 12), truncate(toSess.ID, 12))
+		payload := fmt.Sprintf("[relay from %s %s] %s", from.Surface, d.resolveDisplay(from.ID), text)
+		d.log.Printf("relay %s -> %s", d.resolveDisplay(from.ID), d.resolveDisplay(toSess.ID))
 		if _, err := toSurf.Send(ctx, toSess, payload); err != nil {
 			d.log.Printf("relay send failed: %s", err)
 		}

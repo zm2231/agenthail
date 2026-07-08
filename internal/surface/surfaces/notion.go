@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"fmt"
 	"regexp"
 	"strings"
@@ -19,15 +20,18 @@ import (
 var langTagRe = regexp.MustCompile(`(?i)^<lang[^>]*/?>\s*`)
 
 type Notion struct {
-	spaceID     string
-	userID      string
+	spaceID      string
+	userID       string
+	userName     string
+	timezone     string
 	cookieBridge string
 }
 
 func NewNotion(spaceID, userID string) *Notion {
 	return &Notion{
-		spaceID: spaceID,
-		userID: userID,
+		spaceID:  spaceID,
+		userID:   userID,
+		timezone: os.Getenv("AGENTHAIL_NOTION_TZ"),
 	}
 }
 
@@ -64,13 +68,39 @@ func (n *Notion) autoDetect() {
 			if n.userID == "" {
 				n.userID = uid
 			}
+			// Auto-detect userName from notion_user record
+			if n.userName == "" {
+				if nu, ok := udataMap["notion_user"].(map[string]any); ok {
+					if rec, ok := nu[uid].(map[string]any); ok {
+						if val, ok := rec["value"].(map[string]any); ok {
+							if inner, ok := val["value"].(map[string]any); ok {
+								n.userName, _ = inner["name"].(string)
+							}
+						}
+					}
+				}
+			}
+			// Auto-detect timezone from user_settings
+			if n.timezone == "" {
+				if us, ok := udataMap["user_settings"].(map[string]any); ok {
+					if rec, ok := us[uid].(map[string]any); ok {
+						if val, ok := rec["value"].(map[string]any); ok {
+							if inner, ok := val["value"].(map[string]any); ok {
+								if settings, ok := inner["settings"].(map[string]any); ok {
+									n.timezone, _ = settings["time_zone"].(string)
+								}
+								}
+							}
+						}
+					}
+			}
 			if spaces, ok := udataMap["space"].(map[string]any); ok {
 				for sid := range spaces {
 					if n.spaceID == "" {
 						n.spaceID = sid
 						break
 					}
-				}
+			}
 			}
 		}
 		break
@@ -197,8 +227,8 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 			"id":   uuid.NewString(),
 			"type": "context",
 			"value": map[string]any{
-				"timezone":        "America/Chicago",
-				"userName":        "Zain",
+				"timezone":        n.timezone,
+				"userName":        n.userName,
 				"userId":          n.userID,
 				"spaceId":         n.spaceID,
 				"currentDatetime": now,
