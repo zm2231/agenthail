@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@steipete/sweet-cookie": "^0.4.0"
+  }
+}
