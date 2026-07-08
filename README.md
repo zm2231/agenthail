@@ -43,6 +43,10 @@ which reads fresh Chrome cookies including the session-bound `cf_clearance`.
 ### Codex launch
 
 ```bash
+# Via agenthail
+agenthail launch codex
+
+# Or manually
 open -a Codex --args --inspect=127.0.0.1:9230 --remote-debugging-port=9231
 ```
 
@@ -61,7 +65,9 @@ agenthail stream <target>               # tail live activity
 agenthail goal <target> "ship the thing"
 agenthail compact <target>              # compress context
 agenthail model <target> [name]         # get/set model
-agenthail interrupt <target>            # stop current turn
+agenthail interrupt <target>            # stop current turn (Claude control_request or Codex turn/interrupt)
+agenthail steer <target> "msg"          # inject into the running turn (errors if idle)
+agenthail queue <target> "msg"          # hold until current turn completes, then deliver
 ```
 
 ### Identity
@@ -93,7 +99,7 @@ agenthail relay rm 1
 
 ### Daemon
 
-The daemon runs in the background, watches sessions, and on turn-completion: (1) fires matching relay rules, (2) drains the steer queue.
+The daemon runs in the background, watches sessions, and on turn-completion: (1) fires matching relay rules, (2) drains the message queue.
 
 ```bash
 agenthail daemon start      # spawn background daemon
@@ -115,17 +121,21 @@ Targets resolve in this order:
 
 | | Claude | Codex |
 |---|---|---|
-| send | yes | yes |
+| send | yes | yes (auto-queues if busy) |
 | stream | yes | yes |
 | reply | yes | yes |
 | goal | yes | yes |
 | compact | yes | yes |
 | model | yes | no |
-| interrupt | no | yes |
-| steer | no (daemon-queued) | yes |
+| interrupt | yes | yes |
+| steer | yes (send now) | yes (turn/steer; idle errors) |
+| queue | yes (daemon) | yes (daemon) |
 | fork | no | yes |
 
-Claude `steer` is daemon-mediated: the daemon watches for turn completion, then delivers queued messages. Claude `interrupt` is unsupported over the events API (the stop button uses a different mechanism, not yet mapped).
+**steer** injects into the running turn (Codex `turn/steer`; Claude sends now).
+Returns an error if the session is idle. **queue** holds the message until the
+current turn completes, then delivers it (daemon-mediated for both surfaces).
+**send** delivers immediately when idle, and auto-queues when the session is busy.
 
 ## Data
 

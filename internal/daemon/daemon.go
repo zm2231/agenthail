@@ -95,7 +95,7 @@ func (d *Daemon) onTurnComplete(ctx context.Context, surf surface.Surface, sess 
 			d.fireRelays(ctx, sess, reply.Text)
 		}
 	}
-	d.drainSteerQueue(ctx, surf, sess)
+	d.drainMessageQueue(ctx, surf, sess)
 }
 
 func (d *Daemon) fireRelays(ctx context.Context, from *surface.Session, text string) {
@@ -123,25 +123,20 @@ func (d *Daemon) fireRelays(ctx context.Context, from *surface.Session, text str
 	}
 }
 
-func (d *Daemon) drainSteerQueue(ctx context.Context, surf surface.Surface, sess *surface.Session) {
-	ids, msgs, err := d.Registry.GetSteerQueue(sess.ID)
+func (d *Daemon) drainMessageQueue(ctx context.Context, surf surface.Surface, sess *surface.Session) {
+	ids, msgs, err := d.Registry.GetMessageQueue(sess.ID)
 	if err != nil || len(ids) == 0 {
 		return
 	}
-	d.log.Printf("draining %d steer message(s) for %s", len(ids), truncate(sess.ID, 16))
+	d.log.Printf("draining %d queued message(s) for %s", len(ids), truncate(sess.ID, 16))
 	for i, msg := range msgs {
-		if err := surf.Steer(ctx, sess, msg); err != nil {
-			if err == surface.ErrUnsupported {
-				if _, err := surf.Send(ctx, sess, msg); err != nil {
-					d.log.Printf("steer fallback send failed: %s", err)
-					continue
-				}
-			} else {
-				d.log.Printf("steer failed: %s", err)
-				continue
-			}
+		// Queued messages start a new turn (the prior turn already completed).
+		// Send auto-queues again if somehow still busy.
+		if _, err := surf.Send(ctx, sess, msg); err != nil {
+			d.log.Printf("queue drain send failed: %s", err)
+			continue
 		}
-		d.Registry.MarkSteerDelivered(ids[i])
+		d.Registry.MarkMessageDelivered(ids[i])
 	}
 }
 

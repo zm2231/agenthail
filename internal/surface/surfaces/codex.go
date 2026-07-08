@@ -301,6 +301,28 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 	return &matches[0], nil
 }
 
+// activeTurnID returns the id of the currently-running turn for a thread, or
+// "" if idle. Mirrors the reference codex-control activeTurnId logic.
+func (c *Codex) activeTurnID(ctx context.Context, conn *cdpConn, threadID string) (string, error) {
+	resp, err := c.rpc(ctx, conn, "thread/turns/list", map[string]any{"threadId": threadID}, 5*time.Second)
+	if err != nil {
+		return "", nil
+	}
+	result, _ := resp["result"].(map[string]any)
+	turns, _ := result["data"].([]any)
+	for _, t := range turns {
+		m, _ := t.(map[string]any)
+		status, _ := m["status"].(map[string]any)
+		stype, _ := status["type"].(string)
+		if stype == "running" || stype == "in_progress" || stype == "inProgress" {
+			if id, ok := m["id"].(string); ok {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
@@ -312,6 +334,12 @@ func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string)
 	}
 	if _, err := c.rpc(ctx, conn, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/resume: %w", err)
+	}
+	// If a turn is already running, the message must queue and be delivered by
+	// the daemon on turn/completed (native Codex queueing, surfaced via the
+	// registry). Sending turn/start now would clobber the active turn.
+	if active, _ := c.activeTurnID(ctx, conn, sess.ID); active != "" {
+		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
 	resp, err := c.rpc(ctx, conn, "turn/start", map[string]any{
 		"threadId": sess.ID,
@@ -483,9 +511,16 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 	if err := c.ensureHooked(ctx, conn); err != nil {
 		return err
 	}
+	// turn/steer only applies to a running turn. If idle, there is nothing to
+	// steer into; the caller should use Send instead.
+	turnID, _ := c.activeTurnID(ctx, conn, sess.ID)
+	if turnID == "" {
+		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+	}
 	_, err = c.rpc(ctx, conn, "turn/steer", map[string]any{
-		"threadId": sess.ID,
-		"input":    []map[string]any{{"type": "text", "text": message}},
+		"threadId":       sess.ID,
+		"expectedTurnId": turnID,
+		"input":          []map[string]any{{"type": "text", "text": message}},
 	}, 5*time.Second)
 	return err
 }

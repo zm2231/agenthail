@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -61,6 +63,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdDaemon(rest)
 	case "daemon-run":
 		return a.daemonRun()
+	case "launch":
+		return a.cmdLaunch(rest)
 	case "doctor":
 		return a.cmdDoctor(rest)
 	case "help", "-h", "--help":
@@ -110,6 +114,7 @@ Daemon:
   daemon status                 Is the daemon running?
 
 Other:
+  launch <surface>              Launch a surface app with debug settings
   doctor                        Health check
 
 Targets: @name, PID, session id prefix, or cwd/name fragment.
@@ -210,6 +215,22 @@ func (a *App) cmdSend(args []string) error {
 	result, err := surf.Send(ctx, sess, message)
 	if err != nil {
 		return err
+	}
+
+	// Surface refused because a turn is already running (e.g. Codex). Auto-queue
+	// so the message lands when the current turn completes, matching native
+	// Codex submit-while-busy behavior. The daemon drains the queue.
+	if !result.Accepted && a.Registry != nil {
+		if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
+			return err
+		}
+		if jsonOut {
+			fmt.Printf(`{"queued":true,"target":"%s"}`, sess.ID)
+			fmt.Println()
+		} else {
+			fmt.Printf("queued for %s (busy; delivered on turn completion)\n", truncate(sess.ID, 24))
+		}
+		return nil
 	}
 
 	if wantStream {
@@ -383,7 +404,7 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("queue requires the registry")
 	}
 	message := strings.Join(positional[1:], " ")
-	if err := a.Registry.QueueSteer(sess.ID, message); err != nil {
+	if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
 		return err
 	}
 	fmt.Printf("queued for %s (delivered on next turn completion by the daemon)\n", truncate(sess.ID, 24))
@@ -432,6 +453,43 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 	}
 	return nil
+}
+
+func (a *App) cmdLaunch(args []string) error {
+	positional := stripFlags(args)
+	target := "codex"
+	if len(positional) > 0 {
+		target = positional[0]
+	}
+	switch target {
+	case "codex":
+		return launchCodex()
+	case "claude":
+		return fmt.Errorf("claude must be launched manually (open the app or visit claude.ai/code)")
+	default:
+		return fmt.Errorf("unknown surface '%s' (try: codex)", target)
+	}
+}
+
+func launchCodex() error {
+	inspectorPort := envOr("AGENTHAIL_CODEX_INSPECT", "9230")
+	remotePort := envOr("AGENTHAIL_CODEX_REMOTE", "9231")
+	args := fmt.Sprintf("--inspect=127.0.0.1:%s --remote-debugging-port=%s", inspectorPort, remotePort)
+	cmd := exec.Command("open", "-a", "Codex", "--args", args)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("launch codex: %w", err)
+	}
+	fmt.Printf("launched Codex (inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", inspectorPort, remotePort)
+	return nil
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func truncate(s string, n int) string {

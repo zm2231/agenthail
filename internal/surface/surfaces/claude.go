@@ -35,7 +35,7 @@ func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: true, Reply: true, Goal: true,
-		Compact: true, Model: true, Interrupt: false, Steer: true,
+		Compact: true, Model: true, Interrupt: true, Steer: true,
 	}
 }
 
@@ -60,6 +60,17 @@ func newUUID() string {
 	return fmt.Sprintf("%s-%s-%s-%s-%s",
 		hex.EncodeToString(b[0:4]), hex.EncodeToString(b[4:6]), hex.EncodeToString(b[6:8]),
 		hex.EncodeToString(b[8:10]), hex.EncodeToString(b[10:16]))
+}
+
+const alphanum = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+func randSeq(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	for i := range b {
+		b[i] = alphanum[int(b[i])%len(alphanum)]
+	}
+	return string(b)
 }
 
 func toCse(bridgeID string) string {
@@ -325,7 +336,31 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
-	return surface.ErrUnsupported
+	cse := toCse(sess.ID)
+	reqID := "interrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10) + "-" + randSeq(6)
+	body := map[string]any{
+		"events": []map[string]any{{
+			"payload": map[string]any{
+				"type":       "control_request",
+				"request_id": reqID,
+				"request":    map[string]any{"subtype": "interrupt"},
+				"uuid":       newUUID(),
+			},
+		}},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	headers := c.headerMap("", sess.ID)
+	headers["content-type"] = "application/json"
+	status, respBody, err := cyclePost(
+		"https://claude.ai/v1/code/sessions/"+cse+"/events",
+		headers, string(bodyBytes), 10*time.Second)
+	if err != nil {
+		return err
+	}
+	if status != 200 {
+		return fmt.Errorf("interrupt failed (HTTP %d): %s", status, respBody)
+	}
+	return nil
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {

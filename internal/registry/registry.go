@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS routes (
 	pattern TEXT NOT NULL DEFAULT '.*',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS steer_queue (
+CREATE TABLE IF NOT EXISTS message_queue (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	message TEXT NOT NULL, queued_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -131,13 +131,13 @@ func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
 	return res.LastInsertId()
 }
 
-func (r *Registry) QueueSteer(sessionID, message string) error {
-	_, err := r.db.Exec(`INSERT INTO steer_queue (session_id,message) VALUES (?,?)`, sessionID, message)
+func (r *Registry) QueueMessage(sessionID, message string) error {
+	_, err := r.db.Exec(`INSERT INTO message_queue (session_id,message) VALUES (?,?)`, sessionID, message)
 	return err
 }
 
-func (r *Registry) GetSteerQueue(sessionID string) (ids []int64, msgs []string, err error) {
-	rows, err := r.db.Query(`SELECT id,message FROM steer_queue WHERE session_id=? AND delivered=0 ORDER BY queued_at`, sessionID)
+func (r *Registry) GetMessageQueue(sessionID string) (ids []int64, msgs []string, err error) {
+	rows, err := r.db.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND delivered=0 ORDER BY queued_at`, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -153,8 +153,8 @@ func (r *Registry) GetSteerQueue(sessionID string) (ids []int64, msgs []string, 
 	return ids, msgs, rows.Err()
 }
 
-func (r *Registry) MarkSteerDelivered(id int64) error {
-	_, err := r.db.Exec(`UPDATE steer_queue SET delivered=1 WHERE id=?`, id)
+func (r *Registry) MarkMessageDelivered(id int64) error {
+	_, err := r.db.Exec(`UPDATE message_queue SET delivered=1 WHERE id=?`, id)
 	return err
 }
 
