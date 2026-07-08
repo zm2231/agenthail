@@ -256,6 +256,9 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 			Cwd:     str(m, "cwd"),
 			Status:  codexStatus(str(m, "status")),
 		}
+		if ts, ok := m["recencyAt"].(float64); ok && ts > 0 {
+			sess.LastActive = time.UnixMilli(int64(ts))
+		}
 		out = append(out, sess)
 	}
 	return out, nil

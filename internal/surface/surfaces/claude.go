@@ -190,6 +190,9 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		if n, ok := m["name"].(string); ok {
 			sess.Name = n
 		}
+		if ts, ok := m["updatedAt"].(float64); ok && ts > 0 {
+			sess.LastActive = time.UnixMilli(int64(ts))
+		}
 		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"))
 		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
 		if sess.Name == "" {

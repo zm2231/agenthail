@@ -32,6 +32,7 @@ type Session struct {
 	Status     SessionStatus `json:"status"`
 	Transcript string        `json:"transcript"`
 	HasLocal   bool          `json:"hasLocal"`
+	LastActive time.Time     `json:"lastActive"`
 }
 
 type SendResult struct {

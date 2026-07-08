@@ -126,8 +126,9 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 
 	var resp struct {
 		Transcripts []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			UpdatedAt int64  `json:"updated_at"`
 		} `json:"transcripts"`
 	}
 	if err := json.Unmarshal([]byte(respBody), &resp); err != nil {
@@ -136,12 +137,16 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 
 	sessions := make([]surface.Session, 0, len(resp.Transcripts))
 	for _, t := range resp.Transcripts {
-		sessions = append(sessions, surface.Session{
+		sess := surface.Session{
 			ID:      t.ID,
 			Surface: surface.KindNotion,
 			Name:    t.Title,
 			Status:  surface.StatusIdle,
-		})
+		}
+		if t.UpdatedAt > 0 {
+			sess.LastActive = time.UnixMilli(t.UpdatedAt)
+		}
+		sessions = append(sessions, sess)
 	}
 	return sessions, nil
 }
