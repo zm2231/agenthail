@@ -639,19 +639,25 @@ func (a *App) cmdLaunch(args []string) error {
 func launchCodex() error {
 	inspectorPort := envOr("AGENTHAIL_CODEX_INSPECT", "9230")
 	remotePort := envOr("AGENTHAIL_CODEX_REMOTE", "9231")
-	// `open --args` passes each token as a separate argv entry. We must NOT
-	// concatenate flags into one string or Electron sees them as a single
-	// --inspect value and --remote-debugging-port is swallowed.
-	cmd := exec.Command("open", "-a", "Codex", "--args",
-		fmt.Sprintf("--inspect=127.0.0.1:%s", inspectorPort),
-		fmt.Sprintf("--remote-debugging-port=%s", remotePort),
+	exe := "/Applications/Codex.app/Contents/MacOS/Codex"
+	if _, err := os.Stat(exe); err != nil {
+		return fmt.Errorf("codex binary not found at %s", exe)
+	}
+	// Run the binary directly — NOT via `open --args` which concatenates
+	// all flags after --args into a single string, causing Electron to parse
+	// --inspect and --remote-debugging-port as one combined --inspect value.
+	cmd := exec.Command(exe,
+		"--inspect=127.0.0.1:"+inspectorPort,
+		"--remote-debugging-port="+remotePort,
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch codex: %w", err)
 	}
-	fmt.Printf("launched Codex (inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", inspectorPort, remotePort)
+	// Release the process so it survives after agenthail exits.
+	cmd.Process.Release()
+	fmt.Printf("launched Codex (pid %d, inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", cmd.Process.Pid, inspectorPort, remotePort)
 	return nil
 }
 
