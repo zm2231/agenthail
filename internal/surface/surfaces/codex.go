@@ -240,26 +240,40 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	}, 3*time.Second); err != nil {
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
-	resp, err := c.rpc(ctx, conn, "thread/list", map[string]any{}, 5*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("thread/list: %w", err)
-	}
-	result, _ := resp["result"].(map[string]any)
-	threads, _ := result["data"].([]any)
+	// Paginate thread/list — each page returns 25 threads with a nextCursor.
+	// Fetch pages until we have enough or hit the cutoff (default: 3 pages = 75 threads).
+	const maxPages = 3
 	var out []surface.Session
-	for _, t := range threads {
-		m, _ := t.(map[string]any)
-		sess := surface.Session{
-			ID:      str(m, "id"),
-			Surface: surface.KindCodex,
-			Name:    surface.DeriveName(str(m, "name"), str(m, "preview"), 60),
-			Cwd:     str(m, "cwd"),
-			Status:  codexStatus(str(m, "status")),
+	var cursor any
+	for page := 0; page < maxPages; page++ {
+		params := map[string]any{}
+		if cursor != nil {
+			params["cursor"] = cursor
 		}
-		if ts, ok := m["recencyAt"].(float64); ok && ts > 0 {
-			sess.LastActive = time.Unix(int64(ts), 0) // Codex timestamps are in seconds
+		resp, err := c.rpc(ctx, conn, "thread/list", params, 5*time.Second)
+		if err != nil {
+			return nil, fmt.Errorf("thread/list: %w", err)
 		}
-		out = append(out, sess)
+		result, _ := resp["result"].(map[string]any)
+		threads, _ := result["data"].([]any)
+		for _, t := range threads {
+			m, _ := t.(map[string]any)
+			sess := surface.Session{
+				ID:      str(m, "id"),
+				Surface: surface.KindCodex,
+				Name:    surface.DeriveName(str(m, "name"), str(m, "preview"), 60),
+				Cwd:     str(m, "cwd"),
+				Status:  codexStatus(str(m, "status")),
+			}
+			if ts, ok := m["recencyAt"].(float64); ok && ts > 0 {
+				sess.LastActive = time.Unix(int64(ts), 0) // Codex timestamps are in seconds
+			}
+			out = append(out, sess)
+		}
+		cursor = result["nextCursor"]
+		if cursor == nil {
+			break
+		}
 	}
 	return out, nil
 }
