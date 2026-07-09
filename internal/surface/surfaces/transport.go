@@ -53,10 +53,6 @@ type workerResponse struct {
 // cookieBridge is the path to a .mjs script that prints cookie headers on stdout.
 // cookieURL is passed as an arg to the cookie bridge (e.g. "https://claude.ai/" or "https://app.notion.com/").
 // Pass "" for either to skip.
-func sidecarPost(url string, headers map[string]string, body string, cookieBridge string, timeout time.Duration) (int, string, error) {
-	return callSidecar("POST", url, headers, body, cookieBridge, "", timeout)
-}
-
 func sidecarPostWithCookies(url string, headers map[string]string, body string, cookieBridge string, cookieURL string, timeout time.Duration) (int, string, error) {
 	return callSidecar("POST", url, headers, body, cookieBridge, cookieURL, timeout)
 }
@@ -86,7 +82,8 @@ func callSidecar(method, url string, headers map[string]string, body string, coo
 	}
 	input, _ := json.Marshal(req)
 
-	ctx := timeoutCtx(timeout + 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "python3", worker)
 	cmd.Stdin = strings.NewReader(string(input))
 	out, err := cmd.Output()
@@ -103,12 +100,6 @@ func callSidecar(method, url string, headers map[string]string, body string, coo
 	return resp.Status, resp.Body, nil
 }
 
-func timeoutCtx(d time.Duration) context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), d)
-	_ = cancel
-	return ctx
-}
-
 func cookieBridgePath(name string) string {
 	for _, check := range []string{name, name + ".mjs"} {
 		if exe, err := os.Executable(); err == nil {
@@ -118,8 +109,8 @@ func cookieBridgePath(name string) string {
 			}
 		}
 		if p, err := exec.LookPath(check); err == nil {
-				return p
-			}
+			return p
+		}
 	}
 	return ""
 }

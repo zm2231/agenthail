@@ -3,8 +3,8 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -85,10 +85,10 @@ func (n *Notion) autoDetect() {
 								if settings, ok := inner["settings"].(map[string]any); ok {
 									n.timezone, _ = settings["time_zone"].(string)
 								}
-								}
 							}
 						}
 					}
+				}
 			}
 			if spaces, ok := udataMap["space"].(map[string]any); ok {
 				for sid := range spaces {
@@ -96,7 +96,7 @@ func (n *Notion) autoDetect() {
 						n.spaceID = sid
 						break
 					}
-			}
+				}
 			}
 		}
 		break
@@ -107,8 +107,8 @@ func (n *Notion) Name() surface.SurfaceKind { return surface.KindNotion }
 
 func (n *Notion) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true,
-		Interrupt: true, Steer: true, Model: true,
+		Send: true, Stream: false, Reply: true,
+		Interrupt: false, Steer: true, Model: true,
 	}
 }
 
@@ -124,7 +124,6 @@ func (n *Notion) inferenceURL(action string) string {
 	return "https://app.notion.com/api/v3/" + action
 }
 
-
 func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 	n.ensureContext()
 	body, _ := json.Marshal(map[string]any{
@@ -133,8 +132,8 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 			"id":      n.spaceID,
 			"spaceId": n.spaceID,
 		},
-		"limit":               50,
-		"includeWriterChats":   false,
+		"limit":              50,
+		"includeWriterChats": false,
 	})
 	status, respBody, err := sidecarPostWithCookies(
 		n.inferenceURL("getInferenceTranscriptsForUser"),
@@ -189,7 +188,6 @@ func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, 
 	return nil, fmt.Errorf("no notion thread matched '%s'", target)
 }
 
-
 func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	n.ensureContext()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -211,7 +209,7 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 				"enableCustomAgents":      false,
 				"enableAgentTodos":        false,
 				"enableAgentAutomations":  false,
-				"enableAgentIntegrations":  false,
+				"enableAgentIntegrations": false,
 			},
 		},
 		{
@@ -272,7 +270,6 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 	return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
 }
 
-
 func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	n.ensureContext()
 	if sess.ID == "" {
@@ -309,13 +306,11 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 		return &surface.ReplyResult{Error: "parse thread"}, nil
 	}
 
-	
 	threadRec, ok := threadResp.RecordMap.Thread[sess.ID]
 	if !ok || len(threadRec.Value.Value.Messages) == 0 {
-		
+
 		return &surface.ReplyResult{Error: "no messages"}, nil
 	}
-	
 
 	msgIDs := threadRec.Value.Value.Messages
 	if limit > 0 && limit < len(msgIDs) {
@@ -328,15 +323,15 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 	reqs := make([]map[string]any, len(msgIDs))
 	for i, id := range msgIDs {
 		reqs[i] = map[string]any{
-			"pointer":  map[string]any{"table": "thread_message", "id": id},
-			"version":  -1,
+			"pointer": map[string]any{"table": "thread_message", "id": id},
+			"version": -1,
 		}
 	}
 	body2, _ := json.Marshal(map[string]any{"requests": reqs})
 	status2, respBody2, err := sidecarPostWithCookies(
 		n.inferenceURL("syncRecordValues"),
 		n.headers(), string(body2), n.bridge(), "https://app.notion.com/", 15*time.Second)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("notion reply messages: %w", err)
 	}
@@ -361,9 +356,7 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 	if err := json.Unmarshal([]byte(respBody2), &msgResp); err != nil {
 		return &surface.ReplyResult{Error: "parse messages"}, nil
 	}
-	
 
-	
 	for i := len(msgIDs) - 1; i >= 0; i-- {
 		rec, ok := msgResp.RecordMap.ThreadMessage[msgIDs[i]]
 		if !ok {
@@ -388,16 +381,12 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 		}
 	}
 
-	
-	
 	return &surface.ReplyResult{Error: "no assistant reply found"}, nil
 }
-
 
 func (n *Notion) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	return surface.ErrUnsupported
 }
-
 
 func (n *Notion) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
 	return surface.ErrUnsupported
@@ -414,7 +403,6 @@ func (n *Notion) GoalGet(ctx context.Context, sess *surface.Session) (*surface.G
 func (n *Notion) Compact(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
 }
-
 
 func (n *Notion) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
 	n.ensureContext()
@@ -448,17 +436,14 @@ func (n *Notion) Model(ctx context.Context, sess *surface.Session, name string) 
 	return fmt.Sprintf("model selection is per-request; pass model name in send config (current: %s)", name), nil
 }
 
-
 func (n *Notion) Interrupt(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
 }
 
-
 func (n *Notion) Steer(ctx context.Context, sess *surface.Session, message string) error {
-		_, err := n.Send(ctx, sess, message)
+	_, err := n.Send(ctx, sess, message)
 	return err
 }
-
 
 func parseNotionResponse(ndjson string) string {
 	lines := strings.Split(strings.TrimSpace(ndjson), "\n")
@@ -594,8 +579,8 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 	reqs := make([]map[string]any, len(msgIDs))
 	for i, id := range msgIDs {
 		reqs[i] = map[string]any{
-			"pointer":  map[string]any{"table": "thread_message", "id": id},
-			"version":  -1,
+			"pointer": map[string]any{"table": "thread_message", "id": id},
+			"version": -1,
 		}
 	}
 	body2, _ := json.Marshal(map[string]any{"requests": reqs})

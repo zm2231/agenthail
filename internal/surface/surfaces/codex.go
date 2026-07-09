@@ -93,8 +93,8 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 		"id":     id,
 		"method": "Runtime.evaluate",
 		"params": map[string]any{
-			"expression":   expr,
-			"awaitPromise": true,
+			"expression":    expr,
+			"awaitPromise":  true,
 			"returnByValue": true,
 		},
 	}
@@ -116,7 +116,8 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 		if json.Unmarshal(raw, &msg) != nil {
 			continue
 		}
-		if int(msg["id"].(float64)) != id {
+		msgID, _ := msg["id"].(float64)
+		if int(msgID) != id {
 			continue
 		}
 		result, _ := msg["result"].(map[string]any)
@@ -366,8 +367,8 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 		return nil, err
 	}
 	resp, err := c.rpc(ctx, conn, "thread/read", map[string]any{
-		"threadId":      sess.ID,
-		"includeTurns":  true,
+		"threadId":     sess.ID,
+		"includeTurns": true,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/read: %w", err)
@@ -382,7 +383,7 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 		for _, it := range items {
 			im, _ := it.(map[string]any)
 			if im["type"] == "agentMessage" {
-					if txt, ok := im["text"].(string); ok && txt != "" {
+				if txt, ok := im["text"].(string); ok && txt != "" {
 					last = txt
 				}
 			}
@@ -554,7 +555,6 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 }
 
 var localHTTPClient = &http.Client{Timeout: 5 * time.Second}
-
 
 func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
 	conn, err := c.dial(ctx)

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	pollInterval   = 5 * time.Second
+	pollInterval = 5 * time.Second
 )
 
 type Daemon struct {
@@ -26,7 +27,7 @@ type Daemon struct {
 	mu             sync.Mutex
 	lastReply      map[string]string
 	lastGoalStatus map[string]string // sessionID -> last known goal status
-	initialized    bool // false on first scan - suppress relays until baseline set
+	initialized    bool              // false on first scan - suppress relays until baseline set
 	log            *log.Logger
 }
 
@@ -47,10 +48,10 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	return &Daemon{
 		Registry:       reg,
-		Surfaces:      surfaces,
-		lastReply:     map[string]string{},
+		Surfaces:       surfaces,
+		lastReply:      map[string]string{},
 		lastGoalStatus: map[string]string{},
-		log:           log.New(os.Stderr, "[daemon] ", log.LstdFlags),
+		log:            log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 	}
 }
 
@@ -188,11 +189,11 @@ func matchPattern(pattern, text string) bool {
 	if pattern == "" || pattern == ".*" {
 		return true
 	}
-	matched, err := filepath.Match(pattern, text)
+	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return false
 	}
-	return matched
+	return re.MatchString(text)
 }
 
 func truncate(s string, n int) string {

@@ -148,9 +148,14 @@ current turn completes, then delivers it (daemon-mediated for both surfaces).
 
 ## Configuration
 
-- `AGENTHAIL_CHROME_PROFILE` — Chrome profile name for cookies (default: `Default`)
-- `AGENTHAIL_CLAUDE_WORKER` — path to the claude-worker sidecar
-- `AGENTHAIL_COOKIE_BRIDGE` — path to the Node cookie bridge
+- `AGENTHAIL_CHROME_PROFILE` - Chrome profile name for cookies (default: `Default`)
+- `AGENTHAIL_SIDECAR` - path to the curl_cffi sidecar (Python)
+- `AGENTHAIL_COOKIE_BRIDGE` - path to the Node cookie bridge
+- `AGENTHAIL_CODEX_INSPECT` - Codex Node inspector port (default: 9230)
+- `AGENTHAIL_CODEX_REMOTE` - Codex renderer CDP port (default: 9231)
+- `AGENTHAIL_NOTION_SPACE` - Notion space ID (auto-detected if unset)
+- `AGENTHAIL_NOTION_USER` - Notion user ID (auto-detected if unset)
+- `AGENTHAIL_NOTION_TZ` - Notion timezone (auto-detected if unset)
 
 ## Layout
 

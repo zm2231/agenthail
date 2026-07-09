@@ -17,8 +17,8 @@ import (
 )
 
 type Claude struct {
-	profile     string
-	home        string
+	profile      string
+	home         string
 	cookieBridge string
 }
 
@@ -502,7 +502,7 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 			if strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to") {
 				continue
 			}
-				if _, hasToolID := msgData["tool_use_id"]; hasToolID {
+			if _, hasToolID := msgData["tool_use_id"]; hasToolID {
 				continue
 			}
 			if cl, ok := content.([]any); ok {

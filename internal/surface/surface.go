@@ -42,7 +42,7 @@ type SendResult struct {
 
 type ReplyResult struct {
 	Text     string `json:"text"`
-	UserText string `json:"userText"`  // last user message (for context)
+	UserText string `json:"userText"` // last user message (for context)
 	Done     bool   `json:"done"`
 	Error    string `json:"error"`
 }
@@ -109,7 +109,7 @@ func firstLine(s string, maxLen int) string {
 		s = s[:i]
 	}
 	s = strings.TrimSpace(s)
-		return truncate(s, maxLen)
+	return truncate(s, maxLen)
 }
 
 func truncate(s string, n int) string {
