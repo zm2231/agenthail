@@ -639,8 +639,13 @@ func (a *App) cmdLaunch(args []string) error {
 func launchCodex() error {
 	inspectorPort := envOr("AGENTHAIL_CODEX_INSPECT", "9230")
 	remotePort := envOr("AGENTHAIL_CODEX_REMOTE", "9231")
-	args := fmt.Sprintf("--inspect=127.0.0.1:%s --remote-debugging-port=%s", inspectorPort, remotePort)
-	cmd := exec.Command("open", "-a", "Codex", "--args", args)
+	// `open --args` passes each token as a separate argv entry. We must NOT
+	// concatenate flags into one string or Electron sees them as a single
+	// --inspect value and --remote-debugging-port is swallowed.
+	cmd := exec.Command("open", "-a", "Codex", "--args",
+		fmt.Sprintf("--inspect=127.0.0.1:%s", inspectorPort),
+		fmt.Sprintf("--remote-debugging-port=%s", remotePort),
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
