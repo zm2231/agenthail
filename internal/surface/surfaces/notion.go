@@ -13,8 +13,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// Notion AI via internal API (runInferenceTranscript), proxied through curl_cffi.
-
 var langTagRe = regexp.MustCompile(`(?i)^<lang[^>]*/?>\s*`)
 
 type Notion struct {

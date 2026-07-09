@@ -508,7 +508,7 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 			if cl, ok := content.([]any); ok {
 				for _, item := range cl {
 					if m, ok := item.(map[string]any); ok && m["type"] == "tool_result" {
-						text = "" // it's a tool result, skip
+						text = ""
 						break
 					}
 				}

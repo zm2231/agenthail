@@ -14,9 +14,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// Codex drives Codex Desktop via CDP into the Node inspector (--inspect=127.0.0.1:9230).
-// We Runtime.evaluate to reach the app-server ChildProcess stdin, and hook stdout
-// to read JSON-RPC responses (ids >= 900000).
 type Codex struct {
 	mainURL string
 }
@@ -56,7 +53,6 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 	return &cdpConn{ws: ws, next: 1}, nil
 }
 
-// resolveInspectorURL fetches /json and returns the webSocketDebuggerUrl.
 // Node inspector requires the /<uuid> path suffix; bare ws://host:port fails.
 func (c *Codex) resolveInspectorURL(ctx context.Context) (string, error) {
 	httpURL := strings.Replace(c.mainURL, "ws://", "http://", 1)
@@ -309,7 +305,6 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 	return &matches[0], nil
 }
 
-// activeTurnID returns the running turn id for a thread, or "" if idle.
 func (c *Codex) activeTurnID(ctx context.Context, conn *cdpConn, threadID string) (string, error) {
 	resp, err := c.rpc(ctx, conn, "thread/turns/list", map[string]any{"threadId": threadID}, 5*time.Second)
 	if err != nil {
@@ -491,7 +486,7 @@ func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.Go
 	result, _ := resp["result"].(map[string]any)
 	goal, _ := result["goal"].(map[string]any)
 	if goal == nil {
-		return nil, nil // no active goal
+		return nil, nil
 	}
 	return &surface.GoalState{
 		Objective: str(goal, "objective"),
@@ -598,7 +593,7 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 				continue
 			}
 			if itp == "userMessage" || itp == "user" {
-				lastUser = txt // keep overwriting - last wins
+				lastUser = txt
 			} else {
 				lastAgent = txt
 			}

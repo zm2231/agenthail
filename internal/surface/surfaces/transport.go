@@ -49,10 +49,6 @@ type workerResponse struct {
 	Error  string `json:"error"`
 }
 
-// sidecarPostWithCookies sends a POST via the sidecar (curl_cffi Chrome TLS impersonation).
-// cookieBridge is the path to a .mjs script that prints cookie headers on stdout.
-// cookieURL is passed as an arg to the cookie bridge (e.g. "https://claude.ai/" or "https://app.notion.com/").
-// Pass "" for either to skip.
 func sidecarPostWithCookies(url string, headers map[string]string, body string, cookieBridge string, cookieURL string, timeout time.Duration) (int, string, error) {
 	return callSidecar("POST", url, headers, body, cookieBridge, cookieURL, timeout)
 }

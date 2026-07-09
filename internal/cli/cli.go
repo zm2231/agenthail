@@ -163,7 +163,7 @@ func stripFlags(args []string) []string {
 		a := args[i]
 		if strings.HasPrefix(a, "--") {
 			if valueFlags[a] && i+1 < len(args) {
-				i++ // skip the value
+				i++
 			}
 			continue
 		}
@@ -400,7 +400,7 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	n := 1 // default: last exchange only
+	n := 1
 	if len(positional) > 1 {
 		if v, e := strconv.Atoi(positional[1]); e == nil && v > 0 && v <= 50 {
 			n = v
@@ -649,8 +649,7 @@ func launchCodex() error {
 		"--remote-debugging-port="+remotePort,
 		"--remote-allow-origins=*",
 	)
-	// Discard stdout/stderr so the child's pipe doesn't break (EIO) when
-	// agenthail exits. Codex logs to its own crashpad/SQLite, not our terminal.
+	// Discard stdio: pipe would break (EIO) on agenthail exit, crashing Codex.
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
