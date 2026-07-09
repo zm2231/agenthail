@@ -243,7 +243,7 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 				Surface: surface.KindCodex,
 				Name:    surface.DeriveName(str(m, "name"), str(m, "preview"), 60),
 				Cwd:     str(m, "cwd"),
-				Status:  codexStatus(str(m, "status")),
+				Status:  codexStatus(m["status"]),
 			}
 			if ts, ok := m["recencyAt"].(float64); ok && ts > 0 {
 				sess.LastActive = time.Unix(int64(ts), 0) // Codex timestamps are in seconds
@@ -258,16 +258,20 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	return out, nil
 }
 
-func codexStatus(s string) surface.SessionStatus {
-	switch strings.ToLower(s) {
+func codexStatus(s any) surface.SessionStatus {
+	if m, ok := s.(map[string]any); ok {
+		s = m["type"]
+	}
+	str, _ := s.(string)
+	switch strings.ToLower(str) {
 	case "idle":
 		return surface.StatusIdle
-	case "busy", "running", "in_progress", "inprogress":
+	case "busy", "running", "in_progress", "inprogress", "active":
 		return surface.StatusBusy
 	case "":
 		return surface.StatusUnknown
 	default:
-		return surface.SessionStatus(s)
+		return surface.SessionStatus(str)
 	}
 }
 
