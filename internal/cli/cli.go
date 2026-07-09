@@ -661,6 +661,7 @@ func launchCodex() error {
 	cmd := exec.Command(exe,
 		"--inspect=127.0.0.1:"+inspectorPort,
 		"--remote-debugging-port="+remotePort,
+		"--remote-allow-origins=*",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
