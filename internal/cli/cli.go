@@ -648,8 +648,11 @@ func launchCodex() error {
 		"--remote-debugging-port="+remotePort,
 		"--remote-allow-origins=*",
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Discard stdout/stderr so the child's pipe doesn't break (EIO) when
+	// agenthail exits. Codex logs to its own crashpad/SQLite, not our terminal.
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch codex: %w", err)
 	}
