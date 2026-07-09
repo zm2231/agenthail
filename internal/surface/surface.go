@@ -55,6 +55,12 @@ type Exchange struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// GoalState is the current state of a session's goal.
+type GoalState struct {
+	Objective string `json:"objective"`
+	Status    string `json:"status"` // "active", "complete", ""
+}
+
 type StreamEvent struct {
 	Kind string `json:"kind"`
 	Text string `json:"text"`
@@ -82,6 +88,7 @@ type Surface interface {
 	Stream(ctx context.Context, sess *Session, uuid string, onEvent func(StreamEvent), timeout time.Duration) error
 	GoalSet(ctx context.Context, sess *Session, text string) error
 	GoalClear(ctx context.Context, sess *Session) error
+	GoalGet(ctx context.Context, sess *Session) (*GoalState, error)
 	Compact(ctx context.Context, sess *Session) error
 	Model(ctx context.Context, sess *Session, name string) (string, error)
 	Interrupt(ctx context.Context, sess *Session) error

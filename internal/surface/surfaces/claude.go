@@ -385,6 +385,12 @@ func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
 	return c.sendCommand(ctx, sess, "/goal clear")
 }
 
+// GoalGet is not available for Claude — goals are set via /goal slash commands
+// but there's no API to read them back.
+func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
+	return nil, nil
+}
+
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 	return c.sendCommand(ctx, sess, "/compact")
 }

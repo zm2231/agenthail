@@ -426,6 +426,10 @@ func (n *Notion) GoalClear(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
 }
 
+func (n *Notion) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
+	return nil, nil
+}
+
 func (n *Notion) Compact(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
 }

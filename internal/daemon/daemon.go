@@ -25,6 +25,8 @@ type Daemon struct {
 	Surfaces       []surface.Surface
 	mu             sync.Mutex
 	lastReply      map[string]string
+	lastGoalStatus map[string]string // sessionID -> last known goal status
+	initialized    bool // false on first scan — suppress relays until baseline set
 	log            *log.Logger
 }
 
@@ -45,9 +47,10 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	return &Daemon{
-		Registry:      reg,
+		Registry:       reg,
 		Surfaces:      surfaces,
 		lastReply:     map[string]string{},
+		lastGoalStatus: map[string]string{},
 		log:           log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 	}
 }
@@ -87,30 +90,66 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		for _, sess := range sessions {
 			d.Registry.RegisterSession(sess)
 			var ptr surface.Session = sess
-			d.checkReplyDelta(ctx, s, &ptr)
+			d.onTurnComplete(ctx, s, &ptr)
 		}
 	}
+	// Mark as initialized after first full scan (baseline established)
+	d.mu.Lock()
+	d.initialized = true
+	d.mu.Unlock()
 }
 
-// checkReplyDelta polls the latest reply text for a session. If it changed since
-// the last scan, the turn is treated as complete: relays fire and the steer queue drains.
-// This is surface-agnostic (works whether the surface reports busy/idle status or not).
-func (d *Daemon) checkReplyDelta(ctx context.Context, surf surface.Surface, sess *surface.Session) {
-	d.onTurnComplete(ctx, surf, sess)
-}
-
+// onTurnComplete checks if a turn has completed and fires relays accordingly.
+// Relay gating logic:
+// 1. First scan (initialized=false): establish baseline — record reply + goal
+//    state, DON'T fire any relays. Prevents backlog replay on daemon restart.
+// 2. If surface supports goals (GoalGet returns non-nil):
+//    - Only fire relay when goal status transitions to "complete"
+//    - Intermediate turn ends (goal still "active") are suppressed
+// 3. If surface doesn't support goals (GoalGet returns nil):
+//    - Fall back to reply-delta: fire when reply text changes
+//    - This is the legacy behavior for Claude/Notion
 func (d *Daemon) onTurnComplete(ctx context.Context, surf surface.Surface, sess *surface.Session) {
 	reply, err := surf.Reply(ctx, sess, 1)
-	if err == nil && reply != nil {
-		d.mu.Lock()
-		prev := d.lastReply[sess.ID]
-		d.lastReply[sess.ID] = reply.Text
-		d.mu.Unlock()
-		if reply.Text != "" && reply.Text != prev {
+	if err != nil || reply == nil {
+		d.drainMessageQueue(ctx, surf, sess)
+		return
+	}
+
+	// Check goal state
+	goal, _ := surf.GoalGet(ctx, sess)
+	goalStatus := ""
+	if goal != nil {
+		goalStatus = goal.Status
+	}
+
+	d.mu.Lock()
+	prevReply := d.lastReply[sess.ID]
+	prevGoal := d.lastGoalStatus[sess.ID]
+	firstScan := !d.initialized
+
+	d.lastReply[sess.ID] = reply.Text
+	d.lastGoalStatus[sess.ID] = goalStatus
+	d.mu.Unlock()
+
+	// First scan: just record baseline, don't relay anything
+	if firstScan {
+		return
+	}
+
+	// Goal-gated relay (Codex): fire only when goal transitions to "complete"
+	if goal != nil {
+		if goalStatus == "complete" && prevGoal != "complete" {
 			d.fireRelays(ctx, sess, reply.Text)
 		}
+		// If goal is active, suppress relay even if reply changed — intermediate turn
+		return
 	}
-	d.drainMessageQueue(ctx, surf, sess)
+
+	// Fallback: reply-delta relay (Claude/Notion — no goal API)
+	if reply.Text != "" && reply.Text != prevReply {
+		d.fireRelays(ctx, sess, reply.Text)
+	}
 }
 
 func (d *Daemon) fireRelays(ctx context.Context, from *surface.Session, text string) {

@@ -486,6 +486,32 @@ func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 	return err
 }
 
+func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.close()
+	if err := c.ensureHooked(ctx, conn); err != nil {
+		return nil, err
+	}
+	resp, err := c.rpc(ctx, conn, "thread/goal/get", map[string]any{
+		"threadId": sess.ID,
+	}, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	result, _ := resp["result"].(map[string]any)
+	goal, _ := result["goal"].(map[string]any)
+	if goal == nil {
+		return nil, nil // no active goal
+	}
+	return &surface.GoalState{
+		Objective: str(goal, "objective"),
+		Status:    str(goal, "status"),
+	}, nil
+}
+
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 	conn, err := c.dial(ctx)
 	if err != nil {
