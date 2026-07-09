@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -89,16 +91,16 @@ Usage:
 
 Session commands:
   list [--all]                   List active sessions (default 15, sorted by recency)
-  send <target> "message"       Send a message (--from <name>, --stream, --reply, --json)
+  send <target> "msg"|-       Send a message (--from, --stream, --reply, --json; - reads stdin)
   stream <target>               Tail live activity
-  reply <target>                Fetch last assistant reply
-  last <target> [count] [--full] Show last N exchanges (full text with --full)
+  reply <target> [--json]       Fetch last assistant reply
+  last <target> [count] [--full] [--json]  Show last N exchanges (full text with --full)
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
   steer <target> "message"      Inject guidance into the running turn
-  queue <target> "message"      Hold until the current turn completes, then deliver
+  queue <target> "msg"|-        Hold until turn completes, then deliver (daemon required)
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
@@ -307,6 +309,14 @@ func (a *App) cmdSend(args []string) error {
 	}
 	target := positional[0]
 	message := strings.Join(positional[1:], " ")
+	// Support stdin: if message is "-", read from stdin for long messages.
+	if message == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		message = string(data)
+	}
 	wantStream := hasFlag(args, "--stream")
 	wantReply := hasFlag(args, "--reply")
 	jsonOut := hasFlag(args, "--json")
@@ -328,6 +338,9 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	if !result.Accepted && a.Registry != nil {
+		if _, ok := daemon.IsRunning(); !ok {
+			fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
+		}
 		if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
 			return err
 		}
@@ -386,7 +399,11 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(reply.Text)
+	if hasFlag(args, "--json") {
+		json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done})
+	} else {
+		fmt.Println(reply.Text)
+	}
 	return nil
 }
 
@@ -412,6 +429,10 @@ func (a *App) cmdLast(args []string) error {
 	}
 	if len(exchanges) == 0 {
 		fmt.Println("(no conversation history)")
+		return nil
+	}
+	if hasFlag(args, "--json") {
+		json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "exchanges": exchanges})
 		return nil
 	}
 	label := a.resolveDisplay(sess.ID)
@@ -558,6 +579,16 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("queue requires the registry")
 	}
 	message := strings.Join(positional[1:], " ")
+	if message == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		message = string(data)
+	}
+	if _, ok := daemon.IsRunning(); !ok {
+		fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
+	}
 	if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
 		return err
 	}
