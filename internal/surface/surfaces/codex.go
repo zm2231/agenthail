@@ -221,13 +221,6 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	if err := c.ensureHooked(ctx, conn); err != nil {
 		return nil, err
 	}
-	if _, err := c.rpc(ctx, conn, "initialize", map[string]any{
-		"protocolVersion": "2025-06-18",
-		"clientInfo":      map[string]any{"name": "agenthail", "version": "1.0"},
-		"capabilities":    map[string]any{},
-	}, 3*time.Second); err != nil {
-		return nil, fmt.Errorf("initialize: %w", err)
-	}
 	const maxPages = 3 // thread/list returns 25 per page; fetch 3 for 75
 
 	var out []surface.Session
