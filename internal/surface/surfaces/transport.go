@@ -21,7 +21,6 @@ func SetChromeProfile(name string) {
 	}
 }
 
-// sidecarPath resolves the agenthail sidecar binary (curl_cffi HTTP relay).
 func sidecarPath() (string, error) {
 	if p := os.Getenv("AGENTHAIL_SIDECAR"); p != "" {
 		if _, err := os.Stat(p); err == nil {
@@ -110,8 +109,6 @@ func timeoutCtx(d time.Duration) context.Context {
 	return ctx
 }
 
-// cookieBridgePath resolves a cookie bridge script. Looks for <name> alongside
-// the agenthail binary, then on PATH.
 func cookieBridgePath(name string) string {
 	for _, check := range []string{name, name + ".mjs"} {
 		if exe, err := os.Executable(); err == nil {

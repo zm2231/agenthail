@@ -264,32 +264,27 @@ func b2i(b bool) int {
 	return 0
 }
 
-// GetSession retrieves a session's display info by ID.
 func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) {
 	err = r.db.QueryRow(`SELECT surface, name, cwd FROM sessions WHERE id = ?`, id).Scan(&surface, &name, &cwd)
 	return
 }
 
-// ReverseAlias returns the alias for a session ID, if one exists.
 func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 	var name string
 	err := r.db.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name)
 	return name, err
 }
 
-// RemoveAlias deletes an alias by name.
 func (r *Registry) RemoveAlias(name string) error {
 	_, err := r.db.Exec(`DELETE FROM aliases WHERE name = ?`, name)
 	return err
 }
 
-// RemoveFromChannel removes a session from a channel by session ID.
 func (r *Registry) RemoveFromChannel(channelName, sessionID string) error {
 	_, err := r.db.Exec(`DELETE FROM channel_members WHERE channel_id = (SELECT id FROM channels WHERE name = ?) AND session_id = ?`, channelName, sessionID)
 	return err
 }
 
-// DeleteChannel removes a channel and all its members.
 func (r *Registry) DeleteChannel(channelName string) error {
 	_, err := r.db.Exec(`DELETE FROM channels WHERE name = ?`, channelName)
 	return err

@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// resolveDisplay returns a human-readable label for a session ID:
-// @alias if set, otherwise the session name, otherwise truncated ID.
 func (a *App) resolveDisplay(sessionID string) string {
 	if a.Registry != nil {
 		if alias, err := a.Registry.ReverseAlias(sessionID); err == nil && alias != "" {
@@ -29,7 +27,6 @@ func (a *App) cmdIdentify(args []string) error {
 	if len(args) == 0 || args[0] == "list" {
 		return a.identifyList()
 	}
-	// unidentify <name>
 	if args[0] == "rm" || args[0] == "remove" || args[0] == "unidentify" {
 		if len(args) < 2 {
 			return fmt.Errorf("usage: agenthail identify rm <name>")
@@ -149,7 +146,6 @@ func (a *App) cmdChannel(args []string) error {
 			return fmt.Errorf("usage: agenthail channel send <channel> \"message\" [--from <name>]")
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
-		// Extract --from flag
 		var fromLabel string
 		var msgParts []string
 		for i := 2; i < len(args); i++ {
@@ -164,7 +160,6 @@ func (a *App) cmdChannel(args []string) error {
 		if message == "" {
 			return fmt.Errorf("message is empty")
 		}
-		// Build attributed message
 		if fromLabel == "" {
 			fromLabel = "hail"
 		}

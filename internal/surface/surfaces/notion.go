@@ -13,9 +13,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// Notion drives Notion's default AI chat via the internal API (runInferenceTranscript).
-// Requests go through the curl_cffi sidecar to bypass Cloudflare.
-// Domain migrated from www.notion.so to app.notion.com.
+// Notion AI via internal API (runInferenceTranscript), proxied through curl_cffi.
 
 var langTagRe = regexp.MustCompile(`(?i)^<lang[^>]*/?>\s*`)
 
@@ -68,7 +66,6 @@ func (n *Notion) autoDetect() {
 			if n.userID == "" {
 				n.userID = uid
 			}
-			// Auto-detect userName from notion_user record
 			if n.userName == "" {
 				if nu, ok := udataMap["notion_user"].(map[string]any); ok {
 					if rec, ok := nu[uid].(map[string]any); ok {
@@ -80,7 +77,6 @@ func (n *Notion) autoDetect() {
 					}
 				}
 			}
-			// Auto-detect timezone from user_settings
 			if n.timezone == "" {
 				if us, ok := udataMap["user_settings"].(map[string]any); ok {
 					if rec, ok := us[uid].(map[string]any); ok {
@@ -128,10 +124,6 @@ func (n *Notion) inferenceURL(action string) string {
 	return "https://app.notion.com/api/v3/" + action
 }
 
-// --- Session model ---
-//
-// Notion AI threads are flat: each thread is a conversation.  We expose them as
-// sessions where ID = thread ID.  "HasLocal" is false (no local transcript).
 
 func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 	n.ensureContext()
@@ -197,7 +189,6 @@ func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, 
 	return nil, fmt.Errorf("no notion thread matched '%s'", target)
 }
 
-// --- Send ---
 
 func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	n.ensureContext()
@@ -270,19 +261,17 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 		return nil, fmt.Errorf("notion send (HTTP %d): %s", status, respBody)
 	}
 
-	// Extract thread ID from response
 	resultThreadID := threadID
 	content := parseNotionResponse(respBody)
 	if resultThreadID == "" {
 		resultThreadID = extractThreadID(respBody)
 	}
 
-	_ = content // reply is fetched separately
+	_ = content
 
 	return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
 }
 
-// --- Reply ---
 
 func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	n.ensureContext()
@@ -290,7 +279,6 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 		return &surface.ReplyResult{Error: "no thread ID"}, nil
 	}
 
-	// 1. Get thread record to find message IDs
 	body, _ := json.Marshal(map[string]any{
 		"requests": []map[string]any{
 			{"pointer": map[string]any{"table": "thread", "id": sess.ID}, "version": -1},
@@ -333,12 +321,10 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 	if limit > 0 && limit < len(msgIDs) {
 		msgIDs = msgIDs[max(0, len(msgIDs)-limit):]
 	}
-	// Notion's syncRecordValues has a ~20 request limit per call
 	if len(msgIDs) > 20 {
 		msgIDs = msgIDs[len(msgIDs)-20:]
 	}
 
-	// 2. Fetch message records
 	reqs := make([]map[string]any, len(msgIDs))
 	for i, id := range msgIDs {
 		reqs[i] = map[string]any{
@@ -358,7 +344,6 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 		return &surface.ReplyResult{Error: fmt.Sprintf("HTTP %d", status2)}, nil
 	}
 
-	// Find the last assistant text
 	var msgResp struct {
 		RecordMap struct {
 			ThreadMessage map[string]struct {
@@ -378,7 +363,6 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 	}
 	
 
-	// Iterate message IDs in reverse to find last assistant text
 	
 	for i := len(msgIDs) - 1; i >= 0; i-- {
 		rec, ok := msgResp.RecordMap.ThreadMessage[msgIDs[i]]
@@ -409,14 +393,11 @@ func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 	return &surface.ReplyResult{Error: "no assistant reply found"}, nil
 }
 
-// --- Stream ---
 
 func (n *Notion) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	// Not implemented yet — would require streaming the NDJSON response
 	return surface.ErrUnsupported
 }
 
-// --- Goal / Compact (unsupported) ---
 
 func (n *Notion) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
 	return surface.ErrUnsupported
@@ -434,12 +415,10 @@ func (n *Notion) Compact(ctx context.Context, sess *surface.Session) error {
 	return surface.ErrUnsupported
 }
 
-// --- Model ---
 
 func (n *Notion) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
 	n.ensureContext()
 	if name == "" {
-		// List available models
 		body, _ := json.Marshal(map[string]any{"spaceId": n.spaceID})
 		status, respBody, err := sidecarPostWithCookies(
 			n.inferenceURL("getAvailableModels"),
@@ -466,31 +445,21 @@ func (n *Notion) Model(ctx context.Context, sess *surface.Session, name string) 
 		}
 		return sb.String(), nil
 	}
-	// Setting model per-thread isn't supported via this API (model is per-request)
 	return fmt.Sprintf("model selection is per-request; pass model name in send config (current: %s)", name), nil
 }
 
-// --- Interrupt ---
 
 func (n *Notion) Interrupt(ctx context.Context, sess *surface.Session) error {
-	// Notion AI doesn't have a separate interrupt endpoint; the front-end
-	// sends a saveTransactionsFanout or stops the fetch stream. We return
-	// unsupported for now.
 	return surface.ErrUnsupported
 }
 
-// --- Steer ---
 
 func (n *Notion) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	// Notion has no mid-turn steer like Codex. Steer = send a follow-up message.
-	_, err := n.Send(ctx, sess, message)
+		_, err := n.Send(ctx, sess, message)
 	return err
 }
 
-// --- Helpers ---
 
-// parseNotionResponse extracts text content from an NDJSON response.
-// Handles both agent-inference chunks (new thread) and patch ops (follow-up).
 func parseNotionResponse(ndjson string) string {
 	lines := strings.Split(strings.TrimSpace(ndjson), "\n")
 	var content string
@@ -519,7 +488,6 @@ func parseNotionResponse(ndjson string) string {
 				}
 			}
 		case "patch":
-			// Follow-up responses stream via patch ops
 			if ops, ok := obj["v"].([]any); ok {
 				for _, op := range ops {
 					opMap, ok := op.(map[string]any)
@@ -573,21 +541,18 @@ func extractThreadID(ndjson string) string {
 	return ""
 }
 
-// max returns the larger of two ints (Go 1.21+ has builtin but keeping for safety)
 func max(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
 }
-// Tail returns the last N user/assistant exchanges from a Notion thread.
 func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) ([]surface.Exchange, error) {
 	n.ensureContext()
 	if sess.ID == "" {
 		return nil, fmt.Errorf("notion tail: no thread ID")
 	}
 
-	// 1. Get thread record -> message IDs
 	body, _ := json.Marshal(map[string]any{
 		"requests": []map[string]any{{
 			"pointer": map[string]any{"table": "thread", "id": sess.ID},
@@ -622,12 +587,10 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 		return nil, fmt.Errorf("notion tail: no messages")
 	}
 	msgIDs := threadRec.Value.Value.Messages
-	// Cap to last 20 (API limit per call)
 	if len(msgIDs) > 20 {
 		msgIDs = msgIDs[len(msgIDs)-20:]
 	}
 
-	// 2. Fetch message records
 	reqs := make([]map[string]any, len(msgIDs))
 	for i, id := range msgIDs {
 		reqs[i] = map[string]any{
@@ -646,7 +609,6 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 		return nil, fmt.Errorf("notion tail fetch (HTTP %d)", status2)
 	}
 
-	// Parse with json.RawMessage for step.value (heterogeneous types)
 	var msgResp struct {
 		RecordMap struct {
 			ThreadMessage map[string]struct {
@@ -665,7 +627,6 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 		return nil, fmt.Errorf("notion tail: parse messages: %w", err)
 	}
 
-	// 3. Extract user/assistant text in message order
 	var exchanges []surface.Exchange
 	for _, mid := range msgIDs {
 		rec, ok := msgResp.RecordMap.ThreadMessage[mid]
@@ -674,12 +635,10 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 		}
 		step := rec.Value.Value.Step
 		if step.Type == "user" {
-			// step.value is [["text"]] for user messages
 			var items [][]string
 			if json.Unmarshal(step.Value, &items) == nil && len(items) > 0 && len(items[0]) > 0 {
 				text := strings.TrimSpace(items[0][0])
 				if text != "" {
-					// Start new exchange
 					if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
 						exchanges = append(exchanges, surface.Exchange{User: text})
 					} else {
@@ -688,7 +647,6 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 				}
 			}
 		} else if step.Type == "agent-inference" {
-			// step.value is []{type, content}
 			var items []struct {
 				Type    string `json:"type"`
 				Content string `json:"content"`

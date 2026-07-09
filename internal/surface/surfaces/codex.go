@@ -14,11 +14,9 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-// Codex drives Codex Desktop sessions via CDP into the main V8 inspector (path B).
-// Codex must be launched with --inspect=127.0.0.1:9230.
-// We Runtime.evaluate inside main to reach the app-server ChildProcess via
-// process._getActiveHandles(), write JSON-RPC to its stdin, and read responses
-// off stdout using a coexisting line-splitter hook (ids >= 900000).
+// Codex drives Codex Desktop via CDP into the Node inspector (--inspect=127.0.0.1:9230).
+// We Runtime.evaluate to reach the app-server ChildProcess stdin, and hook stdout
+// to read JSON-RPC responses (ids >= 900000).
 type Codex struct {
 	mainURL string
 }
@@ -39,7 +37,6 @@ func (c *Codex) Capabilities() surface.Capabilities {
 	}
 }
 
-// conn wraps a CDP websocket with a request/response id scheme.
 type cdpConn struct {
 	ws   *websocket.Conn
 	mu   sync.Mutex
@@ -59,9 +56,8 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 	return &cdpConn{ws: ws, next: 1}, nil
 }
 
-// resolveInspectorURL fetches the node inspector target list and returns the
-// webSocketDebuggerUrl for the node (main) context. Node inspector requires the
-// /<uuid> path suffix; a bare ws://host:port fails the handshake.
+// resolveInspectorURL fetches /json and returns the webSocketDebuggerUrl.
+// Node inspector requires the /<uuid> path suffix; bare ws://host:port fails.
 func (c *Codex) resolveInspectorURL(ctx context.Context) (string, error) {
 	httpURL := strings.Replace(c.mainURL, "ws://", "http://", 1)
 	httpURL = strings.Replace(httpURL, "wss://", "https://", 1)
@@ -87,7 +83,6 @@ func (c *Codex) resolveInspectorURL(ctx context.Context) (string, error) {
 
 func (c *cdpConn) close() error { return c.ws.Close() }
 
-// evaluate runs a JS expression in the main process and returns its value.
 func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Duration) (any, error) {
 	c.mu.Lock()
 	id := c.next
@@ -135,7 +130,6 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 	return nil, fmt.Errorf("timeout waiting for eval response")
 }
 
-// hookJS installs the stdout line-splitter hook ONCE. Idempotent via __agenthailHooked flag.
 const hookJS = `
 (() => {
   if (globalThis.__agenthailHooked) return 'already';
@@ -166,14 +160,12 @@ const hookJS = `
 })()
 `
 
-// rpcJS returns a JS snippet that writes one JSON-RPC request to the app-server stdin.
 func rpcJS(id int, method string, params map[string]any) string {
 	paramsJSON, _ := json.Marshal(params)
 	return fmt.Sprintf(`(()=>{try{const c=globalThis.__agenthailChild;if(!c)return'no-child';c.stdin.write(JSON.stringify({jsonrpc:'2.0',id:%d,method:%s,params:%s})+'\n');return 'sent'}catch(e){return 'ERR '+e.message}})()`,
 		id, strconv.Quote(method), string(paramsJSON))
 }
 
-// collectJS drains captured responses with the given id.
 func collectJS(id int) string {
 	return fmt.Sprintf(`(()=>{const r=(globalThis.__agenthailResponses||[]).filter(x=>x.id===%d);return JSON.stringify(r.map(x=>({id:x.id,ok:!!x.result,err:x.error&&(x.error.message||'').slice(0,200),result:x.result})))})()`, id)
 }
@@ -194,7 +186,6 @@ func (c *Codex) ensureHooked(ctx context.Context, conn *cdpConn) error {
 	return nil
 }
 
-// rpc sends one JSON-RPC method and waits for the matching response.
 func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
 	id := 900000 + int(time.Now().UnixNano()%99999)
 	conn.evaluate(ctx, clearResponseJS(id), 2*time.Second)
@@ -240,9 +231,8 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	}, 3*time.Second); err != nil {
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
-	// Paginate thread/list — each page returns 25 threads with a nextCursor.
-	// Fetch pages until we have enough or hit the cutoff (default: 3 pages = 75 threads).
-	const maxPages = 3
+	const maxPages = 3 // thread/list returns 25 per page; fetch 3 for 75
+
 	var out []surface.Session
 	var cursor any
 	for page := 0; page < maxPages; page++ {
@@ -318,8 +308,7 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 	return &matches[0], nil
 }
 
-// activeTurnID returns the id of the currently-running turn for a thread, or
-// "" if idle. Mirrors the reference codex-control activeTurnId logic.
+// activeTurnID returns the running turn id for a thread, or "" if idle.
 func (c *Codex) activeTurnID(ctx context.Context, conn *cdpConn, threadID string) (string, error) {
 	resp, err := c.rpc(ctx, conn, "thread/turns/list", map[string]any{"threadId": threadID}, 5*time.Second)
 	if err != nil {
@@ -352,9 +341,7 @@ func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string)
 	if _, err := c.rpc(ctx, conn, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/resume: %w", err)
 	}
-	// If a turn is already running, the message must queue and be delivered by
-	// the daemon on turn/completed (native Codex queueing, surfaced via the
-	// registry). Sending turn/start now would clobber the active turn.
+	// turn/start would clobber the active turn; queue instead.
 	if active, _ := c.activeTurnID(ctx, conn, sess.ID); active != "" {
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
@@ -395,8 +382,7 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 		for _, it := range items {
 			im, _ := it.(map[string]any)
 			if im["type"] == "agentMessage" {
-				// agentMessage text is in top-level "text" field
-				if txt, ok := im["text"].(string); ok && txt != "" {
+					if txt, ok := im["text"].(string); ok && txt != "" {
 					last = txt
 				}
 			}
@@ -555,8 +541,6 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 	if err := c.ensureHooked(ctx, conn); err != nil {
 		return err
 	}
-	// turn/steer only applies to a running turn. If idle, there is nothing to
-	// steer into; the caller should use Send instead.
 	turnID, _ := c.activeTurnID(ctx, conn, sess.ID)
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
@@ -572,7 +556,6 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 var localHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 
-// Tail returns the last N user/assistant exchanges from a Codex thread.
 func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
@@ -601,8 +584,6 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 		for _, it := range items {
 			im, _ := it.(map[string]any)
 			itp, _ := im["type"].(string)
-			// agentMessage: text in top-level "text" field
-			// userMessage: text nested in content[0].text
 			txt := ""
 			if itp == "userMessage" || itp == "user" {
 				if cl, ok := im["content"].([]any); ok && len(cl) > 0 {
@@ -617,7 +598,7 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 				continue
 			}
 			if itp == "userMessage" || itp == "user" {
-				lastUser = txt // keep overwriting — last wins
+				lastUser = txt // keep overwriting - last wins
 			} else {
 				lastAgent = txt
 			}

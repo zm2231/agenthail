@@ -68,7 +68,6 @@ func (a *App) daemonStatus() error {
 	return nil
 }
 
-// daemonRun is the in-process entry for the spawned daemon.
 func (a *App) daemonRun() error {
 	for _, e := range a.Surfaces {
 		_ = e

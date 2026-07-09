@@ -47,15 +47,12 @@ type ReplyResult struct {
 	Error    string `json:"error"`
 }
 
-// Exchange is one user-assistant turn pair.
-// Either User or Assistant may be empty if the conversation starts mid-turn.
 type Exchange struct {
 	User      string    `json:"user"`
 	Assistant string    `json:"assistant"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// GoalState is the current state of a session's goal.
 type GoalState struct {
 	Objective string `json:"objective"`
 	Status    string `json:"status"` // "active", "complete", ""
@@ -96,8 +93,6 @@ type Surface interface {
 	Capabilities() Capabilities
 }
 
-// DeriveName returns an explicit name if non-empty, otherwise the first line
-// of the given preview/summary text truncated to maxLen. Returns "" if both are empty.
 func DeriveName(explicit, preview string, maxLen int) string {
 	if explicit != "" {
 		return truncate(explicit, maxLen)
@@ -124,7 +119,6 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
-// TruncateString is the exported version of truncate for use by surface implementations.
 func TruncateString(s string, n int) string { return truncate(s, n) }
 
 var ErrUnsupported = errUnsupported{}

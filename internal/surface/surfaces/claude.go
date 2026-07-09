@@ -102,8 +102,6 @@ func (c *Claude) resolveTranscript(s *surface.Session, conversationID string) st
 	return filepath.Join(projectDir(s.Cwd), conversationID+".jsonl")
 }
 
-// firstUserMessage scans the transcript for the first real user message
-// (skipping command caveats and system messages) and returns it truncated.
 func (c *Claude) firstUserMessage(path string) string {
 	if path == "" || !fileExists(path) {
 		return ""
@@ -144,7 +142,6 @@ func (c *Claude) firstUserMessage(path string) string {
 				}
 			}
 		}
-		// Skip command caveats and system messages
 		if strings.HasPrefix(text, "<local-command") || strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<system") {
 			continue
 		}
@@ -385,8 +382,6 @@ func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
 	return c.sendCommand(ctx, sess, "/goal clear")
 }
 
-// GoalGet is not available for Claude — goals are set via /goal slash commands
-// but there's no API to read them back.
 func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
 	return nil, nil
 }
@@ -445,10 +440,6 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// Tail returns the last N completed exchanges from the transcript.
-// Only assistant messages with stop_reason="end_turn" count as real replies;
-// intermediate tool_use/streaming entries are skipped.
-// User messages starting with [< are command caveats/interrupts, also skipped.
 func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
 	path := sess.Transcript
 	if path == "" {
@@ -480,13 +471,11 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 			continue
 		}
 		msgData, _ := rec["message"].(map[string]any)
-		// Assistant: only accept end_turn (final, not tool_use/streaming)
 		if typ == "assistant" {
 			if msgData["stop_reason"] != "end_turn" {
 				continue
 			}
 		}
-		// Handle both string content and list content
 		content := msgData["content"]
 		text := ""
 		switch c := content.(type) {
@@ -506,7 +495,6 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 		if text == "" {
 			continue
 		}
-		// Filter user noise
 		if typ == "user" {
 			if strings.HasPrefix(text, "<local-command") || strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<system") {
 				continue
@@ -514,11 +502,9 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 			if strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to") {
 				continue
 			}
-			// Skip tool_result entries (they have tool_use_id in the message)
-			if _, hasToolID := msgData["tool_use_id"]; hasToolID {
+				if _, hasToolID := msgData["tool_use_id"]; hasToolID {
 				continue
 			}
-			// Skip if content is a list of tool_result items
 			if cl, ok := content.([]any); ok {
 				for _, item := range cl {
 					if m, ok := item.(map[string]any); ok && m["type"] == "tool_result" {
@@ -534,7 +520,6 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 		msgs = append(msgs, msg{role: typ, text: text})
 	}
 
-	// Pair user+assistant into exchanges
 	var exchanges []surface.Exchange
 	for i := 0; i < len(msgs); i++ {
 		if msgs[i].role == "user" {

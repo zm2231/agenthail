@@ -81,7 +81,7 @@ func (a *App) Run(args []string) error {
 }
 
 func (a *App) usage() {
-	fmt.Print(`agenthail — hail an agent
+	fmt.Print(`agenthail - hail an agent
 
 Usage:
   agenthail <command> [target] [args] [options]
@@ -146,7 +146,6 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-// flagVal returns the value following a --flag, or "" if not present.
 func flagVal(args []string, flag string) string {
 	for i, a := range args {
 		if a == flag && i+1 < len(args) {
@@ -156,8 +155,6 @@ func flagVal(args []string, flag string) string {
 	return ""
 }
 
-// stripFlags removes -- flags and their values, returning only positional args.
-// Flags that take values (--from, --model) are skipped along with their value.
 func stripFlags(args []string) []string {
 	valueFlags := map[string]bool{"--from": true, "--model": true}
 	var out []string
@@ -206,7 +203,6 @@ func (a *App) cmdList(args []string) error {
 		return nil
 	}
 
-	// Build alias map (sessionID -> alias name)
 	aliased := make(map[string]string)
 	if a.Registry != nil {
 		rows, _ := a.Registry.ListAliases()
@@ -215,7 +211,6 @@ func (a *App) cmdList(args []string) error {
 		}
 	}
 
-	// Filter: hide Notion threads older than 7 days unless --all
 	if !hasFlag(args, "--all") {
 		cutoff := time.Now().AddDate(0, 0, -7)
 		filtered := allSessions[:0]
@@ -228,7 +223,6 @@ func (a *App) cmdList(args []string) error {
 		allSessions = filtered
 	}
 
-	// Sort by last active (most recent first), sessions with zero time go last
 	sort.SliceStable(allSessions, func(i, j int) bool {
 		if allSessions[i].LastActive.IsZero() {
 			return false
@@ -317,7 +311,6 @@ func (a *App) cmdSend(args []string) error {
 	jsonOut := hasFlag(args, "--json")
 	ctx := context.Background()
 
-	// --from <name>: inject sender attribution into the message
 	fromLabel := flagVal(args, "--from")
 	if fromLabel != "" {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
@@ -333,9 +326,6 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 
-	// Surface refused because a turn is already running (e.g. Codex). Auto-queue
-	// so the message lands when the current turn completes, matching native
-	// Codex submit-while-busy behavior. The daemon drains the queue.
 	if !result.Accepted && a.Registry != nil {
 		if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
 			return err
@@ -639,8 +629,6 @@ func (a *App) cmdLaunch(args []string) error {
 func launchCodex() error {
 	inspectorPort := envOr("AGENTHAIL_CODEX_INSPECT", "9230")
 	remotePort := envOr("AGENTHAIL_CODEX_REMOTE", "9231")
-	// Codex Desktop was renamed to ChatGPT.app in a recent update.
-	// Find the binary regardless of app name.
 	candidates := []string{
 		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
 		"/Applications/Codex.app/Contents/MacOS/Codex",
@@ -655,9 +643,6 @@ func launchCodex() error {
 	if exe == "" {
 		return fmt.Errorf("codex binary not found (tried %s)", strings.Join(candidates, ", "))
 	}
-	// Run the binary directly — NOT via `open --args` which concatenates
-	// all flags after --args into a single string, causing Electron to parse
-	// --inspect and --remote-debugging-port as one combined --inspect value.
 	cmd := exec.Command(exe,
 		"--inspect=127.0.0.1:"+inspectorPort,
 		"--remote-debugging-port="+remotePort,
@@ -669,7 +654,6 @@ func launchCodex() error {
 		return fmt.Errorf("launch codex: %w", err)
 	}
 	pid := cmd.Process.Pid
-	// Release the process so it survives after agenthail exits.
 	cmd.Process.Release()
 	fmt.Printf("launched Codex (pid %d, inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", pid, inspectorPort, remotePort)
 	return nil
