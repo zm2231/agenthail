@@ -91,7 +91,7 @@ Session commands:
   send <target> "message"       Send a message (--from <name>, --stream, --reply, --json)
   stream <target>               Tail live activity
   reply <target>                Fetch last assistant reply
-  last <target> [count]        Show last N exchanges (default 3)
+  last <target> [count]        Show last N exchanges (default 1)
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context
   model <target> [name]         Get or set model
@@ -409,7 +409,7 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	n := 3 // default: last 3 exchanges
+	n := 1 // default: last exchange only
 	if len(positional) > 1 {
 		if v, e := strconv.Atoi(positional[1]); e == nil && v > 0 && v <= 50 {
 			n = v

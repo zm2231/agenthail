@@ -439,7 +439,10 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// Tail scans the transcript for the last N user/assistant exchanges.
+// Tail returns the last N completed exchanges from the transcript.
+// Only assistant messages with stop_reason="end_turn" count as real replies;
+// intermediate tool_use/streaming entries are skipped.
+// User messages starting with [< are command caveats/interrupts, also skipped.
 func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
 	path := sess.Transcript
 	if path == "" {
@@ -456,7 +459,6 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 
-	// Collect all user/assistant text messages
 	type msg struct {
 		role string
 		text string
@@ -472,19 +474,58 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 			continue
 		}
 		msgData, _ := rec["message"].(map[string]any)
-		content, _ := msgData["content"].([]any)
-		for _, item := range content {
-			if m, ok := item.(map[string]any); ok && m["type"] == "text" {
-				if t, ok := m["text"].(string); ok && strings.TrimSpace(t) != "" {
-					// Filter: skip command caveats for user messages
-					if typ == "user" && (strings.HasPrefix(t, "<local-command") || strings.HasPrefix(t, "<command-") || strings.HasPrefix(t, "<system")) {
+		// Assistant: only accept end_turn (final, not tool_use/streaming)
+		if typ == "assistant" {
+			if msgData["stop_reason"] != "end_turn" {
+				continue
+			}
+		}
+		// Handle both string content and list content
+		content := msgData["content"]
+		text := ""
+		switch c := content.(type) {
+		case string:
+			text = c
+		case []any:
+			for _, item := range c {
+				if m, ok := item.(map[string]any); ok && m["type"] == "text" {
+					if t, ok := m["text"].(string); ok && strings.TrimSpace(t) != "" {
+						text = t
 						break
 					}
-					msgs = append(msgs, msg{role: typ, text: t})
-					break
 				}
 			}
 		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		// Filter user noise
+		if typ == "user" {
+			if strings.HasPrefix(text, "<local-command") || strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<system") {
+				continue
+			}
+			if strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to") {
+				continue
+			}
+			// Skip tool_result entries (they have tool_use_id in the message)
+			if _, hasToolID := msgData["tool_use_id"]; hasToolID {
+				continue
+			}
+			// Skip if content is a list of tool_result items
+			if cl, ok := content.([]any); ok {
+				for _, item := range cl {
+					if m, ok := item.(map[string]any); ok && m["type"] == "tool_result" {
+						text = "" // it's a tool result, skip
+						break
+					}
+				}
+			}
+			if text == "" {
+				continue
+			}
+		}
+		msgs = append(msgs, msg{role: typ, text: text})
 	}
 
 	// Pair user+assistant into exchanges
@@ -497,10 +538,15 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 				i++
 			}
 			exchanges = append(exchanges, ex)
+		} else if msgs[i].role == "assistant" {
+			if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
+				exchanges = append(exchanges, surface.Exchange{Assistant: msgs[i].text})
+			} else {
+				exchanges[len(exchanges)-1].Assistant = msgs[i].text
+			}
 		}
 	}
 
-	// Return last n
 	if len(exchanges) > n {
 		exchanges = exchanges[len(exchanges)-n:]
 	}

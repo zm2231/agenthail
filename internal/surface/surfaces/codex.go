@@ -381,6 +381,7 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 		for _, it := range items {
 			im, _ := it.(map[string]any)
 			if im["type"] == "agentMessage" {
+				// agentMessage text is in top-level "text" field
 				if txt, ok := im["text"].(string); ok && txt != "" {
 					last = txt
 				}
@@ -556,24 +557,33 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 	for _, t := range turns {
 		m, _ := t.(map[string]any)
 		items, _ := m["items"].([]any)
-		var ex surface.Exchange
+		var lastUser, lastAgent string
 		for _, it := range items {
 			im, _ := it.(map[string]any)
 			itp, _ := im["type"].(string)
-			if txt, ok := im["text"].(string); ok && txt != "" {
-				if itp == "userMessage" || itp == "user" {
-					if ex.User == "" {
-						ex.User = txt
-					}
-				} else if itp == "agentMessage" || itp == "assistant" {
-					if ex.Assistant == "" {
-						ex.Assistant = txt
+			// agentMessage: text in top-level "text" field
+			// userMessage: text nested in content[0].text
+			txt := ""
+			if itp == "userMessage" || itp == "user" {
+				if cl, ok := im["content"].([]any); ok && len(cl) > 0 {
+					if cm, ok := cl[0].(map[string]any); ok {
+						txt, _ = cm["text"].(string)
 					}
 				}
+			} else if itp == "agentMessage" || itp == "assistant" {
+				txt, _ = im["text"].(string)
+			}
+			if txt == "" {
+				continue
+			}
+			if itp == "userMessage" || itp == "user" {
+				lastUser = txt // keep overwriting — last wins
+			} else {
+				lastAgent = txt
 			}
 		}
-		if ex.User != "" || ex.Assistant != "" {
-			exchanges = append(exchanges, ex)
+		if lastUser != "" || lastAgent != "" {
+			exchanges = append(exchanges, surface.Exchange{User: lastUser, Assistant: lastAgent})
 		}
 	}
 
