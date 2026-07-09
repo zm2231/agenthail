@@ -639,9 +639,21 @@ func (a *App) cmdLaunch(args []string) error {
 func launchCodex() error {
 	inspectorPort := envOr("AGENTHAIL_CODEX_INSPECT", "9230")
 	remotePort := envOr("AGENTHAIL_CODEX_REMOTE", "9231")
-	exe := "/Applications/Codex.app/Contents/MacOS/Codex"
-	if _, err := os.Stat(exe); err != nil {
-		return fmt.Errorf("codex binary not found at %s", exe)
+	// Codex Desktop was renamed to ChatGPT.app in a recent update.
+	// Find the binary regardless of app name.
+	candidates := []string{
+		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+		"/Applications/Codex.app/Contents/MacOS/Codex",
+	}
+	var exe string
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			exe = c
+			break
+		}
+	}
+	if exe == "" {
+		return fmt.Errorf("codex binary not found (tried %s)", strings.Join(candidates, ", "))
 	}
 	// Run the binary directly — NOT via `open --args` which concatenates
 	// all flags after --args into a single string, causing Electron to parse
@@ -655,9 +667,10 @@ func launchCodex() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch codex: %w", err)
 	}
+	pid := cmd.Process.Pid
 	// Release the process so it survives after agenthail exits.
 	cmd.Process.Release()
-	fmt.Printf("launched Codex (pid %d, inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", cmd.Process.Pid, inspectorPort, remotePort)
+	fmt.Printf("launched Codex (pid %d, inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", pid, inspectorPort, remotePort)
 	return nil
 }
 
