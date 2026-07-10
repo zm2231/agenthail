@@ -32,7 +32,7 @@ if [ "$GOOS_VALUE" = "darwin" ] && command -v codesign >/dev/null 2>&1; then
 	codesign --force --sign "${AGENTHAIL_CODESIGN_IDENTITY:--}" "$STAGE/agenthail"
 fi
 
-cp README.md install.sh "$STAGE/"
+cp README.md LICENSE COMMERCIAL.md install.sh "$STAGE/"
 cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
 cp -R skills "$STAGE/"
 test -f "$STAGE/skills/agenthail-operations/SKILL.md"

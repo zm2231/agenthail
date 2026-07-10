@@ -247,3 +247,7 @@ python3 -m py_compile sidecar/sidecar.py
 Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `agenthail doctor --json`, `list --json`, `send --json`, and the queue commands return stable JSON documents for anything you want to script around.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
+
+## License
+
+Agenthail is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE), not an OSI-approved open-source license. Personal, research, educational, nonprofit, public-interest, and other noncommercial use are permitted under its terms. Commercial use requires a separate license; see [COMMERCIAL.md](COMMERCIAL.md) or contact [zainmer@protonmail.com](mailto:zainmer@protonmail.com).
