@@ -150,6 +150,21 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	}
 }
 
+func TestRelayStopsAtHopLimit(t *testing.T) {
+	daemon, r, _, from, _ := daemonFixture(t)
+	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "loop", "[agenthail relay hops=8 source=previous] loop")
+	if r.QueueCount("to") != 0 {
+		t.Fatal("relay exceeded hop limit")
+	}
+	history, err := r.ListHistory(10, "from")
+	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
 func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
 	daemon, r, fake, _, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {

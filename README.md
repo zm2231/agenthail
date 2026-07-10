@@ -57,7 +57,7 @@ agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 ```
 
 The route remembers which completed turn it already delivered, including across restarts. Old answers stay old.
-Routes are validated as a graph when created, so self-routes and cycles such as `@a → @b → @a` are rejected before they can create a relay loop. Relay payloads are also bounded before they enter the next agent's context.
+Routes are validated as a graph when created, so self-routes and cycles such as `@a → @b → @a` are rejected before they can create a relay loop. Relay payloads carry a bounded hop count as a second guard, and are bounded before they enter the next agent's context.
 
 ## Install
 
