@@ -28,6 +28,11 @@ var dashboardJS []byte
 //go:embed dashboard/tokens.css
 var dashboardCSS []byte
 
+const (
+	dashboardStateCacheTTL = 30 * time.Second
+	dashboardRefreshBudget = 18 * time.Second
+)
+
 type dashboardServer struct {
 	server  *http.Server
 	listen  string
@@ -132,18 +137,36 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 	}
 	dashboard.stateMu.Lock()
 	defer dashboard.stateMu.Unlock()
-	if r.URL.Query().Get("fresh") != "1" && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < 8*time.Second {
+	if r.URL.Query().Get("fresh") != "1" && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		writeDashboardJSON(w, http.StatusOK, dashboard.state)
 		return
 	}
-	state, err := d.dashboardState(r.Context())
+	refreshCtx, cancel := context.WithTimeout(r.Context(), dashboardRefreshBudget)
+	defer cancel()
+	state, err := d.dashboardState(refreshCtx)
 	if err != nil {
+		if !dashboard.stateAt.IsZero() {
+			stale := dashboard.state
+			stale.Daemon = cloneDashboardDaemon(stale.Daemon)
+			stale.Daemon["stale"] = true
+			stale.Daemon["refreshError"] = err.Error()
+			writeDashboardJSON(w, http.StatusOK, stale)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	dashboard.state = state
 	dashboard.stateAt = time.Now()
 	writeDashboardJSON(w, http.StatusOK, state)
+}
+
+func cloneDashboardDaemon(input map[string]any) map[string]any {
+	output := make(map[string]any, len(input)+2)
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
 }
 
 func (dashboard *dashboardServer) asset(contentType string, body []byte) http.HandlerFunc {
@@ -262,7 +285,14 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			listBudget := 12 * time.Second
+			if deadline, ok := ctx.Deadline(); ok {
+				remaining := time.Until(deadline)
+				if remaining < listBudget {
+					listBudget = remaining
+				}
+			}
+			operationCtx, cancel := context.WithTimeout(ctx, listBudget)
 			sessions, listErr := adapter.List(operationCtx)
 			cancel()
 			entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Capabilities: adapter.Capabilities()}

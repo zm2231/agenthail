@@ -23,7 +23,7 @@ function renderOverview() {
   const connected = surfaces.filter(surface => surface.connected);
   const busy = sessions.filter(session => session.status === 'busy');
   $('#daemon-status').textContent = app.state.daemon?.running ? 'Running locally' : 'Not running';
-  $('#daemon-detail').textContent = app.state.daemon?.pid ? `Daemon process ${app.state.daemon.pid}` : 'Start the daemon to deliver work';
+  $('#daemon-detail').textContent = app.state.daemon?.stale ? `Showing cached data. ${app.state.daemon.refreshError || 'Surface refresh is temporarily unavailable'}` : (app.state.daemon?.pid ? `Daemon process ${app.state.daemon.pid}` : 'Start the daemon to deliver work');
   $('#connected-count').textContent = `${connected.length} ${connected.length === 1 ? 'surface' : 'surfaces'} ready`;
   $('#active-count').textContent = `${busy.length} ${busy.length === 1 ? 'conversation' : 'conversations'} active`;
   $('#queue-summary').textContent = queue.length ? `${queue.length} ${queue.length === 1 ? 'message' : 'messages'} waiting safely` : 'Nothing waiting';
