@@ -80,6 +80,19 @@ func (d *Daemon) RunWithSignal() error {
 	if err := os.WriteFile(PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
 		return fmt.Errorf("write pidfile: %w", err)
 	}
+	dashboard, err := d.startDashboard()
+	if err != nil {
+		return err
+	}
+	if dashboard != nil {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if shutdownErr := dashboard.server.Shutdown(shutdownCtx); shutdownErr != nil {
+				d.log.Printf("dashboard shutdown: %s", shutdownErr)
+			}
+		}()
+	}
 	err = d.Run(ctx)
 	if removeErr := removePIDFileIfOwned(os.Getpid()); removeErr != nil {
 		d.log.Printf("warn: remove pidfile: %s", removeErr)

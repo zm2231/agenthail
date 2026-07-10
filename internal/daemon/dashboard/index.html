@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Agenthail</title>
+  <link rel="stylesheet" href="/tokens.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="#overview" aria-label="Agenthail home"><span class="brand-mark">A</span><span>agenthail</span></a>
+      <nav class="nav" aria-label="Dashboard"><a href="#overview" data-view="overview">Overview</a><a href="#conversations" data-view="conversations">Conversations</a><a href="#operations" data-view="operations">Operations</a></nav>
+      <div class="topbar-actions"><span class="sync" id="sync">Updating…</span><button class="button quiet" id="refresh" type="button">Refresh</button></div>
+    </header>
+
+    <section class="view" id="overview-view" data-view-panel="overview">
+      <div class="page-heading"><div><p class="eyebrow">Live status</p><h1>Your agent network</h1><p class="lede">A clear view of the agents already working with you.</p></div><button class="text-button" type="button" data-open-conversations>Open conversations <span>→</span></button></div>
+      <section class="summary-grid" aria-label="Network summary">
+        <article class="summary-card"><span class="summary-icon good">↗</span><div><span class="meta">Daemon</span><strong id="daemon-status">Running locally</strong><small id="daemon-detail">Private and ready</small></div></article>
+        <article class="summary-card"><span class="summary-icon warm">✦</span><div><span class="meta">Connected</span><strong id="connected-count">Loading surfaces</strong><small>Only apps you have set up appear here</small></div></article>
+        <article class="summary-card"><span class="summary-icon cool">⌁</span><div><span class="meta">Active now</span><strong id="active-count">Loading conversations</strong><small id="queue-summary">Nothing waiting</small></div></article>
+      </section>
+      <section class="section-block"><div class="section-heading"><div><p class="eyebrow">Live connections</p><h2>Your surfaces</h2></div><button class="text-button" type="button" data-open-conversations>View all conversations <span>→</span></button></div><div class="surface-stack" id="surface-cards"><div class="empty-card">Checking your connected apps…</div></div></section>
+      <section class="two-up"><section class="section-block compact"><div class="section-heading"><div><p class="eyebrow">Working now</p><h2>Recent activity</h2></div></div><div class="activity-list" id="recent-activity"></div></section><section class="section-block compact"><div class="section-heading"><div><p class="eyebrow">Delivery</p><h2>Waiting to go out</h2></div><button class="text-button" type="button" data-open-operations>Manage <span>→</span></button></div><div class="queue-preview" id="queue-preview"></div></section></section>
+    </section>
+
+    <section class="view hidden" id="conversations-view" data-view-panel="conversations">
+      <div class="conversation-layout">
+        <aside class="conversation-rail"><div class="rail-heading"><p class="eyebrow">Conversations</p><strong id="conversation-count">Loading…</strong></div><label class="search"><span>⌕</span><input id="session-search" type="search" placeholder="Find a conversation"></label><div class="session-list" id="session-list"></div></aside>
+        <section class="chat-pane"><header class="chat-header"><div><p class="eyebrow" id="chat-surface">Choose a conversation</p><h1 id="chat-title">Your conversations</h1><p class="chat-subtitle" id="chat-subtitle">History, status, and agent controls live here.</p></div><div class="chat-actions" id="chat-actions"></div></header><div class="chat-body" id="chat-body"><div class="empty-state"><span>✦</span><h2>Pick up where you left off</h2><p>Select an active or recent conversation to see its real history and continue it.</p></div></div><footer class="composer"><form id="composer"><textarea id="message" rows="1" maxlength="120000" disabled placeholder="Select a conversation to send a message"></textarea><button class="button primary" id="send" disabled type="submit">Send</button></form><p id="composer-note">Messages to a busy agent are queued safely.</p></footer></section>
+      </div>
+    </section>
+
+    <section class="view hidden" id="operations-view" data-view-panel="operations"><div class="page-heading"><div><p class="eyebrow">Automation & delivery</p><h1>Keep work moving.</h1><p class="lede">Queued messages, channels, and relays are managed by your local daemon.</p></div></div><section class="operations-grid"><section class="section-block"><div class="section-heading"><div><p class="eyebrow">Queue</p><h2>Delivery status</h2></div></div><div id="queue-list" class="operation-list"></div></section><section class="section-block"><div class="section-heading"><div><p class="eyebrow">Channels</p><h2>Shared handoffs</h2></div></div><form class="operation-form" data-network-form="channel-create"><input name="channel" placeholder="Channel name" required><button class="button" type="submit">Create</button></form><form class="operation-form" data-network-form="channel-add"><input name="channel" placeholder="Channel name" required><input name="targetId" placeholder="Agent, for example @writer" required><button class="button" type="submit">Add agent</button></form><form class="operation-form" data-network-form="channel-send"><input name="channel" placeholder="Channel name" required><input name="message" placeholder="Message everyone" required><button class="button" type="submit">Send</button></form><div id="channel-list" class="operation-list"></div></section><section class="section-block"><div class="section-heading"><div><p class="eyebrow">Relays</p><h2>Automatic handoffs</h2></div></div><form class="operation-form relay-form" data-network-form="relay-add"><input name="fromId" placeholder="From agent, for example @research" required><input name="toId" placeholder="To agent, for example @builder" required><input name="pattern" placeholder="Optional match pattern"><button class="button" type="submit">Add relay</button></form><div id="relay-list" class="operation-list"></div></section></section></section>
+  </main>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

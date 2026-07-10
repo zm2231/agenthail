@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"html"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,6 +96,121 @@ func (a *App) daemonRun() error {
 	return d.RunWithSignal()
 }
 
+func (a *App) cmdDashboard(args []string) error {
+	positional := stripFlags(args)
+	if len(positional) > 1 {
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status] [--no-open]")
+	}
+	action := "open"
+	if len(positional) == 1 {
+		action = positional[0]
+	}
+	config, err := daemon.LoadDashboardConfig()
+	if err != nil {
+		return err
+	}
+	switch action {
+	case "enable":
+		config.Enabled = true
+		if err := daemon.SaveDashboardConfig(config); err != nil {
+			return err
+		}
+		if err := a.restartDaemonForDashboard(); err != nil {
+			return err
+		}
+		if err := waitForDashboard(config.Listen, 15*time.Second); err != nil {
+			return err
+		}
+		if hasFlag(args, "--no-open") {
+			fmt.Println("dashboard enabled")
+			return nil
+		}
+		return a.openDashboard()
+	case "disable":
+		config.Enabled = false
+		if err := daemon.SaveDashboardConfig(config); err != nil {
+			return err
+		}
+		if _, running := daemon.IsRunning(); running {
+			if err := a.restartDaemonForDashboard(); err != nil {
+				return err
+			}
+		}
+		fmt.Println("dashboard disabled")
+		return nil
+	case "status":
+		if !config.Enabled {
+			fmt.Println("dashboard: disabled (run 'agenthail dashboard enable')")
+			return nil
+		}
+		url, err := daemon.DashboardURL()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("dashboard: enabled on %s\n", config.Listen)
+		if _, running := daemon.IsRunning(); !running {
+			fmt.Println("daemon: not running (start it with 'agenthail daemon start')")
+		} else {
+			fmt.Printf("open: %s\n", url)
+		}
+		return nil
+	case "open":
+		if !config.Enabled {
+			return fmt.Errorf("dashboard is disabled; run 'agenthail dashboard enable'")
+		}
+		if _, running := daemon.IsRunning(); !running {
+			return fmt.Errorf("daemon is not running; start it with 'agenthail daemon start'")
+		}
+		return a.openDashboard()
+	default:
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status] [--no-open]")
+	}
+}
+
+func (a *App) openDashboard() error {
+	url, err := daemon.DashboardURL()
+	if err != nil {
+		return err
+	}
+	if err := exec.Command("open", url).Run(); err != nil {
+		return fmt.Errorf("open dashboard: %w", err)
+	}
+	fmt.Printf("opened dashboard: %s\n", url)
+	return nil
+}
+
+func (a *App) restartDaemonForDashboard() error {
+	if daemonServiceLoaded() {
+		domain := fmt.Sprintf("gui/%d", os.Getuid())
+		if output, err := exec.Command("launchctl", "kickstart", "-k", domain+"/"+daemonLaunchdLabel).CombinedOutput(); err != nil {
+			return fmt.Errorf("restart launchd daemon for dashboard: %w (%s)", err, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	if _, running := daemon.IsRunning(); running {
+		if err := daemon.Stop(); err != nil {
+			return err
+		}
+	}
+	return a.daemonStart()
+}
+
+func waitForDashboard(listen string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		response, err := client.Get("http://" + listen + "/")
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusOK || response.StatusCode == http.StatusFound {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemon.LogFilePath())
+}
+
 func daemonServicePath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library", "LaunchAgents", daemonLaunchdLabel+".plist")
@@ -106,6 +222,12 @@ func (a *App) daemonInstallService() error {
 	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
+	// bootout returning does not mean launchd has released the label yet. Wait
+	// for that state before replacing the plist; otherwise an upgrade can race
+	// bootstrap and fail with a transient EIO.
+	for deadline := time.Now().Add(3 * time.Second); daemonServiceLoaded() && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
 	if _, running := daemon.IsRunning(); running {
 		if err := daemon.Stop(); err != nil {
 			return fmt.Errorf("stop existing daemon: %w", err)
@@ -160,8 +282,14 @@ func (a *App) daemonInstallService() error {
 	if err := os.WriteFile(path, []byte(plist), 0600); err != nil {
 		return fmt.Errorf("write launchd service: %w", err)
 	}
+	// launchd can transiently report EIO immediately after a matching service is
+	// booted out. Retry after a real release window so an upgrade cannot fail
+	// after its new payload has already been staged.
 	if output, err := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput(); err != nil {
-		return fmt.Errorf("bootstrap launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
+		time.Sleep(time.Second)
+		if retryOutput, retryErr := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput(); retryErr != nil {
+			return fmt.Errorf("bootstrap launchd service: %w (%s; retry: %s)", retryErr, strings.TrimSpace(string(output)), strings.TrimSpace(string(retryOutput)))
+		}
 	}
 	if output, err := exec.Command("launchctl", "kickstart", "-k", domain+"/"+daemonLaunchdLabel).CombinedOutput(); err != nil {
 		return fmt.Errorf("start launchd service: %w (%s)", err, strings.TrimSpace(string(output)))

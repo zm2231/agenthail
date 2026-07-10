@@ -86,6 +86,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdLaunch(rest)
 	case "doctor":
 		return a.cmdDoctor(rest)
+	case "dashboard":
+		return a.cmdDashboard(rest)
 	case "version", "--version":
 		return a.cmdVersion(rest)
 	case "help", "-h", "--help":
@@ -140,6 +142,12 @@ Daemon:
   daemon status                 Is the daemon running?
   daemon install                Install/start a supervised macOS launchd service
   daemon uninstall              Remove the macOS launchd service
+
+Dashboard (optional):
+  dashboard enable              Enable the local dashboard and open it
+  dashboard disable             Disable the dashboard listener
+  dashboard status              Show dashboard state and URL
+  dashboard                     Open an enabled dashboard
 
 Other:
   launch <surface>              Launch a surface app with debug settings
@@ -272,7 +280,7 @@ func validateCommandFlags(command string, args []string) error {
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
-		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "help": {}, "-h": {}, "--help": {},
+		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {bools: map[string]bool{"--no-open": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {

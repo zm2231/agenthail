@@ -82,6 +82,27 @@ agenthail daemon status
 
 That installs a launchd service with restart-on-crash. If you prefer to run it only when needed, use `agenthail daemon start` and `agenthail daemon stop`.
 
+## Optional dashboard
+
+The dashboard is off by default. When you enable it, the running daemon serves a private local control room for the surfaces you have connected. Claude, Codex, and Notion are independent, so an unavailable surface never blocks the rest.
+
+```bash
+agenthail dashboard enable
+agenthail dashboard status
+```
+
+The home page is deliberately simple: your connected surfaces, live work, and anything waiting to be delivered. Open a conversation when you need the real recent history, message composer, goal, model switcher, or surface-specific controls such as steer, stop, and compact. The operations page shows the durable queue, channels, and relays; dead-lettered messages can be retried there. Every control is shown only when that connected surface supports it.
+
+The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
+
+For private remote access, keep the listener local and put Tailscale in front of it:
+
+```bash
+tailscale serve --https=443 http://127.0.0.1:7412
+```
+
+Do not expose the dashboard directly to the public internet. A Cloudflare deployment needs a separate authenticated access policy before it is supported.
+
 ## Finding your sessions
 
 ```bash
@@ -188,7 +209,7 @@ The delivery receipt returns the persisted thread UUID, which AgentHail register
 
 ## A few useful guarantees
 
-Queues preserve the full message and its model choice. Delivery stays ordered per session. A rejected/busy delivery remains queued, known pre-dispatch failures retry with a bounded backoff, and repeated failures become visible dead letters instead of disappearing. If the daemon dies—or an external response fails after dispatch—in the window where a message may have reached the agent but was not acknowledged locally, agenthail marks the outcome unknown instead of silently sending the instruction twice. You decide whether to retry it.
+Queues preserve the full message and its model choice. Delivery stays ordered per session. A rejected/busy delivery remains queued, known pre-dispatch failures retry with a bounded backoff, and repeated failures become visible dead letters instead of disappearing. If the daemon dies, or an external response fails after dispatch, in the window where a message may have reached the agent but was not acknowledged locally, agenthail marks the outcome unknown instead of silently sending the instruction twice. You decide whether to retry it.
 
 Replies are tied to a new completed turn. Streams are tied to the session/turn that started them, so an old Codex event from another thread cannot leak into the output. Relay delivery is recorded before the next poll and survives daemon restarts.
 

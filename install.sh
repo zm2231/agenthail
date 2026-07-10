@@ -123,7 +123,7 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 PYTHON_BIN="$(cd "$(dirname "$PYTHON_BIN")" && pwd)/$(basename "$PYTHON_BIN")"
 
-echo "agenthail — building Go binary"
+echo "agenthail: building Go binary"
 cd "$REPO_DIR"
 if [ -n "${AGENTHAIL_PREBUILT_BINARY:-}" ]; then
 	cp "$AGENTHAIL_PREBUILT_BINARY" "$STAGE_DIR/agenthail"
@@ -137,15 +137,15 @@ else
 fi
 
 echo ""
-echo "agenthail — installing sidecar deps (curl_cffi, sweet-cookie)"
-echo "agenthail — Python runtime: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
+echo "agenthail: installing sidecar deps (curl_cffi, sweet-cookie)"
+echo "agenthail: Python runtime: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 cd "$REPO_DIR/sidecar"
 npm ci --silent 2>/dev/null || npm ci
 
 cd "$REPO_DIR"
 
 echo ""
-echo "agenthail — installing to $DATA_DIR"
+echo "agenthail: installing to $DATA_DIR"
 chmod +x "$STAGE_DIR/agenthail"
 codesign --force --sign - "$STAGE_DIR/agenthail" 2>/dev/null || true
 
@@ -186,17 +186,17 @@ if [ -n "$SERVICE_PROGRAM" ]; then
 	fi
 fi
 if [ -f "$SERVICE_PLIST" ] && [ "$SERVICE_MANAGED" -eq 1 ]; then
-	echo "agenthail — stopping supervised daemon for upgrade"
+	echo "agenthail: stopping supervised daemon for upgrade"
 	launchctl bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
 	REINSTALL_SERVICE=1
 	RUNTIME_STOPPED=1
 elif [ -f "$SERVICE_PLIST" ]; then
-	echo "agenthail — leaving unrelated supervised daemon unchanged ($SERVICE_PROGRAM)"
+	echo "agenthail: leaving unrelated supervised daemon unchanged ($SERVICE_PROGRAM)"
 elif [ -n "$EXISTING_WRAPPER" ] && [ -x "$EXISTING_WRAPPER" ]; then
 	DAEMON_STATUS="$("$EXISTING_WRAPPER" daemon status 2>/dev/null || true)"
 	case "$DAEMON_STATUS" in
 		*"daemon: running"*)
-			echo "agenthail — stopping running daemon for upgrade"
+			echo "agenthail: stopping running daemon for upgrade"
 			"$EXISTING_WRAPPER" daemon stop
 			RESTART_DAEMON=1
 			RUNTIME_STOPPED=1
@@ -216,7 +216,7 @@ echo ""
 echo "creating wrapper at $INSTALL_DIR/agenthail"
 
 # Create a wrapper in the selected command directory that sets env vars and execs the binary.
-# Both the binary and all sidecar files live in $DATA_DIR so sibling lookup works.
+# Both the binary and all sidecar files live in $DATA_DIR, so sibling lookup works.
 mkdir -p "$INSTALL_DIR"
 if [ -e "$TARGET_WRAPPER" ]; then
 	TARGET_WRAPPER_EXISTED=1
@@ -245,10 +245,10 @@ if [ "${AGENTHAIL_INSTALL_TEST_FAIL_AFTER_ACTIVATION:-0}" = "1" ]; then
 fi
 
 if [ "$REINSTALL_SERVICE" -eq 1 ]; then
-	echo "agenthail — reinstalling supervised daemon"
+	echo "agenthail: reinstalling supervised daemon"
 	"$INSTALL_DIR/agenthail" daemon install
 elif [ "$RESTART_DAEMON" -eq 1 ]; then
-	echo "agenthail — restarting daemon with the upgraded binary"
+	echo "agenthail: restarting daemon with the upgraded binary"
 	"$INSTALL_DIR/agenthail" daemon start
 fi
 
