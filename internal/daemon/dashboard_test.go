@@ -78,3 +78,21 @@ func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 		t.Fatalf("status=%d sent=%v body=%s", response.Code, fake.sent, response.Body.String())
 	}
 }
+
+func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	dashboard := &dashboardServer{token: "secret"}
+	handler := d.dashboardHandler(dashboard)
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+		req.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("state request %d status=%d body=%s", i, res.Code, res.Body.String())
+		}
+	}
+	if got := fake.listCalls.Load(); got != 1 {
+		t.Fatalf("surface list called %d times, want one cached discovery", got)
+	}
+}

@@ -29,9 +29,12 @@ var dashboardJS []byte
 var dashboardCSS []byte
 
 type dashboardServer struct {
-	server *http.Server
-	listen string
-	token  string
+	server  *http.Server
+	listen  string
+	token   string
+	stateMu sync.Mutex
+	stateAt time.Time
+	state   dashboardState
 }
 
 type dashboardSurface struct {
@@ -116,10 +119,31 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
-	mux.HandleFunc("/api/state", dashboard.guard(d.dashboardStateHandler))
+	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
 	mux.HandleFunc("/api/action", dashboard.guard(d.dashboardActionHandler))
 	return d.dashboardHeaders(mux)
+}
+
+func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	dashboard.stateMu.Lock()
+	defer dashboard.stateMu.Unlock()
+	if r.URL.Query().Get("fresh") != "1" && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < 8*time.Second {
+		writeDashboardJSON(w, http.StatusOK, dashboard.state)
+		return
+	}
+	state, err := d.dashboardState(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dashboard.state = state
+	dashboard.stateAt = time.Now()
+	writeDashboardJSON(w, http.StatusOK, state)
 }
 
 func (dashboard *dashboardServer) asset(contentType string, body []byte) http.HandlerFunc {
