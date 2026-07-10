@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -341,6 +342,28 @@ func TestCancelMessagesRecordsAuditEntries(t *testing.T) {
 	}
 	if canceled != 2 {
 		t.Fatalf("canceled history=%d entries=%+v", canceled, entries)
+	}
+}
+
+func TestCancelMessageRemovesDeadLetter(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "writer")
+	if err := r.QueueMessage("writer", "dead"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("writer", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.NackMessage(item.ID, errors.New("failed"), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CancelMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.ListQueue(true)
+	if err != nil || len(rows) != 1 || rows[0].Status != "canceled" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }
 

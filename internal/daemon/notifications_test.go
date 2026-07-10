@@ -6,8 +6,8 @@ import (
 )
 
 func TestAppleScriptStringEscapesAndFlattensText(t *testing.T) {
-	got := appleScriptString("say \"hi\"\\now")
-	if got != `"say \"hi\"\\now"` {
+	got := appleScriptString("say \"hi\"\\now\rnext")
+	if got != `"say \"hi\"\\now next"` {
 		t.Fatalf("escaped=%q", got)
 	}
 }

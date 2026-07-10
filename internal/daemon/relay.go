@@ -26,18 +26,20 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID, text string) {
 		}
 		payload := fmt.Sprintf("[relay id=%d source=%s turn=%s] %s", route.ID, d.resolveDisplay(from.ID), completionID, payloadText)
 		key := fmt.Sprintf("relay:%d:%s", route.ID, completionID)
+		// Queue first: delivery_key makes this insert idempotent. If the daemon
+		// dies before the dedup row is recorded, the next scan finds the same
+		// queue item and can finish recording the delivery.
+		queueID, err := d.Registry.QueueMessageWithKey(route.ToSession, payload, key)
+		if err != nil {
+			d.log.Printf("queue relay %d: %s", route.ID, err)
+			continue
+		}
 		reserved, err := d.Registry.RecordRelayDelivery(route.ID, completionID)
 		if err != nil {
-			d.log.Printf("reserve relay %d: %s", route.ID, err)
+			d.log.Printf("record relay %d after queue item %d: %s", route.ID, queueID, err)
 			continue
 		}
 		if !reserved {
-			continue
-		}
-		queueID, err := d.Registry.QueueMessageWithKey(route.ToSession, payload, key)
-		if err != nil {
-			_ = d.Registry.ForgetRelayDelivery(route.ID, completionID)
-			d.log.Printf("queue relay %d: %s", route.ID, err)
 			continue
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, QueueID: queueID, CompletionID: completionID, Message: text, Result: "queued"})
