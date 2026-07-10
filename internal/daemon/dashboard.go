@@ -364,6 +364,18 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
+	if request.Action == "queue-cancel" {
+		if request.QueueID <= 0 {
+			http.Error(w, "queueId is required", http.StatusBadRequest)
+			return
+		}
+		if err := d.Registry.CancelMessage(request.QueueID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 	if request.Action == "channel-create" {
 		if strings.TrimSpace(request.Channel) == "" {
 			http.Error(w, "channel name is required", http.StatusBadRequest)

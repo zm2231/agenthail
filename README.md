@@ -154,6 +154,10 @@ agenthail steer @writer "keep the example, cut the setup"
 agenthail queue list
 agenthail queue retry 12
 
+# Take back a pending instruction
+agenthail queue rm 12
+agenthail queue clear @writer
+
 # Stop or compact a supported session
 agenthail interrupt @writer
 agenthail compact @writer

@@ -276,6 +276,27 @@ func TestQueueDeadLetterAndExplicitRetry(t *testing.T) {
 	}
 }
 
+func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "cancel me"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+	if err := r.CancelMessage(rows[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if visible, err := r.ListQueue(false); err != nil || len(visible) != 0 {
+		t.Fatalf("visible=%+v err=%v", visible, err)
+	}
+	if item, err := r.ClaimNextMessage("s", time.Now()); err != nil || item != nil {
+		t.Fatalf("canceled item claimed: item=%+v err=%v", item, err)
+	}
+}
+
 func TestClaimDeadLettersStaleInflightWithoutAutomaticRedelivery(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")

@@ -355,7 +355,7 @@ const uncertainDeliveryError = "delivery outcome is unknown after daemon interru
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	query := `SELECT id,session_id,message,model,status,attempts,last_error,queued_at FROM message_queue`
 	if !includeDelivered {
-		query += ` WHERE status!='delivered'`
+		query += ` WHERE status NOT IN ('delivered','canceled')`
 	}
 	query += ` ORDER BY id`
 	rows, err := r.db.Query(query)
@@ -383,6 +383,25 @@ func (r *Registry) RetryMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not dead-lettered", id)
 	}
 	return nil
+}
+
+func (r *Registry) CancelMessage(id int64) error {
+	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE id=? AND status='pending'`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("queue item %d is not pending", id)
+	}
+	return nil
+}
+
+func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
+	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMessage, error) {

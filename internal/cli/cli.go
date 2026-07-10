@@ -118,6 +118,8 @@ Session commands:
   queue <target> "msg"|-        Hold until target is idle, then deliver (daemon required)
   queue list [--json] [--all]   Inspect pending, inflight, and dead-letter messages
   queue retry <id>              Retry a dead-letter message
+  queue rm <id>                 Cancel a pending queued message
+  queue clear <target>          Cancel all pending messages for a target
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
@@ -1017,6 +1019,35 @@ func (a *App) cmdQueue(args []string) error {
 			return err
 		}
 		fmt.Printf("queue item #%d scheduled for retry\n", id)
+		return nil
+	}
+	if len(args) > 0 && (args[0] == "rm" || args[0] == "cancel") {
+		if len(args) != 2 {
+			return fmt.Errorf("usage: agenthail queue rm <id>")
+		}
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil || id <= 0 {
+			return fmt.Errorf("invalid queue id %q", args[1])
+		}
+		if err := a.Registry.CancelMessage(id); err != nil {
+			return err
+		}
+		fmt.Printf("queue item #%d canceled\n", id)
+		return nil
+	}
+	if len(args) > 0 && args[0] == "clear" {
+		if len(args) != 2 {
+			return fmt.Errorf("usage: agenthail queue clear <target>")
+		}
+		sess, _, err := a.resolveTarget(context.Background(), args[1])
+		if err != nil {
+			return err
+		}
+		count, err := a.Registry.CancelMessagesForSession(sess.ID)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("canceled %d queued message(s) for %s\n", count, a.resolveDisplay(sess.ID))
 		return nil
 	}
 	positional := stripFlags(args)
