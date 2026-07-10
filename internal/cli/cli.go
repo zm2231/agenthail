@@ -245,13 +245,10 @@ func (a *App) cmdList(args []string) error {
 		allSessions = allSessions[:max]
 	}
 
-	fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", "PROJECT", "LAST")
-	fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n", "-------", "----", "--------------", "----------------------------", "--------------------", "----------")
+	fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", "PROJECT", "LAST")
+	fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n", "-------", "-----", "--------------", "----------------------------", "--------------------", "----------")
 	for _, s := range allSessions {
-		stat := "○"
-		if s.Status == surface.StatusBusy || s.Status == "running" || s.Status == "active" {
-			stat = "●"
-		}
+		stat := sessStat(s, a.Registry)
 		agent := ""
 		if alias, ok := aliased[s.ID]; ok {
 			agent = "@" + alias
@@ -261,10 +258,30 @@ func (a *App) cmdList(args []string) error {
 			project = "-"
 		}
 		last := relTime(s.LastActive)
-		fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n",
+		fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n",
 			s.Surface, stat, truncate(agent, 14), truncate(s.Name, 28), truncate(project, 20), last)
 	}
 	return nil
+}
+
+func sessStat(s surface.Session, reg *registry.Registry) string {
+	busy := s.Status == surface.StatusBusy || s.Status == "running" || s.Status == "active"
+	if busy {
+		if reg != nil && reg.QueueCount(s.ID) > 0 {
+			return "run+q"
+		}
+		return "run"
+	}
+	if reg != nil && reg.QueueCount(s.ID) > 0 {
+		return "queue"
+	}
+	if s.Status == "idle" || s.Status == "shell" || s.Status == "notLoaded" || s.Status == surface.StatusIdle {
+		return "idle"
+	}
+	if s.Status == "" || s.Status == surface.StatusUnknown {
+		return "?"
+	}
+	return "idle"
 }
 
 func relTime(t time.Time) string {

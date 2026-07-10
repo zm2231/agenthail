@@ -136,6 +136,12 @@ func (r *Registry) QueueMessage(sessionID, message string) error {
 	return err
 }
 
+func (r *Registry) QueueCount(sessionID string) int {
+	var n int
+	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND delivered=0`, sessionID).Scan(&n)
+	return n
+}
+
 func (r *Registry) GetMessageQueue(sessionID string) (ids []int64, msgs []string, err error) {
 	rows, err := r.db.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND delivered=0 ORDER BY queued_at`, sessionID)
 	if err != nil {
