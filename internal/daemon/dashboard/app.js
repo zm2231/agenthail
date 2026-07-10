@@ -1,7 +1,7 @@
 const $ = selector => document.querySelector(selector);
 const app = { state: { sessions: [], surfaces: [], queue: [], channels: [], relays: [] }, selected: null, history: null };
 const labels = { claude: 'Claude Code', codex: 'Codex', notion: 'Notion' };
-const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char]));
+globalThis.escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char]));
 function markdown(value) {
   let text = escape(value);
   text = text.replace(/```([^`]*)```/gs, '<pre><code>$1</code></pre>');
