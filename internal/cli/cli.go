@@ -295,10 +295,20 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 			}
 		}
 	}
+	var bridgeErrors []string
 	for _, s := range a.allSurfaces() {
-		if sess, err := s.Resolve(ctx, target); err == nil {
+		sess, err := s.Resolve(ctx, target)
+		if err == nil {
 			return sess, s, nil
 		}
+		if strings.Contains(err.Error(), "connect main inspector") ||
+			strings.Contains(err.Error(), "sidecar") ||
+			strings.Contains(err.Error(), "no local transcript") {
+			bridgeErrors = append(bridgeErrors, fmt.Sprintf("[%s] %s", s.Name(), err))
+		}
+	}
+	if len(bridgeErrors) > 0 {
+		return nil, nil, fmt.Errorf("%s\nno session matched '%s' (bridge may be down)", strings.Join(bridgeErrors, "; "), target)
 	}
 	return nil, nil, fmt.Errorf("no session matched '%s'", target)
 }

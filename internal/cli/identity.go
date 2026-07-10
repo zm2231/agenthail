@@ -3,7 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/daemon"
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
@@ -222,6 +225,9 @@ func (a *App) cmdRelay(args []string) error {
 		id, err := a.Registry.AddRoute(fromSess.ID, toSess.ID, pattern)
 		if err != nil {
 			return err
+		}
+		if _, ok := daemon.IsRunning(); !ok {
+			fmt.Fprintf(os.Stderr, "warning: daemon is not running; relay will not fire until you start it (agenthail daemon start)\n")
 		}
 		fmt.Printf("relay #%d: %s -> %s (pattern /%s/)\n",
 			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern)
