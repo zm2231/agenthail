@@ -249,7 +249,7 @@ func (a *App) cmdList(args []string) error {
 	fmt.Printf("%-7s %-4s %-14s %-28s %-20s %s\n", "-------", "----", "--------------", "----------------------------", "--------------------", "----------")
 	for _, s := range allSessions {
 		stat := "○"
-		if s.PID > 0 || s.Status == surface.StatusBusy {
+		if s.Status == surface.StatusBusy || s.Status == "running" || s.Status == "active" {
 			stat = "●"
 		}
 		agent := ""
