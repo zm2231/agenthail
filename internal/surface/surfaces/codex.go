@@ -20,7 +20,7 @@ type Codex struct {
 
 func NewCodex(inspectorURL string) *Codex {
 	if inspectorURL == "" {
-		inspectorURL = "ws://127.0.0.1:9230"
+		inspectorURL = "ws://127.0.0.1:9229"
 	}
 	return &Codex{mainURL: inspectorURL}
 }
@@ -48,7 +48,7 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 	d := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
 	ws, _, err := d.DialContext(ctx, wsURL, http.Header{})
 	if err != nil {
-		return nil, fmt.Errorf("connect main inspector at %s: %w (is Codex running with --inspect=9230?)", wsURL, err)
+		return nil, fmt.Errorf("connect main inspector at %s: %w (is Codex running? use 'agenthail launch codex')", wsURL, err)
 	}
 	return &cdpConn{ws: ws, next: 1}, nil
 }
@@ -60,7 +60,7 @@ func (c *Codex) resolveInspectorURL(ctx context.Context) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", httpURL+"/json", nil)
 	resp, err := localHTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("connect main inspector at %s: %w (is Codex running with --inspect=9230?)", httpURL, err)
+		return "", fmt.Errorf("connect main inspector at %s: %w (is Codex running? use 'agenthail launch codex')", httpURL, err)
 	}
 	defer resp.Body.Close()
 	var targets []map[string]any
@@ -334,7 +334,6 @@ func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string)
 	if _, err := c.rpc(ctx, conn, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/resume: %w", err)
 	}
-	// turn/start would clobber the active turn; queue instead.
 	if active, _ := c.activeTurnID(ctx, conn, sess.ID); active != "" {
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}

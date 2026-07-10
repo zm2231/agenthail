@@ -22,6 +22,7 @@ mkdir -p "$DATA_DIR"
 # Copy the Go binary
 cp agenthail "$DATA_DIR/agenthail"
 chmod +x "$DATA_DIR/agenthail"
+codesign --force --sign - "$DATA_DIR/agenthail" 2>/dev/null || true
 
 # Copy sidecar files alongside the binary (transport resolves them via sibling lookup)
 cp sidecar/sidecar.py "$DATA_DIR/sidecar.py"
@@ -65,7 +66,7 @@ echo "verify:    agenthail doctor"
 echo ""
 echo "for Codex support:"
 echo "  agenthail launch codex"
-echo "  (or: open -a Codex --args --inspect=127.0.0.1:9230 --remote-debugging-port=9231)"
+echo "  (launches ChatGPT, then SIGUSR1 to activate V8 inspector on port 9229)"
 echo ""
 echo "data dir:  ~/.agenthail/ (registry.db, daemon.pid, daemon.log)"
 

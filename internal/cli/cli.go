@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -309,13 +310,14 @@ func (a *App) cmdSend(args []string) error {
 	}
 	target := positional[0]
 	message := strings.Join(positional[1:], " ")
-	// Support stdin: if message is "-", read from stdin for long messages.
 	if message == "-" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("read stdin: %w", err)
 		}
 		message = string(data)
+	} else if len(message) > 8000 {
+		fmt.Fprintf(os.Stderr, "warning: message is %d chars; shell may have truncated it. Use '-' to read from stdin for long messages:\n  echo '...' | agenthail send %s -\n  agenthail send %s - < file.txt\n", len(message), target, target)
 	}
 	wantStream := hasFlag(args, "--stream")
 	wantReply := hasFlag(args, "--reply")
@@ -585,6 +587,8 @@ func (a *App) cmdQueue(args []string) error {
 			return fmt.Errorf("read stdin: %w", err)
 		}
 		message = string(data)
+	} else if len(message) > 8000 {
+		fmt.Fprintf(os.Stderr, "warning: message is %d chars; shell may have truncated it. Use '-' to read from stdin for long messages.\n", len(message))
 	}
 	if _, ok := daemon.IsRunning(); !ok {
 		fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
@@ -659,8 +663,6 @@ func (a *App) cmdLaunch(args []string) error {
 }
 
 func launchCodex() error {
-	inspectorPort := envOr("AGENTHAIL_CODEX_INSPECT", "9230")
-	remotePort := envOr("AGENTHAIL_CODEX_REMOTE", "9231")
 	candidates := []string{
 		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
 		"/Applications/Codex.app/Contents/MacOS/Codex",
@@ -675,12 +677,25 @@ func launchCodex() error {
 	if exe == "" {
 		return fmt.Errorf("codex binary not found (tried %s)", strings.Join(candidates, ", "))
 	}
-	cmd := exec.Command(exe,
-		"--inspect=127.0.0.1:"+inspectorPort,
-		"--remote-debugging-port="+remotePort,
-		"--remote-allow-origins=*",
-	)
-	// Discard stdio: pipe would break (EIO) on agenthail exit, crashing Codex.
+
+	pid := findCodexPID()
+	if pid > 0 {
+		if inspectorListening() {
+			fmt.Printf("Codex already running (pid %d, inspector active on 9229)\n", pid)
+			return nil
+		}
+		if err := syscall.Kill(pid, syscall.SIGUSR1); err != nil {
+			return fmt.Errorf("SIGUSR1 failed (pid %d): %w", pid, err)
+		}
+		time.Sleep(1 * time.Second)
+		if inspectorListening() {
+			fmt.Printf("inspector activated on port 9229 (existing pid %d)\n", pid)
+			return nil
+		}
+		return fmt.Errorf("SIGUSR1 sent but inspector not listening (pid %d may be crashed)", pid)
+	}
+
+	cmd := exec.Command(exe, "--no-first-run", "--no-default-browser-check")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
@@ -688,9 +703,20 @@ func launchCodex() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch codex: %w", err)
 	}
-	pid := cmd.Process.Pid
+	pid = cmd.Process.Pid
 	cmd.Process.Release()
-	fmt.Printf("launched Codex (pid %d, inspect=127.0.0.1:%s, remote=%s)\nwait a few seconds for the app to start, then run 'agenthail list'\n", pid, inspectorPort, remotePort)
+	fmt.Printf("launched Codex (pid %d), waiting for startup...\n", pid)
+	time.Sleep(3 * time.Second)
+	if err := syscall.Kill(pid, syscall.SIGUSR1); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: SIGUSR1 failed: %s\n", err)
+	} else {
+		time.Sleep(1 * time.Second)
+	}
+	if inspectorListening() {
+		fmt.Printf("inspector activated on port 9229 (pid %d)\nrun 'agenthail list' to verify\n", pid)
+	} else {
+		fmt.Fprintf(os.Stderr, "warning: inspector not responding (pid %d may be still starting)\n", pid)
+	}
 	return nil
 }
 
@@ -699,6 +725,27 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func findCodexPID() int {
+	out, err := exec.Command("pgrep", "-f", "ChatGPT.app/Contents/MacOS/ChatGPT").Output()
+	if err != nil {
+		out, err = exec.Command("pgrep", "-f", "Codex.app/Contents/MacOS/Codex").Output()
+		if err != nil {
+			return 0
+		}
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return pid
+}
+
+func inspectorListening() bool {
+	resp, err := http.Get("http://127.0.0.1:9229/json/version")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
 }
 
 func truncate(s string, n int) string {
