@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +23,9 @@ type Notion struct {
 	userName     string
 	timezone     string
 	cookieBridge string
+	modelMu      sync.Mutex
+	modelLabels  map[string]string
+	modelsAt     time.Time
 }
 
 func NewNotion(spaceID, userID string) *Notion {
@@ -38,67 +43,93 @@ func (n *Notion) bridge() string {
 	return n.cookieBridge
 }
 
-func (n *Notion) ensureContext() {
+func (n *Notion) ensureContext(ctx context.Context) error {
 	if n.spaceID != "" && n.userID != "" {
-		return
+		return nil
 	}
-	n.autoDetect()
+	return n.autoDetect(ctx)
 }
 
-func (n *Notion) autoDetect() {
-	status, respBody, err := sidecarPostWithCookies(
+func (n *Notion) autoDetect(ctx context.Context) error {
+	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		"https://app.notion.com/api/v3/getSpaces",
 		n.headers(), "{}", n.bridge(), "https://app.notion.com/", 15*time.Second)
-	if err != nil || status != 200 {
-		return
+	if err != nil {
+		return fmt.Errorf("detect Notion context: %w", err)
+	}
+	if status != 200 {
+		return fmt.Errorf("detect Notion context (HTTP %d)", status)
 	}
 	var resp map[string]any
 	if json.Unmarshal([]byte(respBody), &resp) != nil {
-		return
+		return fmt.Errorf("parse Notion context")
 	}
+	var users []string
 	for uid, udata := range resp {
 		if uid == "isNotionError" || uid == "errorId" || uid == "name" || uid == "debugMessage" || uid == "message" {
 			continue
 		}
-		if udataMap, ok := udata.(map[string]any); ok {
-			if n.userID == "" {
-				n.userID = uid
-			}
-			if n.userName == "" {
-				if nu, ok := udataMap["notion_user"].(map[string]any); ok {
-					if rec, ok := nu[uid].(map[string]any); ok {
-						if val, ok := rec["value"].(map[string]any); ok {
-							if inner, ok := val["value"].(map[string]any); ok {
-								n.userName, _ = inner["name"].(string)
-							}
-						}
-					}
-				}
-			}
-			if n.timezone == "" {
-				if us, ok := udataMap["user_settings"].(map[string]any); ok {
-					if rec, ok := us[uid].(map[string]any); ok {
-						if val, ok := rec["value"].(map[string]any); ok {
-							if inner, ok := val["value"].(map[string]any); ok {
-								if settings, ok := inner["settings"].(map[string]any); ok {
-									n.timezone, _ = settings["time_zone"].(string)
-								}
-							}
-						}
-					}
-				}
-			}
-			if spaces, ok := udataMap["space"].(map[string]any); ok {
-				for sid := range spaces {
-					if n.spaceID == "" {
-						n.spaceID = sid
-						break
+		if _, ok := udata.(map[string]any); ok {
+			users = append(users, uid)
+		}
+	}
+	sort.Strings(users)
+	if n.userID == "" {
+		if len(users) == 0 {
+			return fmt.Errorf("no Notion user found; set AGENTHAIL_NOTION_USER")
+		}
+		if len(users) > 1 {
+			return fmt.Errorf("multiple Notion users found; set AGENTHAIL_NOTION_USER")
+		}
+		n.userID = users[0]
+	}
+	udataMap, ok := resp[n.userID].(map[string]any)
+	if !ok {
+		return fmt.Errorf("Notion user %q not found", n.userID)
+	}
+	uid := n.userID
+	if n.userName == "" {
+		if usersByID, ok := udataMap["notion_user"].(map[string]any); ok {
+			if record, ok := usersByID[uid].(map[string]any); ok {
+				if value, ok := record["value"].(map[string]any); ok {
+					if inner, ok := value["value"].(map[string]any); ok {
+						n.userName, _ = inner["name"].(string)
 					}
 				}
 			}
 		}
-		break
 	}
+	if n.timezone == "" {
+		if settingsByID, ok := udataMap["user_settings"].(map[string]any); ok {
+			if record, ok := settingsByID[uid].(map[string]any); ok {
+				if value, ok := record["value"].(map[string]any); ok {
+					if inner, ok := value["value"].(map[string]any); ok {
+						if settings, ok := inner["settings"].(map[string]any); ok {
+							n.timezone, _ = settings["time_zone"].(string)
+						}
+					}
+				}
+			}
+		}
+	}
+	if spaces, ok := udataMap["space"].(map[string]any); ok && n.spaceID == "" {
+		var ids []string
+		for sid := range spaces {
+			ids = append(ids, sid)
+		}
+		sort.Strings(ids)
+		if len(ids) == 0 {
+			return fmt.Errorf("no Notion space found; set AGENTHAIL_NOTION_SPACE")
+		}
+		if len(ids) > 1 {
+			return fmt.Errorf("multiple Notion spaces found; set AGENTHAIL_NOTION_SPACE")
+		}
+		n.spaceID = ids[0]
+	}
+	if n.spaceID == "" {
+		return fmt.Errorf("Notion space unavailable; set AGENTHAIL_NOTION_SPACE")
+	}
+	return nil
 }
 
 func (n *Notion) Name() surface.SurfaceKind { return surface.KindNotion }
@@ -106,7 +137,7 @@ func (n *Notion) Name() surface.SurfaceKind { return surface.KindNotion }
 func (n *Notion) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: false, Reply: true,
-		Interrupt: false, Steer: true, Model: true,
+		Interrupt: false, Steer: false, Model: true,
 	}
 }
 
@@ -123,7 +154,9 @@ func (n *Notion) inferenceURL(action string) string {
 }
 
 func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
-	n.ensureContext()
+	if err := n.ensureContext(ctx); err != nil {
+		return nil, err
+	}
 	body, _ := json.Marshal(map[string]any{
 		"threadParentPointer": map[string]any{
 			"table":   "space",
@@ -133,16 +166,15 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 		"limit":              50,
 		"includeWriterChats": false,
 	})
-	status, respBody, err := sidecarPostWithCookies(
+	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		n.inferenceURL("getInferenceTranscriptsForUser"),
 		n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("list threads (HTTP %d): %s", status, respBody)
+		return nil, fmt.Errorf("list threads (HTTP %d): %s", status, diagnosticExcerpt(respBody))
 	}
-
 	var resp struct {
 		Transcripts []struct {
 			ID        string `json:"id"`
@@ -171,6 +203,20 @@ func (n *Notion) List(ctx context.Context) ([]surface.Session, error) {
 }
 
 func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, error) {
+	if target == "new" || strings.HasPrefix(target, "new:") {
+		name := strings.TrimPrefix(target, "new:")
+		return &surface.Session{ID: target, Surface: surface.KindNotion, Name: name, Status: surface.StatusIdle}, nil
+	}
+	if looksLikeUUID(target) {
+		exists, err := n.threadExists(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, fmt.Errorf("Notion thread %s not found", target)
+		}
+		return &surface.Session{ID: target, Surface: surface.KindNotion, Status: surface.StatusIdle}, nil
+	}
 	threads, err := n.List(ctx)
 	if err != nil {
 		return nil, err
@@ -187,12 +233,44 @@ func (n *Notion) Resolve(ctx context.Context, target string) (*surface.Session, 
 }
 
 func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
-	n.ensureContext()
+	return n.SendWithOptions(ctx, sess, message, surface.SendOptions{})
+}
+
+func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	if err := n.ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	baselineID, _, err := n.latestAgentReply(ctx, sess)
+	if err != nil {
+		return nil, fmt.Errorf("notion send target: %w", err)
+	}
+	model := options.Model
+	if model == "" {
+		model = "almond-croissant-low"
+	} else {
+		resolved, rErr := n.resolveModelCodename(ctx, model)
+		if rErr != nil {
+			return nil, rErr
+		}
+		model = resolved
+	}
+	if err := n.fetchModels(ctx); err != nil {
+		return nil, err
+	}
+	n.modelMu.Lock()
+	if _, ok := n.modelLabels[model]; !ok {
+		n.modelMu.Unlock()
+		return nil, fmt.Errorf("Notion model %q is not available for this workspace", model)
+	}
+	n.modelMu.Unlock()
 	now := time.Now().UTC().Format(time.RFC3339)
 	newThread := sess.ID == "" || strings.HasPrefix(sess.ID, "new")
-	threadID := ""
-	if !newThread {
-		threadID = sess.ID
+	threadID := sess.ID
+	if newThread {
+		portal := strings.SplitN(n.spaceID, "-", 3)[1]
+		parts := strings.Split(uuid.NewString(), "-")
+		parts[1] = portal
+		threadID = strings.Join(parts, "-")
 	}
 
 	transcript := []map[string]any{
@@ -200,14 +278,13 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 			"id":   uuid.NewString(),
 			"type": "config",
 			"value": map[string]any{
-				"type":                    "workflow",
-				"model":                   "almond-croissant-low",
-				"isCustomAgent":           false,
-				"useWebSearch":            false,
-				"enableCustomAgents":      false,
-				"enableAgentTodos":        false,
-				"enableAgentAutomations":  false,
-				"enableAgentIntegrations": false,
+				"type":                     "workflow",
+				"model":                    model,
+				"modelFromUser":            true,
+				"isCustomAgent":            false,
+				"useWebSearch":             true,
+				"enableCustomAgents":       false,
+				"enableCreateAndRunThread": true,
 			},
 		},
 		{
@@ -219,7 +296,7 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 				"userId":          n.userID,
 				"spaceId":         n.spaceID,
 				"currentDatetime": now,
-				"surface":         "ai_chat",
+				"surface":         "ai_module",
 			},
 		},
 		{
@@ -232,154 +309,154 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 	}
 
 	reqBody := map[string]any{
-		"traceId":                 uuid.NewString(),
-		"spaceId":                 n.spaceID,
-		"transcript":              transcript,
-		"threadId":                threadID,
-		"createThread":            newThread,
-		"generateTitle":           false,
-		"saveAllThreadOperations": true,
-		"threadType":              "workflow",
-		"isPartialTranscript":     true,
-		"asPatchResponse":         true,
+		"traceId":                       uuid.NewString(),
+		"spaceId":                       n.spaceID,
+		"transcript":                    transcript,
+		"threadId":                      threadID,
+		"createThread":                  newThread,
+		"generateTitle":                 newThread,
+		"saveAllThreadOperations":       true,
+		"setUnreadState":                true,
+		"createdSource":                 "ai_module",
+		"threadType":                    "workflow",
+		"isPartialTranscript":           false,
+		"asPatchResponse":               true,
+		"patchResponseVersion":          2,
+		"isUserInAnySalesAssistedSpace": false,
+		"isSpaceSalesAssisted":          false,
+	}
+	if newThread {
+		reqBody["threadParentPointer"] = map[string]any{
+			"table":   "space",
+			"id":      n.spaceID,
+			"spaceId": n.spaceID,
+		}
 	}
 	bodyBytes, _ := json.Marshal(reqBody)
 	headers := n.headers()
 	headers["accept"] = "application/x-ndjson"
 
-	status, respBody, err := sidecarPostWithCookies(
+	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		n.inferenceURL("runInferenceTranscript"),
 		headers, string(bodyBytes), n.bridge(), "https://app.notion.com/", 60*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("notion send: %w", err)
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("notion send (HTTP %d): %s", status, respBody)
+		return nil, fmt.Errorf("notion send (HTTP %d): %s", status, diagnosticExcerpt(respBody))
+	}
+	if err := validateNotionInferenceResponse(respBody); err != nil {
+		return nil, fmt.Errorf("notion inference: %w", err)
 	}
 
 	resultThreadID := threadID
-	content := parseNotionResponse(respBody)
 	if resultThreadID == "" {
-		resultThreadID = extractThreadID(respBody)
+		return nil, fmt.Errorf("notion send succeeded without a thread id")
 	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		completionID, reply, observeErr := n.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion})
+		if observeErr != nil {
+			return nil, fmt.Errorf("confirm Notion persistence: %w", observeErr)
+		}
+		if completionID != "" && completionID != baselineID && reply != nil && reply.Done {
+			return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return nil, fmt.Errorf("Notion inference completed but no new persisted agent message appeared within 10s")
+}
 
-	_ = content
+func (n *Notion) fetchModels(ctx context.Context) error {
+	if err := n.ensureContext(ctx); err != nil {
+		return err
+	}
+	n.modelMu.Lock()
+	defer n.modelMu.Unlock()
+	if n.modelLabels != nil && time.Since(n.modelsAt) < 5*time.Minute {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]any{"spaceId": n.spaceID})
+	status, responseBody, err := sidecarRequestWithCookies(ctx, "POST", n.inferenceURL("getAvailableModels"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	if err != nil {
+		return fmt.Errorf("list Notion models: %w", err)
+	}
+	if status != 200 {
+		return fmt.Errorf("list Notion models (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+	}
+	var response struct {
+		Models []struct {
+			Model      string `json:"model"`
+			Label      string `json:"modelMessage"`
+			IsDisabled bool   `json:"isDisabled"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
+		return fmt.Errorf("parse Notion models: %w", err)
+	}
+	n.modelLabels = make(map[string]string, len(response.Models))
+	for _, entry := range response.Models {
+		if entry.Model != "" && !entry.IsDisabled {
+			n.modelLabels[entry.Model] = entry.Label
+		}
+	}
+	n.modelsAt = time.Now()
+	return nil
+}
 
-	return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
+func (n *Notion) resolveModelCodename(ctx context.Context, name string) (string, error) {
+	if err := n.fetchModels(ctx); err != nil {
+		return "", err
+	}
+	n.modelMu.Lock()
+	defer n.modelMu.Unlock()
+	if _, ok := n.modelLabels[name]; ok {
+		return name, nil
+	}
+	for codename, label := range n.modelLabels {
+		if strings.EqualFold(label, name) {
+			return codename, nil
+		}
+	}
+	return "", fmt.Errorf("Notion model %q not found; use a codename or label from 'agenthail model <target>'", name)
+}
+
+func validateNotionInferenceResponse(ndjson string) error {
+	recordCount := 0
+	for _, line := range strings.Split(ndjson, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			return fmt.Errorf("invalid NDJSON record: %w", err)
+		}
+		recordCount++
+		typeName, _ := record["type"].(string)
+		if typeName == "error" || record["isNotionError"] == true || record["error"] != nil {
+			return fmt.Errorf("upstream error: %s", diagnosticExcerpt(line))
+		}
+	}
+	if recordCount == 0 {
+		return fmt.Errorf("response contained no NDJSON records")
+	}
+	return nil
 }
 
 func (n *Notion) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
-	n.ensureContext()
-	if sess.ID == "" {
-		return &surface.ReplyResult{Error: "no thread ID"}, nil
-	}
-
-	body, _ := json.Marshal(map[string]any{
-		"requests": []map[string]any{
-			{"pointer": map[string]any{"table": "thread", "id": sess.ID}, "version": -1},
-		},
-	})
-	status, respBody, err := sidecarPostWithCookies(
-		n.inferenceURL("syncRecordValues"),
-		n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
+	_, reply, err := n.latestAgentReply(ctx, sess)
 	if err != nil {
-		return nil, fmt.Errorf("notion reply: %w", err)
+		return nil, err
 	}
-	if status != 200 {
-		return &surface.ReplyResult{Error: fmt.Sprintf("HTTP %d", status)}, nil
+	if reply == nil {
+		return &surface.ReplyResult{Done: false}, nil
 	}
-
-	var threadResp struct {
-		RecordMap struct {
-			Thread map[string]struct {
-				Value struct {
-					Value struct {
-						Messages []string `json:"messages"`
-					} `json:"value"`
-				} `json:"value"`
-			} `json:"thread"`
-		} `json:"recordMap"`
-	}
-	if err := json.Unmarshal([]byte(respBody), &threadResp); err != nil {
-		return &surface.ReplyResult{Error: "parse thread"}, nil
-	}
-
-	threadRec, ok := threadResp.RecordMap.Thread[sess.ID]
-	if !ok || len(threadRec.Value.Value.Messages) == 0 {
-
-		return &surface.ReplyResult{Error: "no messages"}, nil
-	}
-
-	msgIDs := threadRec.Value.Value.Messages
-	if limit > 0 && limit < len(msgIDs) {
-		msgIDs = msgIDs[max(0, len(msgIDs)-limit):]
-	}
-	if len(msgIDs) > 20 {
-		msgIDs = msgIDs[len(msgIDs)-20:]
-	}
-
-	reqs := make([]map[string]any, len(msgIDs))
-	for i, id := range msgIDs {
-		reqs[i] = map[string]any{
-			"pointer": map[string]any{"table": "thread_message", "id": id},
-			"version": -1,
-		}
-	}
-	body2, _ := json.Marshal(map[string]any{"requests": reqs})
-	status2, respBody2, err := sidecarPostWithCookies(
-		n.inferenceURL("syncRecordValues"),
-		n.headers(), string(body2), n.bridge(), "https://app.notion.com/", 15*time.Second)
-
-	if err != nil {
-		return nil, fmt.Errorf("notion reply messages: %w", err)
-	}
-	if status2 != 200 {
-		return &surface.ReplyResult{Error: fmt.Sprintf("HTTP %d", status2)}, nil
-	}
-
-	var msgResp struct {
-		RecordMap struct {
-			ThreadMessage map[string]struct {
-				Value struct {
-					Value struct {
-						Step struct {
-							Type  string          `json:"type"`
-							Value json.RawMessage `json:"value"`
-						} `json:"step"`
-					} `json:"value"`
-				} `json:"value"`
-			} `json:"thread_message"`
-		} `json:"recordMap"`
-	}
-	if err := json.Unmarshal([]byte(respBody2), &msgResp); err != nil {
-		return &surface.ReplyResult{Error: "parse messages"}, nil
-	}
-
-	for i := len(msgIDs) - 1; i >= 0; i-- {
-		rec, ok := msgResp.RecordMap.ThreadMessage[msgIDs[i]]
-		if !ok {
-			continue
-		}
-		step := rec.Value.Value.Step
-		if step.Type != "agent-inference" {
-			continue
-		}
-		var items []struct {
-			Type    string `json:"type"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal(step.Value, &items); err != nil {
-			continue
-		}
-		for _, item := range items {
-			if item.Type == "text" && item.Content != "" {
-				text := langTagRe.ReplaceAllString(item.Content, "")
-				return &surface.ReplyResult{Text: strings.TrimSpace(text), Done: true}, nil
-			}
-		}
-	}
-
-	return &surface.ReplyResult{Error: "no assistant reply found"}, nil
+	return reply, nil
 }
 
 func (n *Notion) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -403,35 +480,31 @@ func (n *Notion) Compact(ctx context.Context, sess *surface.Session) error {
 }
 
 func (n *Notion) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
-	n.ensureContext()
-	if name == "" {
-		body, _ := json.Marshal(map[string]any{"spaceId": n.spaceID})
-		status, respBody, err := sidecarPostWithCookies(
-			n.inferenceURL("getAvailableModels"),
-			n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
-		if err != nil {
-			return "", fmt.Errorf("get models: %w", err)
-		}
-		if status != 200 {
-			return "", fmt.Errorf("get models (HTTP %d): %s", status, respBody)
-		}
-		var resp struct {
-			Models []struct {
-				Model        string `json:"model"`
-				ModelMessage string `json:"modelMessage"`
-				Family       string `json:"modelFamily"`
-			} `json:"models"`
-		}
-		if err := json.Unmarshal([]byte(respBody), &resp); err != nil {
-			return "", fmt.Errorf("parse models: %w", err)
-		}
-		var sb strings.Builder
-		for _, m := range resp.Models {
-			fmt.Fprintf(&sb, "%s = %q [%s]\n", m.Model, m.ModelMessage, m.Family)
-		}
-		return sb.String(), nil
+	if err := n.ensureContext(ctx); err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("model selection is per-request; pass model name in send config (current: %s)", name), nil
+	if err := n.fetchModels(ctx); err != nil {
+		return "", err
+	}
+	n.modelMu.Lock()
+	defer n.modelMu.Unlock()
+	if name == "" {
+		var lines []string
+		for codename, label := range n.modelLabels {
+			lines = append(lines, fmt.Sprintf("%s\t%s", codename, label))
+		}
+		sort.Strings(lines)
+		return strings.Join(lines, "\n"), nil
+	}
+	if label, ok := n.modelLabels[name]; ok {
+		return label, nil
+	}
+	for _, label := range n.modelLabels {
+		if strings.EqualFold(label, name) {
+			return label, nil
+		}
+	}
+	return "", fmt.Errorf("Notion model %q not found; use a codename or label from 'agenthail model <target>'", name)
 }
 
 func (n *Notion) Interrupt(ctx context.Context, sess *surface.Session) error {
@@ -439,99 +512,13 @@ func (n *Notion) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (n *Notion) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	_, err := n.Send(ctx, sess, message)
-	return err
+	return surface.ErrUnsupported
 }
 
-func parseNotionResponse(ndjson string) string {
-	lines := strings.Split(strings.TrimSpace(ndjson), "\n")
-	var content string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var obj map[string]any
-		if err := json.Unmarshal([]byte(line), &obj); err != nil {
-			continue
-		}
-
-		switch obj["type"] {
-		case "agent-inference":
-			if obj["finishedAt"] != nil {
-				if values, ok := obj["value"].([]any); ok {
-					for _, v := range values {
-						if m, ok := v.(map[string]any); ok && m["type"] == "text" {
-							if c, ok := m["content"].(string); ok {
-								content = c
-							}
-						}
-					}
-				}
-			}
-		case "patch":
-			if ops, ok := obj["v"].([]any); ok {
-				for _, op := range ops {
-					opMap, ok := op.(map[string]any)
-					if !ok {
-						continue
-					}
-					p, _ := opMap["p"].(string)
-					if !strings.Contains(p, "/content") {
-						continue
-					}
-					switch opMap["o"] {
-					case "x": // append
-						if v, ok := opMap["v"].(string); ok {
-							content += v
-						}
-					case "p": // replace
-						if v, ok := opMap["v"].(string); ok {
-							content = v
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return langTagRe.ReplaceAllString(content, "")
-}
-
-func extractThreadID(ndjson string) string {
-	lines := strings.Split(strings.TrimSpace(ndjson), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var obj map[string]any
-		if err := json.Unmarshal([]byte(line), &obj); err != nil {
-			continue
-		}
-		if obj["type"] != "record-map" {
-			continue
-		}
-		if rm, ok := obj["recordMap"].(map[string]any); ok {
-			if threads, ok := rm["thread"].(map[string]any); ok {
-				for k := range threads {
-					return k
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) ([]surface.Exchange, error) {
-	n.ensureContext()
+	if err := n.ensureContext(ctx); err != nil {
+		return nil, err
+	}
 	if sess.ID == "" {
 		return nil, fmt.Errorf("notion tail: no thread ID")
 	}
@@ -542,7 +529,7 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 			"version": -1,
 		}},
 	})
-	status, respBody, err := sidecarPostWithCookies(
+	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		n.inferenceURL("syncRecordValues"),
 		n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
@@ -570,9 +557,6 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 		return nil, fmt.Errorf("notion tail: no messages")
 	}
 	msgIDs := threadRec.Value.Value.Messages
-	if len(msgIDs) > 20 {
-		msgIDs = msgIDs[len(msgIDs)-20:]
-	}
 
 	reqs := make([]map[string]any, len(msgIDs))
 	for i, id := range msgIDs {
@@ -582,7 +566,7 @@ func (n *Notion) Tail(ctx context.Context, sess *surface.Session, msgCount int) 
 		}
 	}
 	body2, _ := json.Marshal(map[string]any{"requests": reqs})
-	status2, respBody2, err := sidecarPostWithCookies(
+	status2, respBody2, err := sidecarRequestWithCookies(ctx, "POST",
 		n.inferenceURL("syncRecordValues"),
 		n.headers(), string(body2), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
