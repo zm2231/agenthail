@@ -154,9 +154,16 @@ agenthail steer @writer "keep the example, cut the setup"
 agenthail queue list
 agenthail queue retry 12
 
+# See what the daemon sent, queued, retried, or failed
+agenthail history
+agenthail history @writer 25
+
 # Take back a pending instruction
 agenthail queue rm 12
 agenthail queue clear @writer
+
+# Get a macOS notification when an observed turn finishes
+agenthail daemon notify on
 
 # Stop or compact a supported session
 agenthail interrupt @writer
@@ -269,7 +276,9 @@ bash -n install.sh
 python3 -m py_compile sidecar/sidecar.py
 ```
 
-Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `agenthail doctor --json`, `list --json`, `send --json`, and the queue commands return stable JSON documents for anything you want to script around.
+Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `agenthail doctor --json`, `list --json`, `send --json`, `history --json`, and the queue commands return stable JSON documents for anything you want to script around. Delivery history is bounded and local, so it records the daemon's decisions without copying unbounded transcripts.
+
+Desktop notifications are opt-in and macOS-only. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
 

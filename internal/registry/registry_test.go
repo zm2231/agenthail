@@ -297,6 +297,53 @@ func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 	}
 }
 
+func TestDeliveryHistoryIsBoundedAndFilterable(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "writer", "reviewer")
+	long := strings.Repeat("x", maxHistoryText+100)
+	if err := r.RecordHistory(HistoryEntry{Kind: "sent", SessionID: "writer", Message: long}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordHistory(HistoryEntry{Kind: "relay", SessionID: "reviewer", SourceSessionID: "writer", Message: "handoff"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := r.ListHistory(10, "writer")
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("entries=%+v err=%v", entries, err)
+	}
+	if len(entries[1].Message) != maxHistoryText+len("\n[truncated]") {
+		t.Fatalf("history message length=%d", len(entries[1].Message))
+	}
+}
+
+func TestCancelMessagesRecordsAuditEntries(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "writer")
+	if err := r.QueueMessage("writer", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage("writer", "two"); err != nil {
+		t.Fatal(err)
+	}
+	count, err := r.CancelMessagesForSession("writer")
+	if err != nil || count != 2 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	entries, err := r.ListHistory(10, "writer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled := 0
+	for _, entry := range entries {
+		if entry.Kind == "canceled" {
+			canceled++
+		}
+	}
+	if canceled != 2 {
+		t.Fatalf("canceled history=%d entries=%+v", canceled, entries)
+	}
+}
+
 func TestClaimDeadLettersStaleInflightWithoutAutomaticRedelivery(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")

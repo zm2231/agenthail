@@ -298,8 +298,34 @@ func (a *App) cmdRelay(args []string) error {
 }
 
 func (a *App) cmdDaemon(args []string) error {
+	if len(args) == 2 && args[0] == "notify" {
+		config, err := daemon.LoadNotificationConfig()
+		if err != nil {
+			return err
+		}
+		switch args[1] {
+		case "on", "enable":
+			config.Enabled = true
+		case "off", "disable":
+			config.Enabled = false
+		case "status":
+			if config.Enabled {
+				fmt.Println("desktop notifications: enabled")
+			} else {
+				fmt.Println("desktop notifications: disabled")
+			}
+			return nil
+		default:
+			return fmt.Errorf("usage: agenthail daemon notify <on|off|status>")
+		}
+		if err := daemon.SaveNotificationConfig(config); err != nil {
+			return err
+		}
+		fmt.Printf("desktop notifications: %s\n", map[bool]string{true: "enabled", false: "disabled"}[config.Enabled])
+		return nil
+	}
 	if len(args) != 1 {
-		return fmt.Errorf("usage: agenthail daemon <start|stop|status|install|uninstall>")
+		return fmt.Errorf("usage: agenthail daemon <start|stop|status|install|uninstall> | daemon notify <on|off|status>")
 	}
 	switch args[0] {
 	case "start":

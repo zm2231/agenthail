@@ -130,6 +130,26 @@ func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {
 	}
 }
 
+func TestRelayBoundsVerboseCompletionText(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Repeat("x", maxRelayText+1000)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline", Reply: &surface.ReplyResult{Text: "old", Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.accepted = false
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "verbose", Reply: &surface.ReplyResult{Text: text, Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	items, err := r.ListQueue(false)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if len(items[0].Message) > maxRelayText+200 || !strings.Contains(items[0].Message, "relay text truncated") {
+		t.Fatalf("relay payload length=%d", len(items[0].Message))
+	}
+}
+
 func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
 	daemon, r, fake, _, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {

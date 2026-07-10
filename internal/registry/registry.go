@@ -157,6 +157,20 @@ CREATE TABLE IF NOT EXISTS relay_deliveries (
 	delivered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	PRIMARY KEY (route_id, completion_id)
 );
+CREATE TABLE IF NOT EXISTS delivery_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	kind TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT '',
+	source_session_id TEXT NOT NULL DEFAULT '',
+	route_id INTEGER NOT NULL DEFAULT 0,
+	queue_id INTEGER NOT NULL DEFAULT 0,
+	completion_id TEXT NOT NULL DEFAULT '',
+	message TEXT NOT NULL DEFAULT '',
+	result TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(created_at DESC, id DESC);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
@@ -304,7 +318,14 @@ func (r *Registry) QueueMessageWithOptions(sessionID, message, deliveryKey strin
 		}
 		return 0, err
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	// History is observability, not delivery. Do not turn a successful enqueue
+	// into a failed send if the audit database write is unavailable.
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message, Result: options.Model})
+	return id, nil
 }
 
 func (r *Registry) QueueCount(sessionID string) int {
@@ -337,6 +358,84 @@ type QueuedMessage struct {
 	Message   string
 	Model     string
 	Attempts  int
+}
+
+const (
+	maxHistoryText = 16 * 1024
+	maxHistoryRows = 2000
+)
+
+// HistoryEntry is the durable, operator-facing record of work moving through
+// the daemon. It intentionally stores bounded message/result text so a single
+// verbose agent cannot grow the registry without limit.
+type HistoryEntry struct {
+	ID              int64  `json:"id"`
+	CreatedAt       string `json:"createdAt"`
+	Kind            string `json:"kind"`
+	SessionID       string `json:"sessionId,omitempty"`
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	RouteID         int64  `json:"routeId,omitempty"`
+	QueueID         int64  `json:"queueId,omitempty"`
+	CompletionID    string `json:"completionId,omitempty"`
+	Message         string `json:"message,omitempty"`
+	Result          string `json:"result,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+func boundHistoryText(value string) string {
+	if len(value) <= maxHistoryText {
+		return value
+	}
+	return value[:maxHistoryText] + "\n[truncated]"
+}
+
+func (r *Registry) RecordHistory(entry HistoryEntry) error {
+	if entry.Kind == "" {
+		return fmt.Errorf("history kind is required")
+	}
+	res, err := r.db.Exec(`INSERT INTO delivery_history(kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error) VALUES(?,?,?,?,?,?,?,?,?)`,
+		entry.Kind, entry.SessionID, entry.SourceSessionID, entry.RouteID, entry.QueueID, entry.CompletionID,
+		boundHistoryText(entry.Message), boundHistoryText(entry.Result), boundHistoryText(entry.Error))
+	if err != nil {
+		return err
+	}
+	// Keep the audit trail useful on a long-running workstation without letting
+	// it become an unbounded transcript store.
+	if id, idErr := res.LastInsertId(); idErr == nil {
+		_, _ = r.db.Exec(`DELETE FROM delivery_history WHERE id <= ?`, id-maxHistoryRows)
+	}
+	return nil
+}
+
+func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `SELECT id,created_at,kind,session_id,source_session_id,route_id,queue_id,completion_id,message,result,error FROM delivery_history`
+	args := []any{}
+	if sessionID != "" {
+		query += ` WHERE session_id=? OR source_session_id=?`
+		args = append(args, sessionID, sessionID)
+	}
+	query += ` ORDER BY id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	entries := make([]HistoryEntry, 0)
+	for rows.Next() {
+		var entry HistoryEntry
+		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 type QueueRow struct {
@@ -375,6 +474,8 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 }
 
 func (r *Registry) RetryMessage(id int64) error {
+	var sessionID, message string
+	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
 	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
@@ -382,10 +483,13 @@ func (r *Registry) RetryMessage(id int64) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not dead-lettered", id)
 	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
 	return nil
 }
 
 func (r *Registry) CancelMessage(id int64) error {
+	var sessionID, message string
+	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
 	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE id=? AND status='pending'`, id)
 	if err != nil {
 		return err
@@ -393,13 +497,42 @@ func (r *Registry) CancelMessage(id int64) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not pending", id)
 	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from pending queue"})
 	return nil
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
-	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status='pending'`, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	var pending []HistoryEntry
+	for rows.Next() {
+		var id int64
+		var message string
+		if err := rows.Scan(&id, &message); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pending = append(pending, HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from pending queue"})
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	for _, entry := range pending {
+		_ = r.RecordHistory(entry)
 	}
 	return res.RowsAffected()
 }

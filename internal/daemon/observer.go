@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -55,6 +56,17 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		}
 		if text != "" {
 			d.fireRelays(session, observation.CompletedTurnID, text)
+		}
+		if observation.Reply != nil && observation.Reply.Done {
+			notification := fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+			if observation.Reply.Error != "" {
+				notification = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+			}
+			go func() {
+				if err := Notify("Agenthail", notification); err != nil {
+					d.log.Printf("desktop notification: %s", err)
+				}
+			}()
 		}
 	}
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {

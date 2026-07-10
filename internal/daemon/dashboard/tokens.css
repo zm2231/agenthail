@@ -63,6 +63,7 @@ html, body { margin:0; min-height:100%; background:var(--color-page); color:var(
 .activity-item, .queue-item { background:transparent; border-radius:0; text-align:left; border-left:0; border-right:0; }
 .conversation-layout { border-radius:0; border-left:0; border-right:0; box-shadow:none; }
 .operation-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.45rem; margin:0 0 1rem; }
+.history-block { margin-top:1rem; }
 .operation-form input, .operation-form select { min-width:0; height:2.6rem; border:1px solid var(--color-rule); border-radius:.55rem; background:var(--color-panel-raised); color:var(--color-ink); padding:0 .6rem; }
 .relay-form { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }.relay-form input { grid-column:1 / -1; }.relay-form .button { grid-column:1 / -1; justify-self:start; }
 @media (max-width:800px) { .summary-grid { grid-template-columns:1fr; }.summary-card { border-right:0; border-bottom:1px solid var(--color-rule); }.summary-card:last-child { border-bottom:0; }.surface-card { padding:1.1rem; }.two-up { gap:2rem; }.operation-form, .relay-form { grid-template-columns:1fr; }.operation-form .button { width:100%; }.relay-form input, .relay-form .button { grid-column:auto; } }

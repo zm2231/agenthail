@@ -69,6 +69,7 @@ type dashboardState struct {
 	Queue         []dashboardQueue   `json:"queue"`
 	Channels      []dashboardChannel `json:"channels"`
 	Relays        []dashboardRelay   `json:"relays"`
+	History       []dashboardHistory `json:"history"`
 }
 
 type dashboardQueue struct {
@@ -93,6 +94,20 @@ type dashboardRelay struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Pattern string `json:"pattern"`
+}
+
+type dashboardHistory struct {
+	ID              int64  `json:"id"`
+	CreatedAt       string `json:"createdAt"`
+	Kind            string `json:"kind"`
+	SessionID       string `json:"sessionId,omitempty"`
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	Target          string `json:"target,omitempty"`
+	Source          string `json:"source,omitempty"`
+	QueueID         int64  `json:"queueId,omitempty"`
+	Message         string `json:"message,omitempty"`
+	Result          string `json:"result,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
@@ -264,7 +279,11 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read relays: %w", err)
 	}
-	state := dashboardState{UpdatedAt: time.Now().UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes))}
+	history, err := d.Registry.ListHistory(50, "")
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read delivery history: %w", err)
+	}
+	state := dashboardState{UpdatedAt: time.Now().UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history))}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
@@ -277,6 +296,9 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	for _, route := range routes {
 		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern})
+	}
+	for _, entry := range history {
+		state.History = append(state.History, dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error})
 	}
 	var mu sync.Mutex
 	var wait sync.WaitGroup

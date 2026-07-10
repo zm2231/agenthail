@@ -55,23 +55,36 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		result, err = adapter.Send(ctx, session, message)
 	}
 	if err != nil {
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result == nil {
-		return nil, fmt.Errorf("%s returned an empty delivery result", adapter.Name())
+		err := fmt.Errorf("%s returned an empty delivery result", adapter.Name())
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		return nil, err
 	}
 	if result.Accepted {
+		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID}, nil
 	}
 	if !allowQueue {
+		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
 		return nil, ErrTargetBusy
 	}
 	if d.Registry == nil {
-		return nil, fmt.Errorf("%s is busy and no registry is available for queuing", adapter.Name())
+		err := fmt.Errorf("%s is busy and no registry is available for queuing", adapter.Name())
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		return nil, err
 	}
 	queueID, err := d.Registry.QueueMessageWithOptions(session.ID, message, deliveryKey, options)
 	if err != nil {
 		return nil, err
 	}
 	return &Receipt{Disposition: DispositionQueued, SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, Reason: "target_busy"}, nil
+}
+
+func (d Dispatcher) record(entry registry.HistoryEntry) {
+	if d.Registry != nil {
+		_ = d.Registry.RecordHistory(entry)
+	}
 }

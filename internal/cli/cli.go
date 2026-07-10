@@ -72,6 +72,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdSteer(rest)
 	case "queue":
 		return a.cmdQueue(rest)
+	case "history":
+		return a.cmdHistory(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
 	case "channel":
@@ -120,6 +122,7 @@ Session commands:
   queue retry <id>              Retry a dead-letter message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
+  history [target] [count]       Show durable delivery history (default 50)
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
@@ -142,6 +145,7 @@ Daemon:
   daemon start                  Start the background daemon (auto-relay + steer)
   daemon stop                   Stop the daemon
   daemon status                 Is the daemon running?
+  daemon notify on|off|status   Optional macOS completion notifications
   daemon install                Install/start a supervised macOS launchd service
   daemon uninstall              Remove the macOS launchd service
 
@@ -279,7 +283,7 @@ func validateCommandFlags(command string, args []string) error {
 		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {bools: map[string]bool{"--full": true, "--json": true}}, "tail": {bools: map[string]bool{"--full": true, "--json": true}},
-		"goal": {bools: map[string]bool{"--json": true}}, "queue": {},
+		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {bools: map[string]bool{"--no-open": true}}, "help": {}, "-h": {}, "--help": {},
@@ -984,10 +988,10 @@ func (a *App) cmdSteer(args []string) error {
 }
 
 func (a *App) cmdQueue(args []string) error {
+	if a.Registry == nil {
+		return fmt.Errorf("queue requires the registry")
+	}
 	if len(args) > 0 && args[0] == "list" {
-		if a.Registry == nil {
-			return fmt.Errorf("queue requires the registry")
-		}
 		rows, err := a.Registry.ListQueue(hasFlag(args, "--all"))
 		if err != nil {
 			return err
@@ -1085,6 +1089,74 @@ func (a *App) cmdQueue(args []string) error {
 		return err
 	}
 	fmt.Printf("queued for %s (delivered when the target is idle on a daemon scan)\n", a.resolveDisplay(sess.ID))
+	return nil
+}
+
+func (a *App) cmdHistory(args []string) error {
+	if a.Registry == nil {
+		return fmt.Errorf("history requires the registry")
+	}
+	positional := stripFlags(args)
+	if len(positional) > 2 {
+		return fmt.Errorf("usage: agenthail history [target] [count] [--json]")
+	}
+	sessionID := ""
+	limit := 50
+	if len(positional) > 0 {
+		if len(positional) == 2 {
+			parsed, err := strconv.Atoi(positional[1])
+			if err != nil || parsed < 1 {
+				return fmt.Errorf("count must be a positive integer")
+			}
+			limit = parsed
+		}
+		sessionID = positional[0]
+		if len(positional) == 1 {
+			if parsed, err := strconv.Atoi(sessionID); err == nil {
+				limit = parsed
+				sessionID = ""
+			}
+		}
+		if sessionID != "" {
+			resolved, err := a.Registry.ResolveTarget(sessionID)
+			if err != nil {
+				return fmt.Errorf("resolve history target %q: %w", sessionID, err)
+			}
+			sessionID = resolved
+		}
+	}
+	if limit > 200 {
+		return fmt.Errorf("count must be 200 or less")
+	}
+	entries, err := a.Registry.ListHistory(limit, sessionID)
+	if err != nil {
+		return err
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"history": entries})
+	}
+	if len(entries) == 0 {
+		fmt.Println("(no delivery history)")
+		return nil
+	}
+	for _, entry := range entries {
+		target := entry.SessionID
+		if target != "" {
+			target = a.resolveDisplay(target)
+		}
+		if entry.SourceSessionID != "" {
+			fmt.Printf("%s %-9s %s -> %s", entry.CreatedAt, entry.Kind, a.resolveDisplay(entry.SourceSessionID), target)
+		} else {
+			fmt.Printf("%s %-9s %s", entry.CreatedAt, entry.Kind, target)
+		}
+		if entry.Message != "" {
+			fmt.Printf(" %s", truncate(strings.ReplaceAll(entry.Message, "\n", " "), 140))
+		}
+		if entry.Error != "" {
+			fmt.Printf(" error=%s", truncate(strings.ReplaceAll(entry.Error, "\n", " "), 140))
+		}
+		fmt.Println()
+	}
 	return nil
 }
 
