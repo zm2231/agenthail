@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/delivery"
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
@@ -27,11 +29,17 @@ func (a *App) cmdIdentify(args []string) error {
 	if a.Registry == nil {
 		return fmt.Errorf("registry not available")
 	}
-	if len(args) == 0 || args[0] == "list" {
+	if len(args) == 0 {
+		return a.identifyList()
+	}
+	if args[0] == "list" {
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agenthail identify list")
+		}
 		return a.identifyList()
 	}
 	if args[0] == "rm" || args[0] == "remove" || args[0] == "unidentify" {
-		if len(args) < 2 {
+		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail identify rm <name>")
 		}
 		name := strings.TrimPrefix(args[1], "@")
@@ -41,7 +49,7 @@ func (a *App) cmdIdentify(args []string) error {
 		fmt.Printf("removed @%s\n", name)
 		return nil
 	}
-	if len(args) < 2 {
+	if len(args) != 2 {
 		return fmt.Errorf("usage: agenthail identify <target> <name>")
 	}
 	target := strings.TrimPrefix(args[0], "@")
@@ -84,7 +92,7 @@ func (a *App) cmdChannel(args []string) error {
 	ctx := context.Background()
 	switch args[0] {
 	case "create":
-		if len(args) < 2 {
+		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail channel create <name>")
 		}
 		id, err := a.Registry.CreateChannel(args[1])
@@ -94,7 +102,7 @@ func (a *App) cmdChannel(args []string) error {
 		fmt.Printf("created channel #%s (id %s)\n", args[1], id)
 		return nil
 	case "add":
-		if len(args) < 3 {
+		if len(args) != 3 {
 			return fmt.Errorf("usage: agenthail channel add <channel> <target>")
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
@@ -108,7 +116,7 @@ func (a *App) cmdChannel(args []string) error {
 		fmt.Printf("added %s to #%s\n", a.resolveDisplay(sess.ID), channelName)
 		return nil
 	case "rm", "remove":
-		if len(args) < 3 {
+		if len(args) != 3 {
 			return fmt.Errorf("usage: agenthail channel rm <channel> <target|--all>")
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
@@ -129,6 +137,9 @@ func (a *App) cmdChannel(args []string) error {
 		fmt.Printf("removed %s from #%s\n", a.resolveDisplay(sess.ID), channelName)
 		return nil
 	case "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agenthail channel list")
+		}
 		channels, err := a.Registry.ListChannels()
 		if err != nil {
 			return err
@@ -151,8 +162,13 @@ func (a *App) cmdChannel(args []string) error {
 		channelName := strings.TrimPrefix(args[1], "#")
 		var fromLabel string
 		var msgParts []string
+		positionalOnly := false
 		for i := 2; i < len(args); i++ {
-			if args[i] == "--from" && i+1 < len(args) {
+			if args[i] == "--" {
+				positionalOnly = true
+				continue
+			}
+			if !positionalOnly && args[i] == "--from" && i+1 < len(args) {
 				fromLabel = args[i+1]
 				i++
 				continue
@@ -174,7 +190,7 @@ func (a *App) cmdChannel(args []string) error {
 		if len(members) == 0 {
 			return fmt.Errorf("channel #%s has no members", channelName)
 		}
-		var sent, failed int
+		var sent, queued, failed int
 		for _, mid := range members {
 			sess, surf, err := a.resolveTarget(ctx, mid)
 			if err != nil {
@@ -182,15 +198,29 @@ func (a *App) cmdChannel(args []string) error {
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
 				continue
 			}
-			if _, err := surf.Send(ctx, sess, payload); err != nil {
+			receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Deliver(ctx, surf, sess, payload, "")
+			if err != nil {
 				failed++
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
 				continue
 			}
-			sent++
-			fmt.Printf("  [ OK ] %s\n", a.resolveDisplay(mid))
+			if receipt.Disposition == delivery.DispositionQueued {
+				queued++
+				fmt.Printf("  [QUEUE] %s\n", a.resolveDisplay(mid))
+			} else {
+				sent++
+				fmt.Printf("  [ OK ] %s\n", a.resolveDisplay(mid))
+			}
 		}
-		fmt.Printf("channel #%s: %d sent, %d failed\n", channelName, sent, failed)
+		fmt.Printf("channel #%s: %d sent, %d queued, %d failed\n", channelName, sent, queued, failed)
+		if queued > 0 {
+			if _, running := daemon.IsRunning(); !running {
+				fmt.Fprintln(os.Stderr, "warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'")
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("channel #%s had %d failed delivery(s)", channelName, failed)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown channel subcommand '%s'", args[0])
@@ -206,7 +236,7 @@ func (a *App) cmdRelay(args []string) error {
 	}
 	switch args[0] {
 	case "add":
-		if len(args) < 3 {
+		if len(args) < 3 || len(args) > 4 {
 			return fmt.Errorf("usage: agenthail relay add <from-target> <to-target> [regex]")
 		}
 		ctx := context.Background()
@@ -233,6 +263,9 @@ func (a *App) cmdRelay(args []string) error {
 			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern)
 		return nil
 	case "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agenthail relay list")
+		}
 		routes, err := a.Registry.ListRoutes()
 		if err != nil {
 			return err
@@ -247,11 +280,13 @@ func (a *App) cmdRelay(args []string) error {
 		}
 		return nil
 	case "rm", "remove", "delete":
-		if len(args) < 2 {
+		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail relay rm <id>")
 		}
-		var id int64
-		fmt.Sscanf(args[1], "%d", &id)
+		id, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil || id <= 0 {
+			return fmt.Errorf("invalid relay id %q", args[1])
+		}
 		if err := a.Registry.RemoveRoute(id); err != nil {
 			return err
 		}
@@ -263,8 +298,8 @@ func (a *App) cmdRelay(args []string) error {
 }
 
 func (a *App) cmdDaemon(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: agenthail daemon <start|stop|status>")
+	if len(args) != 1 {
+		return fmt.Errorf("usage: agenthail daemon <start|stop|status|install|uninstall>")
 	}
 	switch args[0] {
 	case "start":
@@ -273,6 +308,10 @@ func (a *App) cmdDaemon(args []string) error {
 		return a.daemonStop()
 	case "status":
 		return a.daemonStatus()
+	case "install":
+		return a.daemonInstallService()
+	case "uninstall":
+		return a.daemonUninstallService()
 	default:
 		return fmt.Errorf("unknown daemon subcommand '%s'", args[0])
 	}

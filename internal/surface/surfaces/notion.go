@@ -44,10 +44,43 @@ func (n *Notion) bridge() string {
 }
 
 func (n *Notion) ensureContext(ctx context.Context) error {
-	if n.spaceID != "" && n.userID != "" {
-		return nil
+	if n.spaceID == "" || n.userID == "" {
+		if err := n.autoDetect(ctx); err != nil {
+			return err
+		}
 	}
-	return n.autoDetect(ctx)
+	canonical, err := canonicalNotionSpaceID(n.spaceID)
+	if err != nil {
+		return err
+	}
+	n.spaceID = canonical
+	return nil
+}
+
+func canonicalNotionSpaceID(spaceID string) (string, error) {
+	parsed, err := uuid.Parse(spaceID)
+	if err != nil {
+		return "", fmt.Errorf("AGENTHAIL_NOTION_SPACE must be a UUID (got %q)", spaceID)
+	}
+	return parsed.String(), nil
+}
+
+func newNotionThreadID(spaceID string) (string, error) {
+	canonical, err := canonicalNotionSpaceID(spaceID)
+	if err != nil {
+		return "", err
+	}
+	spaceParts := strings.Split(canonical, "-")
+	parts := strings.Split(uuid.NewString(), "-")
+	if len(spaceParts) != 5 || len(parts) != 5 {
+		return "", fmt.Errorf("generate Notion thread ID: invalid UUID segment count")
+	}
+	parts[1] = spaceParts[1]
+	threadID := strings.Join(parts, "-")
+	if _, err := uuid.Parse(threadID); err != nil {
+		return "", fmt.Errorf("generate Notion thread ID: %w", err)
+	}
+	return threadID, nil
 }
 
 func (n *Notion) autoDetect(ctx context.Context) error {
@@ -137,7 +170,7 @@ func (n *Notion) Name() surface.SurfaceKind { return surface.KindNotion }
 func (n *Notion) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: false, Reply: true,
-		Interrupt: false, Steer: false, Model: true,
+		Interrupt: false, Steer: false, Model: false,
 	}
 }
 
@@ -236,6 +269,8 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 	return n.SendWithOptions(ctx, sess, message, surface.SendOptions{})
 }
 
+var notionInferenceRequest = sidecarRequestWithCookies
+
 func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	if err := n.ensureContext(ctx); err != nil {
 		return nil, err
@@ -267,10 +302,10 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	newThread := sess.ID == "" || strings.HasPrefix(sess.ID, "new")
 	threadID := sess.ID
 	if newThread {
-		portal := strings.SplitN(n.spaceID, "-", 3)[1]
-		parts := strings.Split(uuid.NewString(), "-")
-		parts[1] = portal
-		threadID = strings.Join(parts, "-")
+		threadID, err = newNotionThreadID(n.spaceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	transcript := []map[string]any{
@@ -336,39 +371,39 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	headers := n.headers()
 	headers["accept"] = "application/x-ndjson"
 
-	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
+	status, respBody, err := notionInferenceRequest(ctx, "POST",
 		n.inferenceURL("runInferenceTranscript"),
 		headers, string(bodyBytes), n.bridge(), "https://app.notion.com/", 60*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("notion send: %w", err)
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("notion send (HTTP %d): %s", status, diagnosticExcerpt(respBody))
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
 	}
 	if err := validateNotionInferenceResponse(respBody); err != nil {
-		return nil, fmt.Errorf("notion inference: %w", err)
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion inference: %w", err))
 	}
 
 	resultThreadID := threadID
 	if resultThreadID == "" {
-		return nil, fmt.Errorf("notion send succeeded without a thread id")
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Notion send succeeded without a thread id"))
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		completionID, reply, observeErr := n.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion})
 		if observeErr != nil {
-			return nil, fmt.Errorf("confirm Notion persistence: %w", observeErr)
+			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("confirm Notion persistence: %w", observeErr))
 		}
 		if completionID != "" && completionID != baselineID && reply != nil && reply.Done {
 			return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, surface.DeliveryOutcomeUnknown(ctx.Err())
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	return nil, fmt.Errorf("Notion inference completed but no new persisted agent message appeared within 10s")
+	return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Notion inference completed but no new persisted agent message appeared within 10s"))
 }
 
 func (n *Notion) fetchModels(ctx context.Context) error {
@@ -422,7 +457,7 @@ func (n *Notion) resolveModelCodename(ctx context.Context, name string) (string,
 			return codename, nil
 		}
 	}
-	return "", fmt.Errorf("Notion model %q not found; use a codename or label from 'agenthail model <target>'", name)
+	return "", fmt.Errorf("Notion model %q not found; use an available codename or label with 'agenthail send <notion-target> --model <name>'", name)
 }
 
 func validateNotionInferenceResponse(ndjson string) error {
@@ -480,31 +515,7 @@ func (n *Notion) Compact(ctx context.Context, sess *surface.Session) error {
 }
 
 func (n *Notion) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
-	if err := n.ensureContext(ctx); err != nil {
-		return "", err
-	}
-	if err := n.fetchModels(ctx); err != nil {
-		return "", err
-	}
-	n.modelMu.Lock()
-	defer n.modelMu.Unlock()
-	if name == "" {
-		var lines []string
-		for codename, label := range n.modelLabels {
-			lines = append(lines, fmt.Sprintf("%s\t%s", codename, label))
-		}
-		sort.Strings(lines)
-		return strings.Join(lines, "\n"), nil
-	}
-	if label, ok := n.modelLabels[name]; ok {
-		return label, nil
-	}
-	for _, label := range n.modelLabels {
-		if strings.EqualFold(label, name) {
-			return label, nil
-		}
-	}
-	return "", fmt.Errorf("Notion model %q not found; use a codename or label from 'agenthail model <target>'", name)
+	return "", surface.ErrUnsupported
 }
 
 func (n *Notion) Interrupt(ctx context.Context, sess *surface.Session) error {

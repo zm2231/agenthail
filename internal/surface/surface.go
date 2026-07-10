@@ -2,6 +2,8 @@ package surface
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -38,6 +40,48 @@ type Session struct {
 type SendResult struct {
 	UUID     string `json:"uuid"`
 	Accepted bool   `json:"accepted"`
+}
+
+type DeliveryOutcomeUnknownError struct {
+	Err error
+}
+
+func (e DeliveryOutcomeUnknownError) Error() string {
+	return fmt.Sprintf("delivery outcome is unknown: %v", e.Err)
+}
+
+func (e DeliveryOutcomeUnknownError) Unwrap() error { return e.Err }
+
+func DeliveryOutcomeUnknown(err error) error {
+	if err == nil {
+		return nil
+	}
+	return DeliveryOutcomeUnknownError{Err: err}
+}
+
+func IsDeliveryOutcomeUnknown(err error) bool {
+	var target DeliveryOutcomeUnknownError
+	return errors.As(err, &target)
+}
+
+type SendOptions struct {
+	Model string `json:"model,omitempty"`
+}
+
+type OptionSender interface {
+	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
+}
+
+type HealthChecker interface {
+	Health(ctx context.Context) error
+}
+
+type TurnObservation struct {
+	Status          SessionStatus `json:"status"`
+	ActiveTurnID    string        `json:"activeTurnId,omitempty"`
+	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
+	CompletedTurnID string        `json:"completedTurnId,omitempty"`
+	Reply           *ReplyResult  `json:"reply,omitempty"`
 }
 
 type ReplyResult struct {
@@ -79,6 +123,7 @@ type Surface interface {
 	Name() SurfaceKind
 	List(ctx context.Context) ([]Session, error)
 	Resolve(ctx context.Context, target string) (*Session, error)
+	Observe(ctx context.Context, sess *Session) (*TurnObservation, error)
 	Send(ctx context.Context, sess *Session, message string) (*SendResult, error)
 	Reply(ctx context.Context, sess *Session, limit int) (*ReplyResult, error)
 	Tail(ctx context.Context, sess *Session, n int) ([]Exchange, error)
@@ -113,10 +158,14 @@ func firstLine(s string, maxLen int) string {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	if n <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n]
+	return string(runes[:n])
 }
 
 func TruncateString(s string, n int) string { return truncate(s, n) }

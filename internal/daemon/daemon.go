@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
-	"sync"
 	"syscall"
 	"time"
 
@@ -22,13 +20,9 @@ const (
 )
 
 type Daemon struct {
-	Registry       *registry.Registry
-	Surfaces       []surface.Surface
-	mu             sync.Mutex
-	lastReply      map[string]string
-	lastGoalStatus map[string]string // sessionID -> last known goal status
-	initialized    bool              // false on first scan - suppress relays until baseline set
-	log            *log.Logger
+	Registry *registry.Registry
+	Surfaces []surface.Surface
+	log      *log.Logger
 }
 
 func (d *Daemon) resolveDisplay(sessionID string) string {
@@ -47,16 +41,19 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	return &Daemon{
-		Registry:       reg,
-		Surfaces:       surfaces,
-		lastReply:      map[string]string{},
-		lastGoalStatus: map[string]string{},
-		log:            log.New(os.Stderr, "[daemon] ", log.LstdFlags),
+		Registry: reg,
+		Surfaces: surfaces,
+		log:      log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 	}
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
 	d.log.Printf("started; %d surfaces", len(d.Surfaces))
+	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
+		d.log.Printf("warn: recover inflight queue: %s", err)
+	} else if recovered > 0 {
+		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
+	}
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	d.scanAndRelay(ctx)
@@ -64,7 +61,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			d.log.Printf("stopping")
-			return ctx.Err()
+			return nil
 		case <-ticker.C:
 			d.scanAndRelay(ctx)
 		}
@@ -72,128 +69,22 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 func (d *Daemon) RunWithSignal() error {
+	lock, err := acquireDaemonLock()
+	if err != nil {
+		return err
+	}
+	defer releaseDaemonLock(lock)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	d.log.Printf("daemon pid %d", os.Getpid())
-	if err := os.WriteFile(PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-		d.log.Printf("warn: write pidfile: %s", err)
+	if err := os.WriteFile(PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
+		return fmt.Errorf("write pidfile: %w", err)
 	}
-	return d.Run(ctx)
-}
-
-func (d *Daemon) scanAndRelay(ctx context.Context) {
-	for _, s := range d.Surfaces {
-		sessions, err := s.List(ctx)
-		if err != nil {
-			continue
-		}
-		for _, sess := range sessions {
-			d.Registry.RegisterSession(sess)
-			var ptr surface.Session = sess
-			d.onTurnComplete(ctx, s, &ptr)
-		}
+	err = d.Run(ctx)
+	if removeErr := removePIDFileIfOwned(os.Getpid()); removeErr != nil {
+		d.log.Printf("warn: remove pidfile: %s", removeErr)
 	}
-	d.mu.Lock()
-	d.initialized = true
-	d.mu.Unlock()
-}
-
-func (d *Daemon) onTurnComplete(ctx context.Context, surf surface.Surface, sess *surface.Session) {
-	reply, err := surf.Reply(ctx, sess, 1)
-	if err != nil || reply == nil {
-		d.drainMessageQueue(ctx, surf, sess)
-		return
-	}
-
-	goal, _ := surf.GoalGet(ctx, sess)
-	goalStatus := ""
-	if goal != nil {
-		goalStatus = goal.Status
-	}
-
-	d.mu.Lock()
-	prevReply := d.lastReply[sess.ID]
-	prevGoal := d.lastGoalStatus[sess.ID]
-	firstScan := !d.initialized
-
-	d.lastReply[sess.ID] = reply.Text
-	d.lastGoalStatus[sess.ID] = goalStatus
-	d.mu.Unlock()
-
-	if firstScan {
-		return
-	}
-
-	if goal != nil {
-		if goalStatus == "complete" && prevGoal != "complete" {
-			d.fireRelays(ctx, sess, reply.Text)
-		}
-		return
-	}
-
-	if reply.Text != "" && reply.Text != prevReply {
-		d.fireRelays(ctx, sess, reply.Text)
-	}
-}
-
-func (d *Daemon) fireRelays(ctx context.Context, from *surface.Session, text string) {
-	routes, err := d.Registry.ListRoutes()
-	if err != nil {
-		return
-	}
-	for _, r := range routes {
-		if r.FromSession != from.ID {
-			continue
-		}
-		if !matchPattern(r.Pattern, text) {
-			continue
-		}
-		toSess, toSurf := d.findSession(ctx, r.ToSession)
-		if toSess == nil {
-			d.log.Printf("relay target %s not found", truncate(r.ToSession, 16))
-			continue
-		}
-		payload := fmt.Sprintf("[relay from %s %s] %s", from.Surface, d.resolveDisplay(from.ID), text)
-		d.log.Printf("relay %s -> %s", d.resolveDisplay(from.ID), d.resolveDisplay(toSess.ID))
-		if _, err := toSurf.Send(ctx, toSess, payload); err != nil {
-			d.log.Printf("relay send failed: %s", err)
-		}
-	}
-}
-
-func (d *Daemon) drainMessageQueue(ctx context.Context, surf surface.Surface, sess *surface.Session) {
-	ids, msgs, err := d.Registry.GetMessageQueue(sess.ID)
-	if err != nil || len(ids) == 0 {
-		return
-	}
-	d.log.Printf("draining %d queued message(s) for %s", len(ids), truncate(sess.ID, 16))
-	for i, msg := range msgs {
-		if _, err := surf.Send(ctx, sess, msg); err != nil {
-			d.log.Printf("queue drain send failed: %s", err)
-			continue
-		}
-		d.Registry.MarkMessageDelivered(ids[i])
-	}
-}
-
-func (d *Daemon) findSession(ctx context.Context, id string) (*surface.Session, surface.Surface) {
-	for _, s := range d.Surfaces {
-		if sess, err := s.Resolve(ctx, id); err == nil {
-			return sess, s
-		}
-	}
-	return nil, nil
-}
-
-func matchPattern(pattern, text string) bool {
-	if pattern == "" || pattern == ".*" {
-		return true
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return false
-	}
-	return re.MatchString(text)
+	return err
 }
 
 func truncate(s string, n int) string {
@@ -223,7 +114,7 @@ func IsRunning() (int, bool) {
 	if pid <= 0 {
 		return 0, false
 	}
-	if err := exec.Command("kill", "-0", fmt.Sprintf("%d", pid)).Run(); err != nil {
+	if err := exec.Command("kill", "-0", fmt.Sprintf("%d", pid)).Run(); err != nil || !processIsDaemon(pid) {
 		return 0, false
 	}
 	return pid, true
@@ -234,6 +125,11 @@ func Stop() error {
 	if !ok {
 		return fmt.Errorf("daemon not running")
 	}
-	os.Remove(PidFilePath())
-	return exec.Command("kill", "-TERM", fmt.Sprintf("%d", pid)).Run()
+	if err := exec.Command("kill", "-TERM", fmt.Sprintf("%d", pid)).Run(); err != nil {
+		return err
+	}
+	if !waitForStopped(pid, 5*time.Second) {
+		return fmt.Errorf("daemon pid %d did not stop within 5s", pid)
+	}
+	return nil
 }

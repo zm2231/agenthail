@@ -10,6 +10,12 @@ import (
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
+var (
+	version  = "dev"
+	revision = "unknown"
+	builtAt  = ""
+)
+
 func main() {
 	home, _ := os.UserHomeDir()
 	reg, err := registry.Open("")
@@ -21,7 +27,7 @@ func main() {
 
 	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
 	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
-	codex := surfaces.NewCodex("")
+	codex := surfaces.NewCodex(codexRemotePort())
 	notion := surfaces.NewNotion(
 		envOr("AGENTHAIL_NOTION_SPACE", ""),
 		envOr("AGENTHAIL_NOTION_USER", ""),
@@ -34,7 +40,10 @@ func main() {
 			{Name: "codex", Surface: codex},
 			{Name: "notion", Surface: notion},
 		},
-		DefaultTimeout: 30 * time.Second,
+		DefaultTimeout: 2 * time.Minute,
+		Version:        version,
+		Revision:       revision,
+		BuiltAt:        builtAt,
 	}
 
 	if err := app.Run(os.Args[1:]); err != nil {
@@ -48,4 +57,14 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func codexRemotePort() string {
+	if value := os.Getenv("AGENTHAIL_CODEX_REMOTE"); value != "" {
+		return value
+	}
+	if value := os.Getenv("AGENTHAIL_CODEX_INSPECT"); value != "" {
+		return value
+	}
+	return "9231"
 }

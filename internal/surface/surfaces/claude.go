@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,16 +30,37 @@ func NewClaude(profile, home string) *Claude {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Claude{profile: profile, home: home, cookieBridge: cookieBridgePath("cookie")}
+	bridge := os.Getenv("AGENTHAIL_COOKIE_BRIDGE")
+	if bridge == "" {
+		bridge = cookieBridgePath("cookie")
+	}
+	return &Claude{profile: profile, home: home, cookieBridge: bridge}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
-		Send: true, Stream: true, Reply: true, Goal: true,
+		Send: true, Stream: true, Reply: true, Goal: false,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 	}
+}
+
+func (c *Claude) Health(ctx context.Context) error {
+	if _, err := sidecarPath(); err != nil {
+		return err
+	}
+	if c.cookieBridge == "" || !fileExists(c.cookieBridge) {
+		return fmt.Errorf("Claude cookie bridge not found (set AGENTHAIL_COOKIE_BRIDGE or install cookie.mjs alongside agenthail)")
+	}
+	status, body, err := sidecarRequestWithCookies(ctx, "GET", "https://claude.ai/api/organizations", c.headerMap("", ""), "", c.cookieBridge, "https://claude.ai/", 15*time.Second)
+	if err != nil {
+		return fmt.Errorf("Claude authentication probe: %w", err)
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("Claude authentication probe returned HTTP %d: %s", status, diagnosticExcerpt(body))
+	}
+	return nil
 }
 
 func (c *Claude) headerMap(_, _ string) map[string]string {
@@ -156,7 +178,10 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 	sessionsDir := filepath.Join(c.home, ".claude", "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return []surface.Session{}, nil
+		}
+		return nil, fmt.Errorf("read Claude session directory: %w", err)
 	}
 	var out []surface.Session
 	for _, e := range entries {
@@ -190,6 +215,7 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		if ts, ok := m["updatedAt"].(float64); ok && ts > 0 {
 			sess.LastActive = time.UnixMilli(int64(ts))
 		}
+		sess.Status = claudeStatus(sess.Status)
 		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"))
 		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
 		if sess.Name == "" {
@@ -198,6 +224,19 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		out = append(out, sess)
 	}
 	return out, nil
+}
+
+func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
+	switch strings.ToLower(string(status)) {
+	case "idle", "shell":
+		return surface.StatusIdle
+	case "busy", "running", "active", "in_progress", "inprogress":
+		return surface.StatusBusy
+	case "offline":
+		return surface.StatusOffline
+	default:
+		return surface.StatusUnknown
+	}
 }
 
 func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, error) {
@@ -228,7 +267,59 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	return &matches[0], nil
 }
 
+func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	path := sess.Transcript
+	if path == "" {
+		path = c.transcriptPath(sess)
+	}
+	observation := &surface.TurnObservation{Status: claudeStatus(sess.Status)}
+	if path == "" || !fileExists(path) {
+		return observation, nil
+	}
+	turns, err := readClaudeTurns(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(turns) == 0 {
+		return observation, nil
+	}
+	last := turns[len(turns)-1]
+	if !last.Done && !last.Interrupted {
+		observation.Status = surface.StatusBusy
+		observation.ActiveTurnID = last.UserID
+	}
+	for i := len(turns) - 1; i >= 0; i-- {
+		turn := turns[i]
+		if !turn.Done || turn.MessageID == "" {
+			continue
+		}
+		observation.CompletedTurnID = turn.MessageID
+		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true}
+		break
+	}
+	return observation, nil
+}
+
 func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if claudeStatus(sess.Status) == surface.StatusBusy {
+		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
+	}
+	return c.postMessage(ctx, sess, message)
+}
+
+var claudeSendRequest = sidecarRequestWithCookies
+
+func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	uuid := newUUID()
 	cse := toCse(sess.ID)
 	body := map[string]any{
@@ -243,131 +334,92 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	bodyBytes, _ := json.Marshal(body)
 	headers := c.headerMap("", sess.ID)
 	headers["content-type"] = "application/json"
-	status, respBody, err := sidecarPostWithCookies(
+	status, respBody, err := claudeSendRequest(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 30*time.Second)
 	if err != nil {
-		return nil, err
+		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
 	if strings.Contains(respBody, "Just a moment") {
-		return nil, fmt.Errorf("cloudflare challenge (cf_clearance may need refresh)")
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("cloudflare challenge (cf_clearance may need refresh)"))
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("send failed (HTTP %d): %s", status, respBody)
+		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
 	}
 	return &surface.SendResult{UUID: uuid, Accepted: true}, nil
 }
 
 func (c *Claude) sendCommand(ctx context.Context, sess *surface.Session, cmd string) error {
-	_, err := c.Send(ctx, sess, cmd)
+	_, err := c.postMessage(ctx, sess, cmd)
 	return err
 }
 
 func (c *Claude) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
+	observation, err := c.Observe(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if observation.Reply == nil {
+		return &surface.ReplyResult{Done: false}, nil
+	}
+	return observation.Reply, nil
+}
+
+func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
 	}
 	if path == "" || !fileExists(path) {
-		return &surface.ReplyResult{Error: "no local transcript"}, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(string(data), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-		var rec map[string]any
-		if json.Unmarshal([]byte(line), &rec) != nil {
-			continue
-		}
-		if rec["type"] != "assistant" {
-			continue
-		}
-		msg, _ := rec["message"].(map[string]any)
-		content, _ := msg["content"].([]any)
-		for _, item := range content {
-			if m, ok := item.(map[string]any); ok && m["type"] == "text" {
-				if t, ok := m["text"].(string); ok && strings.TrimSpace(t) != "" {
-					return &surface.ReplyResult{Text: t, Done: true}, nil
-				}
-			}
-		}
-	}
-	return &surface.ReplyResult{Done: false}, nil
-}
-
-func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	path := c.transcriptPath(sess)
-	if path == "" || !fileExists(path) {
 		return fmt.Errorf("no local transcript for streaming")
 	}
 	deadline := time.Now().Add(timeout)
-	info, _ := os.Stat(path)
-	pos := info.Size()
-	started := false
+	initial, err := readClaudeTurns(path)
+	if err != nil {
+		return err
+	}
+	targetID := uuid
+	if targetID == "" && len(initial) > 0 && !initial[len(initial)-1].Done && !initial[len(initial)-1].Interrupted {
+		targetID = initial[len(initial)-1].UserID
+	}
+	baseline := len(initial)
+	lastText := ""
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		info, err := os.Stat(path)
+		turns, err := readClaudeTurns(path)
 		if err != nil {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		size := info.Size()
-		if size < pos {
-			pos = 0
+		if targetID == "" && len(turns) > baseline {
+			targetID = turns[baseline].UserID
 		}
-		if size > pos {
-			f, _ := os.Open(path)
-			f.Seek(pos, 0)
-			chunk := make([]byte, size-pos)
-			f.Read(chunk)
-			f.Close()
-			pos = size
-			for _, line := range strings.Split(string(chunk), "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" {
-					continue
+		for _, turn := range turns {
+			if targetID == "" || turn.UserID != targetID {
+				continue
+			}
+			if turn.Assistant != "" && turn.Assistant != lastText {
+				text := turn.Assistant
+				if strings.HasPrefix(text, lastText) {
+					text = strings.TrimPrefix(text, lastText)
 				}
-				var rec map[string]any
-				if json.Unmarshal([]byte(line), &rec) != nil {
-					continue
-				}
-				if !started {
-					if id, _ := rec["uuid"].(string); id == uuid && rec["type"] == "user" {
-						started = true
-						onEvent(surface.StreamEvent{Kind: "status", Text: "turn queued"})
-					}
-					continue
-				}
-				t, _ := rec["type"].(string)
-				switch t {
-				case "assistant":
-					msg, _ := rec["message"].(map[string]any)
-					content, _ := msg["content"].([]any)
-					for _, item := range content {
-						m, _ := item.(map[string]any)
-						switch m["type"] {
-						case "text":
-							onEvent(surface.StreamEvent{Kind: "text", Text: m["text"].(string)})
-						case "tool_use":
-							onEvent(surface.StreamEvent{Kind: "tool_use", Text: m["name"].(string)})
-						}
-					}
-					if msg["stop_reason"] == "end_turn" {
-						onEvent(surface.StreamEvent{Kind: "done"})
-						return nil
-					}
+				lastText = turn.Assistant
+				if text != "" {
+					onEvent(surface.StreamEvent{Kind: "text", Text: text})
 				}
 			}
+			if turn.Done {
+				onEvent(surface.StreamEvent{Kind: "done"})
+				return nil
+			}
+			if turn.Interrupted {
+				return fmt.Errorf("Claude turn %s was interrupted", targetID)
+			}
+			break
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -375,29 +427,100 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 }
 
 func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
-	return c.sendCommand(ctx, sess, "/goal "+text)
+	return surface.ErrUnsupported
 }
 
 func (c *Claude) GoalClear(ctx context.Context, sess *surface.Session) error {
-	return c.sendCommand(ctx, sess, "/goal clear")
+	return surface.ErrUnsupported
 }
 
 func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	return nil, nil
+	return nil, surface.ErrUnsupported
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
-	return c.sendCommand(ctx, sess, "/compact")
+	_, err := c.confirmedCommand(ctx, sess, "/compact", "", 30*time.Second)
+	return err
 }
 
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
 	if name != "" {
-		return "", c.sendCommand(ctx, sess, "/model "+name)
+		result, err := c.confirmedCommand(ctx, sess, "/model", name, 5*time.Second)
+		if err != nil {
+			return "", fmt.Errorf("model switch rejected: %w", err)
+		}
+		return result, nil
 	}
-	return "", nil
+	path := sess.Transcript
+	if path == "" {
+		path = c.transcriptPath(sess)
+	}
+	turns, err := readClaudeTurns(path)
+	if err != nil {
+		return "", err
+	}
+	for i := len(turns) - 1; i >= 0; i-- {
+		if turns[i].Model != "" {
+			return turns[i].Model, nil
+		}
+	}
+	return "", fmt.Errorf("model unavailable: no assistant turn recorded")
+}
+
+func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {
+	path := sess.Transcript
+	if path == "" {
+		path = c.transcriptPath(sess)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("command confirmation requires a local transcript: %w", err)
+	}
+	command := commandName
+	if args != "" {
+		command += " " + args
+	}
+	if err := c.sendCommand(ctx, sess, command); err != nil {
+		return "", err
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline.C:
+			return "", fmt.Errorf("%s was accepted but no correlated confirmation appeared within %s", commandName, timeout)
+		case <-ticker.C:
+			result, found, readErr := readClaudeCommandResult(path, info.Size(), commandName, args)
+			if readErr != nil {
+				return "", fmt.Errorf("read %s confirmation: %w", commandName, readErr)
+			}
+			if !found {
+				continue
+			}
+			lower := strings.ToLower(result)
+			for _, failure := range []string{"not found", "error", "failed", "cannot"} {
+				if strings.Contains(lower, failure) {
+					return "", fmt.Errorf("%s", result)
+				}
+			}
+			return result, nil
+		}
+	}
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
+	current, err := c.Resolve(ctx, sess.ID)
+	if err != nil {
+		return err
+	}
+	if current.Status != surface.StatusBusy {
+		return fmt.Errorf("session idle; nothing to interrupt")
+	}
+	sess = current
 	cse := toCse(sess.ID)
 	reqID := "interrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10) + "-" + randSeq(6)
 	body := map[string]any{
@@ -413,20 +536,27 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 	bodyBytes, _ := json.Marshal(body)
 	headers := c.headerMap("", sess.ID)
 	headers["content-type"] = "application/json"
-	status, respBody, err := sidecarPostWithCookies(
+	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 10*time.Second)
 	if err != nil {
 		return err
 	}
 	if status != 200 {
-		return fmt.Errorf("interrupt failed (HTTP %d): %s", status, respBody)
+		return fmt.Errorf("interrupt failed (HTTP %d): %s", status, diagnosticExcerpt(respBody))
 	}
 	return nil
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	_, err := c.Send(ctx, sess, message)
+	current, err := c.Resolve(ctx, sess.ID)
+	if err != nil {
+		return err
+	}
+	if current.Status != surface.StatusBusy {
+		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+	}
+	_, err = c.postMessage(ctx, current, message)
 	return err
 }
 
@@ -448,94 +578,16 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 	if path == "" || !fileExists(path) {
 		return nil, fmt.Errorf("no local transcript")
 	}
-	f, err := os.Open(path)
+	turns, err := readClaudeTurns(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-
-	type msg struct {
-		role string
-		text string
-	}
-	var msgs []msg
-	for sc.Scan() {
-		var rec map[string]any
-		if json.Unmarshal(sc.Bytes(), &rec) != nil {
-			continue
-		}
-		typ, _ := rec["type"].(string)
-		if typ != "user" && typ != "assistant" {
-			continue
-		}
-		msgData, _ := rec["message"].(map[string]any)
-		if typ == "assistant" {
-			if msgData["stop_reason"] != "end_turn" {
-				continue
-			}
-		}
-		content := msgData["content"]
-		text := ""
-		switch c := content.(type) {
-		case string:
-			text = c
-		case []any:
-			for _, item := range c {
-				if m, ok := item.(map[string]any); ok && m["type"] == "text" {
-					if t, ok := m["text"].(string); ok && strings.TrimSpace(t) != "" {
-						text = t
-						break
-					}
-				}
-			}
-		}
-		text = strings.TrimSpace(text)
-		if text == "" {
-			continue
-		}
-		if typ == "user" {
-			if strings.HasPrefix(text, "<local-command") || strings.HasPrefix(text, "<command-") || strings.HasPrefix(text, "<system") {
-				continue
-			}
-			if strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to") {
-				continue
-			}
-			if _, hasToolID := msgData["tool_use_id"]; hasToolID {
-				continue
-			}
-			if cl, ok := content.([]any); ok {
-				for _, item := range cl {
-					if m, ok := item.(map[string]any); ok && m["type"] == "tool_result" {
-						text = ""
-						break
-					}
-				}
-			}
-			if text == "" {
-				continue
-			}
-		}
-		msgs = append(msgs, msg{role: typ, text: text})
-	}
-
 	var exchanges []surface.Exchange
-	for i := 0; i < len(msgs); i++ {
-		if msgs[i].role == "user" {
-			ex := surface.Exchange{User: msgs[i].text}
-			if i+1 < len(msgs) && msgs[i+1].role == "assistant" {
-				ex.Assistant = msgs[i+1].text
-				i++
-			}
-			exchanges = append(exchanges, ex)
-		} else if msgs[i].role == "assistant" {
-			if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
-				exchanges = append(exchanges, surface.Exchange{Assistant: msgs[i].text})
-			} else {
-				exchanges[len(exchanges)-1].Assistant = msgs[i].text
-			}
+	for _, turn := range turns {
+		if turn.User == "" && turn.Assistant == "" {
+			continue
 		}
+		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant})
 	}
 
 	if len(exchanges) > n {
