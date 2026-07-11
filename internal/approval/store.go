@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -22,6 +23,7 @@ const (
 	MaxInputBytes    = 16 * 1024
 	MaxSummaryLength = 512
 	MaxListLimit     = 200
+	MaxRows          = 2000
 )
 
 type Decision string
@@ -58,7 +60,8 @@ type Record struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db           *sql.DB
+	pruneCounter atomic.Uint64
 }
 
 func DefaultPath() string {
@@ -201,6 +204,11 @@ func (s *Store) Observe(request Request, now time.Time) (Response, bool, error) 
 	if err := validateRequest(request); err != nil {
 		return Response{}, false, err
 	}
+	if s.pruneCounter.Add(1)%64 == 0 {
+		if err := s.prune(now); err != nil {
+			return Response{}, false, err
+		}
+	}
 	inserted := false
 	result, err := s.db.Exec(`INSERT OR IGNORE INTO approval_requests(id,source,session_id,tool,action,summary,input_json,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)`, request.ID, request.Source, request.SessionID, request.Tool, request.Action, request.Summary, string(request.Input), request.CreatedAt.UnixMilli(), request.ExpiresAt.UnixMilli())
 	if err != nil {
@@ -208,6 +216,11 @@ func (s *Store) Observe(request Request, now time.Time) (Response, bool, error) 
 	}
 	if count, _ := result.RowsAffected(); count == 1 {
 		inserted = true
+	}
+	if s.pruneCounter.Load()%64 == 0 {
+		if err := s.prune(now); err != nil {
+			return Response{}, false, err
+		}
 	}
 	var decision Decision
 	var reason string
@@ -226,6 +239,14 @@ func (s *Store) Observe(request Request, now time.Time) (Response, bool, error) 
 		return Response{RequestID: request.ID, Decision: DecisionPending, Reason: "approval required; review with 'agenthail approval list'"}, inserted, nil
 	}
 	return Response{RequestID: request.ID, Decision: decision, Reason: reason}, false, nil
+}
+
+func (s *Store) prune(now time.Time) error {
+	if _, err := s.db.Exec(`DELETE FROM approval_requests WHERE expires_at<=? AND decision!=?`, now.UnixMilli(), DecisionPending); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM approval_requests WHERE id IN (SELECT id FROM approval_requests ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?)`, MaxRows)
+	return err
 }
 
 func (s *Store) Decide(id string, decision Decision, reason string, now time.Time) error {
@@ -252,6 +273,9 @@ func (s *Store) List(limit int) ([]Record, error) {
 	if limit > MaxListLimit {
 		limit = MaxListLimit
 	}
+	if err := s.pruneExpired(time.Now()); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(`SELECT id,source,session_id,tool,action,summary,input_json,created_at,expires_at,decision,decision_reason,decided_at FROM approval_requests ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -275,6 +299,14 @@ func (s *Store) List(limit int) ([]Record, error) {
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) pruneExpired(now time.Time) error {
+	if _, err := s.db.Exec(`DELETE FROM approval_requests WHERE expires_at<=?`, now.UnixMilli()); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM approval_requests WHERE id IN (SELECT id FROM approval_requests ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?)`, MaxRows)
+	return err
 }
 
 func validateRequest(request Request) error {

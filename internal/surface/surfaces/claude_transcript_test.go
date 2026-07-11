@@ -64,6 +64,17 @@ func TestClaudeObserveAndModelUseCompletedTranscript(t *testing.T) {
 	}
 }
 
+func TestClaudeMaxTokensIsTerminal(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]}}`)
+	claude := NewClaude("Default", t.TempDir())
+	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusBusy, Transcript: path})
+	if err != nil || observation.Status == surface.StatusBusy || observation.CompletedUserID != "u1" || observation.Reply.Error == "" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+}
+
 func TestClaudeInterruptedTurnIsNotReportedBusyOrComplete(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}

@@ -179,6 +179,10 @@ func TestRecoverInflightAndRuntimeState(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
+	history, err := r.ListHistory(10, "s")
+	if err != nil || len(history) != 2 || history[0].Kind != "unknown" || history[0].QueueID != item.ID {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
 	observation := surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1", CompletedTurnID: "turn-0"}
 	if err := r.SaveRuntimeState("s", observation); err != nil {
 		t.Fatal(err)

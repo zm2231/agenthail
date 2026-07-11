@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -21,6 +22,7 @@ type Claude struct {
 	profile      string
 	home         string
 	cookieBridge string
+	steerMu      sync.Mutex
 }
 
 func NewClaude(profile, home string) *Claude {
@@ -292,14 +294,36 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if !last.Done && !last.Interrupted {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = last.UserID
+	} else {
+		observation.Status = surface.StatusIdle
 	}
+	completions := make([]surface.Completion, 0, len(turns))
+	for _, turn := range turns {
+		if !turn.Done || turn.MessageID == "" {
+			continue
+		}
+		reply := &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, UserID: turn.UserID, Done: true}
+		if turn.StopReason == "max_tokens" {
+			reply.Error = "turn reached the model token limit"
+		}
+		completions = append(completions, surface.Completion{ID: turn.MessageID, UserID: turn.UserID, Reply: reply})
+	}
+	if len(completions) > 128 {
+		completions = completions[len(completions)-128:]
+	}
+	observation.Completions = completions
 	for i := len(turns) - 1; i >= 0; i-- {
 		turn := turns[i]
 		if !turn.Done || turn.MessageID == "" {
 			continue
 		}
 		observation.CompletedTurnID = turn.MessageID
-		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true}
+		observation.CompletedUserID = turn.UserID
+		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, UserID: turn.UserID, Done: true}
+		observation.TerminalReason = turn.StopReason
+		if turn.StopReason == "max_tokens" {
+			observation.Reply.Error = "turn reached the model token limit"
+		}
 		break
 	}
 	return observation, nil
@@ -338,13 +362,20 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 30*time.Second)
 	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(err)
+		return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, 0, err)
 	}
 	if strings.Contains(respBody, "Just a moment") {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("cloudflare challenge (cf_clearance may need refresh)"))
+		return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, status, fmt.Errorf("cloudflare challenge (cf_clearance may need refresh)"))
 	}
 	if status != 200 {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
+		class := surface.DeliveryUnknown
+		if status >= 400 && status < 500 && status != 408 && status != 409 && status != 429 {
+			class = surface.DeliveryTerminal
+		}
+		if status == 429 {
+			class = surface.DeliveryRetryable
+		}
+		return nil, surface.ClassifyDelivery(class, status, fmt.Errorf("send failed: %s", diagnosticExcerpt(respBody)))
 	}
 	return &surface.SendResult{UUID: uuid, Accepted: true}, nil
 }
@@ -549,6 +580,8 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	c.steerMu.Lock()
+	defer c.steerMu.Unlock()
 	current, err := c.Resolve(ctx, sess.ID)
 	if err != nil {
 		return err

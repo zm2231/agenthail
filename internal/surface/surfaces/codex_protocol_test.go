@@ -47,6 +47,13 @@ func TestCodexFailedTurnIsCompletedWithExplicitError(t *testing.T) {
 	}
 }
 
+func TestCodexApprovalStateNeedsInput(t *testing.T) {
+	status, done, message := codexTurnState(map[string]any{"type": "approvalRequired"})
+	if status != surface.StatusNeedsInput || done || message == "" {
+		t.Fatalf("status=%s done=%v message=%q", status, done, message)
+	}
+}
+
 func TestCodexSystemErrorTurnIsTerminal(t *testing.T) {
 	status, done, message := codexTurnState(map[string]any{"type": "systemError"})
 	if status != surface.StatusIdle || !done || message != "turn systemerror" {

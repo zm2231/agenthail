@@ -19,10 +19,11 @@ const (
 type SessionStatus string
 
 const (
-	StatusIdle    SessionStatus = "idle"
-	StatusBusy    SessionStatus = "busy"
-	StatusOffline SessionStatus = "offline"
-	StatusUnknown SessionStatus = "unknown"
+	StatusIdle       SessionStatus = "idle"
+	StatusBusy       SessionStatus = "busy"
+	StatusNeedsInput SessionStatus = "needs_input"
+	StatusOffline    SessionStatus = "offline"
+	StatusUnknown    SessionStatus = "unknown"
 )
 
 type Session struct {
@@ -39,6 +40,7 @@ type Session struct {
 
 type SendResult struct {
 	UUID     string `json:"uuid"`
+	ReplyID  string `json:"replyId,omitempty"`
 	Accepted bool   `json:"accepted"`
 }
 
@@ -60,9 +62,62 @@ func DeliveryOutcomeUnknown(err error) error {
 }
 
 func IsDeliveryOutcomeUnknown(err error) bool {
+	if DeliveryClassOfWithoutUnknown(err) == DeliveryUnknown {
+		return true
+	}
 	var target DeliveryOutcomeUnknownError
 	return errors.As(err, &target)
 }
+
+func DeliveryClassOfWithoutUnknown(err error) DeliveryClass {
+	var classified DeliveryError
+	if errors.As(err, &classified) {
+		return classified.Class
+	}
+	return ""
+}
+
+type DeliveryClass string
+
+const (
+	DeliveryTerminal  DeliveryClass = "terminal"
+	DeliveryRetryable DeliveryClass = "retryable"
+	DeliveryUnknown   DeliveryClass = "unknown"
+)
+
+type DeliveryError struct {
+	Class  DeliveryClass
+	Status int
+	Err    error
+}
+
+func (e DeliveryError) Error() string {
+	if e.Status != 0 {
+		return fmt.Sprintf("delivery %s (HTTP %d): %v", e.Class, e.Status, e.Err)
+	}
+	return fmt.Sprintf("delivery %s: %v", e.Class, e.Err)
+}
+
+func (e DeliveryError) Unwrap() error { return e.Err }
+
+func ClassifyDelivery(class DeliveryClass, status int, err error) error {
+	if err == nil {
+		return nil
+	}
+	return DeliveryError{Class: class, Status: status, Err: err}
+}
+
+func DeliveryClassOf(err error) DeliveryClass {
+	if class := DeliveryClassOfWithoutUnknown(err); class != "" {
+		return class
+	}
+	if IsDeliveryOutcomeUnknown(err) {
+		return DeliveryUnknown
+	}
+	return DeliveryRetryable
+}
+
+func IsDeliveryTerminal(err error) bool { return DeliveryClassOf(err) == DeliveryTerminal }
 
 type SendOptions struct {
 	Model string `json:"model,omitempty"`
@@ -78,15 +133,25 @@ type HealthChecker interface {
 
 type TurnObservation struct {
 	Status          SessionStatus `json:"status"`
+	TerminalReason  string        `json:"terminalReason,omitempty"`
 	ActiveTurnID    string        `json:"activeTurnId,omitempty"`
 	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
 	CompletedTurnID string        `json:"completedTurnId,omitempty"`
+	CompletedUserID string        `json:"completedUserId,omitempty"`
+	Completions     []Completion  `json:"completions,omitempty"`
 	Reply           *ReplyResult  `json:"reply,omitempty"`
+}
+
+type Completion struct {
+	ID     string       `json:"id"`
+	UserID string       `json:"userId,omitempty"`
+	Reply  *ReplyResult `json:"reply,omitempty"`
 }
 
 type ReplyResult struct {
 	Text     string `json:"text"`
 	UserText string `json:"userText"` // last user message (for context)
+	UserID   string `json:"userId,omitempty"`
 	Done     bool   `json:"done"`
 	Error    string `json:"error"`
 }

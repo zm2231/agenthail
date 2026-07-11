@@ -22,6 +22,7 @@ type Receipt struct {
 	Disposition Disposition `json:"disposition"`
 	SessionID   string      `json:"sessionId"`
 	TurnID      string      `json:"turnId,omitempty"`
+	ReplyID     string      `json:"replyId,omitempty"`
 	QueueID     int64       `json:"queueId,omitempty"`
 	Reason      string      `json:"reason,omitempty"`
 }
@@ -65,7 +66,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if result.Accepted {
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
-		return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID}, nil
+		return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID, ReplyID: result.ReplyID}, nil
 	}
 	if !allowQueue {
 		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
@@ -80,7 +81,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err != nil {
 		return nil, err
 	}
-	return &Receipt{Disposition: DispositionQueued, SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, Reason: "target_busy"}, nil
+	return &Receipt{Disposition: DispositionQueued, SessionID: session.ID, TurnID: result.UUID, ReplyID: result.ReplyID, QueueID: queueID, Reason: "target_busy"}, nil
 }
 
 func (d Dispatcher) record(entry registry.HistoryEntry) {

@@ -20,6 +20,7 @@ type claudeTurn struct {
 	User        string
 	Assistant   string
 	Model       string
+	StopReason  string
 	Done        bool
 	Interrupted bool
 }
@@ -90,7 +91,8 @@ func readClaudeTurns(path string) ([]claudeTurn, error) {
 					turn.Assistant += "\n" + text
 				}
 			}
-			turn.Done = record.Message.StopReason == "end_turn"
+			turn.StopReason = record.Message.StopReason
+			turn.Done = record.Message.StopReason == "end_turn" || record.Message.StopReason == "max_tokens"
 			turn.Interrupted = record.Message.StopReason == "stop_sequence" || record.Message.StopReason == "refusal"
 		}
 	}

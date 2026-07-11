@@ -92,7 +92,7 @@ agenthail dashboard enable
 agenthail dashboard status
 ```
 
-The home page is deliberately simple: your connected surfaces, live work, and anything waiting to be delivered. Open a conversation when you need the real recent history, message composer, goal, model switcher, or surface-specific controls such as steer, stop, and compact. The operations page shows the durable queue, channels, and relays; dead-lettered messages can be retried there. Every control is shown only when that connected surface supports it.
+The home page is deliberately simple: your connected surfaces, live work, and anything waiting to be delivered. Sessions can be ready, working, or waiting for your input. Open a conversation when you need the real recent history, message composer, goal, model switcher, or surface-specific controls such as steer, stop, and compact. The operations page shows the durable queue, channels, relays, and approvals; dead-lettered messages can be retried there. Every control is shown only when that connected surface supports it.
 
 The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
 
@@ -165,6 +165,13 @@ agenthail queue clear @writer
 
 # Get a macOS notification when an observed turn finishes
 agenthail daemon notify on
+
+# Fail-closed local approval hook
+agenthail approval install   # add the hook to Claude Code's local settings
+printf '%s\n' '{"source":"claude-code","session_id":"demo","tool_name":"Bash","tool_input":{"command":"git push"}}' | agenthail approval hook
+agenthail approval list
+agenthail approval allow <request-id> "approved for this run"
+agenthail approval uninstall # remove only Agenthail's hook entry
 
 # Stop or compact a supported session
 agenthail interrupt @writer
@@ -265,6 +272,7 @@ The remaining environment variables are mostly escape hatches:
 | `AGENTHAIL_NOTION_TZ` | Timezone sent with Notion messages |
 | `AGENTHAIL_MAX_RESPONSE_BYTES` | Sidecar response limit, default 16 MiB |
 | `AGENTHAIL_DEBUG=1` | Safe sidecar diagnostics without cookie values |
+| `AGENTHAIL_APPROVAL_DB` | Override the private local approval store path (tests and isolated profiles) |
 
 ## Build / verify from source
 
@@ -280,6 +288,8 @@ python3 -m py_compile sidecar/sidecar.py
 Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `agenthail doctor --json`, `list --json`, `send --json`, `history --json`, and the queue commands return stable JSON documents for anything you want to script around. Delivery history is bounded and local, so it records the daemon's decisions without copying unbounded transcripts.
 
 Desktop notifications are opt-in and macOS-only. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling.
+
+The approval hook is local and fail-closed. `agenthail approval install` adds an idempotent command hook to Claude Code's `~/.claude/settings.json`; `approval uninstall` removes only Agenthail's matching entry. A hook waits up to two minutes for `agenthail approval allow` or `agenthail approval deny`; malformed requests, store failures, and timeouts return deny. Valid requests are stored in `~/.agenthail/approvals.db`; the store is private to the local user, keeps request input bounded, and does not call ntfy or any hosted service.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
 

@@ -35,6 +35,13 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	}
 	cancel()
 	if sendErr != nil {
+		if surface.IsDeliveryTerminal(sendErr) {
+			if err := d.Registry.NackMessage(item.ID, sendErr, now, 1); err != nil {
+				d.log.Printf("dead-letter terminal queue item %d: %s", item.ID, err)
+			}
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "terminal", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
+			return
+		}
 		if surface.IsDeliveryOutcomeUnknown(sendErr) {
 			if err := d.Registry.DeadLetterUnknown(item.ID, sendErr); err != nil {
 				d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)

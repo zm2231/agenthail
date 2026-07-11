@@ -72,6 +72,20 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 	}
 }
 
+func TestNotionActiveStateUsesReferenceCounts(t *testing.T) {
+	notion := NewNotion("", "")
+	notion.setActive("thread", true)
+	notion.setActive("thread", true)
+	notion.setActive("thread", false)
+	if !notion.isActive("thread") {
+		t.Fatal("first concurrent operation cleared active state")
+	}
+	notion.setActive("thread", false)
+	if notion.isActive("thread") {
+		t.Fatal("active state remained after all operations completed")
+	}
+}
+
 func TestValidateNotionInferenceResponse(t *testing.T) {
 	success := `{"type":"agent-inference","value":[]}`
 	if err := validateNotionInferenceResponse(success); err != nil {

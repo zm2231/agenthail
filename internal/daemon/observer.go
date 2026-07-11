@@ -49,33 +49,53 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
-	if found && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID {
-		text := ""
-		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			text = observation.Reply.Text
-		}
-		if text != "" {
-			d.fireRelays(session, observation.CompletedTurnID, text)
-		}
-		if observation.Reply != nil && observation.Reply.Done {
-			notification := fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
-			if observation.Reply.Error != "" {
-				notification = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
-			}
-			go func() {
-				if err := Notify("Agenthail", notification); err != nil {
-					d.log.Printf("desktop notification: %s", err)
-				}
-			}()
-		}
-	}
+	newCompletions := unseenCompletions(observation, previous.CompletedTurnID, found)
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
+	for _, completion := range newCompletions {
+		if completion.Reply == nil || !completion.Reply.Done {
+			continue
+		}
+		if completion.Reply.Error == "" && completion.Reply.Text != "" {
+			d.fireRelays(session, completion.ID, completion.Reply.Text)
+		}
+		notification := fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+		if completion.Reply.Error != "" {
+			notification = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+		}
+		go func(message string) {
+			if err := Notify("Agenthail", message); err != nil {
+				d.log.Printf("desktop notification: %s", err)
+			}
+		}(notification)
+	}
 	if observation.Status == surface.StatusIdle && observation.ActiveTurnID == "" {
 		d.drainMessageQueue(ctx, adapter, session)
 	}
+}
+
+func unseenCompletions(observation *surface.TurnObservation, previousID string, found bool) []surface.Completion {
+	if !found || observation == nil || observation.CompletedTurnID == "" {
+		return nil
+	}
+	completions := observation.Completions
+	if len(completions) == 0 {
+		if observation.CompletedTurnID == previousID {
+			return nil
+		}
+		return []surface.Completion{{ID: observation.CompletedTurnID, Reply: observation.Reply}}
+	}
+	if previousID == "" {
+		return nil
+	}
+	for i, completion := range completions {
+		if completion.ID == previousID {
+			return completions[i+1:]
+		}
+	}
+	return completions[len(completions)-1:]
 }
 
 func (d *Daemon) surfaceForKind(kind surface.SurfaceKind) surface.Surface {

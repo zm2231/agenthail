@@ -26,6 +26,8 @@ type Notion struct {
 	modelMu      sync.Mutex
 	modelLabels  map[string]string
 	modelsAt     time.Time
+	activeMu     sync.Mutex
+	active       map[string]int
 }
 
 func NewNotion(spaceID, userID string) *Notion {
@@ -33,6 +35,7 @@ func NewNotion(spaceID, userID string) *Notion {
 		spaceID:  spaceID,
 		userID:   userID,
 		timezone: os.Getenv("AGENTHAIL_NOTION_TZ"),
+		active:   map[string]int{},
 	}
 }
 
@@ -272,6 +275,8 @@ func (n *Notion) Send(ctx context.Context, sess *surface.Session, message string
 var notionInferenceRequest = sidecarRequestWithCookies
 
 func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	n.setActive(sess.ID, true)
+	defer n.setActive(sess.ID, false)
 	if err := n.ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -375,35 +380,42 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 		n.inferenceURL("runInferenceTranscript"),
 		headers, string(bodyBytes), n.bridge(), "https://app.notion.com/", 60*time.Second)
 	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
+		return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, 0, fmt.Errorf("notion send: %w", err))
 	}
 	if status != 200 {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
+		class := surface.DeliveryUnknown
+		if status >= 400 && status < 500 && status != 408 && status != 409 && status != 429 {
+			class = surface.DeliveryTerminal
+		}
+		if status == 429 {
+			class = surface.DeliveryRetryable
+		}
+		return nil, surface.ClassifyDelivery(class, status, fmt.Errorf("notion send: %s", diagnosticExcerpt(respBody)))
 	}
 	if err := validateNotionInferenceResponse(respBody); err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion inference: %w", err))
+		return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, status, fmt.Errorf("notion inference: %w", err))
 	}
 
 	resultThreadID := threadID
 	if resultThreadID == "" {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Notion send succeeded without a thread id"))
+		return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, status, fmt.Errorf("Notion send succeeded without a thread id"))
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		completionID, reply, observeErr := n.latestAgentReply(ctx, &surface.Session{ID: resultThreadID, Surface: surface.KindNotion})
 		if observeErr != nil {
-			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("confirm Notion persistence: %w", observeErr))
+			return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, 0, fmt.Errorf("confirm Notion persistence: %w", observeErr))
 		}
 		if completionID != "" && completionID != baselineID && reply != nil && reply.Done {
-			return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
+			return &surface.SendResult{UUID: resultThreadID, ReplyID: completionID, Accepted: true}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, surface.DeliveryOutcomeUnknown(ctx.Err())
+			return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, 0, ctx.Err())
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Notion inference completed but no new persisted agent message appeared within 10s"))
+	return nil, surface.ClassifyDelivery(surface.DeliveryUnknown, 0, fmt.Errorf("Notion inference completed but no new persisted agent message appeared within 10s"))
 }
 
 func (n *Notion) fetchModels(ctx context.Context) error {

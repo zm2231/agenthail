@@ -558,7 +558,11 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
-		return nil, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		_ = r.RecordHistory(HistoryEntry{Kind: "unknown", SessionID: item.SessionID, QueueID: item.ID, Message: item.Message, Error: uncertainDeliveryError})
+		return nil, nil
 	}
 	if status != "pending" || availableAt > now.UnixMilli() {
 		return nil, nil
@@ -631,9 +635,37 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 }
 
 func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
-	res, err := r.db.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, uncertainDeliveryError, before.UnixMilli())
+	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id,session_id,message FROM message_queue WHERE status='inflight' AND inflight_at_ms<?`, before.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	var entries []HistoryEntry
+	for rows.Next() {
+		var id int64
+		var sessionID, message string
+		if err := rows.Scan(&id, &sessionID, &message); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		entries = append(entries, HistoryEntry{Kind: "unknown", SessionID: sessionID, QueueID: id, Message: message, Error: uncertainDeliveryError})
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, uncertainDeliveryError, before.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	for _, entry := range entries {
+		_ = r.RecordHistory(entry)
 	}
 	return res.RowsAffected()
 }

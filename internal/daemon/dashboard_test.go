@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/approval"
 )
 
 func TestDashboardListenIsLoopbackOnly(t *testing.T) {
@@ -94,5 +98,47 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	}
 	if got := fake.listCalls.Load(); got != 1 {
 		t.Fatalf("surface list called %d times, want one cached discovery", got)
+	}
+}
+
+func TestDashboardApprovalActionRequiresTokenAndDecidesLocalRequest(t *testing.T) {
+	t.Setenv("AGENTHAIL_APPROVAL_DB", filepath.Join(t.TempDir(), "approvals.db"))
+	store, err := approval.Open(approval.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := approval.Normalize([]byte(`{"request_id":"dashboard-approval","tool_name":"Bash","tool_input":{"command":"git push"}}`), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Observe(request, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body, _ := json.Marshal(map[string]string{"action": "approval-allow", "approvalId": request.ID})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body)))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d", unauthorized.Code)
+	}
+	allowed := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	allowed.Header.Set("Origin", "http://example.test")
+	allowed.Host = "example.test"
+	allowed.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, allowed)
+	if response.Code != http.StatusOK {
+		t.Fatalf("allow status=%d body=%s", response.Code, response.Body.String())
+	}
+	store, err = approval.Open(approval.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.List(10)
+	if err != nil || len(rows) != 1 || rows[0].Decision != approval.DecisionAllow {
+		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }

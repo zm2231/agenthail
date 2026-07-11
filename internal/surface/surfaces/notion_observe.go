@@ -15,11 +15,42 @@ func (n *Notion) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if err != nil {
 		return nil, err
 	}
-	return &surface.TurnObservation{
+	observation := &surface.TurnObservation{
 		Status:          surface.StatusIdle,
 		CompletedTurnID: messageID,
 		Reply:           reply,
-	}, nil
+	}
+	if n.isActive(sess.ID) {
+		observation.Status = surface.StatusBusy
+		observation.ActiveTurnID = sess.ID
+	}
+	return observation, nil
+}
+
+func (n *Notion) setActive(sessionID string, active bool) {
+	if sessionID == "" {
+		return
+	}
+	n.activeMu.Lock()
+	defer n.activeMu.Unlock()
+	if active {
+		if n.active == nil {
+			n.active = map[string]int{}
+		}
+		n.active[sessionID]++
+	} else {
+		if n.active[sessionID] <= 1 {
+			delete(n.active, sessionID)
+		} else {
+			n.active[sessionID]--
+		}
+	}
+}
+
+func (n *Notion) isActive(sessionID string) bool {
+	n.activeMu.Lock()
+	defer n.activeMu.Unlock()
+	return n.active[sessionID] > 0
 }
 
 func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error) {

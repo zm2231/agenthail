@@ -286,3 +286,19 @@ func TestOutboxDeadLettersUnknownDeliveryWithoutAutomaticRetry(t *testing.T) {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }
+
+func TestUnseenCompletionsCatchesUpFromRuntimeCursor(t *testing.T) {
+	observation := &surface.TurnObservation{CompletedTurnID: "c3", Completions: []surface.Completion{{ID: "c1"}, {ID: "c2"}, {ID: "c3"}}}
+	got := unseenCompletions(observation, "c1", true)
+	if len(got) != 2 || got[0].ID != "c2" || got[1].ID != "c3" {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestUnseenCompletionsDoesNotReplayUnknownCursor(t *testing.T) {
+	observation := &surface.TurnObservation{CompletedTurnID: "c3", Completions: []surface.Completion{{ID: "c2"}, {ID: "c3"}}}
+	got := unseenCompletions(observation, "old", true)
+	if len(got) != 1 || got[0].ID != "c3" {
+		t.Fatalf("got=%+v", got)
+	}
+}

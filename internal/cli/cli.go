@@ -74,6 +74,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdQueue(rest)
 	case "history":
 		return a.cmdHistory(rest)
+	case "approval":
+		return a.cmdApproval(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
 	case "channel":
@@ -120,9 +122,17 @@ Session commands:
   queue <target> "msg"|-        Hold until target is idle, then deliver (daemon required)
   queue list [--json] [--all]   Inspect pending, inflight, and dead-letter messages
   queue retry <id>              Retry a dead-letter message
-  queue rm <id>                 Cancel a pending queued message
+  queue rm <id>                 Cancel a pending or dead-letter message
   queue clear <target>          Cancel all pending messages for a target
   history [target] [count]       Show durable delivery history (default 50)
+
+Local approvals:
+  approval install                Install the Claude Code PermissionRequest hook
+  approval uninstall              Remove the Agenthail Claude Code hook
+  approval hook < request.json  Normalize a local permission hook (deny by default)
+  approval list [count]         List pending and decided requests
+  approval allow <id> [reason]  Explicitly allow one request
+  approval deny <id> [reason]   Explicitly deny one request
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
@@ -283,7 +293,7 @@ func validateCommandFlags(command string, args []string) error {
 		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {bools: map[string]bool{"--full": true, "--json": true}}, "tail": {bools: map[string]bool{"--full": true, "--json": true}},
-		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
+		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}}, "approval": {bools: map[string]bool{"--json": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {bools: map[string]bool{"--no-open": true}}, "help": {}, "-h": {}, "--help": {},
@@ -681,7 +691,11 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	if wantReply {
-		reply, err := waitForReply(ctx, surf, sess, baseline, receipt.TurnID, timeout)
+		expectedReplyID := receipt.ReplyID
+		if expectedReplyID == "" {
+			expectedReplyID = receipt.TurnID
+		}
+		reply, err := waitForReply(ctx, surf, sess, baseline, expectedReplyID, timeout)
 		if err != nil {
 			return err
 		}
@@ -735,6 +749,12 @@ func waitForReply(ctx context.Context, adapter surface.Surface, session *surface
 			}
 			if observation.Reply.Error != "" {
 				return nil, fmt.Errorf("turn %s did not complete successfully: %s", observation.CompletedTurnID, observation.Reply.Error)
+			}
+			if turnID != "" && adapter.Name() == surface.KindClaude && observation.CompletedUserID != turnID {
+				continue
+			}
+			if turnID != "" && adapter.Name() == surface.KindNotion && observation.CompletedTurnID != turnID {
+				continue
 			}
 			if turnID != "" && observation.CompletedTurnID != turnID && adapter.Name() == surface.KindCodex {
 				continue

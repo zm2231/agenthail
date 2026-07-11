@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +18,16 @@ const maxApprovalHookBytes = 128 << 10
 
 func (a *App) cmdApproval(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: agenthail approval <hook|list|allow|deny> ...")
+		return fmt.Errorf("usage: agenthail approval <install|uninstall|hook|list|allow|deny> ...")
+	}
+	if args[0] == "install" || args[0] == "uninstall" {
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agenthail approval %s", args[0])
+		}
+		if args[0] == "install" {
+			return installApprovalHook()
+		}
+		return uninstallApprovalHook()
 	}
 	store, err := approval.Open(approval.DefaultPath())
 	if err != nil {
@@ -39,8 +50,157 @@ func (a *App) cmdApproval(args []string) error {
 	case "deny", "reject":
 		return decideApproval(store, approval.DecisionDeny, args[1:])
 	default:
-		return fmt.Errorf("unknown approval command %q (use hook, list, allow, or deny)", args[0])
+		return fmt.Errorf("unknown approval command %q (use install, uninstall, hook, list, allow, or deny)", args[0])
 	}
+}
+
+func approvalSettingsPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "settings.json")
+}
+
+func approvalHookCommand() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve agenthail executable: %w", err)
+	}
+	return shellQuote(executable) + " approval hook", nil
+}
+
+func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
+
+func installApprovalHook() error {
+	command, err := approvalHookCommand()
+	if err != nil {
+		return err
+	}
+	path := approvalSettingsPath()
+	settings := map[string]any{}
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parse Claude settings: %w", err)
+		}
+	} else if !os.IsNotExist(readErr) {
+		return fmt.Errorf("read Claude settings: %w", readErr)
+	}
+	hooks, hooksPresent := settings["hooks"].(map[string]any)
+	if _, exists := settings["hooks"]; exists && !hooksPresent {
+		return fmt.Errorf("Claude settings hooks must be an object")
+	}
+	if hooks == nil {
+		hooks = map[string]any{}
+		settings["hooks"] = hooks
+	}
+	permissionHooks, permissionHooksPresent := hooks["PermissionRequest"].([]any)
+	if _, exists := hooks["PermissionRequest"]; exists && !permissionHooksPresent {
+		return fmt.Errorf("Claude settings PermissionRequest hooks must be an array")
+	}
+	for _, raw := range permissionHooks {
+		entry, _ := raw.(map[string]any)
+		inner, _ := entry["hooks"].([]any)
+		for _, hookRaw := range inner {
+			hook, _ := hookRaw.(map[string]any)
+			if hook["command"] == command {
+				return nil
+			}
+		}
+	}
+	permissionHooks = append(permissionHooks, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}})
+	hooks["PermissionRequest"] = permissionHooks
+	return writeClaudeSettings(path, settings)
+}
+
+func uninstallApprovalHook() error {
+	command, err := approvalHookCommand()
+	if err != nil {
+		return err
+	}
+	path := approvalSettingsPath()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read Claude settings: %w", err)
+	}
+	settings := map[string]any{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fmt.Errorf("parse Claude settings: %w", err)
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		return nil
+	}
+	permissionHooks, permissionHooksPresent := hooks["PermissionRequest"].([]any)
+	if _, exists := hooks["PermissionRequest"]; exists && !permissionHooksPresent {
+		return fmt.Errorf("Claude settings PermissionRequest hooks must be an array")
+	}
+	kept := permissionHooks[:0]
+	for _, raw := range permissionHooks {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			kept = append(kept, raw)
+			continue
+		}
+		innerValue, hasInner := entry["hooks"]
+		if !hasInner {
+			kept = append(kept, raw)
+			continue
+		}
+		inner, ok := innerValue.([]any)
+		if !ok {
+			return fmt.Errorf("Claude settings PermissionRequest hook entries must contain hook arrays")
+		}
+		filtered := inner[:0]
+		for _, hookRaw := range inner {
+			hook, _ := hookRaw.(map[string]any)
+			if hook["command"] != command {
+				filtered = append(filtered, hookRaw)
+			}
+		}
+		if len(filtered) != len(inner) && len(filtered) > 0 {
+			entry["hooks"] = filtered
+			kept = append(kept, raw)
+		} else if len(filtered) == len(inner) {
+			kept = append(kept, raw)
+		}
+	}
+	if len(kept) == len(permissionHooks) {
+		return nil
+	}
+	hooks["PermissionRequest"] = kept
+	return writeClaudeSettings(path, settings)
+}
+
+func writeClaudeSettings(path string, settings map[string]any) error {
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create Claude settings directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings.json.*")
+	if err != nil {
+		return fmt.Errorf("create Claude settings temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := io.Copy(tmp, bytes.NewReader(append(data, '\n'))); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace Claude settings: %w", err)
+	}
+	return nil
 }
 
 func runApprovalHook(store *approval.Store) error {
@@ -58,6 +218,23 @@ func runApprovalHook(store *approval.Store) error {
 	response, _, err := store.Observe(request, time.Now())
 	if err != nil {
 		return writeApprovalHookFailure(fmt.Errorf("approval broker unavailable: %w", err))
+	}
+	if response.Decision == approval.DecisionPending {
+		deadline := time.Now().Add(approval.DefaultWait)
+		if request.ExpiresAt.Before(deadline) {
+			deadline = request.ExpiresAt
+		}
+		for time.Now().Before(deadline) {
+			time.Sleep(250 * time.Millisecond)
+			response, _, err = store.Observe(request, time.Now())
+			if err != nil {
+				return writeApprovalHookFailure(fmt.Errorf("approval broker unavailable: %w", err))
+			}
+			if response.Decision != approval.DecisionPending {
+				return writeApprovalHookResponse(response)
+			}
+		}
+		return writeApprovalHookResponse(approval.Response{RequestID: request.ID, Decision: approval.DecisionDeny, Reason: "approval request timed out"})
 	}
 	return writeApprovalHookResponse(response)
 }
@@ -89,15 +266,13 @@ func writeApprovalHookResponse(response approval.Response) error {
 }
 
 func listApprovals(store *approval.Store, args []string) error {
-	if len(args) > 1 {
+	positional := stripFlags(args)
+	if len(positional) > 1 {
 		return fmt.Errorf("usage: agenthail approval list [count] [--json]")
 	}
 	limit := 50
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "--") {
-			continue
-		}
-		parsed, err := strconv.Atoi(arg)
+	if len(positional) == 1 {
+		parsed, err := strconv.Atoi(positional[0])
 		if err != nil || parsed < 1 {
 			return fmt.Errorf("count must be a positive integer")
 		}
@@ -116,6 +291,9 @@ func listApprovals(store *approval.Store, args []string) error {
 	}
 	for _, row := range rows {
 		fmt.Printf("%s %-7s %-16s %s", row.ID, row.Decision, row.Tool, row.Summary)
+		if len(row.Input) > 0 {
+			fmt.Printf(" input=%s", row.Input)
+		}
 		if row.SessionID != "" {
 			fmt.Printf(" session=%s", row.SessionID)
 		}
@@ -128,6 +306,9 @@ func listApprovals(store *approval.Store, args []string) error {
 }
 
 func decideApproval(store *approval.Store, decision approval.Decision, args []string) error {
+	if hasFlag(args, "--json") {
+		return fmt.Errorf("--json is only supported with approval list")
+	}
 	if len(args) < 1 || len(args) > 2 || strings.HasPrefix(args[0], "--") {
 		return fmt.Errorf("usage: agenthail approval %s <request-id> [reason]", decision)
 	}

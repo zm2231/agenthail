@@ -2,6 +2,7 @@ package approval
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestNormalizeClaudePermissionRequest(t *testing.T) {
-	now := time.Unix(100, 0)
+	now := time.Now()
 	request, err := Normalize([]byte(`{"source":"claude-code","session_id":"session-1","tool_name":"Bash","tool_input":{"command":"git status"}}`), now)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestObserveFailsClosedUntilExplicitDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	now := time.Unix(100, 0)
+	now := time.Now()
 	request, err := Normalize([]byte(`{"request_id":"request-1","source":"test","tool":"Bash","input":{"command":"git push"}}`), now)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +102,7 @@ func TestExpiredApprovalCannotBeAllowed(t *testing.T) {
 		t.Fatalf("reopened response=%+v reopened=%v err=%v", response, reopened, err)
 	}
 	rows, err := store.List(10)
-	if err != nil || len(rows) != 1 || rows[0].Decision != DecisionPending {
+	if err != nil || len(rows) != 0 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }
@@ -121,5 +122,33 @@ func TestApprovalStoreIsPrivate(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("mode=%o", info.Mode().Perm())
+	}
+}
+
+func TestApprovalStorePrunesRows(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "approvals.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Now()
+	for i := 0; i < MaxRows+5; i++ {
+		request, normalizeErr := Normalize([]byte(fmt.Sprintf(`{"request_id":"row-%d","tool":"Bash"}`, i)), now)
+		if normalizeErr != nil {
+			t.Fatal(normalizeErr)
+		}
+		if _, _, observeErr := store.Observe(request, now); observeErr != nil {
+			t.Fatal(observeErr)
+		}
+	}
+	if _, err := store.List(MaxListLimit); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM approval_requests`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != MaxRows {
+		t.Fatalf("rows=%d want=%d", count, MaxRows)
 	}
 }

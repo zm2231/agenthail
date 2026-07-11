@@ -87,6 +87,8 @@ func codexTurnState(value any) (surface.SessionStatus, bool, string) {
 	switch normalized {
 	case "running", "inprogress", "active", "queued":
 		return surface.StatusBusy, false, ""
+	case "waitingforapproval", "approvalrequired", "waitingforinput", "needsinput", "awaitinginput":
+		return surface.StatusNeedsInput, false, "approval or user input required"
 	case "completed", "complete", "succeeded", "success":
 		return surface.StatusIdle, true, ""
 	case "interrupted", "cancelled", "canceled", "failed", "error", "systemerror":
@@ -117,8 +119,12 @@ func codexObservation(thread *codexThread) *surface.TurnObservation {
 	observation := &surface.TurnObservation{Status: thread.Status}
 	for i := len(thread.Turns) - 1; i >= 0; i-- {
 		turn := thread.Turns[i]
-		if turn.Status == surface.StatusBusy {
+		if turn.Status == surface.StatusBusy || turn.Status == surface.StatusNeedsInput {
 			observation.Status = surface.StatusBusy
+			if turn.Status == surface.StatusNeedsInput {
+				observation.Status = surface.StatusNeedsInput
+				observation.TerminalReason = "approval or user input required"
+			}
 			observation.ActiveTurnID = turn.ID
 			break
 		}
@@ -138,5 +144,16 @@ func codexObservation(thread *codexThread) *surface.TurnObservation {
 		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true, Error: turn.Error}
 		break
 	}
+	completions := make([]surface.Completion, 0, len(thread.Turns))
+	for _, turn := range thread.Turns {
+		if turn.ID == "" || !turn.Done || (turn.Assistant == "" && turn.Error == "") {
+			continue
+		}
+		completions = append(completions, surface.Completion{ID: turn.ID, Reply: &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true, Error: turn.Error}})
+	}
+	if len(completions) > 128 {
+		completions = completions[len(completions)-128:]
+	}
+	observation.Completions = completions
 	return observation
 }

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/approval"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -61,15 +62,17 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt     time.Time          `json:"updatedAt"`
-	Daemon        map[string]any     `json:"daemon"`
-	Surfaces      []dashboardSurface `json:"surfaces"`
-	Sessions      []dashboardSession `json:"sessions"`
-	TotalSessions int                `json:"totalSessions"`
-	Queue         []dashboardQueue   `json:"queue"`
-	Channels      []dashboardChannel `json:"channels"`
-	Relays        []dashboardRelay   `json:"relays"`
-	History       []dashboardHistory `json:"history"`
+	UpdatedAt     time.Time           `json:"updatedAt"`
+	Daemon        map[string]any      `json:"daemon"`
+	Surfaces      []dashboardSurface  `json:"surfaces"`
+	Sessions      []dashboardSession  `json:"sessions"`
+	TotalSessions int                 `json:"totalSessions"`
+	Queue         []dashboardQueue    `json:"queue"`
+	Channels      []dashboardChannel  `json:"channels"`
+	Relays        []dashboardRelay    `json:"relays"`
+	History       []dashboardHistory  `json:"history"`
+	Approvals     []dashboardApproval `json:"approvals"`
+	ApprovalError string              `json:"approvalError,omitempty"`
 }
 
 type dashboardQueue struct {
@@ -108,6 +111,19 @@ type dashboardHistory struct {
 	Message         string `json:"message,omitempty"`
 	Result          string `json:"result,omitempty"`
 	Error           string `json:"error,omitempty"`
+}
+
+type dashboardApproval struct {
+	ID        string          `json:"id"`
+	Source    string          `json:"source"`
+	SessionID string          `json:"sessionId,omitempty"`
+	Tool      string          `json:"tool"`
+	Summary   string          `json:"summary"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Decision  string          `json:"decision"`
+	Reason    string          `json:"reason,omitempty"`
+	CreatedAt time.Time       `json:"createdAt"`
+	ExpiresAt time.Time       `json:"expiresAt"`
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
@@ -283,7 +299,19 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read delivery history: %w", err)
 	}
-	state := dashboardState{UpdatedAt: time.Now().UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history))}
+	state := dashboardState{UpdatedAt: time.Now().UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Approvals: make([]dashboardApproval, 0)}
+	if store, storeErr := approval.Open(approval.DefaultPath()); storeErr == nil {
+		if rows, listErr := store.List(50); listErr == nil {
+			for _, row := range rows {
+				state.Approvals = append(state.Approvals, dashboardApproval{ID: row.ID, Source: row.Source, SessionID: row.SessionID, Tool: row.Tool, Summary: row.Summary, Input: row.Input, Decision: string(row.Decision), Reason: row.DecisionReason, CreatedAt: row.CreatedAt, ExpiresAt: row.ExpiresAt})
+			}
+		} else {
+			state.ApprovalError = listErr.Error()
+		}
+		_ = store.Close()
+	} else {
+		state.ApprovalError = storeErr.Error()
+	}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
@@ -339,6 +367,12 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	wait.Wait()
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	sort.Slice(state.Sessions, func(i, j int) bool {
+		if state.Sessions[i].Status == surface.StatusNeedsInput && state.Sessions[j].Status != surface.StatusNeedsInput {
+			return true
+		}
+		if state.Sessions[j].Status == surface.StatusNeedsInput && state.Sessions[i].Status != surface.StatusNeedsInput {
+			return false
+		}
 		if state.Sessions[i].Status == surface.StatusBusy && state.Sessions[j].Status != surface.StatusBusy {
 			return true
 		}
@@ -358,20 +392,43 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	defer r.Body.Close()
 	var request struct {
-		Action    string `json:"action"`
-		SessionID string `json:"sessionId"`
-		Message   string `json:"message"`
-		Model     string `json:"model"`
-		QueueID   int64  `json:"queueId"`
-		Channel   string `json:"channel"`
-		TargetID  string `json:"targetId"`
-		FromID    string `json:"fromId"`
-		ToID      string `json:"toId"`
-		Pattern   string `json:"pattern"`
-		RelayID   int64  `json:"relayId"`
+		Action     string `json:"action"`
+		SessionID  string `json:"sessionId"`
+		Message    string `json:"message"`
+		Model      string `json:"model"`
+		QueueID    int64  `json:"queueId"`
+		Channel    string `json:"channel"`
+		TargetID   string `json:"targetId"`
+		FromID     string `json:"fromId"`
+		ToID       string `json:"toId"`
+		Pattern    string `json:"pattern"`
+		RelayID    int64  `json:"relayId"`
+		ApprovalID string `json:"approvalId"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		return
+	}
+	if request.Action == "approval-allow" || request.Action == "approval-deny" {
+		if request.ApprovalID == "" {
+			http.Error(w, "approvalId is required", http.StatusBadRequest)
+			return
+		}
+		store, storeErr := approval.Open(approval.DefaultPath())
+		if storeErr != nil {
+			http.Error(w, storeErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer store.Close()
+		decision := approval.DecisionDeny
+		if request.Action == "approval-allow" {
+			decision = approval.DecisionAllow
+		}
+		if err := store.Decide(request.ApprovalID, decision, "dashboard decision", time.Now()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 	if request.Action == "queue-retry" {
