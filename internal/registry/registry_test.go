@@ -161,6 +161,72 @@ func TestQueueLifecycleAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestQueueMessagesExpireAndCanBeRetried(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	id, err := r.QueueMessageWithKey("s", "expires", "expires-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := r.ExpireQueue(time.Unix(2, 0)); err != nil || count != 1 {
+		t.Fatalf("expired=%d err=%v", count, err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Status != "expired" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+	if err := r.RetryMessage(id); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.ClaimNextMessage("s", time.Now()); err != nil || item == nil {
+		t.Fatalf("retried item=%+v err=%v", item, err)
+	}
+}
+
+func TestPruneQueueRemovesTerminalRecords(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "delivered"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.AckMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := r.PruneQueue(); err != nil || count != 1 {
+		t.Fatalf("pruned=%d err=%v", count, err)
+	}
+	rows, err := r.ListQueue(true)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestPruneQueueExpiresPendingRowsWhenDaemonIsStopped(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	id, err := r.QueueMessageWithKey("s", "old", "old-prune")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := r.PruneQueue(); err != nil || count != 1 {
+		t.Fatalf("pruned=%d err=%v", count, err)
+	}
+	rows, err := r.ListQueue(true)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
 func TestRecoverInflightAndRuntimeState(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")

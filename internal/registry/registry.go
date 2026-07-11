@@ -61,6 +61,7 @@ func (r *Registry) migrate() error {
 		{"delivery_key", `TEXT NOT NULL DEFAULT ''`},
 		{"model", `TEXT NOT NULL DEFAULT ''`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
+		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, column := range columns {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
@@ -70,6 +71,7 @@ func (r *Registry) migrate() error {
 	_, err := r.db.Exec(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
+		UPDATE message_queue SET expires_at_ms=CAST(strftime('%s', queued_at) AS INTEGER)*1000+` + fmt.Sprint(DefaultQueueTTL.Milliseconds()) + ` WHERE expires_at_ms=0 AND queued_at!='';
 		CREATE UNIQUE INDEX IF NOT EXISTS message_queue_delivery_key
 		ON message_queue(delivery_key) WHERE delivery_key!='';`)
 	return err
@@ -142,7 +144,8 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	last_error TEXT NOT NULL DEFAULT '', available_at_ms INTEGER NOT NULL DEFAULT 0,
 	inflight_at_ms INTEGER NOT NULL DEFAULT 0, delivery_key TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
@@ -309,7 +312,7 @@ func (r *Registry) QueueMessageWithKey(sessionID, message, deliveryKey string) (
 }
 
 func (r *Registry) QueueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions) (int64, error) {
-	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,status,updated_at) VALUES (?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model)
+	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,status,updated_at,expires_at_ms) VALUES (?,?,?,?,'pending',datetime('now'),?)`, sessionID, message, deliveryKey, options.Model, time.Now().Add(DefaultQueueTTL).UnixMilli())
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -329,12 +332,16 @@ func (r *Registry) QueueMessageWithOptions(sessionID, message, deliveryKey strin
 }
 
 func (r *Registry) QueueCount(sessionID string) int {
+	_, _ = r.ExpireQueue(time.Now())
 	var n int
 	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
 	return n
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
+	if _, err := r.ExpireQueue(time.Now()); err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`)
 	if err != nil {
 		return nil, err
@@ -361,8 +368,9 @@ type QueuedMessage struct {
 }
 
 const (
-	maxHistoryText = 16 * 1024
-	maxHistoryRows = 2000
+	DefaultQueueTTL = time.Hour
+	maxHistoryText  = 16 * 1024
+	maxHistoryRows  = 2000
 )
 
 // HistoryEntry is the durable, operator-facing record of work moving through
@@ -447,12 +455,16 @@ type QueueRow struct {
 	Attempts  int    `json:"attempts"`
 	LastError string `json:"lastError,omitempty"`
 	QueuedAt  string `json:"queuedAt"`
+	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
 const uncertainDeliveryError = "delivery outcome is unknown after daemon interruption; retry explicitly if the target did not receive it"
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
-	query := `SELECT id,session_id,message,model,status,attempts,last_error,queued_at FROM message_queue`
+	if _, err := r.ExpireQueue(time.Now()); err != nil {
+		return nil, err
+	}
+	query := `SELECT id,session_id,message,model,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled')`
 	}
@@ -465,7 +477,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	result := make([]QueueRow, 0)
 	for rows.Next() {
 		var row QueueRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -476,7 +488,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,delivered=0,updated_at=datetime('now'),expires_at_ms=? WHERE id=? AND status IN ('dead','expired')`, time.Now().Add(DefaultQueueTTL).UnixMilli(), id)
 	if err != nil {
 		return err
 	}
@@ -490,7 +502,7 @@ func (r *Registry) RetryMessage(id int64) error {
 func (r *Registry) CancelMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead')`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE id=? AND status IN ('pending','dead','expired')`, id)
 	if err != nil {
 		return err
 	}
@@ -502,12 +514,15 @@ func (r *Registry) CancelMessage(id int64) error {
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
+	if _, err := r.ExpireQueue(time.Now()); err != nil {
+		return 0, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status='pending'`, sessionID)
+	rows, err := tx.Query(`SELECT id,message FROM message_queue WHERE session_id=? AND status IN ('pending','expired')`, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -524,7 +539,7 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err := rows.Close(); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE session_id=? AND status='pending'`, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET status='canceled',updated_at=datetime('now') WHERE session_id=? AND status IN ('pending','expired')`, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -538,6 +553,9 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 }
 
 func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	if _, err := r.ExpireQueue(now); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -579,6 +597,53 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 		return nil, err
 	}
 	return &item, nil
+}
+
+func (r *Registry) ExpireQueue(now time.Time) (int64, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id,session_id,message FROM message_queue WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, now.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	var entries []HistoryEntry
+	for rows.Next() {
+		var id int64
+		var sessionID, message string
+		if err := rows.Scan(&id, &sessionID, &message); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		entries = append(entries, HistoryEntry{Kind: "expired", SessionID: sessionID, QueueID: id, Message: message, Error: "message expired after one hour"})
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(`UPDATE message_queue SET status='expired',last_error='message expired after one hour',available_at_ms=0,updated_at=datetime('now') WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, now.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	for _, entry := range entries {
+		_ = r.RecordHistory(entry)
+	}
+	return res.RowsAffected()
+}
+
+func (r *Registry) PruneQueue() (int64, error) {
+	if _, err := r.ExpireQueue(time.Now()); err != nil {
+		return 0, err
+	}
+	res, err := r.db.Exec(`DELETE FROM message_queue WHERE status IN ('delivered','canceled','expired')`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (r *Registry) AckMessage(id int64) error {

@@ -121,15 +121,17 @@ Session commands:
   steer <target> "message"      Inject guidance into the running turn
   queue <target> "msg"|-        Hold until target is idle, then deliver (daemon required)
   queue list [--json] [--all]   Inspect pending, inflight, and dead-letter messages
-  queue retry <id>              Retry a dead-letter message
-  queue rm <id>                 Cancel a pending or dead-letter message
-  queue clear <target>          Cancel all pending messages for a target
+  queue retry <id>              Retry a dead-letter or expired message
+  queue rm <id>                 Cancel a pending, expired, or dead-letter message
+  queue clear <target>          Cancel all pending or expired messages for a target
+  queue prune                   Remove delivered, canceled, and expired queue records
   history [target] [count]       Show durable delivery history (default 50)
 
 Local approvals:
-  approval install                Install the Claude Code PermissionRequest hook
-  approval uninstall              Remove the Agenthail Claude Code hook
+  approval install                Install Claude Code permission and question hooks
+  approval uninstall              Remove the Agenthail Claude Code hooks
   approval hook < request.json  Normalize a local permission hook (deny by default)
+  approval question-hook < request.json  Normalize an AskUserQuestion hook
   approval list [count]         List pending and decided requests
   approval allow <id> [reason]  Explicitly allow one request
   approval deny <id> [reason]   Explicitly deny one request
@@ -1044,6 +1046,17 @@ func (a *App) cmdQueue(args []string) error {
 			return err
 		}
 		fmt.Printf("queue item #%d scheduled for retry\n", id)
+		return nil
+	}
+	if len(args) > 0 && args[0] == "prune" {
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agenthail queue prune")
+		}
+		count, err := a.Registry.PruneQueue()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("pruned %d terminal queue record(s)\n", count)
 		return nil
 	}
 	if len(args) > 0 && (args[0] == "rm" || args[0] == "cancel") {

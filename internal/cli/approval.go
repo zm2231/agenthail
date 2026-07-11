@@ -18,7 +18,7 @@ const maxApprovalHookBytes = 128 << 10
 
 func (a *App) cmdApproval(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: agenthail approval <install|uninstall|hook|list|allow|deny|answer> ...")
+		return fmt.Errorf("usage: agenthail approval <install|uninstall|hook|question-hook|list|allow|deny|answer> ...")
 	}
 	if args[0] == "install" || args[0] == "uninstall" {
 		if len(args) != 1 {
@@ -34,6 +34,9 @@ func (a *App) cmdApproval(args []string) error {
 		if args[0] == "hook" {
 			return writeApprovalHookFailure(fmt.Errorf("approval broker unavailable: %w", err))
 		}
+		if args[0] == "question-hook" {
+			return writeQuestionHookFailure(fmt.Errorf("approval broker unavailable: %w", err))
+		}
 		return err
 	}
 	defer store.Close()
@@ -43,6 +46,11 @@ func (a *App) cmdApproval(args []string) error {
 			return fmt.Errorf("usage: agenthail approval hook < request.json")
 		}
 		return runApprovalHook(store)
+	case "question-hook":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: agenthail approval question-hook < request.json")
+		}
+		return runQuestionHook(store)
 	case "list":
 		return listApprovals(store, args[1:])
 	case "allow", "approve":
@@ -52,7 +60,7 @@ func (a *App) cmdApproval(args []string) error {
 	case "answer":
 		return answerApproval(store, args[1:])
 	default:
-		return fmt.Errorf("unknown approval command %q (use install, uninstall, hook, list, allow, deny, or answer)", args[0])
+		return fmt.Errorf("unknown approval command %q (use install, uninstall, hook, question-hook, list, allow, deny, or answer)", args[0])
 	}
 }
 
@@ -69,11 +77,19 @@ func approvalHookCommand() (string, error) {
 	return shellQuote(executable) + " approval hook", nil
 }
 
+func approvalQuestionHookCommand() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve agenthail executable: %w", err)
+	}
+	return shellQuote(executable) + " approval question-hook", nil
+}
+
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 
-func isAgenthailApprovalHook(value string) bool {
+func isAgenthailHook(value, suffix string) bool {
 	value = strings.TrimSpace(value)
-	return strings.HasSuffix(value, " approval hook") && strings.Contains(value, "agenthail")
+	return strings.HasSuffix(value, suffix) && strings.Contains(value, "agenthail")
 }
 
 func installApprovalHook() error {
@@ -81,35 +97,104 @@ func installApprovalHook() error {
 	if err != nil {
 		return err
 	}
+	questionCommand, err := approvalQuestionHookCommand()
+	if err != nil {
+		return err
+	}
+	path, settings, err := readClaudeSettings()
+	if err != nil {
+		return err
+	}
+	changed, err := installClaudeHook(settings, "PermissionRequest", "", command, " approval hook")
+	if err != nil {
+		return err
+	}
+	questionChanged, err := installClaudeHook(settings, "PreToolUse", "AskUserQuestion", questionCommand, " approval question-hook")
+	if err != nil {
+		return err
+	}
+	if !changed && !questionChanged {
+		return nil
+	}
+	return writeClaudeSettings(path, settings)
+}
+
+func uninstallApprovalHook() error {
+	command, err := approvalHookCommand()
+	if err != nil {
+		return err
+	}
+	questionCommand, err := approvalQuestionHookCommand()
+	if err != nil {
+		return err
+	}
+	path, settings, err := readClaudeSettings()
+	if err != nil {
+		return err
+	}
+	changed, err := uninstallClaudeHook(settings, "PermissionRequest", command)
+	if err != nil {
+		return err
+	}
+	questionChanged, err := uninstallClaudeHook(settings, "PreToolUse", questionCommand)
+	if err != nil {
+		return err
+	}
+	if !changed && !questionChanged {
+		return nil
+	}
+	return writeClaudeSettings(path, settings)
+}
+
+func readClaudeSettings() (string, map[string]any, error) {
 	path := approvalSettingsPath()
 	settings := map[string]any{}
 	if data, readErr := os.ReadFile(path); readErr == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("parse Claude settings: %w", err)
+			return "", nil, fmt.Errorf("parse Claude settings: %w", err)
 		}
 	} else if !os.IsNotExist(readErr) {
-		return fmt.Errorf("read Claude settings: %w", readErr)
+		return "", nil, fmt.Errorf("read Claude settings: %w", readErr)
 	}
-	hooks, hooksPresent := settings["hooks"].(map[string]any)
-	if _, exists := settings["hooks"]; exists && !hooksPresent {
-		return fmt.Errorf("Claude settings hooks must be an object")
+	return path, settings, nil
+}
+
+func hookEntries(settings map[string]any, event string) (map[string]any, []any, error) {
+	hooks, present := settings["hooks"].(map[string]any)
+	if _, exists := settings["hooks"]; exists && !present {
+		return nil, nil, fmt.Errorf("Claude settings hooks must be an object")
 	}
 	if hooks == nil {
 		hooks = map[string]any{}
 		settings["hooks"] = hooks
 	}
-	permissionHooks, permissionHooksPresent := hooks["PermissionRequest"].([]any)
-	if _, exists := hooks["PermissionRequest"]; exists && !permissionHooksPresent {
-		return fmt.Errorf("Claude settings PermissionRequest hooks must be an array")
+	entries, present := hooks[event].([]any)
+	if _, exists := hooks[event]; exists && !present {
+		return nil, nil, fmt.Errorf("Claude settings %s hooks must be an array", event)
 	}
-	kept := permissionHooks[:0]
+	return hooks, entries, nil
+}
+
+func installClaudeHook(settings map[string]any, event, matcher, command, staleSuffix string) (bool, error) {
+	hooks, entries, err := hookEntries(settings, event)
+	if err != nil {
+		return false, err
+	}
+	kept := entries[:0]
 	present := false
 	changed := false
-	for _, raw := range permissionHooks {
+	for _, raw := range entries {
 		entry, ok := raw.(map[string]any)
 		if !ok {
 			kept = append(kept, raw)
 			continue
+		}
+		if matcher != "" {
+			entryMatcher, _ := entry["matcher"].(string)
+			if entryMatcher != matcher {
+				kept = append(kept, raw)
+				continue
+			}
 		}
 		inner, ok := entry["hooks"].([]any)
 		if !ok {
@@ -123,13 +208,11 @@ func installApprovalHook() error {
 			if value == command {
 				present = true
 				filtered = append(filtered, hookRaw)
-				continue
-			}
-			if isAgenthailApprovalHook(value) {
+			} else if isAgenthailHook(value, staleSuffix) {
 				changed = true
-				continue
+			} else {
+				filtered = append(filtered, hookRaw)
 			}
-			filtered = append(filtered, hookRaw)
 		}
 		if len(filtered) == 0 {
 			changed = true
@@ -138,78 +221,58 @@ func installApprovalHook() error {
 		entry["hooks"] = filtered
 		kept = append(kept, raw)
 	}
-	permissionHooks = kept
 	if !present {
-		permissionHooks = append(permissionHooks, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}})
+		entry := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}}
+		if matcher != "" {
+			entry["matcher"] = matcher
+		}
+		kept = append(kept, entry)
 		changed = true
 	}
-	if !changed {
-		return nil
-	}
-	hooks["PermissionRequest"] = permissionHooks
-	return writeClaudeSettings(path, settings)
+	hooks[event] = kept
+	return changed, nil
 }
 
-func uninstallApprovalHook() error {
-	command, err := approvalHookCommand()
+func uninstallClaudeHook(settings map[string]any, event, command string) (bool, error) {
+	hooks, entries, err := hookEntries(settings, event)
 	if err != nil {
-		return err
+		return false, err
 	}
-	path := approvalSettingsPath()
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read Claude settings: %w", err)
-	}
-	settings := map[string]any{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("parse Claude settings: %w", err)
-	}
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		return nil
-	}
-	permissionHooks, permissionHooksPresent := hooks["PermissionRequest"].([]any)
-	if _, exists := hooks["PermissionRequest"]; exists && !permissionHooksPresent {
-		return fmt.Errorf("Claude settings PermissionRequest hooks must be an array")
-	}
-	kept := permissionHooks[:0]
-	for _, raw := range permissionHooks {
+	kept := entries[:0]
+	changed := false
+	for _, raw := range entries {
 		entry, ok := raw.(map[string]any)
 		if !ok {
 			kept = append(kept, raw)
 			continue
 		}
-		innerValue, hasInner := entry["hooks"]
-		if !hasInner {
+		inner, ok := entry["hooks"].([]any)
+		if !ok {
 			kept = append(kept, raw)
 			continue
-		}
-		inner, ok := innerValue.([]any)
-		if !ok {
-			return fmt.Errorf("Claude settings PermissionRequest hook entries must contain hook arrays")
 		}
 		filtered := inner[:0]
 		for _, hookRaw := range inner {
 			hook, _ := hookRaw.(map[string]any)
-			if hook["command"] != command {
+			if hook["command"] == command {
+				changed = true
+			} else {
 				filtered = append(filtered, hookRaw)
 			}
 		}
-		if len(filtered) != len(inner) && len(filtered) > 0 {
+		if len(filtered) > 0 {
 			entry["hooks"] = filtered
 			kept = append(kept, raw)
 		} else if len(filtered) == len(inner) {
 			kept = append(kept, raw)
+		} else {
+			changed = true
 		}
 	}
-	if len(kept) == len(permissionHooks) {
-		return nil
+	if changed {
+		hooks[event] = kept
 	}
-	hooks["PermissionRequest"] = kept
-	return writeClaudeSettings(path, settings)
+	return changed, nil
 }
 
 func writeClaudeSettings(path string, settings map[string]any) error {
@@ -244,20 +307,28 @@ func writeClaudeSettings(path string, settings map[string]any) error {
 }
 
 func runApprovalHook(store *approval.Store) error {
+	return runHook(store, writeApprovalHookResponse, writeApprovalHookFailure)
+}
+
+func runQuestionHook(store *approval.Store) error {
+	return runHook(store, writeQuestionHookResponse, writeQuestionHookFailure)
+}
+
+func runHook(store *approval.Store, writeResponse func(approval.Response) error, writeFailure func(error) error) error {
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, maxApprovalHookBytes+1))
 	if err != nil {
-		return writeApprovalHookFailure(fmt.Errorf("read approval request: %w", err))
+		return writeFailure(fmt.Errorf("read approval request: %w", err))
 	}
 	if len(data) > maxApprovalHookBytes {
-		return writeApprovalHookFailure(fmt.Errorf("approval request exceeds %d bytes", maxApprovalHookBytes))
+		return writeFailure(fmt.Errorf("approval request exceeds %d bytes", maxApprovalHookBytes))
 	}
 	request, err := approval.Normalize(data, time.Now())
 	if err != nil {
-		return writeApprovalHookFailure(err)
+		return writeFailure(err)
 	}
 	response, _, err := store.Observe(request, time.Now())
 	if err != nil {
-		return writeApprovalHookFailure(fmt.Errorf("approval broker unavailable: %w", err))
+		return writeFailure(fmt.Errorf("approval broker unavailable: %w", err))
 	}
 	if response.Decision == approval.DecisionPending {
 		deadline := time.Now().Add(approval.DefaultWait)
@@ -268,15 +339,15 @@ func runApprovalHook(store *approval.Store) error {
 			time.Sleep(250 * time.Millisecond)
 			response, _, err = store.Observe(request, time.Now())
 			if err != nil {
-				return writeApprovalHookFailure(fmt.Errorf("approval broker unavailable: %w", err))
+				return writeFailure(fmt.Errorf("approval broker unavailable: %w", err))
 			}
 			if response.Decision != approval.DecisionPending {
-				return writeApprovalHookResponse(response)
+				return writeResponse(response)
 			}
 		}
-		return writeApprovalHookResponse(approval.Response{RequestID: request.ID, Decision: approval.DecisionDeny, Reason: "approval request timed out"})
+		return writeResponse(approval.Response{RequestID: request.ID, Decision: approval.DecisionDeny, Reason: "approval request timed out"})
 	}
-	return writeApprovalHookResponse(response)
+	return writeResponse(response)
 }
 
 func writeApprovalHookFailure(err error) error {
@@ -306,6 +377,35 @@ func writeApprovalHookResponse(response approval.Response) error {
 			"hookEventName": "PermissionRequest",
 			"decision":      decisionPayload,
 		},
+	}
+	return json.NewEncoder(os.Stdout).Encode(output)
+}
+
+func writeQuestionHookFailure(err error) error {
+	response := approval.Response{Decision: approval.DecisionDeny, Reason: "approval denied: " + err.Error()}
+	_ = writeQuestionHookResponse(response)
+	return err
+}
+
+func writeQuestionHookResponse(response approval.Response) error {
+	decision := "deny"
+	if response.Decision == approval.DecisionAllow {
+		decision = "allow"
+	}
+	output := map[string]any{
+		"requestId": response.RequestID,
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       decision,
+			"permissionDecisionReason": response.Reason,
+		},
+	}
+	if len(response.UpdatedInput) > 0 && response.Decision == approval.DecisionAllow {
+		var updatedInput any
+		if err := json.Unmarshal(response.UpdatedInput, &updatedInput); err != nil {
+			return err
+		}
+		output["hookSpecificOutput"].(map[string]any)["updatedInput"] = updatedInput
 	}
 	return json.NewEncoder(os.Stdout).Encode(output)
 }

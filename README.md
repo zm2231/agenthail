@@ -154,6 +154,7 @@ agenthail steer @writer "keep the example, cut the setup"
 # See what is waiting or failed
 agenthail queue list
 agenthail queue retry 12
+agenthail queue prune
 
 # See what the daemon sent, queued, retried, or failed
 agenthail history
@@ -162,6 +163,8 @@ agenthail history @writer 25
 # Take back a pending instruction
 agenthail queue rm 12
 agenthail queue clear @writer
+
+Queued messages expire after one hour unless they are already in flight. Expired messages stay visible for review and can be retried or canceled; `queue prune` removes terminal queue records without deleting delivery history.
 
 # Get a macOS notification when an observed turn finishes
 agenthail daemon notify on
@@ -290,7 +293,7 @@ Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `age
 
 Desktop notifications are opt-in and macOS-only. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling.
 
-The approval hook is local and fail-closed. `agenthail approval install` adds an idempotent `PermissionRequest` command hook to Claude Code's `~/.claude/settings.json`; that hook also recognizes `AskUserQuestion` tool requests. `approval uninstall` removes only Agenthail's matching entry. A hook waits up to two minutes for `agenthail approval allow`, `agenthail approval answer`, or `agenthail approval deny`; malformed requests, store failures, and timeouts return deny. Valid requests are stored in `~/.agenthail/approvals.db`; the store is private to the local user, keeps request input bounded, and does not call ntfy or any hosted service.
+The approval broker is local and fail-closed. `agenthail approval install` adds idempotent Claude Code `PermissionRequest` and `PreToolUse` hooks to `~/.claude/settings.json`; the latter is matched only to `AskUserQuestion` and returns Claude's external-answer payload after `agenthail approval answer`. `approval uninstall` removes only Agenthail's matching entries. A hook waits up to two minutes for `agenthail approval allow`, `agenthail approval answer`, or `agenthail approval deny`; malformed requests, store failures, and timeouts return deny. Valid requests are stored in `~/.agenthail/approvals.db`; the store is private to the local user, keeps request input bounded, and does not call ntfy or any hosted service.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
 

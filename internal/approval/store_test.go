@@ -1,6 +1,7 @@
 package approval
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -102,6 +103,54 @@ func TestAskUserQuestionStoresAndReturnsUpdatedInput(t *testing.T) {
 	canonical, _ := canonicalJSON(updated)
 	if err != nil || response.Decision != DecisionAllow || string(response.UpdatedInput) != string(canonical) {
 		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
+func TestAskUserQuestionRejectsIncompleteAnswer(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "approvals.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Now()
+	request, err := Normalize([]byte(`{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Ship?","options":[{"label":"Yes"}]}]}}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Observe(request, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DecideWithInput(request.ID, DecisionAllow, "answered", json.RawMessage(`{"questions":[{"question":"Ship?"}],"answers":{"Other":"Yes"}}`), now); err == nil {
+		t.Fatal("incomplete answer accepted")
+	}
+}
+
+func TestConcurrentApprovalStoreMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "approvals.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE approval_requests (id TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', tool TEXT NOT NULL, action TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', input_json TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT NOT NULL DEFAULT '', decided_at INTEGER NOT NULL DEFAULT 0);`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 8
+	results := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			store, openErr := Open(path)
+			if store != nil {
+				store.Close()
+			}
+			results <- openErr
+		}()
+	}
+	for i := 0; i < workers; i++ {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent migration failed: %v", err)
+		}
 	}
 }
 

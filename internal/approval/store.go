@@ -106,18 +106,31 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialize approval store: %w", err)
 	}
-	var columnCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('approval_requests') WHERE name='decision_input_json'`).Scan(&columnCount); err != nil {
+	if err := ensureDecisionInputColumn(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("inspect approval store: %w", err)
-	}
-	if columnCount == 0 {
-		if _, err := db.Exec(`ALTER TABLE approval_requests ADD COLUMN decision_input_json TEXT NOT NULL DEFAULT ''`); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("migrate approval store: %w", err)
-		}
+		return nil, err
 	}
 	return store, nil
+}
+
+func ensureDecisionInputColumn(db *sql.DB) error {
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('approval_requests') WHERE name='decision_input_json'`).Scan(&columnCount); err != nil {
+		return fmt.Errorf("inspect approval store: %w", err)
+	}
+	if columnCount > 0 {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE approval_requests ADD COLUMN decision_input_json TEXT NOT NULL DEFAULT ''`); err == nil {
+		return nil
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('approval_requests') WHERE name='decision_input_json'`).Scan(&columnCount); err != nil {
+		return fmt.Errorf("migrate approval store: %w", err)
+	}
+	if columnCount > 0 {
+		return nil
+	}
+	return fmt.Errorf("migrate approval store: decision_input_json column could not be added")
 }
 
 func (s *Store) Close() error {
@@ -277,8 +290,8 @@ func (s *Store) DecideWithInput(id string, decision Decision, reason string, upd
 	if len(updatedInput) > MaxInputBytes {
 		return fmt.Errorf("approval response input exceeds %d bytes", MaxInputBytes)
 	}
-	var tool string
-	if err := s.db.QueryRow(`SELECT tool FROM approval_requests WHERE id=?`, id).Scan(&tool); err != nil {
+	var tool, originalInput string
+	if err := s.db.QueryRow(`SELECT tool,input_json FROM approval_requests WHERE id=?`, id).Scan(&tool, &originalInput); err != nil {
 		return err
 	}
 	if tool == "AskUserQuestion" && decision == DecisionAllow && len(updatedInput) == 0 {
@@ -291,6 +304,11 @@ func (s *Store) DecideWithInput(id string, decision Decision, reason string, upd
 		if err != nil {
 			return fmt.Errorf("approval response input is invalid JSON: %w", err)
 		}
+		if tool == "AskUserQuestion" && decision == DecisionAllow {
+			if err := validateAskUserQuestionAnswer([]byte(originalInput), canonical); err != nil {
+				return err
+			}
+		}
 	}
 	result, err := s.db.Exec(`UPDATE approval_requests SET decision=?,decision_reason=?,decision_input_json=?,decided_at=? WHERE id=? AND decision=? AND expires_at>?`, decision, boundText(reason, MaxSummaryLength), string(canonical), now.UnixMilli(), id, DecisionPending, now.UnixMilli())
 	if err != nil {
@@ -298,6 +316,49 @@ func (s *Store) DecideWithInput(id string, decision Decision, reason string, upd
 	}
 	if count, _ := result.RowsAffected(); count != 1 {
 		return fmt.Errorf("approval request %q is missing, decided, or expired", id)
+	}
+	return nil
+}
+
+func validateAskUserQuestionAnswer(original, updated []byte) error {
+	type question struct {
+		Question    string `json:"question"`
+		Header      string `json:"header"`
+		MultiSelect bool   `json:"multiSelect"`
+	}
+	var source struct {
+		Questions []question `json:"questions"`
+	}
+	var answer struct {
+		Questions []question                 `json:"questions"`
+		Answers   map[string]json.RawMessage `json:"answers"`
+	}
+	if err := json.Unmarshal(original, &source); err != nil || len(source.Questions) == 0 {
+		return fmt.Errorf("AskUserQuestion request is missing its questions")
+	}
+	if err := json.Unmarshal(updated, &answer); err != nil || len(answer.Questions) == 0 || answer.Answers == nil {
+		return fmt.Errorf("AskUserQuestion answer must include questions and answers")
+	}
+	for _, expected := range source.Questions {
+		key := expected.Question
+		if key == "" {
+			key = expected.Header
+		}
+		value, ok := answer.Answers[key]
+		if !ok || len(value) == 0 || string(value) == "null" {
+			return fmt.Errorf("AskUserQuestion answer is missing %q", key)
+		}
+		if expected.MultiSelect {
+			var values []string
+			if err := json.Unmarshal(value, &values); err != nil || len(values) == 0 {
+				return fmt.Errorf("AskUserQuestion answer for %q must be a non-empty list", key)
+			}
+		} else {
+			var valueText string
+			if err := json.Unmarshal(value, &valueText); err != nil || strings.TrimSpace(valueText) == "" {
+				return fmt.Errorf("AskUserQuestion answer for %q must be a non-empty string", key)
+			}
+		}
 	}
 	return nil
 }

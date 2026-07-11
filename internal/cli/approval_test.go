@@ -75,6 +75,25 @@ func TestApprovalHookReturnsAskUserQuestionUpdatedInput(t *testing.T) {
 	}
 }
 
+func TestQuestionHookReturnsPreToolUseAnswer(t *testing.T) {
+	output, err := captureStdout(t, func() error {
+		return writeQuestionHookResponse(approval.Response{RequestID: "question", Decision: approval.DecisionAllow, Reason: "answered", UpdatedInput: json.RawMessage(`{"questions":[{"question":"Ship?"}],"answers":{"Ship?":"Yes"}}`)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		HookSpecificOutput struct {
+			HookEventName      string         `json:"hookEventName"`
+			PermissionDecision string         `json:"permissionDecision"`
+			UpdatedInput       map[string]any `json:"updatedInput"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(output), &response); err != nil || response.HookSpecificOutput.HookEventName != "PreToolUse" || response.HookSpecificOutput.PermissionDecision != "allow" || response.HookSpecificOutput.UpdatedInput["answers"] == nil {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestApprovalHookMalformedInputFailsClosed(t *testing.T) {
 	t.Setenv("AGENTHAIL_APPROVAL_DB", filepath.Join(t.TempDir(), "approvals.db"))
 	app := &App{}
@@ -129,11 +148,19 @@ func TestApprovalHookInstallIsIdempotentAndPreservesSettings(t *testing.T) {
 	if strings.Contains(string(second), `"hooks": []`) {
 		t.Fatalf("empty hook groups remain: %s", second)
 	}
+	var settings map[string]any
+	if err := json.Unmarshal(second, &settings); err != nil {
+		t.Fatal(err)
+	}
+	preToolUse, _ := settings["hooks"].(map[string]any)
+	if _, ok := preToolUse["PreToolUse"]; !ok {
+		t.Fatal("AskUserQuestion hook was not installed")
+	}
 	if err := app.cmdApproval([]string{"uninstall"}); err != nil {
 		t.Fatal(err)
 	}
 	third, _ := os.ReadFile(path)
-	if strings.Contains(string(third), "approval hook") || !strings.Contains(string(third), "existing") {
+	if strings.Contains(string(third), "approval hook") || strings.Contains(string(third), "question-hook") || !strings.Contains(string(third), "existing") {
 		t.Fatalf("uninstall settings=%q", third)
 	}
 }
