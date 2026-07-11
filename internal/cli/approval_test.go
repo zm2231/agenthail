@@ -108,7 +108,7 @@ func TestApprovalHookInstallIsIdempotentAndPreservesSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"theme":"dark","hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"existing"}]}]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"theme":"dark","hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"existing"},{"type":"command","command":"'/tmp/agenthail-current' approval hook"}]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	app := &App{}
@@ -125,6 +125,9 @@ func TestApprovalHookInstallIsIdempotentAndPreservesSettings(t *testing.T) {
 	second, _ := os.ReadFile(path)
 	if strings.Count(string(second), "approval hook") != 1 {
 		t.Fatalf("duplicate hook settings=%q", second)
+	}
+	if strings.Contains(string(second), `"hooks": []`) {
+		t.Fatalf("empty hook groups remain: %s", second)
 	}
 	if err := app.cmdApproval([]string{"uninstall"}); err != nil {
 		t.Fatal(err)

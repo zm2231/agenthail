@@ -71,6 +71,11 @@ func approvalHookCommand() (string, error) {
 
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 
+func isAgenthailApprovalHook(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasSuffix(value, " approval hook") && strings.Contains(value, "agenthail")
+}
+
 func installApprovalHook() error {
 	command, err := approvalHookCommand()
 	if err != nil {
@@ -97,17 +102,50 @@ func installApprovalHook() error {
 	if _, exists := hooks["PermissionRequest"]; exists && !permissionHooksPresent {
 		return fmt.Errorf("Claude settings PermissionRequest hooks must be an array")
 	}
+	kept := permissionHooks[:0]
+	present := false
+	changed := false
 	for _, raw := range permissionHooks {
-		entry, _ := raw.(map[string]any)
-		inner, _ := entry["hooks"].([]any)
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			kept = append(kept, raw)
+			continue
+		}
+		inner, ok := entry["hooks"].([]any)
+		if !ok {
+			kept = append(kept, raw)
+			continue
+		}
+		filtered := inner[:0]
 		for _, hookRaw := range inner {
 			hook, _ := hookRaw.(map[string]any)
-			if hook["command"] == command {
-				return nil
+			value, _ := hook["command"].(string)
+			if value == command {
+				present = true
+				filtered = append(filtered, hookRaw)
+				continue
 			}
+			if isAgenthailApprovalHook(value) {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, hookRaw)
 		}
+		if len(filtered) == 0 {
+			changed = true
+			continue
+		}
+		entry["hooks"] = filtered
+		kept = append(kept, raw)
 	}
-	permissionHooks = append(permissionHooks, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}})
+	permissionHooks = kept
+	if !present {
+		permissionHooks = append(permissionHooks, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}})
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
 	hooks["PermissionRequest"] = permissionHooks
 	return writeClaudeSettings(path, settings)
 }

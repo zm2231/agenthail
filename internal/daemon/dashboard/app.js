@@ -49,7 +49,11 @@ function renderSessions() {
 }
 function approvalCard(item) {
   const input = item.input || {};
-  if (item.tool !== 'AskUserQuestion' || !Array.isArray(input.questions)) return `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(item.tool)} · ${escape(item.source || 'local hook')}</div><div class="operation-detail">${escape(item.summary)} · ${timeAgo(item.createdAt)}</div></div><div><button class="button quiet" data-approval-action="approval-allow" data-approval-id="${escape(item.id)}" type="button">Allow</button><button class="button quiet" data-approval-action="approval-deny" data-approval-id="${escape(item.id)}" type="button">Deny</button></div></article>`;
+  if (item.tool !== 'AskUserQuestion' || !Array.isArray(input.questions)) {
+    const detail = item.summary || `${item.tool} request`;
+    const payload = JSON.stringify(input, null, 2);
+    return `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(item.tool)} · ${escape(item.source || 'local hook')}</div><div class="operation-detail">${escape(detail)} · ${timeAgo(item.createdAt)}</div><pre class="approval-input">${escape(payload)}</pre></div><div><button class="button quiet" data-approval-action="approval-allow" data-approval-id="${escape(item.id)}" type="button">Allow</button><button class="button quiet" data-approval-action="approval-deny" data-approval-id="${escape(item.id)}" type="button">Deny</button></div></article>`;
+  }
   const questions = input.questions.map(question => `<div class="approval-question" data-multi-select="${question.multiSelect ? '1' : '0'}"><strong>${escape(question.question || question.header || 'Question')}</strong><div class="approval-options">${(question.options || []).map(option => `<button class="button quiet approval-option" data-approval-option data-question="${escape(question.question || question.header || '')}" data-value="${escape(option.label || '')}" type="button">${escape(option.label || '')}</button>`).join('')}</div></div>`).join('');
   return `<article class="operation-item approval-card" data-approval-card="${escape(item.id)}"><div class="operation-main"><div class="operation-title">AskUserQuestion · ${escape(item.source || 'local hook')}</div>${questions}</div><div><button class="button quiet" data-approval-answer="${escape(item.id)}" type="button">Answer</button><button class="button quiet" data-approval-action="approval-deny" data-approval-id="${escape(item.id)}" type="button">Deny</button></div></article>`;
 }

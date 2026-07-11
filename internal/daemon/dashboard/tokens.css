@@ -84,4 +84,4 @@ html, body { margin:0; min-height:100%; background:var(--color-page); color:var(
 }
 :root { --color-needs-input:#e6c76b; }
 .status-pill.needs_input { color:var(--color-needs-input); border-color:rgba(230,199,107,.45); }
-.approval-card { align-items:flex-start; }.approval-question { margin-top:.7rem; }.approval-question strong { display:block; font-size:.82rem; }.approval-options { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.45rem; }.approval-option.selected { color:var(--color-ink); border-color:var(--color-accent); background:#30251f; }
+.approval-card { align-items:flex-start; }.approval-input { max-width:100%; margin:.65rem 0 0; padding:.65rem; overflow:auto; border:1px solid var(--color-rule); border-radius:.55rem; color:var(--color-muted); background:var(--color-page); font:650 .68rem/1.45 var(--font-mono); white-space:pre-wrap; overflow-wrap:anywhere; }.approval-question { margin-top:.7rem; }.approval-question strong { display:block; font-size:.82rem; }.approval-options { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.45rem; }.approval-option.selected { color:var(--color-ink); border-color:var(--color-accent); background:#30251f; }
