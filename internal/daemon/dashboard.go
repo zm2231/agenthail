@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -617,7 +618,13 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
-	exchanges, err := adapter.Tail(ctx, session, 8)
+	limit := 20
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 4 && parsed <= 40 {
+			limit = parsed
+		}
+	}
+	exchanges, err := adapter.Tail(ctx, session, limit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("load conversation: %s", err), http.StatusBadGateway)
 		return
