@@ -127,7 +127,7 @@ func TestApprovalHookInstallIsIdempotentAndPreservesSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"theme":"dark","hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"existing"},{"type":"command","command":"'/tmp/agenthail-current' approval hook"}]}]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"theme":"dark","hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"existing"},{"type":"command","command":"'/tmp/agenthail-current' approval hook"}]}],"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"'/tmp/agenthail-current' approval question-hook"}]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	app := &App{}
@@ -152,9 +152,9 @@ func TestApprovalHookInstallIsIdempotentAndPreservesSettings(t *testing.T) {
 	if err := json.Unmarshal(second, &settings); err != nil {
 		t.Fatal(err)
 	}
-	preToolUse, _ := settings["hooks"].(map[string]any)
-	if _, ok := preToolUse["PreToolUse"]; !ok {
-		t.Fatal("AskUserQuestion hook was not installed")
+	hooks, _ := settings["hooks"].(map[string]any)
+	if preToolUse, ok := hooks["PreToolUse"].([]any); ok && len(preToolUse) > 0 {
+		t.Fatal("AskUserQuestion hook should not be installed by default")
 	}
 	if err := app.cmdApproval([]string{"uninstall"}); err != nil {
 		t.Fatal(err)

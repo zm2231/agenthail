@@ -293,7 +293,7 @@ Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `age
 
 Desktop notifications are opt-in and macOS-only. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling.
 
-The approval broker is local and fail-closed. `agenthail approval install` adds idempotent Claude Code `PermissionRequest` and `PreToolUse` hooks to `~/.claude/settings.json`; the latter is matched only to `AskUserQuestion` and returns Claude's external-answer payload after `agenthail approval answer`. `approval uninstall` removes only Agenthail's matching entries. A hook waits up to two minutes for `agenthail approval allow`, `agenthail approval answer`, or `agenthail approval deny`; malformed requests, store failures, and timeouts return deny. Valid requests are stored in `~/.agenthail/approvals.db`; the store is private to the local user, keeps request input bounded, and does not call ntfy or any hosted service.
+Permission requests stay on your Mac. `agenthail approval install` adds a small local bridge for Claude Code permission prompts, while leaving Claude's own question screen visible. If an older Agenthail setting could hide that screen, installation cleans it up. You can allow or deny a prompt from the dashboard or CLI; if nobody responds, the request is denied locally. Nothing is sent to a hosted approval service.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
 

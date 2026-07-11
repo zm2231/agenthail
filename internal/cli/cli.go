@@ -128,7 +128,7 @@ Session commands:
   history [target] [count]       Show durable delivery history (default 50)
 
 Local approvals:
-  approval install                Install Claude Code permission and question hooks
+  approval install                Install the Claude Code PermissionRequest hook
   approval uninstall              Remove the Agenthail Claude Code hooks
   approval hook < request.json  Normalize a local permission hook (deny by default)
   approval question-hook < request.json  Normalize an AskUserQuestion hook

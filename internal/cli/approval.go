@@ -74,6 +74,9 @@ func approvalHookCommand() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve agenthail executable: %w", err)
 	}
+	if launcher := os.Getenv("AGENTHAIL_LAUNCHER"); launcher != "" {
+		executable = launcher
+	}
 	return shellQuote(executable) + " approval hook", nil
 }
 
@@ -81,6 +84,9 @@ func approvalQuestionHookCommand() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve agenthail executable: %w", err)
+	}
+	if launcher := os.Getenv("AGENTHAIL_LAUNCHER"); launcher != "" {
+		executable = launcher
 	}
 	return shellQuote(executable) + " approval question-hook", nil
 }
@@ -109,7 +115,7 @@ func installApprovalHook() error {
 	if err != nil {
 		return err
 	}
-	questionChanged, err := installClaudeHook(settings, "PreToolUse", "AskUserQuestion", questionCommand, " approval question-hook")
+	questionChanged, err := uninstallClaudeHook(settings, "PreToolUse", questionCommand)
 	if err != nil {
 		return err
 	}
@@ -254,7 +260,12 @@ func uninstallClaudeHook(settings map[string]any, event, command string) (bool, 
 		filtered := inner[:0]
 		for _, hookRaw := range inner {
 			hook, _ := hookRaw.(map[string]any)
-			if hook["command"] == command {
+			value, _ := hook["command"].(string)
+			suffix := " approval hook"
+			if event == "PreToolUse" {
+				suffix = " approval question-hook"
+			}
+			if value == command || isAgenthailHook(value, suffix) {
 				changed = true
 			} else {
 				filtered = append(filtered, hookRaw)
