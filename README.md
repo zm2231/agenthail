@@ -171,6 +171,7 @@ agenthail approval install   # add the hook to Claude Code's local settings
 printf '%s\n' '{"source":"claude-code","session_id":"demo","tool_name":"Bash","tool_input":{"command":"git push"}}' | agenthail approval hook
 agenthail approval list
 agenthail approval allow <request-id> "approved for this run"
+agenthail approval answer <request-id> '{"questions":[],"answers":{"Ship this change?":"Yes"}}'
 agenthail approval uninstall # remove only Agenthail's hook entry
 
 # Stop or compact a supported session
@@ -289,7 +290,7 @@ Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `age
 
 Desktop notifications are opt-in and macOS-only. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling.
 
-The approval hook is local and fail-closed. `agenthail approval install` adds an idempotent command hook to Claude Code's `~/.claude/settings.json`; `approval uninstall` removes only Agenthail's matching entry. A hook waits up to two minutes for `agenthail approval allow` or `agenthail approval deny`; malformed requests, store failures, and timeouts return deny. Valid requests are stored in `~/.agenthail/approvals.db`; the store is private to the local user, keeps request input bounded, and does not call ntfy or any hosted service.
+The approval hook is local and fail-closed. `agenthail approval install` adds an idempotent `PermissionRequest` command hook to Claude Code's `~/.claude/settings.json`; that hook also recognizes `AskUserQuestion` tool requests. `approval uninstall` removes only Agenthail's matching entry. A hook waits up to two minutes for `agenthail approval allow`, `agenthail approval answer`, or `agenthail approval deny`; malformed requests, store failures, and timeouts return deny. Valid requests are stored in `~/.agenthail/approvals.db`; the store is private to the local user, keeps request input bounded, and does not call ntfy or any hosted service.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
 

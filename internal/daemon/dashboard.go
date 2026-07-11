@@ -392,24 +392,25 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	defer r.Body.Close()
 	var request struct {
-		Action     string `json:"action"`
-		SessionID  string `json:"sessionId"`
-		Message    string `json:"message"`
-		Model      string `json:"model"`
-		QueueID    int64  `json:"queueId"`
-		Channel    string `json:"channel"`
-		TargetID   string `json:"targetId"`
-		FromID     string `json:"fromId"`
-		ToID       string `json:"toId"`
-		Pattern    string `json:"pattern"`
-		RelayID    int64  `json:"relayId"`
-		ApprovalID string `json:"approvalId"`
+		Action       string          `json:"action"`
+		SessionID    string          `json:"sessionId"`
+		Message      string          `json:"message"`
+		Model        string          `json:"model"`
+		QueueID      int64           `json:"queueId"`
+		Channel      string          `json:"channel"`
+		TargetID     string          `json:"targetId"`
+		FromID       string          `json:"fromId"`
+		ToID         string          `json:"toId"`
+		Pattern      string          `json:"pattern"`
+		RelayID      int64           `json:"relayId"`
+		ApprovalID   string          `json:"approvalId"`
+		UpdatedInput json.RawMessage `json:"updatedInput"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
 		return
 	}
-	if request.Action == "approval-allow" || request.Action == "approval-deny" {
+	if request.Action == "approval-allow" || request.Action == "approval-deny" || request.Action == "approval-answer" {
 		if request.ApprovalID == "" {
 			http.Error(w, "approvalId is required", http.StatusBadRequest)
 			return
@@ -424,7 +425,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if request.Action == "approval-allow" {
 			decision = approval.DecisionAllow
 		}
-		if err := store.Decide(request.ApprovalID, decision, "dashboard decision", time.Now()); err != nil {
+		var decideErr error
+		if request.Action == "approval-answer" {
+			decideErr = store.DecideWithInput(request.ApprovalID, approval.DecisionAllow, "answered in dashboard", request.UpdatedInput, time.Now())
+		} else {
+			decideErr = store.Decide(request.ApprovalID, decision, "dashboard decision", time.Now())
+		}
+		if err := decideErr; err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

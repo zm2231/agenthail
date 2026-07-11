@@ -47,16 +47,18 @@ type Request struct {
 }
 
 type Response struct {
-	RequestID string   `json:"requestId"`
-	Decision  Decision `json:"decision"`
-	Reason    string   `json:"reason"`
+	RequestID    string          `json:"requestId"`
+	Decision     Decision        `json:"decision"`
+	Reason       string          `json:"reason"`
+	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
 }
 
 type Record struct {
 	Request
-	Decision       Decision   `json:"decision"`
-	DecisionReason string     `json:"decisionReason,omitempty"`
-	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
+	Decision       Decision        `json:"decision"`
+	DecisionReason string          `json:"decisionReason,omitempty"`
+	DecisionInput  json.RawMessage `json:"decisionInput,omitempty"`
+	DecidedAt      *time.Time      `json:"decidedAt,omitempty"`
 }
 
 type Store struct {
@@ -104,6 +106,17 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialize approval store: %w", err)
 	}
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('approval_requests') WHERE name='decision_input_json'`).Scan(&columnCount); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("inspect approval store: %w", err)
+	}
+	if columnCount == 0 {
+		if _, err := db.Exec(`ALTER TABLE approval_requests ADD COLUMN decision_input_json TEXT NOT NULL DEFAULT ''`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate approval store: %w", err)
+		}
+	}
 	return store, nil
 }
 
@@ -127,6 +140,7 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 	expires_at INTEGER NOT NULL,
 	decision TEXT NOT NULL DEFAULT 'pending',
 	decision_reason TEXT NOT NULL DEFAULT '',
+	decision_input_json TEXT NOT NULL DEFAULT '',
 	decided_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS approval_requests_created_at ON approval_requests(created_at DESC);
@@ -223,9 +237,9 @@ func (s *Store) Observe(request Request, now time.Time) (Response, bool, error) 
 		}
 	}
 	var decision Decision
-	var reason string
+	var reason, inputJSON string
 	var expiresAt int64
-	if err := s.db.QueryRow(`SELECT decision,decision_reason,expires_at FROM approval_requests WHERE id=?`, request.ID).Scan(&decision, &reason, &expiresAt); err != nil {
+	if err := s.db.QueryRow(`SELECT decision,decision_reason,decision_input_json,expires_at FROM approval_requests WHERE id=?`, request.ID).Scan(&decision, &reason, &inputJSON, &expiresAt); err != nil {
 		return Response{}, false, err
 	}
 	if expiresAt <= now.UnixMilli() {
@@ -238,7 +252,7 @@ func (s *Store) Observe(request Request, now time.Time) (Response, bool, error) 
 	if decision == DecisionPending {
 		return Response{RequestID: request.ID, Decision: DecisionPending, Reason: "approval required; review with 'agenthail approval list'"}, inserted, nil
 	}
-	return Response{RequestID: request.ID, Decision: decision, Reason: reason}, false, nil
+	return Response{RequestID: request.ID, Decision: decision, Reason: reason, UpdatedInput: json.RawMessage(inputJSON)}, false, nil
 }
 
 func (s *Store) prune(now time.Time) error {
@@ -250,13 +264,35 @@ func (s *Store) prune(now time.Time) error {
 }
 
 func (s *Store) Decide(id string, decision Decision, reason string, now time.Time) error {
+	return s.DecideWithInput(id, decision, reason, nil, now)
+}
+
+func (s *Store) DecideWithInput(id string, decision Decision, reason string, updatedInput json.RawMessage, now time.Time) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
 	if decision != DecisionAllow && decision != DecisionDeny {
 		return fmt.Errorf("approval decision must be allow or deny")
 	}
-	result, err := s.db.Exec(`UPDATE approval_requests SET decision=?,decision_reason=?,decided_at=? WHERE id=? AND decision=? AND expires_at>?`, decision, boundText(reason, MaxSummaryLength), now.UnixMilli(), id, DecisionPending, now.UnixMilli())
+	if len(updatedInput) > MaxInputBytes {
+		return fmt.Errorf("approval response input exceeds %d bytes", MaxInputBytes)
+	}
+	var tool string
+	if err := s.db.QueryRow(`SELECT tool FROM approval_requests WHERE id=?`, id).Scan(&tool); err != nil {
+		return err
+	}
+	if tool == "AskUserQuestion" && decision == DecisionAllow && len(updatedInput) == 0 {
+		return fmt.Errorf("AskUserQuestion requires an answer payload")
+	}
+	canonical := []byte(nil)
+	if len(updatedInput) > 0 {
+		var err error
+		canonical, err = canonicalJSON(updatedInput)
+		if err != nil {
+			return fmt.Errorf("approval response input is invalid JSON: %w", err)
+		}
+	}
+	result, err := s.db.Exec(`UPDATE approval_requests SET decision=?,decision_reason=?,decision_input_json=?,decided_at=? WHERE id=? AND decision=? AND expires_at>?`, decision, boundText(reason, MaxSummaryLength), string(canonical), now.UnixMilli(), id, DecisionPending, now.UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -276,7 +312,7 @@ func (s *Store) List(limit int) ([]Record, error) {
 	if err := s.pruneExpired(time.Now()); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT id,source,session_id,tool,action,summary,input_json,created_at,expires_at,decision,decision_reason,decided_at FROM approval_requests ORDER BY created_at DESC LIMIT ?`, limit)
+	rows, err := s.db.Query(`SELECT id,source,session_id,tool,action,summary,input_json,created_at,expires_at,decision,decision_reason,decision_input_json,decided_at FROM approval_requests ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -285,11 +321,13 @@ func (s *Store) List(limit int) ([]Record, error) {
 	for rows.Next() {
 		var row Record
 		var input string
+		var decisionInput string
 		var createdAt, expiresAt, decidedAt int64
-		if err := rows.Scan(&row.ID, &row.Source, &row.SessionID, &row.Tool, &row.Action, &row.Summary, &input, &createdAt, &expiresAt, &row.Decision, &row.DecisionReason, &decidedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.Source, &row.SessionID, &row.Tool, &row.Action, &row.Summary, &input, &createdAt, &expiresAt, &row.Decision, &row.DecisionReason, &decisionInput, &decidedAt); err != nil {
 			return nil, err
 		}
 		row.Input = json.RawMessage(input)
+		row.DecisionInput = json.RawMessage(decisionInput)
 		row.CreatedAt = time.UnixMilli(createdAt).UTC()
 		row.ExpiresAt = time.UnixMilli(expiresAt).UTC()
 		if decidedAt > 0 {

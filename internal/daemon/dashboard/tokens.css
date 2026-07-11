@@ -84,3 +84,4 @@ html, body { margin:0; min-height:100%; background:var(--color-page); color:var(
 }
 :root { --color-needs-input:#e6c76b; }
 .status-pill.needs_input { color:var(--color-needs-input); border-color:rgba(230,199,107,.45); }
+.approval-card { align-items:flex-start; }.approval-question { margin-top:.7rem; }.approval-question strong { display:block; font-size:.82rem; }.approval-options { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.45rem; }.approval-option.selected { color:var(--color-ink); border-color:var(--color-accent); background:#30251f; }

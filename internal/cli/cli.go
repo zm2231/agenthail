@@ -133,6 +133,7 @@ Local approvals:
   approval list [count]         List pending and decided requests
   approval allow <id> [reason]  Explicitly allow one request
   approval deny <id> [reason]   Explicitly deny one request
+  approval answer <id> <json>   Answer an AskUserQuestion request
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)

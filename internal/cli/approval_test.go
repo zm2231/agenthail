@@ -55,6 +55,26 @@ func TestApprovalHookReturnsExplicitLocalAllow(t *testing.T) {
 	}
 }
 
+func TestApprovalHookReturnsAskUserQuestionUpdatedInput(t *testing.T) {
+	output, err := captureStdout(t, func() error {
+		return writeApprovalHookResponse(approval.Response{RequestID: "question", Decision: approval.DecisionAllow, UpdatedInput: json.RawMessage(`{"questions":[],"answers":{"Ship?":"Yes"}}`)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		HookSpecificOutput struct {
+			Decision struct {
+				Behavior     string         `json:"behavior"`
+				UpdatedInput map[string]any `json:"updatedInput"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(output), &response); err != nil || response.HookSpecificOutput.Decision.Behavior != "allow" || response.HookSpecificOutput.Decision.UpdatedInput["answers"] == nil {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestApprovalHookMalformedInputFailsClosed(t *testing.T) {
 	t.Setenv("AGENTHAIL_APPROVAL_DB", filepath.Join(t.TempDir(), "approvals.db"))
 	app := &App{}

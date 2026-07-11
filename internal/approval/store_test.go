@@ -80,6 +80,31 @@ func TestObserveFailsClosedUntilExplicitDecision(t *testing.T) {
 	}
 }
 
+func TestAskUserQuestionStoresAndReturnsUpdatedInput(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "approvals.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Now()
+	request, err := Normalize([]byte(`{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Ship?","options":[{"label":"Yes"},{"label":"No"}]}]}}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Observe(request, now); err != nil {
+		t.Fatal(err)
+	}
+	updated := json.RawMessage(`{"questions":[{"question":"Ship?"}],"answers":{"Ship?":"Yes"}}`)
+	if err := store.DecideWithInput(request.ID, DecisionAllow, "answered", updated, now); err != nil {
+		t.Fatal(err)
+	}
+	response, _, err := store.Observe(request, now)
+	canonical, _ := canonicalJSON(updated)
+	if err != nil || response.Decision != DecisionAllow || string(response.UpdatedInput) != string(canonical) {
+		t.Fatalf("response=%+v err=%v", response, err)
+	}
+}
+
 func TestExpiredApprovalCannotBeAllowed(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "approvals.db"))
 	if err != nil {

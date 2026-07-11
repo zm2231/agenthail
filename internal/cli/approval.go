@@ -18,7 +18,7 @@ const maxApprovalHookBytes = 128 << 10
 
 func (a *App) cmdApproval(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: agenthail approval <install|uninstall|hook|list|allow|deny> ...")
+		return fmt.Errorf("usage: agenthail approval <install|uninstall|hook|list|allow|deny|answer> ...")
 	}
 	if args[0] == "install" || args[0] == "uninstall" {
 		if len(args) != 1 {
@@ -49,8 +49,10 @@ func (a *App) cmdApproval(args []string) error {
 		return decideApproval(store, approval.DecisionAllow, args[1:])
 	case "deny", "reject":
 		return decideApproval(store, approval.DecisionDeny, args[1:])
+	case "answer":
+		return answerApproval(store, args[1:])
 	default:
-		return fmt.Errorf("unknown approval command %q (use install, uninstall, hook, list, allow, or deny)", args[0])
+		return fmt.Errorf("unknown approval command %q (use install, uninstall, hook, list, allow, deny, or answer)", args[0])
 	}
 }
 
@@ -250,16 +252,21 @@ func writeApprovalHookResponse(response approval.Response) error {
 	if decision != approval.DecisionAllow {
 		decision = approval.DecisionDeny
 	}
+	decisionPayload := map[string]any{"behavior": string(decision), "message": response.Reason}
+	if len(response.UpdatedInput) > 0 {
+		var updatedInput any
+		if err := json.Unmarshal(response.UpdatedInput, &updatedInput); err != nil {
+			return err
+		}
+		decisionPayload["updatedInput"] = updatedInput
+	}
 	output := map[string]any{
 		"requestId": response.RequestID,
 		"decision":  decision,
 		"reason":    response.Reason,
 		"hookSpecificOutput": map[string]any{
 			"hookEventName": "PermissionRequest",
-			"decision": map[string]any{
-				"behavior": string(decision),
-				"message":  response.Reason,
-			},
+			"decision":      decisionPayload,
 		},
 	}
 	return json.NewEncoder(os.Stdout).Encode(output)
@@ -326,5 +333,24 @@ func decideApproval(store *approval.Store, decision approval.Decision, args []st
 		return err
 	}
 	fmt.Printf("approval %s: %s\n", decision, args[0])
+	return nil
+}
+
+func answerApproval(store *approval.Store, args []string) error {
+	if len(args) != 2 || strings.HasPrefix(args[0], "--") {
+		return fmt.Errorf("usage: agenthail approval answer <request-id> '{\"questions\":[],\"answers\":{}}'")
+	}
+	input := []byte(args[1])
+	if args[1] == "-" {
+		var err error
+		input, err = io.ReadAll(io.LimitReader(os.Stdin, maxApprovalHookBytes))
+		if err != nil {
+			return fmt.Errorf("read approval answer: %w", err)
+		}
+	}
+	if err := store.DecideWithInput(args[0], approval.DecisionAllow, "answered locally", input, time.Now()); err != nil {
+		return err
+	}
+	fmt.Printf("approval answer: %s\n", args[0])
 	return nil
 }
