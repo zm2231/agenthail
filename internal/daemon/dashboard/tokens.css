@@ -90,3 +90,29 @@ html, body { margin:0; min-height:100%; background:var(--color-page); color:var(
 .session-more { width:100%; margin-top:.6rem; }
 .operations-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-top:1px solid var(--color-rule); border-bottom:1px solid var(--color-rule); margin-bottom:1.5rem; }.operations-stat { padding:1rem 1.15rem; border-right:1px solid var(--color-rule); }.operations-stat:last-child { border-right:0; }.operations-stat strong { display:block; margin:.35rem 0 .15rem; font-size:1.45rem; letter-spacing:-.05em; }.operations-stat small { color:var(--color-muted); font-size:.74rem; }.operation-tabs { display:flex; gap:.35rem; margin-bottom:1rem; }.operation-tab { border:1px solid var(--color-rule); border-radius:999px; background:transparent; color:var(--color-muted); padding:.55rem .8rem; font-size:.76rem; font-weight:700; }.operation-tab:hover, .operation-tab.active { color:var(--color-ink); border-color:var(--color-accent); background:rgba(255,136,72,.08); }.operation-panel { min-height:18rem; border-top:1px solid var(--color-rule); padding-top:1.2rem; }.network-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3rem; }.operation-item { min-width:0; }.operation-actions { display:flex; align-items:center; gap:.4rem; flex:0 0 auto; }.operation-dot { display:inline-block; width:.45rem; height:.45rem; margin-right:.45rem; border-radius:50%; background:var(--color-subtle); }.operation-dot.pending { background:var(--color-warning); }.operation-dot.dead { background:var(--color-danger); }.operation-meta { margin-top:.3rem; color:var(--color-subtle); font:650 .6rem var(--font-mono); letter-spacing:.06em; text-transform:uppercase; }.operation-error { color:var(--color-danger); }.route-arrow { color:var(--color-accent); }.history-item .status-pill { align-self:center; }
 @media (max-width:800px) { .conversation-layout { height:auto; min-height:calc(100dvh - 8rem); grid-template-columns:1fr; }.conversation-rail { max-height:19rem; }.filter-row { grid-template-columns:1fr 1fr; }.thread-bar { padding:.55rem 1rem; }.operations-summary { grid-template-columns:1fr; }.operations-stat { border-right:0; border-bottom:1px solid var(--color-rule); }.operations-stat:last-child { border-bottom:0; }.operation-tabs { overflow-x:auto; padding-bottom:.2rem; }.operation-tab { flex:0 0 auto; }.network-grid { grid-template-columns:1fr; gap:2rem; }.operation-item { align-items:flex-start; }.operation-actions { flex-wrap:wrap; justify-content:flex-end; }.message { max-width:96%; } }
+
+/* Hallmark corrective pass: make empty, disabled, and mobile states honest. */
+.button.primary:disabled { background:var(--color-panel-raised); color:var(--color-subtle); border-color:var(--color-rule); opacity:.8; }
+.surface-load-label { color:var(--color-muted); font:600 .74rem var(--font-body); letter-spacing:0; text-transform:none; }
+.session-list { scrollbar-color:#4b5563 transparent; scrollbar-width:thin; }
+.session-list::-webkit-scrollbar { width:.45rem; height:.45rem; }
+.session-list::-webkit-scrollbar-track { background:transparent; }
+.session-list::-webkit-scrollbar-thumb { background:#4b5563; border-radius:999px; }
+.chat-body .empty-state { border-style:solid; background:var(--color-panel-soft); }
+.chat-pane, .chat-body, .message { min-width:0; }
+.message { overflow-wrap:anywhere; word-break:break-word; }
+.message { overflow:hidden; }
+.message pre { max-width:100%; overflow-x:auto; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
+.message ul { min-width:0; max-width:100%; padding-left:1.2rem; }
+.thread-bar { font-family:var(--font-body); font-size:.74rem; font-weight:600; letter-spacing:0; text-transform:none; }
+.operation-panel { min-height:0; }
+.operation-panel .empty-card { border-style:solid; padding:1.3rem 1rem; text-align:left; }
+@media (max-width:800px) {
+  .filter-row { grid-template-columns:1fr; gap:.65rem; }
+  .filter-summary { display:none; }
+  .conversation-layout { height:auto; }
+  .conversation-rail { max-height:none; overflow:visible; }
+  .session-list { flex:0 0 auto; max-height:28rem; overflow-y:auto; }
+  .thread-bar { flex-direction:column; align-items:flex-start; gap:.2rem; }
+  .chat-body .empty-state { border:1px solid var(--color-rule); padding:1.25rem; }
+}
