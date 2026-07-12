@@ -130,3 +130,31 @@ html, body { margin:0; min-height:100%; background:var(--color-page); color:var(
   .thread-bar { flex-direction:column; align-items:flex-start; gap:.2rem; }
   .chat-body .empty-state { border:1px solid var(--color-rule); padding:1.25rem; }
 }
+
+/* Final visual review: keep controls readable at every viewport. */
+.composer { padding:1rem clamp(1rem,3vw,2rem) .8rem; overflow:hidden; }
+.composer form { width:100%; align-items:end; }
+.composer textarea { display:block; height:3.2rem; max-height:10rem; resize:none; overflow-x:hidden; overflow-y:hidden; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
+.composer .button { align-self:stretch; min-width:5.5rem; }
+.session-name { min-width:0; max-width:100%; }
+.session-name span { flex:1 1 auto; max-width:100%; }
+.surface-stats > div { text-align:right; }
+.operation-form[data-network-form="channel-add"] { grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; }
+.operation-form[data-network-form="channel-send"] { grid-template-columns:minmax(0,1fr) auto; }
+.relay-form { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+.relay-form input:nth-of-type(1), .relay-form input:nth-of-type(2) { grid-column:auto; }
+.relay-form input:nth-of-type(3), .relay-form .button { grid-column:1 / -1; }
+.relay-form .button { justify-self:start; }
+.operation-item .operation-actions { align-self:center; }
+#history-list { width:100%; max-width:62rem; margin:0 auto; }
+#history-list .history-item { padding-top:1.05rem; padding-bottom:1.05rem; }
+#history-list .operation-main { max-width:62rem; }
+.empty-inline { border:0; background:var(--color-panel-soft); border-radius:.7rem; padding:1rem; }
+@media (max-width:800px) {
+  .composer textarea { width:100%; }
+  .operation-form[data-network-form="channel-add"] { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .operation-form[data-network-form="channel-add"] .button { grid-column:1 / -1; justify-self:start; }
+  .operation-form[data-network-form="channel-create"], .operation-form[data-network-form="channel-send"] { grid-template-columns:minmax(0,1fr) auto; }
+  .operation-form .button { width:auto; }
+  .operation-item .operation-actions { align-self:center; }
+}
