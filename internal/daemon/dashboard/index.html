@@ -16,11 +16,7 @@
 
     <section class="view" id="overview-view" data-view-panel="overview">
       <div class="page-heading"><div><p class="eyebrow">Live status</p><h1>Your agent network</h1><p class="lede">A clear view of the agents already working with you.</p></div><button class="text-button" type="button" data-open-conversations>Open conversations <span>→</span></button></div>
-      <section class="summary-grid" aria-label="Network summary">
-        <article class="summary-card"><span class="summary-icon good">↗</span><div><span class="meta">Daemon</span><strong id="daemon-status">Running locally</strong><small id="daemon-detail">Private and ready</small></div></article>
-        <article class="summary-card"><span class="summary-icon warm">✦</span><div><span class="meta">Connected</span><strong id="connected-count">Loading surfaces</strong><small>Your connected local accounts</small></div></article>
-        <article class="summary-card"><span class="summary-icon cool">⌁</span><div><span class="meta">Active now</span><strong id="active-count">Loading conversations</strong><small id="queue-summary">Nothing waiting</small></div></article>
-      </section>
+      <section class="daemon-strip" aria-label="Daemon status"><span class="summary-icon good">↗</span><div><span class="meta">Daemon</span><strong id="daemon-status">Running locally</strong><small id="daemon-detail">Private and ready</small></div></section>
         <section class="section-block"><div class="section-heading"><div><p class="eyebrow">Live connections</p><h2>Your surfaces</h2></div><button class="text-button" type="button" data-open-conversations>View all conversations <span>→</span></button></div><div class="surface-stack" id="surface-cards"><div class="empty-card">Checking your connected apps…</div></div></section>
       <section class="two-up"><section class="section-block compact"><div class="section-heading"><div><p class="eyebrow">Working now</p><h2>Recent activity</h2></div></div><div class="activity-list" id="recent-activity"></div></section><section class="section-block compact"><div class="section-heading"><div><p class="eyebrow">Delivery</p><h2>Waiting to go out</h2></div><button class="text-button" type="button" data-open-operations>Manage <span>→</span></button></div><div class="queue-preview" id="queue-preview"></div></section></section>
     </section>
