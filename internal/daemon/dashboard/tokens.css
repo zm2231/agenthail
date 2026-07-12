@@ -155,6 +155,8 @@ html, body { margin:0; min-height:100%; background:var(--color-page); color:var(
   .operation-form[data-network-form="channel-add"] { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
   .operation-form[data-network-form="channel-add"] .button { grid-column:1 / -1; justify-self:start; }
   .operation-form[data-network-form="channel-create"], .operation-form[data-network-form="channel-send"] { grid-template-columns:minmax(0,1fr) auto; }
+  .relay-form { grid-template-columns:minmax(0,1fr); }
+  .relay-form input:nth-of-type(1), .relay-form input:nth-of-type(2), .relay-form input:nth-of-type(3), .relay-form .button { grid-column:auto; }
   .operation-form .button { width:auto; }
   .operation-item .operation-actions { align-self:center; }
 }
