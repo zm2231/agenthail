@@ -1,36 +1,355 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Agenthail</title>
-  <link rel="stylesheet" href="/tokens.css">
-</head>
-<body>
-  <main class="shell">
-    <header class="topbar">
-      <a class="brand" href="#overview" aria-label="Agenthail home"><span class="brand-mark">A</span><span>agenthail</span></a>
-      <nav class="nav" aria-label="Dashboard"><a href="#overview" data-view="overview">Overview</a><a href="#conversations" data-view="conversations">Conversations</a><a href="#operations" data-view="operations">Operations</a></nav>
-      <div class="topbar-actions"><span class="sync" id="sync">Updating…</span><button class="button quiet" id="refresh" type="button">Refresh</button></div>
-    </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>Agenthail</title>
+    <link rel="stylesheet" href="/tokens.css?v=7" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="#overview" aria-label="Agenthail home"
+          ><span class="brand-mark">A</span><span>agenthail</span></a
+        >
+        <nav class="nav" aria-label="Dashboard">
+          <a href="#overview" data-view="overview">Overview</a
+          ><a href="#conversations" data-view="conversations">Conversations</a
+          ><a href="#operations" data-view="operations">Operations</a>
+        </nav>
+        <div class="topbar-actions">
+          <span class="daemon-presence" id="daemon-presence"
+            ><i></i><span id="daemon-status">Connecting</span></span
+          ><span class="sync" id="sync">Updating</span
+          ><button
+            class="icon-button"
+            id="refresh"
+            type="button"
+            aria-label="Refresh dashboard"
+          >
+            ↻
+          </button>
+        </div>
+      </header>
 
-    <section class="view" id="overview-view" data-view-panel="overview">
-      <div class="page-heading"><div><p class="eyebrow">Live status</p><h1>Your agent network</h1><p class="lede">A clear view of the agents already working with you.</p></div><button class="text-button" type="button" data-open-conversations>Open conversations <span>→</span></button></div>
-      <section class="daemon-strip" aria-label="Daemon status"><span class="summary-icon good">↗</span><div><span class="meta">Daemon</span><strong id="daemon-status">Running locally</strong><small id="daemon-detail">Private and ready</small></div></section>
-        <section class="section-block"><div class="section-heading"><div><p class="eyebrow">Live connections</p><h2>Your surfaces</h2></div><button class="text-button" type="button" data-open-conversations>View all conversations <span>→</span></button></div><div class="surface-stack" id="surface-cards"><div class="empty-card">Checking your connected apps…</div></div></section>
-      <section class="two-up"><section class="section-block compact"><div class="section-heading"><div><p class="eyebrow">Working now</p><h2>Recent activity</h2></div></div><div class="activity-list" id="recent-activity"></div></section><section class="section-block compact"><div class="section-heading"><div><p class="eyebrow">Delivery</p><h2>Waiting to go out</h2></div><button class="text-button" type="button" data-open-operations>Manage <span>→</span></button></div><div class="queue-preview" id="queue-preview"></div></section></section>
-    </section>
+      <section class="view" id="overview-view" data-view-panel="overview">
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Today</p>
+            <h1>Your agents, in one place.</h1>
+            <p class="lede" id="daemon-detail">
+              Connecting to the local daemon.
+            </p>
+          </div>
+          <button class="text-button" type="button" data-open-conversations>
+            Open inbox <span>→</span>
+          </button>
+        </header>
+        <section class="attention-section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Needs attention</p>
+              <h2>Waiting on you</h2>
+            </div>
+            <button class="text-button" type="button" data-open-operations>
+              Manage delivery <span>→</span>
+            </button>
+          </div>
+          <div class="attention-list" id="queue-preview"></div>
+        </section>
+        <section class="overview-grid">
+          <section>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Working now</p>
+                <h2>Current conversations</h2>
+              </div>
+            </div>
+            <div class="activity-list" id="recent-activity"></div>
+          </section>
+          <section>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Connections</p>
+                <h2>Your surfaces</h2>
+              </div>
+              <button class="text-button" type="button" data-open-conversations>
+                Browse all <span>→</span>
+              </button>
+            </div>
+            <div class="surface-stack" id="surface-cards">
+              <div class="empty-state compact">Checking connected apps.</div>
+            </div>
+          </section>
+        </section>
+      </section>
 
-    <section class="view hidden" id="conversations-view" data-view-panel="conversations">
-      <div class="conversation-layout">
-        <aside class="conversation-rail"><div class="rail-heading"><div><p class="eyebrow">Conversations</p><strong id="conversation-count">Loading…</strong></div><span class="rail-hint">Most recent first</span></div><label class="search"><span>⌕</span><input id="session-search" type="search" placeholder="Find a conversation"></label><div class="filter-row"><label class="filter-field"><span>Surface</span><select id="session-surface-filter"><option value="all">All surfaces</option></select></label><label class="filter-field"><span>Status</span><select id="session-status-filter"><option value="all">All statuses</option><option value="busy">Working</option><option value="idle">Ready</option><option value="offline">Offline</option><option value="unavailable">Unavailable</option></select></label></div><div class="filter-summary" id="filter-summary"></div><div class="session-list" id="session-list"></div><button class="button quiet session-more" id="session-more" type="button" hidden>Show more conversations</button></aside>
-        <section class="chat-pane"><header class="chat-header"><div class="chat-heading"><p class="eyebrow" id="chat-surface">Choose a conversation</p><h1 id="chat-title">Your conversations</h1><p class="chat-subtitle" id="chat-subtitle">Select a conversation to see its recent messages.</p></div><div class="chat-actions" id="chat-actions"></div></header><div class="thread-bar"><span>Conversation history</span><span id="thread-count">No conversation selected</span></div><div class="chat-body" id="chat-body"><div class="empty-state"><span>✦</span><h2>Pick up where you left off</h2><p>Select an active or recent conversation to see its real history and continue it.</p></div></div><footer class="composer"><form id="composer"><textarea id="message" rows="1" maxlength="120000" disabled placeholder="Select a conversation to send"></textarea><button class="button primary" id="send" disabled type="submit">Send</button></form><p id="composer-note">Select a conversation before sending a message.</p></footer></section>
-      </div>
-    </section>
+      <section
+        class="view hidden"
+        id="conversations-view"
+        data-view-panel="conversations"
+      >
+        <div class="conversation-layout">
+          <aside class="conversation-rail">
+            <div class="rail-heading">
+              <div>
+                <p class="eyebrow">Inbox</p>
+                <h1>Conversations</h1>
+              </div>
+              <span id="conversation-count">Loading</span>
+            </div>
+            <div class="segmented" aria-label="Conversation scope">
+              <button
+                class="active"
+                aria-pressed="true"
+                type="button"
+                data-inbox-mode="active"
+              >
+                Active</button
+              ><button
+                aria-pressed="false"
+                type="button"
+                data-inbox-mode="recent"
+              >
+                Recent</button
+              ><button aria-pressed="false" type="button" data-inbox-mode="all">
+                All
+              </button>
+            </div>
+            <div class="session-tools" id="session-tools">
+              <label class="search"
+                ><span>⌕</span
+                ><input
+                  id="session-search"
+                  type="search"
+                  placeholder="Search conversations"
+              /></label>
+              <div class="filter-row">
+                <label
+                  ><span>Surface</span
+                  ><select id="session-surface-filter">
+                    <option value="all">All surfaces</option>
+                  </select></label
+                ><label
+                  ><span>Status</span
+                  ><select id="session-status-filter">
+                    <option value="all">All statuses</option>
+                    <option value="busy">Working</option>
+                    <option value="idle">Idle</option>
+                    <option value="offline">Offline</option>
+                    <option value="unavailable">Unavailable</option>
+                  </select></label
+                >
+              </div>
+            </div>
+            <div class="filter-summary" id="filter-summary"></div>
+            <div class="session-list" id="session-list"></div>
+            <button
+              class="soft-button session-more"
+              id="session-more"
+              type="button"
+              hidden
+            >
+              Show more
+            </button>
+          </aside>
+          <section class="notebook">
+            <header class="notebook-header">
+              <div>
+                <p class="eyebrow" id="chat-surface">Choose a conversation</p>
+                <h1 id="chat-title">Your workbench</h1>
+                <p id="chat-subtitle">
+                  Pick an active or recent conversation to continue.
+                </p>
+              </div>
+              <div class="chat-actions" id="chat-actions"></div>
+            </header>
+            <div class="thread-meta">
+              <span>Transcript</span
+              ><span id="thread-count">No conversation selected</span>
+            </div>
+            <div class="chat-body" id="chat-body">
+              <div class="empty-state">
+                <span class="empty-glyph">✦</span>
+                <h2>Nothing selected</h2>
+                <p>
+                  Choose a conversation from the inbox to see its history and
+                  controls.
+                </p>
+              </div>
+            </div>
+            <footer class="composer">
+              <form id="composer">
+                <textarea
+                  id="message"
+                  aria-label="Message selected conversation"
+                  rows="1"
+                  maxlength="120000"
+                  disabled
+                  placeholder="Select a conversation to send"
+                ></textarea
+                ><button class="send-button" id="send" disabled type="submit">
+                  <span>Send</span><span aria-hidden="true">↑</span>
+                </button>
+              </form>
+              <p id="composer-note">
+                Messages travel through your local daemon.
+              </p>
+            </footer>
+          </section>
+        </div>
+      </section>
 
-    <section class="view hidden" id="operations-view" data-view-panel="operations"><div class="page-heading"><div><p class="eyebrow">Automation & delivery</p><h1>Work that moves without you.</h1><p class="lede">See what is waiting, what is wired together, and what the daemon has already delivered.</p></div></div><section class="operations-summary" aria-label="Operations summary"><article class="operations-stat"><span class="meta">Waiting</span><strong id="operations-queue-count">0</strong><small>messages ready to deliver</small></article><article class="operations-stat"><span class="meta">Handoffs</span><strong id="operations-relay-count">0</strong><small>automatic routes active</small></article><article class="operations-stat"><span class="meta">Recent activity</span><strong id="operations-history-count">0</strong><small>events in the audit trail</small></article></section><div class="operation-tabs" role="tablist" aria-label="Operations sections"><button class="operation-tab active" type="button" data-operations-tab="queue">Delivery queue</button><button class="operation-tab" type="button" data-operations-tab="network">Handoffs</button><button class="operation-tab" type="button" data-operations-tab="audit">Audit trail</button></div><section class="operation-panel" data-operations-panel="queue"><div class="section-heading"><div><p class="eyebrow">Delivery queue</p><h2>Messages waiting to move</h2></div></div><div id="queue-list" class="operation-list"></div></section><section class="operation-panel hidden" data-operations-panel="network"><div class="network-grid"><section><div class="section-heading"><div><p class="eyebrow">Channels</p><h2>Shared handoffs</h2></div></div><form class="operation-form" data-network-form="channel-create"><input name="channel" placeholder="Channel name" required><button class="button" type="submit">Create</button></form><form class="operation-form" data-network-form="channel-add"><input name="channel" placeholder="Channel name" required><input name="targetId" placeholder="Agent, for example @writer" required><button class="button" type="submit">Add agent</button></form><form class="operation-form" data-network-form="channel-send"><input name="channel" placeholder="Channel name" required><input name="message" placeholder="Message everyone" required><button class="button" type="submit">Send</button></form><div id="channel-list" class="operation-list"></div></section><section><div class="section-heading"><div><p class="eyebrow">Relays</p><h2>Automatic handoffs</h2></div></div><form class="operation-form relay-form" data-network-form="relay-add"><input name="fromId" placeholder="From agent, for example @research" required><input name="toId" placeholder="To agent, for example @builder" required><input name="pattern" placeholder="Optional match pattern"><button class="button" type="submit">Add relay</button></form><div id="relay-list" class="operation-list"></div></section></div></section><section class="operation-panel hidden" data-operations-panel="audit"><div class="section-heading"><div><p class="eyebrow">Audit trail</p><h2>What the daemon did</h2></div><span class="rail-hint">Newest first</span></div><div id="history-list" class="operation-list"></div></section></section>
-  </main>
-  <div class="toast" id="toast" role="status" hidden></div>
-  <script src="/app.js?v=6"></script>
-</body>
+      <section
+        class="view hidden"
+        id="operations-view"
+        data-view-panel="operations"
+      >
+        <header class="page-heading">
+          <div>
+            <p class="eyebrow">Operations</p>
+            <h1>Delivery and handoffs.</h1>
+            <p class="lede">
+              Manage messages, shared channels, automatic relays, and the daemon
+              record.
+            </p>
+          </div>
+        </header>
+        <div class="operation-tabs" aria-label="Operations sections">
+          <button
+            class="active"
+            aria-pressed="true"
+            type="button"
+            data-operations-tab="queue"
+          >
+            Delivery <span id="operations-queue-count">0</span></button
+          ><button
+            aria-pressed="false"
+            type="button"
+            data-operations-tab="network"
+          >
+            Handoffs <span id="operations-relay-count">0</span></button
+          ><button
+            aria-pressed="false"
+            type="button"
+            data-operations-tab="audit"
+          >
+            Audit <span id="operations-history-count">0</span>
+          </button>
+        </div>
+        <section class="operation-panel" data-operations-panel="queue">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Delivery queue</p>
+              <h2>Messages waiting to move</h2>
+            </div>
+            <p>Busy agents receive these when they become available.</p>
+          </div>
+          <div id="queue-list" class="operation-list"></div>
+        </section>
+        <section class="operation-panel hidden" data-operations-panel="network">
+          <div class="settings-grid">
+            <section class="settings-card">
+              <div class="settings-card-heading">
+                <p class="eyebrow">Channels</p>
+                <h2>Shared handoffs</h2>
+                <p>Group agents that should receive the same context.</p>
+              </div>
+              <form class="labeled-form" data-network-form="channel-create">
+                <label
+                  ><span>Channel name</span
+                  ><input name="channel" placeholder="Launch review" required
+                /></label>
+                <div class="form-action">
+                  <button class="primary-button" type="submit">
+                    Create channel
+                  </button>
+                </div>
+              </form>
+              <form class="labeled-form" data-network-form="channel-add">
+                <label
+                  ><span>Channel</span
+                  ><input
+                    name="channel"
+                    placeholder="Launch review"
+                    required /></label
+                ><label
+                  ><span>Agent</span
+                  ><input name="targetId" placeholder="@writer" required
+                /></label>
+                <div class="form-action">
+                  <button class="soft-button" type="submit">Add agent</button>
+                </div>
+              </form>
+              <div id="channel-list" class="operation-list compact-list"></div>
+              <form class="labeled-form" data-network-form="channel-send">
+                <label
+                  ><span>Channel</span
+                  ><input
+                    name="channel"
+                    placeholder="Launch review"
+                    required /></label
+                ><label
+                  ><span>Message</span
+                  ><input name="message" placeholder="Share an update" required
+                /></label>
+                <div class="form-action">
+                  <button class="primary-button" type="submit">
+                    Send update
+                  </button>
+                </div>
+              </form>
+            </section>
+            <section class="settings-card">
+              <div class="settings-card-heading">
+                <p class="eyebrow">Relays</p>
+                <h2>Automatic handoffs</h2>
+                <p>Pass completed work from one agent to another.</p>
+              </div>
+              <form class="labeled-form" data-network-form="relay-add">
+                <label
+                  ><span>From</span
+                  ><input
+                    name="fromId"
+                    placeholder="@research"
+                    required /></label
+                ><label
+                  ><span>To</span
+                  ><input name="toId" placeholder="@builder" required /></label
+                ><label
+                  ><span>Match pattern <small>Optional</small></span
+                  ><input name="pattern" placeholder="READY|SHIP"
+                /></label>
+                <div class="form-action">
+                  <button class="primary-button" type="submit">
+                    Add handoff
+                  </button>
+                </div>
+              </form>
+              <div id="relay-list" class="operation-list compact-list"></div>
+            </section>
+          </div>
+        </section>
+        <section
+          class="operation-panel audit-panel hidden"
+          data-operations-panel="audit"
+        >
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Audit trail</p>
+              <h2>What the daemon did</h2>
+            </div>
+            <p>Newest activity appears first.</p>
+          </div>
+          <div id="history-list" class="operation-list"></div>
+        </section>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <script src="/app.js?v=7"></script>
+  </body>
 </html>
