@@ -80,6 +80,11 @@ func (d *Daemon) RunWithSignal() error {
 	if err := os.WriteFile(PidFilePath(), []byte(fmt.Sprintf("%d", os.Getpid())), 0600); err != nil {
 		return fmt.Errorf("write pidfile: %w", err)
 	}
+	defer func() {
+		if removeErr := removePIDFileIfOwned(os.Getpid()); removeErr != nil {
+			d.log.Printf("warn: remove pidfile: %s", removeErr)
+		}
+	}()
 	dashboard, err := d.startDashboard()
 	if err != nil {
 		return err
@@ -93,11 +98,7 @@ func (d *Daemon) RunWithSignal() error {
 			}
 		}()
 	}
-	err = d.Run(ctx)
-	if removeErr := removePIDFileIfOwned(os.Getpid()); removeErr != nil {
-		d.log.Printf("warn: remove pidfile: %s", removeErr)
-	}
-	return err
+	return d.Run(ctx)
 }
 
 func truncate(s string, n int) string {
