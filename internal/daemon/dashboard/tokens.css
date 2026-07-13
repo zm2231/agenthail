@@ -349,7 +349,7 @@ textarea:focus-visible {
 }
 .surface-row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.15fr) repeat(2, minmax(70px, 0.45fr));
+  grid-template-columns: minmax(190px, 1.15fr) repeat(3, minmax(70px, 0.4fr));
   align-items: center;
   gap: 24px;
   padding: 18px 0;
@@ -1026,7 +1026,7 @@ select {
     grid-template-columns: 1fr;
   }
   .surface-row {
-    grid-template-columns: minmax(180px, 1fr) repeat(2, 80px);
+    grid-template-columns: minmax(180px, 1fr) repeat(3, 72px);
   }
 }
 @media (max-width: 760px) {
@@ -1080,7 +1080,7 @@ select {
     margin-top: 44px;
   }
   .surface-row {
-    grid-template-columns: minmax(0, 1fr) 62px 62px;
+    grid-template-columns: minmax(0, 1fr) repeat(3, 54px);
     gap: 10px;
   }
   .conversation-layout {

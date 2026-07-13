@@ -99,7 +99,7 @@ func (a *App) daemonRun() error {
 func (a *App) cmdDashboard(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) > 1 {
-		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status] [--no-open]")
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config] [--no-open] [--codex-recent-hours <hours>]")
 	}
 	action := "open"
 	if len(positional) == 1 {
@@ -148,11 +148,31 @@ func (a *App) cmdDashboard(args []string) error {
 			return err
 		}
 		fmt.Printf("dashboard: enabled on %s\n", config.Listen)
+		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
 		if _, running := daemon.IsRunning(); !running {
 			fmt.Println("daemon: not running (start it with 'agenthail daemon start')")
 		} else {
 			fmt.Printf("open: %s\n", url)
 		}
+		return nil
+	case "config":
+		rawHours := flagVal(args, "--codex-recent-hours")
+		if rawHours == "" {
+			fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
+			return nil
+		}
+		hours, parseErr := strconv.Atoi(rawHours)
+		if parseErr != nil {
+			return fmt.Errorf("Codex recent hours must be a whole number")
+		}
+		if hours < 1 {
+			return fmt.Errorf("Codex recent hours must be at least 1")
+		}
+		config.CodexRecentHours = hours
+		if err := daemon.SaveDashboardConfig(config); err != nil {
+			return err
+		}
+		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
 		return nil
 	case "open":
 		if !config.Enabled {
@@ -163,7 +183,7 @@ func (a *App) cmdDashboard(args []string) error {
 		}
 		return a.openDashboard()
 	default:
-		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status] [--no-open]")
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config] [--no-open] [--codex-recent-hours <hours>]")
 	}
 }
 

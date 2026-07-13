@@ -153,6 +153,8 @@ Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
   dashboard disable             Disable the dashboard listener
   dashboard status              Show dashboard state and URL
+  dashboard config --codex-recent-hours <hours>
+                                Set the Codex current-session window
   dashboard                     Open an enabled dashboard
 
 Other:
@@ -250,7 +252,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--from": true, "--model": true, "--timeout": true}
+	valueFlags := map[string]bool{"--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -286,7 +288,7 @@ func validateCommandFlags(command string, args []string) error {
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
-		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {bools: map[string]bool{"--no-open": true}}, "help": {}, "-h": {}, "--help": {},
+		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true}, bools: map[string]bool{"--no-open": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {

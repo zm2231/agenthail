@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,26 +53,30 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	ID           string                `json:"id"`
-	Surface      surface.SurfaceKind   `json:"surface"`
-	Name         string                `json:"name"`
-	Alias        string                `json:"alias,omitempty"`
-	Status       surface.SessionStatus `json:"status"`
-	LastActive   time.Time             `json:"lastActive,omitempty"`
-	QueueCount   int                   `json:"queueCount"`
-	Capabilities surface.Capabilities  `json:"capabilities"`
+	ID            string                `json:"id"`
+	Surface       surface.SurfaceKind   `json:"surface"`
+	Name          string                `json:"name"`
+	Alias         string                `json:"alias,omitempty"`
+	Status        surface.SessionStatus `json:"status"`
+	LastActive    time.Time             `json:"lastActive,omitempty"`
+	QueueCount    int                   `json:"queueCount"`
+	Open          bool                  `json:"open"`
+	Current       bool                  `json:"current"`
+	CurrentReason string                `json:"currentReason,omitempty"`
+	Capabilities  surface.Capabilities  `json:"capabilities"`
 }
 
 type dashboardState struct {
-	UpdatedAt     time.Time          `json:"updatedAt"`
-	Daemon        map[string]any     `json:"daemon"`
-	Surfaces      []dashboardSurface `json:"surfaces"`
-	Sessions      []dashboardSession `json:"sessions"`
-	TotalSessions int                `json:"totalSessions"`
-	Queue         []dashboardQueue   `json:"queue"`
-	Channels      []dashboardChannel `json:"channels"`
-	Relays        []dashboardRelay   `json:"relays"`
-	History       []dashboardHistory `json:"history"`
+	UpdatedAt        time.Time          `json:"updatedAt"`
+	Daemon           map[string]any     `json:"daemon"`
+	Surfaces         []dashboardSurface `json:"surfaces"`
+	Sessions         []dashboardSession `json:"sessions"`
+	TotalSessions    int                `json:"totalSessions"`
+	Queue            []dashboardQueue   `json:"queue"`
+	Channels         []dashboardChannel `json:"channels"`
+	Relays           []dashboardRelay   `json:"relays"`
+	History          []dashboardHistory `json:"history"`
+	CodexRecentHours int                `json:"codexRecentHours"`
 }
 
 type dashboardQueue struct {
@@ -264,6 +270,11 @@ func (d *Daemon) dashboardStateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("load dashboard config: %w", err)
+	}
+	now := time.Now()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read queue counts: %w", err)
@@ -284,7 +295,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read delivery history: %w", err)
 	}
-	state := dashboardState{UpdatedAt: time.Now().UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history))}
+	state := dashboardState{UpdatedAt: now.UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
@@ -329,7 +340,9 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 					continue
 				}
 				alias, _ := d.Registry.ReverseAlias(session.ID)
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Capabilities: adapter.Capabilities()})
+				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
+				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
+				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: adapter.Capabilities()})
 			}
 			mu.Unlock()
 		}()
@@ -347,6 +360,60 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	})
 	state.TotalSessions = len(state.Sessions)
 	return state, nil
+}
+
+func dashboardSessionPresence(session surface.Session, queueCount int, open bool, codexRecentHours int, now time.Time) (bool, string) {
+	switch session.Surface {
+	case surface.KindClaude:
+		if queueCount > 0 {
+			return true, "queued"
+		}
+		if !open {
+			return false, ""
+		}
+		if session.Status == surface.StatusBusy {
+			return true, "working"
+		}
+		return true, "open"
+	case surface.KindCodex:
+		if session.Status == surface.StatusBusy {
+			return true, "working"
+		}
+		if queueCount > 0 {
+			return true, "queued"
+		}
+		if session.Status == surface.SessionStatus("notLoaded") || session.LastActive.IsZero() {
+			return false, ""
+		}
+		if now.Sub(session.LastActive) <= time.Duration(codexRecentHours)*time.Hour {
+			return true, "recent"
+		}
+		return false, ""
+	default:
+		if session.Status == surface.StatusBusy {
+			return true, "working"
+		}
+		if queueCount > 0 {
+			return true, "queued"
+		}
+		if !session.LastActive.IsZero() && now.Sub(session.LastActive) <= 24*time.Hour {
+			return true, "recent"
+		}
+		return false, ""
+	}
+}
+
+func claudeProcessOpen(ctx context.Context, pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	processCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	output, err := exec.CommandContext(processCtx, "ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(strings.TrimSpace(string(output))) == "claude"
 }
 
 func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {

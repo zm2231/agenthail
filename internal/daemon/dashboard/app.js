@@ -227,6 +227,16 @@ function statusLabel(status) {
     }[status] || status
   );
 }
+function presenceLabel(session) {
+  return (
+    {
+      working: "Working",
+      queued: "Queued",
+      open: "Open",
+      recent: "Recent",
+    }[session.currentReason] || statusLabel(session.status)
+  );
+}
 function surfaceIcon(name) {
   return name === "claude" ? "✦" : name === "codex" ? "◈" : "N";
 }
@@ -247,47 +257,45 @@ function renderOverview() {
           (session) => session.surface === surface.name,
         );
         const active = owned.filter(
-          (session) => session.status === "busy",
+          (session) => session.currentReason === "working",
+        ).length;
+        const present = owned.filter((session) =>
+          surface.name === "claude"
+            ? session.open
+            : session.currentReason === "recent",
         ).length;
         const queued = owned.reduce(
           (total, session) => total + session.queueCount,
           0,
         );
         const name = labels[surface.name] || surface.name;
-        return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${surface.connected ? "" : "offline"}"><i></i>${surface.connected ? "Connected" : surface.error ? escape(surface.error) : "Not connected"}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
+        const presenceName = surface.name === "claude" ? "Open" : "Recent";
+        return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${surface.connected ? "" : "offline"}"><i></i>${surface.connected ? "Connected" : surface.error ? escape(surface.error) : "Not connected"}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>${presenceName}</span><strong>${present}</strong></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
       })
       .join("") ||
     '<div class="empty-state compact">No surfaces are connected yet.</div>';
-  const working = [...sessions]
-    .filter((session) => session.status === "busy")
-    .sort((a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0))
+  const recent = [...sessions]
+    .filter(sessionIsCurrent)
+    .sort((a, b) => {
+      const rank = { working: 0, queued: 1, open: 2, recent: 3 };
+      const reasonOrder =
+        (rank[a.currentReason] ?? 9) - (rank[b.currentReason] ?? 9);
+      return (
+        reasonOrder || new Date(b.lastActive || 0) - new Date(a.lastActive || 0)
+      );
+    })
     .slice(0, 6);
-  const recent = working.length
-    ? working
-    : sessions
-        .filter(sessionIsCurrent)
-        .sort(
-          (a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0),
-        )
-        .slice(0, 4);
   $("#recent-activity").innerHTML =
     recent
       .map(
         (session) =>
-          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${timeAgo(session.lastActive)}</div></div>${statusPill(session.status)}</button>`,
+          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
 }
 function sessionIsCurrent(session) {
-  if (session.status === "busy" || session.queueCount > 0) return true;
-  if (["notLoaded", "unknown", "offline"].includes(session.status))
-    return false;
-  const lastActive = new Date(session.lastActive || 0).getTime();
-  return (
-    Number.isFinite(lastActive) &&
-    lastActive >= Date.now() - 24 * 60 * 60 * 1000
-  );
+  return session.current === true;
 }
 function scopedSessions() {
   if (app.inboxMode === "current")
@@ -339,7 +347,7 @@ function renderSessions() {
   $("#filter-summary").textContent =
     app.inboxMode === "current"
       ? sessions.length
-        ? "Working, queued, or active in the last 24 hours"
+        ? `Open Claude sessions, working or queued work, and recent sessions (Codex ${app.state.codexRecentHours || 5}-hour window)`
         : "Nothing current right now"
       : sessions.length > visible.length
         ? `Showing ${visible.length} of ${sessions.length}`
@@ -348,7 +356,7 @@ function renderSessions() {
     visible
       .map(
         (session) =>
-          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(statusLabel(session.status))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
+          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
       .join("") ||
     `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Open History to find an older conversation." : "No conversations in this view."}</p></div>`;

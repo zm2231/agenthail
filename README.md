@@ -90,9 +90,10 @@ The dashboard is off by default. When you enable it, the running daemon serves a
 ```bash
 agenthail dashboard enable
 agenthail dashboard status
+agenthail dashboard config --codex-recent-hours 5
 ```
 
-The home page is deliberately simple: your connected surfaces, live work, and anything waiting to be delivered. Open a conversation when you need the real recent history, message composer, goal, model switcher, or surface-specific controls such as steer, stop, and compact. The operations page shows the durable queue, channels, and relays; dead-lettered messages can be retried there. Every control is shown only when that connected surface supports it.
+The home page is deliberately simple: your connected surfaces and current work. Claude sessions count as current while their terminal process is open. Codex sessions count as current while working, queued, or used within the configured window, which defaults to five hours. Open History for older threads. The operations page shows the durable queue, channels, and relays; dead-lettered messages can be retried there. Every control is shown only when that connected surface supports it.
 
 The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
 

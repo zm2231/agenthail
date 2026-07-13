@@ -167,6 +167,9 @@ func TestSubcommandSpecificFlags(t *testing.T) {
 	if err := validateCommandFlags("channel", []string{"create", "team", "--from", "me"}); err == nil {
 		t.Fatal("channel create accepted send-only flag")
 	}
+	if err := validateCommandFlags("dashboard", []string{"config", "--codex-recent-hours", "5"}); err != nil {
+		t.Fatalf("dashboard config flag rejected: %v", err)
+	}
 }
 
 func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {

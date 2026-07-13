@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,7 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 }
 
 func TestDashboardStatePrefersLiveSurfaceStatus(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	d, registry, fake, from, _ := daemonFixture(t)
 	if err := registry.SaveRuntimeState(from.ID, surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
@@ -123,4 +125,41 @@ func TestDashboardStatePrefersLiveSurfaceStatus(t *testing.T) {
 		}
 	}
 	t.Fatal("live session missing from dashboard state")
+}
+
+func TestDashboardSessionPresenceUsesSurfaceSpecificTruth(t *testing.T) {
+	now := time.Date(2026, 7, 12, 20, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		session     surface.Session
+		queueCount  int
+		open        bool
+		wantCurrent bool
+		wantReason  string
+	}{
+		{name: "open idle Claude", session: surface.Session{Surface: surface.KindClaude, Status: surface.StatusIdle}, open: true, wantCurrent: true, wantReason: "open"},
+		{name: "closed busy Claude is stale", session: surface.Session{Surface: surface.KindClaude, Status: surface.StatusBusy}, wantCurrent: false},
+		{name: "queued closed Claude", session: surface.Session{Surface: surface.KindClaude}, queueCount: 1, wantCurrent: true, wantReason: "queued"},
+		{name: "recent Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, LastActive: now.Add(-4 * time.Hour)}, wantCurrent: true, wantReason: "recent"},
+		{name: "old Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, LastActive: now.Add(-6 * time.Hour)}, wantCurrent: false},
+		{name: "historical Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), LastActive: now.Add(-time.Hour)}, wantCurrent: false},
+		{name: "busy Codex", session: surface.Session{Surface: surface.KindCodex, Status: surface.StatusBusy, LastActive: now.Add(-48 * time.Hour)}, wantCurrent: true, wantReason: "working"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			current, reason := dashboardSessionPresence(test.session, test.queueCount, test.open, 5, now)
+			if current != test.wantCurrent || reason != test.wantReason {
+				t.Fatalf("current=%v reason=%q, want current=%v reason=%q", current, reason, test.wantCurrent, test.wantReason)
+			}
+		})
+	}
+}
+
+func TestClaudeProcessOpenRejectsOtherProcesses(t *testing.T) {
+	if claudeProcessOpen(context.Background(), os.Getpid()) {
+		t.Fatal("non-Claude process was recognized as an open Claude session")
+	}
+	if claudeProcessOpen(context.Background(), 0) {
+		t.Fatal("zero PID was recognized as alive")
+	}
 }

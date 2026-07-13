@@ -10,11 +10,16 @@ import (
 	"path/filepath"
 )
 
-const defaultDashboardListen = "127.0.0.1:7412"
+const (
+	defaultDashboardListen  = "127.0.0.1:7412"
+	defaultCodexRecentHours = 5
+	maximumCodexRecentHours = 168
+)
 
 type DashboardConfig struct {
-	Enabled bool   `json:"enabled"`
-	Listen  string `json:"listen"`
+	Enabled          bool   `json:"enabled"`
+	Listen           string `json:"listen"`
+	CodexRecentHours int    `json:"codexRecentHours"`
 }
 
 func DashboardConfigPath() string {
@@ -27,7 +32,7 @@ func DashboardTokenPath() string {
 func LoadDashboardConfig() (DashboardConfig, error) {
 	data, err := os.ReadFile(DashboardConfigPath())
 	if os.IsNotExist(err) {
-		return DashboardConfig{Listen: defaultDashboardListen}, nil
+		return DashboardConfig{Listen: defaultDashboardListen, CodexRecentHours: defaultCodexRecentHours}, nil
 	}
 	if err != nil {
 		return DashboardConfig{}, fmt.Errorf("read dashboard config: %w", err)
@@ -39,6 +44,12 @@ func LoadDashboardConfig() (DashboardConfig, error) {
 	if config.Listen == "" {
 		config.Listen = defaultDashboardListen
 	}
+	if config.CodexRecentHours == 0 {
+		config.CodexRecentHours = defaultCodexRecentHours
+	}
+	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
+		return DashboardConfig{}, err
+	}
 	if err := validateDashboardListen(config.Listen); err != nil {
 		return DashboardConfig{}, err
 	}
@@ -48,6 +59,12 @@ func LoadDashboardConfig() (DashboardConfig, error) {
 func SaveDashboardConfig(config DashboardConfig) error {
 	if config.Listen == "" {
 		config.Listen = defaultDashboardListen
+	}
+	if config.CodexRecentHours == 0 {
+		config.CodexRecentHours = defaultCodexRecentHours
+	}
+	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
+		return err
 	}
 	if err := validateDashboardListen(config.Listen); err != nil {
 		return err
@@ -60,6 +77,13 @@ func SaveDashboardConfig(config DashboardConfig) error {
 		return fmt.Errorf("create dashboard config directory: %w", err)
 	}
 	return os.WriteFile(DashboardConfigPath(), append(data, '\n'), 0600)
+}
+
+func validateCodexRecentHours(hours int) error {
+	if hours < 1 || hours > maximumCodexRecentHours {
+		return fmt.Errorf("Codex recent hours must be between 1 and %d", maximumCodexRecentHours)
+	}
+	return nil
 }
 
 func DashboardURL() (string, error) {
