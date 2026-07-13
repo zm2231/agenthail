@@ -1233,6 +1233,7 @@ select {
   }
   .conversation-layout {
     display: block;
+    min-height: 0;
     margin-top: -42px;
   }
   .conversation-rail {
@@ -1257,7 +1258,9 @@ select {
   }
   .session-list {
     height: auto;
-    max-height: 360px;
+    max-height: none;
+    overflow: visible;
+    overscroll-behavior: auto;
   }
   .notebook {
     min-height: auto;

@@ -664,7 +664,7 @@ function renderChat() {
     capabilities.compact && ["/compact", "Compact this conversation"],
     session.status === "busy" && capabilities.interrupt && ["/stop", "Stop the current turn"],
     session.status === "busy" && capabilities.steer && ["/steer", "Redirect the current turn"],
-    capabilities.model && ["/model", "Switch the session model"],
+    capabilities.model && ["/model", "Choose the active model"],
     capabilities.goal && ["/goal", "Set the session goal"],
   ].filter(Boolean);
   if (readOnly) {
