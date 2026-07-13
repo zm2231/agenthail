@@ -1216,15 +1216,15 @@ select {
   }
   .notebook {
     min-height: auto;
-    padding: 28px 0 0;
+    padding: 18px 0 0;
   }
   .mobile-chat-back {
     display: inline-flex;
     align-items: center;
     justify-self: start;
     gap: 8px;
-    margin-bottom: 26px;
-    padding: 9px 12px;
+    margin-bottom: 16px;
+    padding: 7px 10px;
     border: 0;
     border-radius: 10px;
     background: var(--raised);
@@ -1238,13 +1238,21 @@ select {
   }
   .notebook-header {
     display: block;
+    padding-bottom: 18px;
+  }
+  .notebook-header .eyebrow {
+    font-size: 9px;
   }
   .notebook-header h1 {
-    font-size: 26px;
+    font-size: 22px;
   }
   .notebook-header p:last-child {
-    margin-top: 7px;
-    font-size: 13px;
+    margin-top: 5px;
+    font-size: 12px;
+  }
+  .thread-meta {
+    padding: 9px 0;
+    font-size: 9px;
   }
   .chat-actions {
     justify-content: flex-start;
