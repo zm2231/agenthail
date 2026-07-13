@@ -221,7 +221,12 @@ function showView(name) {
 }
 const mobileConversationView = () => window.matchMedia("(max-width: 760px)").matches;
 function syncConversationLayout() {
-  const active = mobileConversationView() && app.mobileChatOpen;
+  const conversations = document.querySelector('[data-view-panel="conversations"]');
+  const active =
+    mobileConversationView() &&
+    app.mobileChatOpen &&
+    conversations &&
+    !conversations.classList.contains("hidden");
   document.querySelector(".conversation-layout")?.classList.toggle("mobile-chat-open", active);
   document.body.classList.toggle("mobile-chat-active", active);
 }

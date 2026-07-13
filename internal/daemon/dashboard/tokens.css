@@ -314,6 +314,11 @@ textarea:focus-visible {
   gap: 72px;
   margin-top: 64px;
 }
+.overview-grid > section,
+.surface-stack,
+.surface-row {
+  min-width: 0;
+}
 .activity-item {
   display: flex;
   align-items: center;
@@ -961,18 +966,26 @@ select {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 24px;
+  min-width: 0;
   padding: 18px 0;
   border-bottom: 1px solid var(--rule);
+}
+.operation-main,
+.operation-list,
+.operation-panel {
+  min-width: 0;
 }
 .operation-title {
   overflow-wrap: anywhere;
 }
 .operation-detail {
   max-width: 900px;
+  overflow-wrap: anywhere;
 }
 .operation-meta {
   font-family: var(--mono);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .operation-error {
   color: var(--bad);
@@ -1157,7 +1170,7 @@ select {
 }
 @media (max-width: 1050px) {
   .overview-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 54px;
   }
   .conversation-layout {
@@ -1192,14 +1205,19 @@ select {
     grid-row: 2;
     order: 3;
     height: 45px;
-    overflow-x: auto;
+    justify-content: space-between;
+    gap: 0;
+    overflow-x: visible;
   }
   .nav a {
-    padding: 0 14px;
+    min-width: 0;
+    padding: 0 5px;
+    font-size: 13px;
+    white-space: nowrap;
   }
   .nav a.active:after {
-    right: 14px;
-    left: 14px;
+    right: 5px;
+    left: 5px;
   }
   .sync {
     display: none;
@@ -1339,13 +1357,27 @@ select {
     margin-top: 8px;
   }
   .operation-item {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .audit-toolbar {
     grid-template-columns: 1fr;
   }
   .operation-actions {
     justify-content: flex-start;
+  }
+  .operation-tabs {
+    gap: 2px;
+  }
+  .operation-tabs button {
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+    padding: 10px 5px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .operation-tabs button span {
+    display: none;
   }
   .labeled-form {
     grid-template-columns: 1fr;
