@@ -124,7 +124,7 @@ The source installer puts the binary and sidecar under `~/.local/share/agenthail
 
 If you already run Claude Code or Codex, it also links the agenthail operations skill into `~/.claude/skills` and `~/.codex/skills`, so your agents know how to drive the CLI themselves. It never creates those directories, so nothing shows up on a machine that does not use them. Skip it with `./install.sh --no-skill`.
 
-For queues and relays that survive logouts and reboots:
+The Homebrew service already keeps queues and relays alive across logouts and reboots. For a source install, enable the native launchd service with:
 
 ```bash
 agenthail daemon install

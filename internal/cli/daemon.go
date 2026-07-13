@@ -17,11 +17,15 @@ import (
 )
 
 const (
-	daemonLaunchdLabel = "com.agenthail.daemon"
-	daemonLogMaxBytes  = 1024 * 1024
+	daemonLaunchdLabel         = "com.agenthail.daemon"
+	homebrewDaemonLaunchdLabel = "homebrew.mxcl.agenthail"
+	daemonLogMaxBytes          = 1024 * 1024
 )
 
 func (a *App) daemonStart() error {
+	if homebrewDaemonManaged() {
+		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services start agenthail'")
+	}
 	if pid, ok := daemon.IsRunning(); ok {
 		return fmt.Errorf("daemon already running (pid %d)", pid)
 	}
@@ -60,6 +64,9 @@ func (a *App) daemonStart() error {
 }
 
 func (a *App) daemonStop() error {
+	if homebrewDaemonManaged() {
+		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
+	}
 	pid, ok := daemon.IsRunning()
 	if !ok {
 		fmt.Println("daemon not running")
@@ -76,21 +83,14 @@ func (a *App) daemonStop() error {
 }
 
 func (a *App) daemonRestart() error {
+	if homebrewDaemonServiceLoaded() {
+		return restartLaunchdDaemon(homebrewDaemonLaunchdLabel)
+	}
+	if homebrewDaemonManaged() {
+		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services start agenthail'")
+	}
 	if daemonServiceLoaded() {
-		before, _ := daemon.IsRunning()
-		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonLaunchdLabel)
-		if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
-			return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
-		}
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			if pid, running := daemon.IsRunning(); running && pid != before {
-				fmt.Printf("daemon restarted (pid %d)\n", pid)
-				return nil
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		return fmt.Errorf("launchd restarted the service but the daemon did not become ready")
+		return restartLaunchdDaemon(daemonLaunchdLabel)
 	}
 	if _, running := daemon.IsRunning(); running {
 		if err := daemon.Stop(); err != nil {
@@ -227,12 +227,11 @@ func (a *App) openDashboard() error {
 }
 
 func (a *App) restartDaemonForDashboard() error {
+	if homebrewDaemonServiceLoaded() {
+		return restartLaunchdDaemon(homebrewDaemonLaunchdLabel)
+	}
 	if daemonServiceLoaded() {
-		domain := fmt.Sprintf("gui/%d", os.Getuid())
-		if output, err := exec.Command("launchctl", "kickstart", "-k", domain+"/"+daemonLaunchdLabel).CombinedOutput(); err != nil {
-			return fmt.Errorf("restart launchd daemon for dashboard: %w (%s)", err, strings.TrimSpace(string(output)))
-		}
-		return nil
+		return restartLaunchdDaemon(daemonLaunchdLabel)
 	}
 	if _, running := daemon.IsRunning(); running {
 		if err := daemon.Stop(); err != nil {
@@ -266,6 +265,9 @@ func daemonServicePath() string {
 func (a *App) daemonInstallService() error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("daemon service installation currently supports macOS launchd only")
+	}
+	if homebrewDaemonManaged() {
+		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services restart agenthail'")
 	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
@@ -375,6 +377,9 @@ func (a *App) daemonUninstallService() error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("daemon service installation currently supports macOS launchd only")
 	}
+	if homebrewDaemonManaged() {
+		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
+	}
 	domain := fmt.Sprintf("gui/%d", os.Getuid())
 	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
 	if err := os.Remove(daemonServicePath()); err != nil && !os.IsNotExist(err) {
@@ -382,6 +387,23 @@ func (a *App) daemonUninstallService() error {
 	}
 	fmt.Printf("uninstalled launchd service %s\n", daemonLaunchdLabel)
 	return nil
+}
+
+func restartLaunchdDaemon(label string) error {
+	before, _ := daemon.IsRunning()
+	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
+	if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+		return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if pid, running := daemon.IsRunning(); running && pid != before {
+			fmt.Printf("daemon restarted (pid %d)\n", pid)
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("launchd restarted the service but the daemon did not become ready")
 }
 
 func daemonServiceLoaded() bool {

@@ -209,19 +209,73 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 }
 
 func TestHomebrewDaemonServiceLoaded(t *testing.T) {
+	installHomebrewLaunchctl(t)
+	if !homebrewDaemonServiceLoaded() {
+		t.Fatal("Homebrew service was not detected")
+	}
+}
+
+func TestHomebrewDaemonManagedByExecutablePath(t *testing.T) {
+	if !homebrewManagedExecutable("/opt/homebrew/Cellar/agenthail/0.1.3/libexec/agenthail") {
+		t.Fatal("Homebrew Cellar executable was not detected")
+	}
+	if homebrewManagedExecutable("/Users/example/.local/share/agenthail/agenthail") {
+		t.Fatal("source executable was detected as Homebrew")
+	}
+}
+
+func TestHomebrewDaemonLifecycleUsesHomebrewSupervisor(t *testing.T) {
+	logPath := installHomebrewLaunchctl(t)
+	app := &App{}
+	for name, check := range map[string]struct {
+		call func() error
+		want string
+	}{
+		"start":     {call: app.daemonStart, want: "brew services start agenthail"},
+		"stop":      {call: app.daemonStop, want: "brew services stop agenthail"},
+		"install":   {call: app.daemonInstallService, want: "brew services restart agenthail"},
+		"uninstall": {call: app.daemonUninstallService, want: "brew services stop agenthail"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := check.call()
+			if err == nil || !strings.Contains(err.Error(), check.want) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	for name, call := range map[string]func() error{
+		"restart":   app.daemonRestart,
+		"dashboard": app.restartDaemonForDashboard,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := call(); err == nil || !strings.Contains(err.Error(), "restart launchd service") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), "homebrew.mxcl.agenthail") != 2 {
+		t.Fatalf("launchctl log=%q", data)
+	}
+}
+
+func installHomebrewLaunchctl(t *testing.T) string {
+	t.Helper()
 	if runtime.GOOS != "darwin" {
 		t.Skip("launchd is only available on macOS")
 	}
 	dir := t.TempDir()
 	launchctl := filepath.Join(dir, "launchctl")
-	script := "#!/bin/sh\n[ \"$1\" = print ] && [ \"$2\" = \"gui/$(id -u)/homebrew.mxcl.agenthail\" ]\n"
+	logPath := filepath.Join(dir, "launchctl.log")
+	script := "#!/bin/sh\nif [ \"$1\" = print ]; then [ \"$2\" = \"gui/$(id -u)/homebrew.mxcl.agenthail\" ]; exit; fi\nprintf '%s\\n' \"$*\" >> \"" + logPath + "\"\nexit 1\n"
 	if err := os.WriteFile(launchctl, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	if !homebrewDaemonServiceLoaded() {
-		t.Fatal("Homebrew service was not detected")
-	}
+	return logPath
 }
 
 func TestSubcommandSpecificFlags(t *testing.T) {

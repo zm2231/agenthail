@@ -283,7 +283,7 @@ func (a *App) ensureDashboardReady() (daemon.DashboardConfig, error) {
 			return daemon.DashboardConfig{}, err
 		}
 	}
-	if !daemonServiceLoaded() {
+	if !a.isDaemonServiceLoaded() {
 		if err := a.daemonInstallService(); err != nil {
 			return daemon.DashboardConfig{}, err
 		}

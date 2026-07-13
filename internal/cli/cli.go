@@ -1339,8 +1339,23 @@ func homebrewDaemonServiceLoaded() bool {
 	if runtime.GOOS != "darwin" {
 		return false
 	}
-	target := fmt.Sprintf("gui/%d/homebrew.mxcl.agenthail", os.Getuid())
+	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), homebrewDaemonLaunchdLabel)
 	return exec.Command("launchctl", "print", target).Run() == nil
+}
+
+func homebrewDaemonManaged() bool {
+	if homebrewDaemonServiceLoaded() {
+		return true
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return homebrewManagedExecutable(exe)
+}
+
+func homebrewManagedExecutable(exe string) bool {
+	return strings.Contains(filepath.Clean(exe), string(filepath.Separator)+"Cellar"+string(filepath.Separator)+"agenthail"+string(filepath.Separator))
 }
 
 func (a *App) cmdLaunch(args []string) error {
