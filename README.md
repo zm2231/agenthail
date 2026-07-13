@@ -61,7 +61,7 @@ Routes are validated as a graph when created, so self-routes and cycles such as 
 
 ## Install
 
-agenthail currently targets macOS. You need Go, Node.js, Python 3.10 or newer, Chrome, and the desktop/web apps for the surfaces you want to use. The installer selects a supported Python interpreter, installs sidecar dependencies with that exact interpreter, and pins its absolute path into the wrapper and daemon service.
+agenthail currently targets macOS. A source install needs Go, Swift, Node.js, Python 3.10 or newer, Chrome, and the desktop/web apps for the surfaces you want to use. The installer selects a supported Python interpreter, installs sidecar dependencies with that exact interpreter, and pins its absolute path into the wrapper and daemon service.
 
 ```bash
 git clone https://github.com/zm2231/agenthail.git
@@ -70,9 +70,9 @@ cd agenthail
 agenthail doctor
 ```
 
-The installer packages the Go binary, Python/Node helpers, and the AgentHail operations skill under `~/.local/share/agenthail`, then puts the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running `./install.sh` again upgrades the installation without nesting dependencies. If the daemon is running, the installer restarts it on the new binary. The packaged skill lives at `~/.local/share/agenthail/skills/agenthail-operations/SKILL.md` for agent setups that load local operator skills.
+The installer packages the Go binary, Python/Node helpers, native Agenthail menu bar app, and Agenthail operations skill under `~/.local/share/agenthail`, then puts the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). The small menu bar icon opens the dashboard, shows daemon health, controls notifications, and can restart the daemon. It does not replace the daemon or contact agent providers. Running `./install.sh` again upgrades the installation without nesting dependencies. If the daemon is running, the installer restarts it on the new binary. The packaged skill lives at `~/.local/share/agenthail/skills/agenthail-operations/SKILL.md` for agent setups that load local operator skills.
 
-Release archives produced by `scripts/package-release.sh` contain the binary, so the same installer works without a Go toolchain after extraction. The script requires a clean worktree, embeds the exact revision/build time, and writes a SHA-256 checksum next to the archive.
+Release archives produced by `scripts/package-release.sh` contain the binary and native app, so the same installer works without Go or Swift toolchains after extraction. The script requires a clean worktree, embeds the exact revision/build time, uses a Developer ID signing identity, notarizes and staples the app through `AGENTHAIL_NOTARY_PROFILE`, and writes a SHA-256 checksum next to the archive. A production build fails closed when signing or notarization is missing. `AGENTHAIL_ALLOW_UNNOTARIZED=1` is available only for an intentional local artifact that should not be published.
 
 For queues and relays that survive logouts/reboots:
 
@@ -191,6 +191,10 @@ agenthail queue clear @writer
 # Get a macOS notification when an observed turn finishes
 agenthail daemon notify on
 
+# Verify delivery or open macOS notification settings
+agenthail daemon notify test
+agenthail daemon notify settings
+
 # Stop or compact a supported session
 agenthail interrupt @writer
 agenthail compact @writer
@@ -304,7 +308,7 @@ python3 -m py_compile sidecar/sidecar.py
 
 Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `agenthail doctor --json`, `list --json`, `send --json`, `history --json`, and the queue commands return stable JSON documents for anything you want to script around. Delivery history is bounded and local, so it records the daemon's decisions without copying unbounded transcripts.
 
-Desktop notifications are opt-in and macOS-only. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling.
+Desktop notifications are opt-in and macOS-only. They use the native Agenthail app, so macOS shows Agenthail as the sender and a notification can open the dashboard. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling. The menu bar app starts at login, stays out of the Dock, and can be quit without stopping the daemon.
 
 Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
 

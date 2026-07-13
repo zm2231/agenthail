@@ -306,39 +306,57 @@ func (a *App) cmdRelay(args []string) error {
 
 func (a *App) cmdDaemon(args []string) error {
 	if len(args) == 2 && args[0] == "notify" {
-		config, err := daemon.LoadNotificationConfig()
-		if err != nil {
-			return err
-		}
 		switch args[1] {
 		case "on", "enable":
-			config.Enabled = true
+			status, err := daemon.EnableNotifications()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("desktop notifications: enabled (%s)\n", status.Authorization)
+			return nil
 		case "off", "disable":
-			config.Enabled = false
+			if err := daemon.DisableNotifications(); err != nil {
+				return err
+			}
+			fmt.Println("desktop notifications: disabled")
+			return nil
 		case "status":
-			if config.Enabled {
-				fmt.Println("desktop notifications: enabled")
-			} else {
-				fmt.Println("desktop notifications: disabled")
+			status := daemon.GetNotificationStatus()
+			state := "disabled"
+			if status.Enabled {
+				state = "enabled"
+			}
+			fmt.Printf("desktop notifications: %s (%s)\n", state, status.Authorization)
+			if status.Error != "" {
+				fmt.Printf("native app: unavailable (%s)\n", status.Error)
 			}
 			return nil
+		case "test":
+			status := daemon.GetNotificationStatus()
+			if !status.Enabled {
+				return fmt.Errorf("desktop notifications are not enabled (%s)", status.Authorization)
+			}
+			if err := daemon.Notify("Agenthail", "Native notifications are ready."); err != nil {
+				return err
+			}
+			fmt.Println("test notification sent")
+			return nil
+		case "settings":
+			return daemon.OpenNotificationSettings()
 		default:
-			return fmt.Errorf("usage: agenthail daemon notify <on|off|status>")
+			return fmt.Errorf("usage: agenthail daemon notify <on|off|status|test|settings>")
 		}
-		if err := daemon.SaveNotificationConfig(config); err != nil {
-			return err
-		}
-		fmt.Printf("desktop notifications: %s\n", map[bool]string{true: "enabled", false: "disabled"}[config.Enabled])
-		return nil
 	}
 	if len(args) != 1 {
-		return fmt.Errorf("usage: agenthail daemon <start|stop|status|install|uninstall> | daemon notify <on|off|status>")
+		return fmt.Errorf("usage: agenthail daemon <start|stop|restart|status|install|uninstall> | daemon notify <on|off|status|test|settings>")
 	}
 	switch args[0] {
 	case "start":
 		return a.daemonStart()
 	case "stop":
 		return a.daemonStop()
+	case "restart":
+		return a.daemonRestart()
 	case "status":
 		return a.daemonStatus()
 	case "install":

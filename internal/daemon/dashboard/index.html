@@ -368,8 +368,8 @@
                 <button class="soft-button" type="submit">Save</button>
               </form>
               <div class="setting-row">
-                <div><strong>Desktop notifications</strong><p>Notify when an agent finishes.</p></div>
-                <button class="soft-button" id="notification-toggle" type="button">Loading</button>
+                <div><strong>Desktop notifications</strong><p id="notification-status">Notify when an agent finishes.</p></div>
+                <button class="soft-button" id="notification-toggle" type="button" aria-describedby="notification-status">Loading</button>
               </div>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
             </section>
@@ -378,6 +378,6 @@
       </section>
     </main>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=8"></script>
+    <script src="/app.js?v=9"></script>
   </body>
 </html>

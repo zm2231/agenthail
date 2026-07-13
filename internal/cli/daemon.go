@@ -75,6 +75,31 @@ func (a *App) daemonStop() error {
 	return nil
 }
 
+func (a *App) daemonRestart() error {
+	if daemonServiceLoaded() {
+		before, _ := daemon.IsRunning()
+		target := fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonLaunchdLabel)
+		if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+			return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if pid, running := daemon.IsRunning(); running && pid != before {
+				fmt.Printf("daemon restarted (pid %d)\n", pid)
+				return nil
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return fmt.Errorf("launchd restarted the service but the daemon did not become ready")
+	}
+	if _, running := daemon.IsRunning(); running {
+		if err := daemon.Stop(); err != nil {
+			return err
+		}
+	}
+	return a.daemonStart()
+}
+
 func (a *App) daemonStatus() error {
 	pid, ok := daemon.IsRunning()
 	if !ok {
@@ -267,6 +292,7 @@ func (a *App) daemonInstallService() error {
 		"AGENTHAIL_SIDECAR":            os.Getenv("AGENTHAIL_SIDECAR"),
 		"AGENTHAIL_COOKIE_BRIDGE":      os.Getenv("AGENTHAIL_COOKIE_BRIDGE"),
 		"AGENTHAIL_PYTHON":             os.Getenv("AGENTHAIL_PYTHON"),
+		"AGENTHAIL_MAC_APP":            os.Getenv("AGENTHAIL_MAC_APP"),
 		"AGENTHAIL_CODEX_REMOTE":       codexRemotePort(),
 		"AGENTHAIL_CHROME_PROFILE":     envOr("AGENTHAIL_CHROME_PROFILE", "Default"),
 		"AGENTHAIL_NOTION_SPACE":       os.Getenv("AGENTHAIL_NOTION_SPACE"),
@@ -278,7 +304,7 @@ func (a *App) daemonInstallService() error {
 		"PATH":                         envOr("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"),
 	}
 	var envXML strings.Builder
-	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "AGENTHAIL_CODEX_REMOTE", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
+	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "AGENTHAIL_MAC_APP", "AGENTHAIL_CODEX_REMOTE", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
 		if environment[key] != "" {
 			fmt.Fprintf(&envXML, "    <key>%s</key><string>%s</string>\n", key, html.EscapeString(environment[key]))
 		}

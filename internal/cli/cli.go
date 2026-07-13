@@ -148,8 +148,9 @@ Routing (auto-relay):
 Daemon:
   daemon start                  Start the background daemon (auto-relay + steer)
   daemon stop                   Stop the daemon
+  daemon restart                Restart manual or supervised daemon
   daemon status                 Is the daemon running?
-  daemon notify on|off|status   Optional macOS completion notifications
+  daemon notify on|off|status|test|settings  Native macOS completion notifications
   daemon install                Install/start a supervised macOS launchd service
   daemon uninstall              Remove the macOS launchd service
 

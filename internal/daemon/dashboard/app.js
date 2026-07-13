@@ -480,8 +480,23 @@ function renderSettings() {
   const { dashboard, notifications, remoteAccess } = app.settings;
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
   $("#settings-listener").textContent = dashboard.listen;
-  $("#notification-toggle").textContent = notifications.enabled ? "On" : "Off";
-  $("#notification-toggle").dataset.enabled = String(notifications.enabled);
+  const notificationButton = $("#notification-toggle");
+  notificationButton.dataset.enabled = String(notifications.enabled);
+  notificationButton.dataset.action = notifications.authorization === "denied" ? "settings" : "toggle";
+  notificationButton.disabled = !notifications.available && notifications.authorization !== "denied";
+  notificationButton.textContent = notifications.authorization === "denied"
+    ? "Open settings"
+    : !notifications.available
+      ? "Unavailable"
+      : notifications.enabled
+        ? "On"
+        : "Turn on";
+  $("#notification-status").textContent = notifications.error
+    || (notifications.authorization === "denied"
+      ? "Agenthail is blocked in System Settings."
+      : notifications.enabled
+        ? "Native alerts and sounds are on."
+        : "Turn on native alerts when an agent finishes.");
   $("#remote-access-content").innerHTML = remoteAccess.enabled
     ? `<div class="remote-ready"><img src="/api/settings/remote-qr" alt="QR code for this Agenthail dashboard"><div><span class="status-pill idle">Connected</span><p>${escape(remoteAccess.dnsName)}</p><div class="remote-actions"><button class="primary-button" data-copy-remote type="button">Copy phone link</button><button class="soft-button" data-remote-action="remote-disable" type="button">Turn off</button></div><small>On iPhone, open the link, tap Share, then Add to Home Screen.</small></div></div>`
     : `<div class="remote-off"><p>${escape(remoteAccess.error || "Use Tailscale to reach this dashboard from your own devices.")}</p><button class="primary-button" data-remote-action="remote-enable" type="button">Enable phone access</button></div>`;
@@ -995,7 +1010,12 @@ $("#dashboard-settings-form").addEventListener("submit", async (event) => {
 });
 $("#notification-toggle").addEventListener("click", async () => {
   try {
-    await updateSettings({ action: "notifications", notificationsEnabled: $("#notification-toggle").dataset.enabled !== "true" });
+    const button = $("#notification-toggle");
+    if (button.dataset.action === "settings") {
+      await updateSettings({ action: "notification-settings" });
+      return;
+    }
+    await updateSettings({ action: "notifications", notificationsEnabled: button.dataset.enabled !== "true" });
   } catch (error) {
     toast(error.message);
   }

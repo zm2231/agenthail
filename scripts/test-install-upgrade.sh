@@ -55,6 +55,7 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 (cd "$ROOT" && go build -trimpath -o "$TMP/agenthail" ./cmd/agenthail)
+"$ROOT/scripts/build-macos-app.sh" "$TMP/Agenthail.app" "$(uname -m)" >/dev/null
 
 install_once() {
 	local home="$1"
@@ -64,6 +65,8 @@ install_once() {
 	PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
 	AGENTHAIL_PREBUILT_BINARY="$TMP/agenthail" \
+	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
+	AGENTHAIL_SKIP_MAC_APP_LAUNCH=1 \
 	AGENTHAIL_INSTALL_DIR="$install_dir" \
 	AGENTHAIL_DATA_DIR="$data_dir" \
 	"$ROOT/install.sh"
@@ -86,6 +89,7 @@ install_once "$TEST_HOME" "$NEW_BIN" "$DATA_DIR" >"$TMP/upgrade.log"
 
 test ! -e "$OLD_BIN/agenthail"
 test -x "$NEW_BIN/agenthail"
+test -x "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
 grep -Fq 'stopping running daemon for upgrade' "$TMP/upgrade.log"
 grep -Fq 'restarting daemon with the upgraded binary' "$TMP/upgrade.log"
 grep -Fq 'agenthail-managed-wrapper-v1' "$NEW_BIN/agenthail"
@@ -134,6 +138,7 @@ grep -Fq 'refusing to overwrite unmanaged executable' "$TMP/supervised-data-coll
 SUPERVISED_PLIST="$SUPERVISED_HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract ProgramArguments.0 raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/agenthail"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVISED_PLIST")" = "$PYTHON_BIN"
+test "$(plutil -extract EnvironmentVariables.AGENTHAIL_MAC_APP raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/Agenthail.app/Contents/MacOS/Agenthail"
 
 echo "legacy wrapper migration: OK"
 echo "custom wrapper upgrade: OK"

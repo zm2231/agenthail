@@ -16,6 +16,7 @@ RUNTIME_STOPPED=0
 ACTIVATED=0
 INSTALL_SUCCEEDED=0
 SERVICE_PLIST="$HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
+LEGACY_MENUBAR_PLIST="$HOME/Library/LaunchAgents/com.agenthail.menubar.plist"
 PARENT_DIR="$(dirname "$DATA_DIR")"
 mkdir -p "$PARENT_DIR"
 STAGE_DIR="$(mktemp -d "$PARENT_DIR/.agenthail-stage.XXXXXX")"
@@ -136,6 +137,19 @@ else
 	exit 1
 fi
 
+echo "agenthail: building macOS companion"
+if [ -n "${AGENTHAIL_PREBUILT_MAC_APP:-}" ]; then
+	cp -R "$AGENTHAIL_PREBUILT_MAC_APP" "$STAGE_DIR/Agenthail.app"
+elif [ -d "$REPO_DIR/Agenthail.app" ]; then
+	cp -R "$REPO_DIR/Agenthail.app" "$STAGE_DIR/Agenthail.app"
+elif [ -x "$REPO_DIR/scripts/build-macos-app.sh" ]; then
+	"$REPO_DIR/scripts/build-macos-app.sh" "$STAGE_DIR/Agenthail.app" "$(uname -m)" >/dev/null
+else
+	echo "error: Agenthail.app is missing and cannot be built" >&2
+	exit 1
+fi
+test -x "$STAGE_DIR/Agenthail.app/Contents/MacOS/Agenthail"
+
 echo ""
 echo "agenthail: installing sidecar deps (curl_cffi, sweet-cookie)"
 echo "agenthail: Python runtime: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
@@ -147,7 +161,8 @@ cd "$REPO_DIR"
 echo ""
 echo "agenthail: installing to $DATA_DIR"
 chmod +x "$STAGE_DIR/agenthail"
-codesign --force --sign - "$STAGE_DIR/agenthail" 2>/dev/null || true
+codesign --verify "$STAGE_DIR/agenthail" 2>/dev/null || codesign --force --sign - "$STAGE_DIR/agenthail" 2>/dev/null || true
+codesign --verify --deep --strict "$STAGE_DIR/Agenthail.app"
 
 cp sidecar/sidecar.py "$STAGE_DIR/sidecar.py"
 cp sidecar/cookie.mjs "$STAGE_DIR/cookie.mjs"
@@ -228,12 +243,14 @@ printf -v SIDECAR_SHELL '%q' "$DATA_DIR/sidecar.py"
 printf -v COOKIE_BRIDGE_SHELL '%q' "$DATA_DIR/cookie.mjs"
 printf -v PYTHON_SHELL '%q' "$PYTHON_BIN"
 printf -v PYDEPS_SHELL '%q' "$DATA_DIR/pydeps"
+printf -v MAC_APP_SHELL '%q' "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
 cat >"$INSTALL_DIR/agenthail" <<EOF
 #!/usr/bin/env bash
 # agenthail-managed-wrapper-v1
 export AGENTHAIL_SIDECAR=$SIDECAR_SHELL
 export AGENTHAIL_COOKIE_BRIDGE=$COOKIE_BRIDGE_SHELL
 export AGENTHAIL_PYTHON=$PYTHON_SHELL
+export AGENTHAIL_MAC_APP=$MAC_APP_SHELL
 export PYTHONPATH=$PYDEPS_SHELL:\${PYTHONPATH:-}
 exec $DATA_BINARY_SHELL "\$@"
 EOF
@@ -250,6 +267,29 @@ if [ "$REINSTALL_SERVICE" -eq 1 ]; then
 elif [ "$RESTART_DAEMON" -eq 1 ]; then
 	echo "agenthail: restarting daemon with the upgraded binary"
 	"$INSTALL_DIR/agenthail" daemon start
+fi
+
+if [ "${AGENTHAIL_SKIP_MAC_APP_LAUNCH:-0}" != "1" ]; then
+	LEGACY_MENUBAR_LOADED=0
+	if launchctl print "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 && [ -f "$LEGACY_MENUBAR_PLIST" ]; then
+		LEGACY_MENUBAR_LOADED=1
+		launchctl bootout "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 || true
+	fi
+	if SERVICE_OUTPUT="$($DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail service enable 2>&1)"; then
+		rm -f "$LEGACY_MENUBAR_PLIST"
+		killall Agenthail >/dev/null 2>&1 || true
+		open -gja "$DATA_DIR/Agenthail.app" || true
+	else
+		echo "warning: Agenthail login item could not be registered ($SERVICE_OUTPUT)" >&2
+		if [ "$LEGACY_MENUBAR_LOADED" -eq 1 ] && [ -f "$LEGACY_MENUBAR_PLIST" ]; then
+			if ! launchctl bootstrap "gui/$UID" "$LEGACY_MENUBAR_PLIST" >/dev/null 2>&1; then
+				echo "warning: previous menu service could not be restored; opening Agenthail directly" >&2
+				open -gja "$DATA_DIR/Agenthail.app" || true
+			fi
+		else
+			open -gja "$DATA_DIR/Agenthail.app" || true
+		fi
+	fi
 fi
 
 if [ "${#OWNED_WRAPPERS[@]}" -gt 0 ]; then
@@ -273,6 +313,7 @@ echo "installed: agenthail $INSTALL_DIR/agenthail"
 echo "  sidecar:  $DATA_DIR/sidecar.py"
 echo "  python:   $PYTHON_BIN"
 echo "  cookies:  $DATA_DIR/cookie.mjs"
+echo "  mac app:  $DATA_DIR/Agenthail.app"
 if [ -f "$DATA_DIR/skills/agenthail-operations/SKILL.md" ]; then
   echo "  skill:    $DATA_DIR/skills/agenthail-operations/SKILL.md"
 fi

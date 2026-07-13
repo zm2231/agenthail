@@ -165,11 +165,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	notifications, err := LoadNotificationConfig()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	notifications := GetNotificationStatus()
 	if r.Method == http.MethodGet {
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "notifications": notifications, "remoteAccess": RemoteAccessStatusForConfig(config), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
 		return
@@ -196,8 +192,14 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		config.CodexRecentHours = request.CodexRecentHours
 		err = SaveDashboardConfig(config)
 	case "notifications":
-		notifications.Enabled = request.NotificationsEnabled
-		err = SaveNotificationConfig(notifications)
+		if request.NotificationsEnabled {
+			notifications, err = EnableNotifications()
+		} else {
+			err = DisableNotifications()
+			notifications = GetNotificationStatus()
+		}
+	case "notification-settings":
+		err = OpenNotificationSettings()
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)
 		return
@@ -206,7 +208,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "notifications": notifications})
 }
 
 func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request) {
