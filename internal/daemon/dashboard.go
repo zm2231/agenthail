@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -148,8 +149,63 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
+	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
 	mux.HandleFunc("/api/action", dashboard.guard(d.dashboardActionHandler))
 	return d.dashboardHeaders(mux)
+}
+
+func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	limit := 25
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			http.Error(w, "limit must be between 1 and 100", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+	var beforeID int64
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 1 {
+			http.Error(w, "before must be a positive history id", http.StatusBadRequest)
+			return
+		}
+		beforeID = parsed
+	}
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	queryText := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(kind) > 100 || len(queryText) > 200 {
+		http.Error(w, "history filters are too long", http.StatusBadRequest)
+		return
+	}
+	entries, hasMore, err := d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("read delivery history: %s", err), http.StatusInternalServerError)
+		return
+	}
+	kinds, err := d.Registry.ListHistoryKinds()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("read delivery history kinds: %s", err), http.StatusInternalServerError)
+		return
+	}
+	items := make([]dashboardHistory, 0, len(entries))
+	for _, entry := range entries {
+		items = append(items, d.dashboardHistoryEntry(entry))
+	}
+	nextBefore := int64(0)
+	if hasMore && len(entries) > 0 {
+		nextBefore = entries[len(entries)-1].ID
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"items": items, "hasMore": hasMore, "nextBefore": nextBefore, "kinds": kinds})
+}
+
+func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHistory {
+	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error}
 }
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
@@ -310,7 +366,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern})
 	}
 	for _, entry := range history {
-		state.History = append(state.History, dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error})
+		state.History = append(state.History, d.dashboardHistoryEntry(entry))
 	}
 	var mu sync.Mutex
 	var wait sync.WaitGroup

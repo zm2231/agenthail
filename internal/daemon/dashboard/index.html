@@ -327,7 +327,12 @@
             </div>
             <p>Newest activity appears first.</p>
           </div>
+          <div class="audit-toolbar">
+            <label class="search audit-search"><span aria-hidden="true">⌕</span><input id="audit-search" type="search" placeholder="Find an event" aria-label="Find an audit event" /></label>
+            <label><span class="sr-only">Event type</span><select id="audit-kind-filter"><option value="all">All events</option></select></label>
+          </div>
           <div id="history-list" class="operation-list"></div>
+          <button class="soft-button audit-more" id="history-more" type="button" hidden>Load older activity</button>
         </section>
       </section>
     </main>

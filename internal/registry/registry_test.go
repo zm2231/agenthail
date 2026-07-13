@@ -3,6 +3,7 @@ package registry
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -314,6 +315,80 @@ func TestDeliveryHistoryIsBoundedAndFilterable(t *testing.T) {
 	}
 	if len(entries[1].Message) != maxHistoryText+len("\n[truncated]") {
 		t.Fatalf("history message length=%d", len(entries[1].Message))
+	}
+}
+
+func TestListHistoryPageUsesStableCursor(t *testing.T) {
+	r := openTestRegistry(t)
+	for i := 0; i < 5; i++ {
+		if err := r.RecordHistory(HistoryEntry{Kind: fmt.Sprintf("event_%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, hasMore, err := r.ListHistoryPage(2, 0, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || !hasMore || first[0].ID <= first[1].ID {
+		t.Fatalf("first page=%v hasMore=%v", first, hasMore)
+	}
+	second, hasMore, err := r.ListHistoryPage(2, first[len(first)-1].ID, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 2 || !hasMore || second[0].ID >= first[len(first)-1].ID {
+		t.Fatalf("second page=%v hasMore=%v", second, hasMore)
+	}
+	last, hasMore, err := r.ListHistoryPage(2, second[len(second)-1].ID, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(last) != 1 || hasMore {
+		t.Fatalf("last page=%v hasMore=%v", last, hasMore)
+	}
+}
+
+func TestListHistoryPageFiltersAcrossAllRows(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: "named-session", Surface: surface.KindCodex, Name: "Release Writer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("writer", "named-session"); err != nil {
+		t.Fatal(err)
+	}
+	entries := []HistoryEntry{
+		{Kind: "sent", Message: "ordinary update"},
+		{Kind: "failed", Message: "deploy alpha"},
+		{Kind: "sent", Message: "deploy beta"},
+		{Kind: "sent", SessionID: "named-session", Message: "handoff"},
+	}
+	for _, entry := range entries {
+		if err := r.RecordHistory(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filtered, hasMore, err := r.ListHistoryPage(25, 0, "sent", "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].Message != "deploy beta" || hasMore {
+		t.Fatalf("filtered=%v hasMore=%v", filtered, hasMore)
+	}
+	kinds, err := r.ListHistoryKinds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(kinds, ",") != "failed,sent" {
+		t.Fatalf("kinds=%v", kinds)
+	}
+	for _, query := range []string{"@writer", "codex/Release Writer"} {
+		matched, _, err := r.ListHistoryPage(25, 0, "", query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matched) != 1 || matched[0].SessionID != "named-session" {
+			t.Fatalf("query=%q matched=%v", query, matched)
+		}
 	}
 }
 

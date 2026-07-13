@@ -320,6 +320,13 @@ textarea:focus-visible {
   gap: 20px;
   padding: 15px 0;
 }
+.activity-main {
+  flex: 1;
+  min-width: 0;
+}
+.activity-item > .status-pill {
+  flex: none;
+}
 .activity-item:hover .activity-name {
   color: var(--accent);
 }
@@ -330,6 +337,9 @@ textarea:focus-visible {
   min-width: 0;
 }
 .activity-name span {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -618,7 +628,7 @@ select {
   width: min(100%, 820px);
   height: calc(100vh - 340px);
   margin: 0 auto;
-  padding: 28px 22px 40px;
+  padding: 28px 22px 40px 46px;
   overflow-y: auto;
   overflow-wrap: anywhere;
   overscroll-behavior: contain;
@@ -631,13 +641,13 @@ select {
   margin-top: 10px;
 }
 .turn.agent {
-  padding-left: 24px;
+  padding-left: 0;
 }
 .turn.agent:before {
   position: absolute;
   top: 20px;
   bottom: 20px;
-  left: 0;
+  left: -24px;
   width: 2px;
   border-radius: 2px;
   background: var(--rule);
@@ -995,8 +1005,79 @@ select {
   width: min(100%, 980px);
   margin: auto;
 }
-.history-item {
-  align-items: start;
+.audit-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 10px;
+  margin: 8px 0 24px;
+}
+.audit-search input {
+  padding: 12px 0;
+}
+.audit-event {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.audit-marker {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--good);
+}
+.audit-marker.failed {
+  background: var(--bad);
+}
+.audit-event-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.audit-event-heading time,
+.audit-route {
+  color: var(--muted);
+  font-size: 13px;
+}
+.audit-route {
+  margin-top: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.audit-event details {
+  margin-top: 10px;
+}
+.audit-event summary {
+  cursor: pointer;
+  color: var(--quiet);
+  font-size: 12px;
+  font-weight: 700;
+}
+.audit-detail {
+  max-width: 760px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.audit-detail p {
+  margin: 0 0 10px;
+}
+.audit-more {
+  display: block;
+  margin: 24px auto 0;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
 }
 .toast {
   position: fixed;
@@ -1113,7 +1194,7 @@ select {
   .chat-body {
     height: min(520px, 58vh);
     min-height: 360px;
-    padding: 24px 4px;
+    padding: 24px 4px 24px 28px;
   }
   .composer {
     width: 100%;
@@ -1132,6 +1213,9 @@ select {
     margin-top: 8px;
   }
   .operation-item {
+    grid-template-columns: 1fr;
+  }
+  .audit-toolbar {
     grid-template-columns: 1fr;
   }
   .operation-actions {

@@ -13,6 +13,7 @@ const app = {
   filters: { surface: "all", status: "all" },
   inboxMode: "current",
   operationsTab: "queue",
+  audit: { items: [], kinds: [], nextBefore: 0, hasMore: true, loaded: false, loading: false, kind: "all", query: "", searchTimer: null },
   sessionLimit: 0,
   sessionViewport: null,
 };
@@ -394,7 +395,7 @@ function renderOperations() {
   const { queue, channels, relays, history = [] } = app.state;
   $("#operations-queue-count").textContent = queue.length;
   $("#operations-relay-count").textContent = relays.length;
-  $("#operations-history-count").textContent = history.length;
+  $("#operations-history-count").textContent = history.length === 50 ? "50+" : history.length;
   $("#queue-list").innerHTML =
     queue
       .map(
@@ -417,20 +418,7 @@ function renderOperations() {
           `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(relay.from)} <span class="route-arrow">→</span> ${escape(relay.to)}</div><div class="operation-detail">Matches /${escape(relay.pattern)}/</div></div><button class="button quiet" data-network-action="relay-remove" data-relay-id="${relay.id}" type="button">Remove</button></article>`,
       )
       .join("") || '<div class="empty-card">No automatic handoffs yet.</div>';
-  $("#history-list").innerHTML =
-    history
-      .slice(0, 50)
-      .map((entry) => {
-        const target = entry.target || entry.sessionId || "daemon";
-        const source = entry.source
-          ? `${escape(entry.source)} <span class="route-arrow">→</span> `
-          : "";
-        const detail = entry.error
-          ? `<span class="operation-error">${escape(entry.error)}</span>`
-          : escape(entry.message || entry.result || "");
-        return `<article class="operation-item history-item"><div class="operation-main"><div class="operation-title">${source}${escape(target)}</div><div class="operation-detail">${escape(entry.kind)} · ${timeAgo(entry.createdAt)}${detail ? ` · ${detail}` : ""}</div></div>${statusPill(entry.kind)}</article>`;
-      })
-      .join("") || '<div class="empty-card">No delivery history yet.</div>';
+  renderAudit();
   document
     .querySelectorAll("[data-operations-panel]")
     .forEach((panel) =>
@@ -455,6 +443,65 @@ function renderOperations() {
         String(tab.dataset.operationsTab === app.operationsTab),
       ),
     );
+}
+function auditKindLabel(kind) {
+  return String(kind || "event").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+function renderAudit() {
+  const audit = app.audit;
+  const kindSelect = $("#audit-kind-filter");
+  kindSelect.innerHTML = ['<option value="all">All events</option>', ...audit.kinds.map((kind) => `<option value="${escape(kind)}">${escape(auditKindLabel(kind))}</option>`)].join("");
+  kindSelect.value = audit.kinds.includes(audit.kind) ? audit.kind : "all";
+  audit.kind = kindSelect.value;
+  $("#history-list").innerHTML = audit.items.map((entry) => {
+    const target = entry.target || entry.sessionId || "Agenthail";
+    const route = entry.source ? `${escape(entry.source)} <span class="route-arrow">→</span> ${escape(target)}` : escape(target);
+    const content = entry.error || entry.message || entry.result || "No message content recorded";
+    return `<article class="audit-event"><div class="audit-marker ${entry.error ? "failed" : ""}"></div><div class="audit-event-body"><div class="audit-event-heading"><strong>${escape(auditKindLabel(entry.kind))}</strong><time>${timeAgo(entry.createdAt)}</time></div><div class="audit-route">${route}</div><details><summary>View details</summary><div class="audit-detail${entry.error ? " operation-error" : ""}">${markdown(content)}</div></details></div></article>`;
+  }).join("") || `<div class="empty-card">${audit.loading ? "Loading activity." : audit.loaded ? "No activity matches these filters." : "Open Audit to load daemon activity."}</div>`;
+  const more = $("#history-more");
+  more.hidden = !audit.loaded || !audit.hasMore;
+  more.disabled = audit.loading;
+  more.textContent = audit.loading ? "Loading activity" : "Load older activity";
+}
+async function loadAudit(reset = false, silent = false) {
+  if (app.audit.loading) return;
+  const previous = silent ? { items: app.audit.items, nextBefore: app.audit.nextBefore, hasMore: app.audit.hasMore } : null;
+  if (reset) app.audit = { ...app.audit, items: silent ? app.audit.items : [], nextBefore: 0, hasMore: true, loaded: silent && app.audit.loaded };
+  if (!app.audit.hasMore) return;
+  app.audit.loading = true;
+  renderAudit();
+  try {
+    const params = new URLSearchParams({ limit: "25" });
+    if (app.audit.nextBefore) params.set("before", app.audit.nextBefore);
+    if (app.audit.kind !== "all") params.set("kind", app.audit.kind);
+    if (app.audit.query) params.set("q", app.audit.query);
+    const response = await fetch(`/api/history?${params}`);
+    if (!response.ok) throw Error(await response.text());
+    const page = await response.json();
+    const previousIDs = previous ? new Set(previous.items.map((entry) => entry.id)) : null;
+    const overlapsPrevious = previousIDs ? page.items.some((entry) => previousIDs.has(entry.id)) : false;
+    if (reset) {
+      if (previous) {
+        const fresh = new Set(page.items.map((entry) => entry.id));
+        app.audit.items = [...page.items, ...previous.items.filter((entry) => !fresh.has(entry.id))];
+      } else {
+        app.audit.items = page.items;
+      }
+    } else {
+      const known = new Set(app.audit.items.map((entry) => entry.id));
+      app.audit.items.push(...page.items.filter((entry) => !known.has(entry.id)));
+    }
+    app.audit.nextBefore = previous && overlapsPrevious ? previous.nextBefore : page.nextBefore || 0;
+    app.audit.hasMore = previous && overlapsPrevious ? previous.hasMore : page.hasMore === true;
+    app.audit.kinds = page.kinds || [];
+    app.audit.loaded = true;
+  } catch (error) {
+    toast(friendlyError(error));
+  } finally {
+    app.audit.loading = false;
+    renderAudit();
+  }
 }
 function renderAll() {
   try {
@@ -497,6 +544,7 @@ async function load(fresh = false) {
       if (replacement) app.selected = replacement;
     }
     renderAll();
+    if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
     if (!app.selected && location.hash === "#conversations") {
       const first = scopedSessions()[0] || app.state.sessions[0];
@@ -780,9 +828,22 @@ document.addEventListener("click", (event) => {
   if (tab) {
     app.operationsTab = tab.dataset.operationsTab;
     renderOperations();
+    if (app.operationsTab === "audit" && !app.audit.loaded) loadAudit();
   }
 });
-$("#refresh").addEventListener("click", () => load(true));
+$("#audit-search").addEventListener("input", (event) => {
+  app.audit.query = event.target.value;
+  clearTimeout(app.audit.searchTimer);
+  app.audit.searchTimer = setTimeout(() => loadAudit(true), 250);
+});
+$("#audit-kind-filter").addEventListener("change", (event) => {
+  app.audit.kind = event.target.value;
+  loadAudit(true);
+});
+$("#history-more").addEventListener("click", () => loadAudit());
+$("#refresh").addEventListener("click", async () => {
+  await load(true);
+});
 window.addEventListener("resize", () => {
   renderSessions();
   resizeComposer();

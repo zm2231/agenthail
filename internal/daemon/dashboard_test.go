@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -99,6 +101,53 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	}
 	if got := fake.listCalls.Load(); got != 1 {
 		t.Fatalf("surface list called %d times, want one cached discovery", got)
+	}
+}
+
+func TestDashboardHistoryIsAuthorizedAndPaginated(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	for i := 0; i < 4; i++ {
+		if err := registry.RecordHistory(registrypkg.HistoryEntry{Kind: "sent", Message: fmt.Sprintf("message %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/history?limit=2", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d", unauthorized.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/history?limit=2", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var first struct {
+		Items      []dashboardHistory `json:"items"`
+		HasMore    bool               `json:"hasMore"`
+		NextBefore int64              `json:"nextBefore"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 2 || !first.HasMore || first.NextBefore != first.Items[1].ID {
+		t.Fatalf("first page=%+v", first)
+	}
+	nextRequest := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/history?limit=2&before=%d", first.NextBefore), nil)
+	nextRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	nextResponse := httptest.NewRecorder()
+	handler.ServeHTTP(nextResponse, nextRequest)
+	if nextResponse.Code != http.StatusOK || strings.Contains(nextResponse.Body.String(), fmt.Sprintf(`"id":%d`, first.Items[1].ID)) {
+		t.Fatalf("second page status=%d body=%s", nextResponse.Code, nextResponse.Body.String())
+	}
+	filteredRequest := httptest.NewRequest(http.MethodGet, "/api/history?limit=25&q=message+3&kind=sent", nil)
+	filteredRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	filteredResponse := httptest.NewRecorder()
+	handler.ServeHTTP(filteredResponse, filteredRequest)
+	if filteredResponse.Code != http.StatusOK || !strings.Contains(filteredResponse.Body.String(), "message 3") || strings.Contains(filteredResponse.Body.String(), "message 2") {
+		t.Fatalf("filtered status=%d body=%s", filteredResponse.Code, filteredResponse.Body.String())
 	}
 }
 

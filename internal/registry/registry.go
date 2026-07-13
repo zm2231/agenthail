@@ -438,6 +438,76 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	return entries, rows.Err()
 }
 
+func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText string) ([]HistoryEntry, bool, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	query := `SELECT h.id,h.created_at,h.kind,h.session_id,h.source_session_id,h.route_id,h.queue_id,h.completion_id,h.message,h.result,h.error FROM delivery_history h`
+	args := []any{}
+	conditions := []string{}
+	if beforeID > 0 {
+		conditions = append(conditions, `h.id < ?`)
+		args = append(args, beforeID)
+	}
+	if kind != "" {
+		conditions = append(conditions, `h.kind = ?`)
+		args = append(args, kind)
+	}
+	if queryText != "" {
+		conditions = append(conditions, `(h.kind LIKE ? ESCAPE '\' OR h.session_id LIKE ? ESCAPE '\' OR h.source_session_id LIKE ? ESCAPE '\' OR h.message LIKE ? ESCAPE '\' OR h.result LIKE ? ESCAPE '\' OR h.error LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM aliases a WHERE (a.session_id=h.session_id OR a.session_id=h.source_session_id) AND ('@' || a.name) LIKE ? ESCAPE '\') OR EXISTS (SELECT 1 FROM sessions s WHERE (s.id=h.session_id OR s.id=h.source_session_id) AND (s.surface || '/' || s.name) LIKE ? ESCAPE '\'))`)
+		pattern := "%" + escapeLike(queryText) + "%"
+		for range 8 {
+			args = append(args, pattern)
+		}
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
+	}
+	query += ` ORDER BY h.id DESC LIMIT ?`
+	args = append(args, limit+1)
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	entries := make([]HistoryEntry, 0, limit+1)
+	for rows.Next() {
+		var entry HistoryEntry
+		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error); err != nil {
+			return nil, false, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(entries) > limit
+	if hasMore {
+		entries = entries[:limit]
+	}
+	return entries, hasMore, nil
+}
+
+func (r *Registry) ListHistoryKinds() ([]string, error) {
+	rows, err := r.db.Query(`SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	kinds := []string{}
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			return nil, err
+		}
+		kinds = append(kinds, kind)
+	}
+	return kinds, rows.Err()
+}
+
 type QueueRow struct {
 	ID        int64  `json:"id"`
 	SessionID string `json:"sessionId"`
