@@ -102,16 +102,25 @@ Nothing here leaves your machine. The trail is bounded on purpose (the newest 20
 
 ## Install
 
-macOS only, for now. A source install needs Go, Node.js, Python 3.10 or newer, and Chrome.
+macOS on Apple silicon, for now. Install Agenthail with Homebrew:
+
+```bash
+brew install zm2231/tap/agenthail
+brew services start agenthail
+agenthail doctor
+```
+
+Homebrew installs the signed and notarized binary plus its local sidecars, puts `agenthail` on your PATH, and keeps the daemon running across logins. Upgrade later with `brew upgrade agenthail`.
+
+To install from source instead, you need Go, Node.js, Python 3.10 or newer, and Chrome:
 
 ```bash
 git clone https://github.com/zm2231/agenthail.git
 cd agenthail
 ./install.sh
-agenthail doctor
 ```
 
-The installer puts the binary and sidecar under `~/.local/share/agenthail`, then drops the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running it again upgrades in place and restarts the daemon on the new binary.
+The source installer puts the binary and sidecar under `~/.local/share/agenthail`, then drops the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running it again upgrades in place and restarts the daemon on the new binary.
 
 If you already run Claude Code or Codex, it also links the agenthail operations skill into `~/.claude/skills` and `~/.codex/skills`, so your agents know how to drive the CLI themselves. It never creates those directories, so nothing shows up on a machine that does not use them. Skip it with `./install.sh --no-skill`.
 
