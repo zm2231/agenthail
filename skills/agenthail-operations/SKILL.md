@@ -34,6 +34,12 @@ uses AgentHail's local app-server bridge. Relevant overrides are
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 
+AgentHail reads these overrides from the environment of each CLI or daemon
+process and stores shared session, alias, queue, relay, and delivery state in
+`~/.agenthail/registry.db`. A launchd service does not inherit variables that
+exist only in an interactive shell. Put required `AGENTHAIL_*` overrides in the
+service environment as well as the shell that runs the operator.
+
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
 
@@ -67,13 +73,23 @@ target has no writable transport.
 
 ## Find And Resolve Targets
 
-Start with the 15 most recent sessions. Use `--all` only when the target is
-older or missing from the recent window.
+For a user-facing current view, show open Claude sessions, busy or loaded Codex
+sessions active within the configured recent window (five hours by default),
+and busy or recently active Notion threads. Use `--all` only when the user asks
+for history or a target is older or missing from the current view.
 
 ```bash
 agenthail list --json
 agenthail list --all --json
 ```
+
+`doctor` is a health probe. Its per-surface session counts are full discovery
+inventory counts, not current, active, or recent totals. Never use those counts
+in a session summary. Session lists and counts must come from `list` output
+after applying the current-view policy above. A surface discovery error means
+that surface is unavailable for this call; report it and continue with sessions
+from healthy surfaces. Do not describe an unavailable Notion surface as active
+or configured.
 
 Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, or a
 qualified `surface:target` value. If AgentHail reports ambiguity, show the
