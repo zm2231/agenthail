@@ -45,6 +45,9 @@ func (a *App) Run(args []string) error {
 	}
 	cmd := args[0]
 	rest := args[1:]
+	if cmd == "codex" {
+		return a.cmdCodex(rest)
+	}
 	if err := validateCommandFlags(cmd, rest); err != nil {
 		return err
 	}
@@ -107,6 +110,7 @@ Usage:
   agenthail <command> [target] [args] [options]
 
 Session commands:
+  codex [args]                  Start a writable Codex terminal session
   list [--all]                   List active sessions (default 15, sorted by recency)
   send <target> "msg"|-       Send (--from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
@@ -167,6 +171,27 @@ Other:
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
 `)
+}
+
+func (a *App) cmdCodex(args []string) error {
+	for _, arg := range args {
+		if arg == "--remote" || strings.HasPrefix(arg, "--remote=") || arg == "--remote-auth-token-env" || strings.HasPrefix(arg, "--remote-auth-token-env=") {
+			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
+		}
+	}
+	path, err := exec.LookPath("codex")
+	if err != nil {
+		return fmt.Errorf("find codex: %w", err)
+	}
+	start := exec.Command(path, "app-server", "daemon", "start")
+	start.Stdin = os.Stdin
+	start.Stdout = io.Discard
+	start.Stderr = os.Stderr
+	if err := start.Run(); err != nil {
+		return fmt.Errorf("start Codex app-server: %w", err)
+	}
+	argv := append([]string{"codex", "--remote", "unix://"}, args...)
+	return syscall.Exec(path, argv, os.Environ())
 }
 
 func (a *App) cmdVersion(args []string) error {

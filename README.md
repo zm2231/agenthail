@@ -83,6 +83,17 @@ agenthail daemon status
 
 That installs a launchd service with restart-on-crash. If you prefer to run it only when needed, use `agenthail daemon start` and `agenthail daemon stop`.
 
+## Writable Codex terminal sessions
+
+Start new Codex terminal work with Agenthail when you want to send, steer, stop, compact, or change models from the dashboard later:
+
+```bash
+agenthail codex
+agenthail codex --model gpt-5.6-sol
+```
+
+This starts Codex on Agenthail's local app-server without replacing the `codex` command or changing your shell. Existing sessions started with plain `codex` still appear in history, but they are read-only because the standard terminal process has no safe external input path. Codex Desktop sessions remain writable while loaded in the app.
+
 ## Optional dashboard
 
 The dashboard is off by default. When you enable it, the running daemon serves a private local control room for the surfaces you have connected. Claude, Codex, and Notion are independent, so an unavailable surface never blocks the rest.
@@ -93,7 +104,7 @@ agenthail dashboard status
 agenthail dashboard config --codex-recent-hours 5
 ```
 
-The home page is deliberately simple: your connected surfaces and current work. Claude sessions count as current while their terminal process is open. Codex sessions count as current while working, queued, or used within the configured window, which defaults to five hours. Open History for older threads. Codex threads reported as not loaded by Codex Desktop remain readable but are read-only in the dashboard. Type `/` in a writable conversation to see supported commands; `/model` uses the model catalog reported by that surface. Operations contains delivery, handoffs, audit, remote access, and dashboard settings.
+The home page is deliberately simple: your connected surfaces and current work. Claude sessions count as current while their terminal process is open. Codex sessions count as current while working, queued, or used within the configured window, which defaults to five hours. Open History for older threads. Plain `codex` terminal sessions and unloaded historical threads remain readable but cannot accept messages or actions. Type `/` in a writable conversation to see supported commands; `/model` uses the model catalog reported by that surface. Operations contains delivery, handoffs, audit, remote access, and dashboard settings.
 
 The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
 

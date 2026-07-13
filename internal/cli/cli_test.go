@@ -32,6 +32,13 @@ type cliSurface struct {
 	streamEvents []surface.StreamEvent
 }
 
+func TestCodexCommandRejectsCustomRemote(t *testing.T) {
+	err := (&App{}).Run([]string{"codex", "--remote", "ws://example.test"})
+	if err == nil || !strings.Contains(err.Error(), "manages the remote transport") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func (f *cliSurface) Name() surface.SurfaceKind                       { return f.kind }
 func (f *cliSurface) List(context.Context) ([]surface.Session, error) { return f.listed, nil }
 func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session, error) {

@@ -26,8 +26,8 @@ type codexThread struct {
 	Turns  []codexTurn
 }
 
-func (c *Codex) readThread(ctx context.Context, conn *cdpConn, threadID string) (*codexThread, error) {
-	response, err := c.rpc(ctx, conn, "thread/read", map[string]any{
+func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
+	response, err := conn.Request(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
 		"includeTurns": true,
 	}, 5*time.Second)

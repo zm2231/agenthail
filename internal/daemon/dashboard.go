@@ -500,8 +500,11 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 }
 
 func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
+	if session.Surface == surface.KindCodex && session.Transport == "readOnly" {
+		return surface.Capabilities{}, true, "This terminal session is read only. Start a writable session with agenthail codex."
+	}
 	if session.Surface == surface.KindCodex && session.Status == surface.SessionStatus("notLoaded") {
-		return surface.Capabilities{}, true, "This thread is not loaded in Codex Desktop"
+		return surface.Capabilities{}, true, "This Codex session is history only"
 	}
 	return capabilities, false, ""
 }

@@ -67,6 +67,11 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
+	for _, column := range []string{"source", "transport"} {
+		if err := r.ensureColumn("sessions", column, `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	_, err := r.db.Exec(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
@@ -109,6 +114,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	cwd TEXT NOT NULL DEFAULT '', pid INTEGER NOT NULL DEFAULT 0,
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
+	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -175,12 +181,12 @@ CREATE INDEX IF NOT EXISTS delivery_history_created_at ON delivery_history(creat
 
 func (r *Registry) RegisterSession(s surface.Session) error {
 	_, err := r.db.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,updated_at)
-		 VALUES (?,?,?,?,?,?,?, ?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
-		   has_local=excluded.has_local,updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal))
+		   has_local=excluded.has_local,source=excluded.source,transport=excluded.transport,updated_at=datetime('now')`,
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport)
 	return err
 }
 
@@ -900,8 +906,8 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var session surface.Session
 	var kind, status string
 	var hasLocal int
-	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local FROM sessions WHERE id = ?`, id).Scan(
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal,
+	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport FROM sessions WHERE id = ?`, id).Scan(
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport,
 	)
 	if err != nil {
 		return nil, err

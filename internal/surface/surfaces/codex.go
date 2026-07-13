@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,16 +17,18 @@ import (
 type Codex struct {
 	rendererURL string
 	nodeURL     string
+	managed     bool
 }
 
 func NewCodex(remoteURL string) *Codex {
+	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
 		remoteURL = "9231"
 	}
 	if !strings.Contains(remoteURL, "://") {
 		remoteURL = "ws://127.0.0.1:" + remoteURL
 	}
-	return &Codex{rendererURL: remoteURL, nodeURL: "ws://127.0.0.1:9229"}
+	return &Codex{rendererURL: remoteURL, nodeURL: "ws://127.0.0.1:9229", managed: managed}
 }
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
@@ -199,19 +202,64 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 const maxCodexListPages = 100
 
 func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return nil, err
+	clients := []struct {
+		client  codexClient
+		managed bool
+	}{}
+	var failures []string
+	if client, err := c.openDesktop(ctx); err == nil {
+		clients = append(clients, struct {
+			client  codexClient
+			managed bool
+		}{client, false})
+	} else {
+		failures = append(failures, err.Error())
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return nil, err
+	if client, err := dialManagedCodex(ctx); err == nil && c.managed {
+		clients = append(clients, struct {
+			client  codexClient
+			managed bool
+		}{client, true})
+	} else if c.managed {
+		failures = append(failures, err.Error())
 	}
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("Codex is unavailable: %s", strings.Join(failures, "; "))
+	}
+	byID := map[string]surface.Session{}
+	succeeded := false
+	for _, entry := range clients {
+		sessions, err := c.listClient(ctx, entry.client, entry.managed)
+		_ = entry.client.Close()
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		succeeded = true
+		for _, session := range sessions {
+			previous, exists := byID[session.ID]
+			if !exists || session.Transport == codexTransportManaged || previous.Transport == codexTransportReadOnly {
+				byID[session.ID] = session
+			}
+		}
+	}
+	if !succeeded {
+		return nil, fmt.Errorf("thread/list: %s", strings.Join(failures, "; "))
+	}
+	out := make([]surface.Session, 0, len(byID))
+	for _, session := range byID {
+		out = append(out, session)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
+	return out, nil
+}
+
+func (c *Codex) listClient(ctx context.Context, conn codexClient, managed bool) ([]surface.Session, error) {
 	var out []surface.Session
 	var cursor any
 	seenCursors := map[string]bool{}
 	for page := 0; page < maxCodexListPages; page++ {
-		sessions, nextCursor, err := c.listPage(ctx, conn, cursor)
+		sessions, nextCursor, err := c.listPage(ctx, conn, cursor, managed)
 		if err != nil {
 			return nil, fmt.Errorf("thread/list: %w", err)
 		}
@@ -232,12 +280,12 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	return out, nil
 }
 
-func (c *Codex) listPage(ctx context.Context, conn *cdpConn, cursor any) ([]surface.Session, any, error) {
+func (c *Codex) listPage(ctx context.Context, conn codexClient, cursor any, managed bool) ([]surface.Session, any, error) {
 	params := map[string]any{}
 	if cursor != nil {
 		params["cursor"] = cursor
 	}
-	resp, err := c.rpc(ctx, conn, "thread/list", params, 10*time.Second)
+	resp, err := conn.Request(ctx, "thread/list", params, 10*time.Second)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -246,12 +294,15 @@ func (c *Codex) listPage(ctx context.Context, conn *cdpConn, cursor any) ([]surf
 	sessions := make([]surface.Session, 0, len(threads))
 	for _, value := range threads {
 		thread, _ := value.(map[string]any)
+		source := codexSource(thread["source"])
 		session := surface.Session{
-			ID:      str(thread, "id"),
-			Surface: surface.KindCodex,
-			Name:    surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
-			Cwd:     str(thread, "cwd"),
-			Status:  codexStatus(thread["status"]),
+			ID:        str(thread, "id"),
+			Surface:   surface.KindCodex,
+			Name:      surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
+			Cwd:       str(thread, "cwd"),
+			Status:    codexStatus(thread["status"]),
+			Source:    source,
+			Transport: codexTransport(source, thread["status"], managed),
 		}
 		if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
 			session.LastActive = time.Unix(int64(timestamp), 0)
@@ -279,62 +330,27 @@ func codexStatus(s any) surface.SessionStatus {
 }
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
-	if looksLikeUUID(target) {
-		conn, err := c.dial(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer conn.close()
-		if err := c.ensureHooked(ctx, conn); err != nil {
-			return nil, err
-		}
-		thread, err := c.readThread(ctx, conn, target)
-		if err != nil {
-			return nil, err
-		}
-		return &surface.Session{ID: thread.ID, Surface: surface.KindCodex, Name: thread.Name, Cwd: thread.Cwd, Status: codexObservation(thread).Status}, nil
-	}
-	conn, err := c.dial(ctx)
+	sessions, err := c.List(ctx)
 	if err != nil {
-		return nil, err
-	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
 		return nil, err
 	}
 	lower := strings.ToLower(target)
 	var matches []surface.Session
 	var exactMatches []surface.Session
-	var cursor any
-	seenCursors := map[string]bool{}
-	for page := 0; page < maxCodexListPages; page++ {
-		sessions, nextCursor, listErr := c.listPage(ctx, conn, cursor)
-		if listErr != nil {
-			return nil, fmt.Errorf("thread/list: %w", listErr)
+	for _, session := range sessions {
+		if looksLikeUUID(target) && session.ID == target {
+			copy := session
+			return &copy, nil
 		}
-		for _, session := range sessions {
-			if strings.EqualFold(session.Name, target) {
-				exactMatches = append(exactMatches, session)
-				continue
-			}
-			if strings.HasPrefix(session.ID, target) ||
-				strings.Contains(strings.ToLower(session.Cwd), lower) ||
-				strings.Contains(strings.ToLower(session.Name), lower) {
-				matches = append(matches, session)
-			}
+		if strings.EqualFold(session.Name, target) {
+			exactMatches = append(exactMatches, session)
+			continue
 		}
-		cursor = nextCursor
-		if cursor == nil {
-			break
+		if strings.HasPrefix(session.ID, target) ||
+			strings.Contains(strings.ToLower(session.Cwd), lower) ||
+			strings.Contains(strings.ToLower(session.Name), lower) {
+			matches = append(matches, session)
 		}
-		cursorKey := fmt.Sprint(cursor)
-		if seenCursors[cursorKey] {
-			return nil, fmt.Errorf("thread/list returned repeated cursor %q", cursorKey)
-		}
-		seenCursors[cursorKey] = true
-	}
-	if cursor != nil {
-		return nil, fmt.Errorf("thread/list exceeded pagination limit of %d pages", maxCodexListPages)
 	}
 	if len(exactMatches) > 0 {
 		matches = exactMatches
@@ -353,14 +369,11 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 }
 
 func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
-	conn, err := c.dial(ctx)
+	conn, err := c.openSession(ctx, sess, false)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return nil, err
-	}
+	defer conn.Close()
 	thread, err := c.readThread(ctx, conn, sess.ID)
 	if err != nil {
 		return nil, err
@@ -368,7 +381,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 	return codexObservation(thread), nil
 }
 
-func (c *Codex) activeTurnID(ctx context.Context, conn *cdpConn, threadID string) (string, error) {
+func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
 	thread, err := c.readThread(ctx, conn, threadID)
 	if err != nil {
 		return "", err
@@ -386,15 +399,12 @@ func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string)
 }
 
 func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
-	conn, err := c.dial(ctx)
+	conn, err := c.openSession(ctx, sess, true)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return nil, err
-	}
-	if _, err := c.rpc(ctx, conn, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
+	defer conn.Close()
+	if _, err := conn.Request(ctx, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
 		return nil, fmt.Errorf("thread/resume: %w", err)
 	}
 	active, err := c.activeTurnID(ctx, conn, sess.ID)
@@ -411,7 +421,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if options.Model != "" {
 		params["model"] = options.Model
 	}
-	resp, err := c.rpc(ctx, conn, "turn/start", params, 10*time.Second)
+	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
 	}
@@ -438,6 +448,9 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	if sess.Transport == codexTransportManaged {
+		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
+	}
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return err
@@ -447,7 +460,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		return err
 	}
 	if uuid != "" {
-		thread, readErr := c.readThread(ctx, conn, sess.ID)
+		thread, readErr := c.readThread(ctx, &desktopCodexClient{owner: c, conn: conn}, sess.ID)
 		if readErr != nil {
 			return readErr
 		}
@@ -504,7 +517,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 					onEvent(surface.StreamEvent{Kind: "tool_use", Text: name})
 				}
 			case codexCompletionMethod(method):
-				thread, readErr := c.readThread(ctx, conn, sess.ID)
+				thread, readErr := c.readThread(ctx, &desktopCodexClient{owner: c, conn: conn}, sess.ID)
 				if readErr != nil {
 					return readErr
 				}
@@ -530,6 +543,46 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 	return fmt.Errorf("stream timed out after %s", timeout)
 }
 
+func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	client, err := c.openSession(ctx, sess, false)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	emitted := ""
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		thread, err := c.readThread(ctx, client, sess.ID)
+		if err != nil {
+			return err
+		}
+		turn := codexTurnByID(thread, uuid)
+		if turn == nil && len(thread.Turns) > 0 {
+			turn = &thread.Turns[len(thread.Turns)-1]
+		}
+		if turn != nil && strings.HasPrefix(turn.Assistant, emitted) {
+			delta := strings.TrimPrefix(turn.Assistant, emitted)
+			if delta != "" {
+				emitted = turn.Assistant
+				onEvent(surface.StreamEvent{Kind: "text", Text: delta})
+			}
+			if turn.Done {
+				if turn.Error != "" {
+					return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
+				}
+				onEvent(surface.StreamEvent{Kind: "done"})
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("stream timed out after %s", timeout)
+}
+
 func codexTurnByID(thread *codexThread, turnID string) *codexTurn {
 	if thread == nil || turnID == "" {
 		return nil
@@ -543,15 +596,7 @@ func codexTurnByID(thread *codexThread, turnID string) *codexTurn {
 }
 
 func (c *Codex) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return err
-	}
-	_, err = c.rpc(ctx, conn, "thread/goal/set", map[string]any{
+	_, err := c.requestSession(ctx, sess, true, "thread/goal/set", map[string]any{
 		"threadId":  sess.ID,
 		"objective": text,
 		"status":    "active",
@@ -560,30 +605,14 @@ func (c *Codex) GoalSet(ctx context.Context, sess *surface.Session, text string)
 }
 
 func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return err
-	}
-	_, err = c.rpc(ctx, conn, "thread/goal/clear", map[string]any{
+	_, err := c.requestSession(ctx, sess, true, "thread/goal/clear", map[string]any{
 		"threadId": sess.ID,
 	}, 5*time.Second)
 	return err
 }
 
 func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return nil, err
-	}
-	resp, err := c.rpc(ctx, conn, "thread/goal/get", map[string]any{
+	resp, err := c.requestSession(ctx, sess, false, "thread/goal/get", map[string]any{
 		"threadId": sess.ID,
 	}, 5*time.Second)
 	if err != nil {
@@ -601,34 +630,18 @@ func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.Go
 }
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return err
-	}
-	_, err = c.rpc(ctx, conn, "thread/compact/start", map[string]any{
+	_, err := c.requestSession(ctx, sess, true, "thread/compact/start", map[string]any{
 		"threadId": sess.ID,
 	}, 10*time.Second)
 	return err
 }
 
 func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return "", err
-	}
 	params := map[string]any{"threadId": sess.ID}
 	if name != "" {
 		params["model"] = name
 	}
-	response, err := c.rpc(ctx, conn, "thread/resume", params, 5*time.Second)
+	response, err := c.requestSession(ctx, sess, name != "", "thread/resume", params, 5*time.Second)
 	if err != nil {
 		return "", err
 	}
@@ -641,14 +654,14 @@ func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (
 }
 
 func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
-	conn, err := c.dial(ctx)
+	conn, err := c.openDesktop(ctx)
+	if err != nil && c.managed {
+		conn, err = dialManagedCodex(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return nil, err
-	}
+	defer conn.Close()
 	var models []surface.ModelOption
 	var cursor any
 	for page := 0; page < 20; page++ {
@@ -656,7 +669,7 @@ func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
 		if cursor != nil {
 			params["cursor"] = cursor
 		}
-		response, err := c.rpc(ctx, conn, "model/list", params, 10*time.Second)
+		response, err := conn.Request(ctx, "model/list", params, 10*time.Second)
 		if err != nil {
 			return nil, err
 		}
@@ -682,14 +695,11 @@ func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
 }
 
 func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
-	conn, err := c.dial(ctx)
+	conn, err := c.openSession(ctx, sess, true)
 	if err != nil {
 		return err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return err
-	}
+	defer conn.Close()
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
 		return err
@@ -697,21 +707,18 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to interrupt")
 	}
-	_, err = c.rpc(ctx, conn, "turn/interrupt", map[string]any{
+	_, err = conn.Request(ctx, "turn/interrupt", map[string]any{
 		"threadId": sess.ID,
 	}, 5*time.Second)
 	return err
 }
 
 func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	conn, err := c.dial(ctx)
+	conn, err := c.openSession(ctx, sess, true)
 	if err != nil {
 		return err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return err
-	}
+	defer conn.Close()
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
 		return err
@@ -719,7 +726,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
 	}
-	_, err = c.rpc(ctx, conn, "turn/steer", map[string]any{
+	_, err = conn.Request(ctx, "turn/steer", map[string]any{
 		"threadId":       sess.ID,
 		"expectedTurnId": turnID,
 		"input":          []map[string]any{{"type": "text", "text": message}},
@@ -730,14 +737,11 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 var localHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
-	conn, err := c.dial(ctx)
+	conn, err := c.openSession(ctx, sess, false)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return nil, err
-	}
+	defer conn.Close()
 	thread, err := c.readThread(ctx, conn, sess.ID)
 	if err != nil {
 		return nil, err

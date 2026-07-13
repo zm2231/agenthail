@@ -96,6 +96,13 @@ func TestDashboardCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	}
 }
 
+func TestDashboardCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
+	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
+	if !readOnly || reason == "" || capabilities.Send || capabilities.Steer || capabilities.Compact {
+		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", capabilities, readOnly, reason)
+	}
+}
+
 func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	dashboard := &dashboardServer{token: "secret"}

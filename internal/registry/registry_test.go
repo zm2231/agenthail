@@ -82,7 +82,7 @@ func TestForeignKeysAndChannelValidation(t *testing.T) {
 
 func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	r := openTestRegistry(t)
-	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true}
+	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop"}
 	if err := r.RegisterSession(want); err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,29 @@ func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal {
+	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal || got.Source != want.Source || got.Transport != want.Transport {
 		t.Fatalf("session=%+v want=%+v", got, want)
+	}
+}
+
+func TestMigrationAddsCodexOwnershipWithoutLosingSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE sessions (id TEXT PRIMARY KEY, surface TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', cwd TEXT NOT NULL DEFAULT '', pid INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '', has_local INTEGER NOT NULL DEFAULT 0, registered_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))); INSERT INTO sessions(id,surface,name) VALUES('old','codex','old thread')`)
+	if closeErr := db.Close(); err != nil || closeErr != nil {
+		t.Fatalf("seed err=%v close err=%v", err, closeErr)
+	}
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session, err := r.Session("old")
+	if err != nil || session.Name != "old thread" || session.Source != "" || session.Transport != "" {
+		t.Fatalf("session=%+v err=%v", session, err)
 	}
 }
 

@@ -34,6 +34,8 @@ type Session struct {
 	Status     SessionStatus `json:"status"`
 	Transcript string        `json:"transcript"`
 	HasLocal   bool          `json:"hasLocal"`
+	Source     string        `json:"source,omitempty"`
+	Transport  string        `json:"transport,omitempty"`
 	LastActive time.Time     `json:"lastActive"`
 }
 
