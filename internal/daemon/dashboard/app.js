@@ -238,6 +238,12 @@ function presenceLabel(session) {
     }[session.currentReason] || statusLabel(session.status)
   );
 }
+function conversationMeta(session, model = "") {
+  const parts = [statusLabel(session.status), `${session.queueCount || 0} queued`];
+  if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
+  if (model) parts.push(model);
+  return parts.join(" · ");
+}
 function surfaceIcon(name) {
   return name === "claude" ? "✦" : name === "codex" ? "◈" : "N";
 }
@@ -290,7 +296,7 @@ function renderOverview() {
     recent
       .map(
         (session) =>
-          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
+          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${session.status === "busy" ? "working now" : timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
@@ -574,8 +580,7 @@ async function selectSession(id, focus = false) {
   showView("conversations");
   $("#chat-surface").textContent = labels[session.surface] || session.surface;
   $("#chat-title").textContent = displayName(session);
-  $("#chat-subtitle").textContent =
-    `${statusLabel(session.status)} · ${session.queueCount || 0} queued · last active ${timeAgo(session.lastActive)}`;
+  $("#chat-subtitle").textContent = conversationMeta(session);
   $("#message").disabled = false;
   $("#send").disabled = false;
   $("#message").placeholder = `Message ${displayName(session)}`;
@@ -615,9 +620,7 @@ function renderChat() {
       '<button data-action="compact" type="button">Compact</button>',
     );
   $("#chat-actions").innerHTML = controls.join("");
-  const modelMeta = model ? ` · ${escape(model)}` : "";
-  $("#chat-subtitle").innerHTML =
-    `${escape(statusLabel(session.status))} · ${session.queueCount || 0} queued · last active ${timeAgo(session.lastActive)}${modelMeta}`;
+  $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
   const toolRows = [];

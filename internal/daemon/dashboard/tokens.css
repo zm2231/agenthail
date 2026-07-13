@@ -1,4 +1,4 @@
-/* Hallmark · genre: modern-minimal · theme: warm graphite and coral · macrostructure: Workbench · nav: product bar · footer: none · slop: pass */
+/* Hallmark · genre: modern-minimal · theme: warm graphite and coral · macrostructure: Workbench · critique: P5 H5 E5 S5 R5 V4 · slop: pass */
 :root {
   --paper: oklch(14% 0.012 45);
   --panel: oklch(17% 0.012 45);
@@ -25,6 +25,7 @@
   --mono: "SFMono-Regular", Consolas, monospace;
   --radius: 16px;
   --max: 1540px;
+  --conversation-width: 1120px;
 }
 * {
   box-sizing: border-box;
@@ -623,12 +624,13 @@ select {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  width: min(100%, var(--conversation-width));
 }
 .chat-body {
-  width: min(100%, 820px);
+  width: min(100%, var(--conversation-width));
   height: calc(100vh - 340px);
-  margin: 0 auto;
-  padding: 28px 22px 40px 46px;
+  margin: 0;
+  padding: 28px 36px 40px 0;
   overflow-y: auto;
   overflow-wrap: anywhere;
   overscroll-behavior: contain;
@@ -642,16 +644,6 @@ select {
 }
 .turn.agent {
   padding-left: 0;
-}
-.turn.agent:before {
-  position: absolute;
-  top: 20px;
-  bottom: 20px;
-  left: -24px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--rule);
-  content: "";
 }
 .turn.user {
   color: var(--muted);
@@ -789,9 +781,9 @@ select {
 .composer {
   position: relative;
   z-index: 8;
-  width: min(calc(100% - 44px), 840px);
-  margin: 0 auto;
-  padding: 14px 22px 0;
+  width: min(100%, var(--conversation-width));
+  margin: 0;
+  padding: 14px 36px 0 0;
 }
 .composer form {
   display: grid;
@@ -1194,7 +1186,7 @@ select {
   .chat-body {
     height: min(520px, 58vh);
     min-height: 360px;
-    padding: 24px 4px 24px 28px;
+    padding: 24px 0;
   }
   .composer {
     width: 100%;
