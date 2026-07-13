@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -1331,7 +1332,15 @@ func (a *App) isDaemonServiceLoaded() bool {
 	if a.daemonServiceLoaded != nil {
 		return a.daemonServiceLoaded()
 	}
-	return daemonServiceLoaded()
+	return daemonServiceLoaded() || homebrewDaemonServiceLoaded()
+}
+
+func homebrewDaemonServiceLoaded() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	target := fmt.Sprintf("gui/%d/homebrew.mxcl.agenthail", os.Getuid())
+	return exec.Command("launchctl", "print", target).Run() == nil
 }
 
 func (a *App) cmdLaunch(args []string) error {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -204,6 +205,22 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	}
 	if !strings.Contains(output, `"durable":true`) || !strings.Contains(output, "supervised by Agenthail") {
 		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestHomebrewDaemonServiceLoaded(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd is only available on macOS")
+	}
+	dir := t.TempDir()
+	launchctl := filepath.Join(dir, "launchctl")
+	script := "#!/bin/sh\n[ \"$1\" = print ] && [ \"$2\" = \"gui/$(id -u)/homebrew.mxcl.agenthail\" ]\n"
+	if err := os.WriteFile(launchctl, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	if !homebrewDaemonServiceLoaded() {
+		t.Fatal("Homebrew service was not detected")
 	}
 }
 
