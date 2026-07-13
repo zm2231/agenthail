@@ -640,6 +640,47 @@ func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (
 	return model, nil
 }
 
+func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.close()
+	if err := c.ensureHooked(ctx, conn); err != nil {
+		return nil, err
+	}
+	var models []surface.ModelOption
+	var cursor any
+	for page := 0; page < 20; page++ {
+		params := map[string]any{"includeHidden": false, "limit": 100}
+		if cursor != nil {
+			params["cursor"] = cursor
+		}
+		response, err := c.rpc(ctx, conn, "model/list", params, 10*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		result, _ := response["result"].(map[string]any)
+		data, _ := result["data"].([]any)
+		for _, raw := range data {
+			value, _ := raw.(map[string]any)
+			id := str(value, "model")
+			if id == "" {
+				id = str(value, "id")
+			}
+			if id == "" {
+				continue
+			}
+			models = append(models, surface.ModelOption{ID: id, DisplayName: str(value, "displayName"), Description: str(value, "description"), Default: value["isDefault"] == true})
+		}
+		cursor = result["nextCursor"]
+		if cursor == nil {
+			break
+		}
+	}
+	return models, nil
+}
+
 func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 	conn, err := c.dial(ctx)
 	if err != nil {

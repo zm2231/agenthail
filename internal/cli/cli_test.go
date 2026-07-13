@@ -170,14 +170,14 @@ func TestSubcommandSpecificFlags(t *testing.T) {
 	if err := validateCommandFlags("dashboard", []string{"config", "--codex-recent-hours", "5"}); err != nil {
 		t.Fatalf("dashboard config flag rejected: %v", err)
 	}
-	if err := validateCommandFlags("dashboard", []string{"share", "--no-open", "--json", "--tailscale", "/tmp/tailscale"}); err != nil {
-		t.Fatalf("dashboard share flags rejected: %v", err)
+	if err := validateCommandFlags("dashboard", []string{"remote", "--no-open", "--json", "--tailscale", "/tmp/tailscale"}); err != nil {
+		t.Fatalf("dashboard remote flags rejected: %v", err)
 	}
 }
 
 func TestStripFlagsConsumesDashboardTailscalePath(t *testing.T) {
-	got := stripFlags([]string{"share", "--tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale", "--no-open"})
-	if strings.Join(got, ",") != "share" {
+	got := stripFlags([]string{"remote", "--tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale", "--no-open"})
+	if strings.Join(got, ",") != "remote" {
 		t.Fatalf("positionals=%v", got)
 	}
 }

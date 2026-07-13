@@ -93,28 +93,30 @@ agenthail dashboard status
 agenthail dashboard config --codex-recent-hours 5
 ```
 
-The home page is deliberately simple: your connected surfaces and current work. Claude sessions count as current while their terminal process is open. Codex sessions count as current while working, queued, or used within the configured window, which defaults to five hours. Open History for older threads. The operations page shows the durable queue, channels, and relays; dead-lettered messages can be retried there. Every control is shown only when that connected surface supports it.
+The home page is deliberately simple: your connected surfaces and current work. Claude sessions count as current while their terminal process is open. Codex sessions count as current while working, queued, or used within the configured window, which defaults to five hours. Open History for older threads. Codex threads reported as not loaded by Codex Desktop remain readable but are read-only in the dashboard. Type `/` in a writable conversation to see supported commands; `/model` uses the model catalog reported by that surface. Operations contains delivery, handoffs, audit, remote access, and dashboard settings.
 
 The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
 
-For private phone access, install Tailscale on the Mac and phone, sign both into the same tailnet, then run one command:
+For private phone access, install Tailscale on the Mac and phone, sign both into the same tailnet, then open Operations → Settings and choose Enable phone access. The dashboard shows the authenticated QR code, phone link, connection status, and the option to turn access off.
+
+The CLI offers the same controls for automation:
 
 ```bash
-agenthail dashboard share
+agenthail dashboard remote
 ```
 
-This enables the dashboard config, starts the supervised daemon if needed, keeps Agenthail bound to loopback, configures a tailnet-only Tailscale Serve route, copies the authenticated phone URL, and opens both the URL and a QR code. It resolves the real macOS Tailscale app binary so App Store and Standalone CLI launchers do not depend on shell PATH behavior.
+Both paths keep Agenthail bound to loopback and configure a tailnet-only Tailscale Serve route. The CLI also copies the authenticated phone URL and opens its QR code.
 
 On iPhone, open the generated URL, tap Share, then tap Add to Home Screen. The trusted-device cookie lasts one year; rotating the local dashboard token revokes saved access. Treat the generated URL and QR as private because they contain the dashboard token.
 
 ```bash
-agenthail dashboard share status
-agenthail dashboard share off
-agenthail dashboard share --no-open
-agenthail dashboard share --json
+agenthail dashboard remote status
+agenthail dashboard remote off
+agenthail dashboard remote --no-open
+agenthail dashboard remote --json
 ```
 
-Sharing fails with an actionable message when Tailscale is missing, offline, lacks MagicDNS, or already uses Agenthail's Serve port for another service. It never enables Funnel or public internet access. A Cloudflare deployment needs a separate authenticated access policy before it is supported.
+Remote access fails with an actionable message when Tailscale is missing, offline, lacks MagicDNS, or already uses Agenthail's Serve port for another service. It never enables Funnel or public internet access. A Cloudflare deployment needs a separate authenticated access policy before it is supported.
 
 ## Finding your sessions
 

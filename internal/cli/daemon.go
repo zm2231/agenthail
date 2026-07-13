@@ -99,7 +99,7 @@ func (a *App) daemonRun() error {
 func (a *App) cmdDashboard(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|share [status|off]] [options]")
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|remote [status|off]] [options]")
 	}
 	action := "open"
 	if len(positional) > 0 {
@@ -174,8 +174,8 @@ func (a *App) cmdDashboard(args []string) error {
 		}
 		fmt.Printf("Codex current window: %dh\n", config.CodexRecentHours)
 		return nil
-	case "share":
-		return a.cmdDashboardShare(args, positional[1:])
+	case "remote":
+		return a.cmdDashboardRemote(args, positional[1:])
 	case "open":
 		if !config.Enabled {
 			return fmt.Errorf("dashboard is disabled; run 'agenthail dashboard enable'")
@@ -185,7 +185,7 @@ func (a *App) cmdDashboard(args []string) error {
 		}
 		return a.openDashboard()
 	default:
-		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|share [status|off]] [options]")
+		return fmt.Errorf("usage: agenthail dashboard [enable|disable|status|config|remote [status|off]] [options]")
 	}
 }
 

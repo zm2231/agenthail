@@ -818,6 +818,44 @@ select {
 .slash-menu span {
   color: var(--muted);
 }
+.remote-ready {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+.remote-ready img {
+  width: 168px;
+  border-radius: 12px;
+  background: white;
+}
+.remote-ready p,
+.remote-off p,
+.setting-row p {
+  color: var(--muted);
+}
+.remote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 12px;
+}
+.remote-ready small {
+  color: var(--quiet);
+  line-height: 1.5;
+}
+.settings-form,
+.setting-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.settings-form label {
+  flex: 1;
+}
 .composer form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1136,6 +1174,10 @@ select {
   }
 }
 @media (max-width: 760px) {
+  body.mobile-chat-active {
+    height: 100dvh;
+    overflow: hidden;
+  }
   .shell {
     padding: 0 18px 40px;
   }
@@ -1208,7 +1250,10 @@ select {
     display: none;
   }
   .conversation-layout.mobile-chat-open .notebook {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 134px);
+    overflow: hidden;
   }
   .session-list {
     height: auto;
@@ -1259,7 +1304,8 @@ select {
     margin-top: 18px;
   }
   .chat-body {
-    height: clamp(300px, 42dvh, 440px);
+    flex: 1;
+    height: auto;
     min-height: 0;
     padding: 24px 0;
   }
@@ -1269,6 +1315,13 @@ select {
   }
   .slash-menu {
     right: 0;
+  }
+  .remote-ready {
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 16px;
+  }
+  .remote-ready img {
+    width: 112px;
   }
   .composer > p {
     display: none;

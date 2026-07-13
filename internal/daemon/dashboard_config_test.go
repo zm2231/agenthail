@@ -15,6 +15,9 @@ func TestDashboardConfigDefaultsCodexRecency(t *testing.T) {
 	if config.CodexRecentHours != defaultCodexRecentHours {
 		t.Fatalf("Codex recent hours=%d, want %d", config.CodexRecentHours, defaultCodexRecentHours)
 	}
+	if config.RemoteAccess.Provider != "tailscale" || config.RemoteAccess.Port != defaultRemoteAccessPort {
+		t.Fatalf("remote access=%+v", config.RemoteAccess)
+	}
 }
 
 func TestDashboardConfigPersistsCodexRecency(t *testing.T) {

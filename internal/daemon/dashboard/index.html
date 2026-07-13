@@ -8,7 +8,7 @@
     />
     <meta name="color-scheme" content="dark" />
     <title>Agenthail</title>
-    <link rel="stylesheet" href="/tokens.css?v=7" />
+    <link rel="stylesheet" href="/tokens.css?v=8" />
   </head>
   <body>
     <main class="shell">
@@ -225,6 +225,13 @@
             data-operations-tab="audit"
           >
             Audit <span id="operations-history-count">0</span>
+          </button
+          ><button
+            aria-pressed="false"
+            type="button"
+            data-operations-tab="settings"
+          >
+            Settings
           </button>
         </div>
         <section class="operation-panel" data-operations-panel="queue">
@@ -338,9 +345,39 @@
           <div id="history-list" class="operation-list"></div>
           <button class="soft-button audit-more" id="history-more" type="button" hidden>Load older activity</button>
         </section>
+        <section class="operation-panel hidden" data-operations-panel="settings">
+          <div class="settings-grid">
+            <section class="settings-card remote-access-card">
+              <div class="settings-card-heading">
+                <p class="eyebrow">Remote access</p>
+                <h2>Open Agenthail on your phone</h2>
+                <p>Private to devices signed into your Tailscale network.</p>
+              </div>
+              <div id="remote-access-content" class="remote-access-content">
+                <div class="empty-card">Checking Tailscale.</div>
+              </div>
+            </section>
+            <section class="settings-card">
+              <div class="settings-card-heading">
+                <p class="eyebrow">Dashboard</p>
+                <h2>Current work</h2>
+                <p>Choose how long Codex threads remain in your current inbox.</p>
+              </div>
+              <form class="settings-form" id="dashboard-settings-form">
+                <label><span>Codex recent window</span><select id="settings-codex-hours" name="codexRecentHours"><option value="1">1 hour</option><option value="3">3 hours</option><option value="5">5 hours</option><option value="8">8 hours</option><option value="12">12 hours</option><option value="24">24 hours</option></select></label>
+                <button class="soft-button" type="submit">Save</button>
+              </form>
+              <div class="setting-row">
+                <div><strong>Desktop notifications</strong><p>Notify when an agent finishes.</p></div>
+                <button class="soft-button" id="notification-toggle" type="button">Loading</button>
+              </div>
+              <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=7"></script>
+    <script src="/app.js?v=8"></script>
   </body>
 </html>

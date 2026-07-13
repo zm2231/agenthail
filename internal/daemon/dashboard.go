@@ -55,17 +55,19 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	ID            string                `json:"id"`
-	Surface       surface.SurfaceKind   `json:"surface"`
-	Name          string                `json:"name"`
-	Alias         string                `json:"alias,omitempty"`
-	Status        surface.SessionStatus `json:"status"`
-	LastActive    time.Time             `json:"lastActive,omitempty"`
-	QueueCount    int                   `json:"queueCount"`
-	Open          bool                  `json:"open"`
-	Current       bool                  `json:"current"`
-	CurrentReason string                `json:"currentReason,omitempty"`
-	Capabilities  surface.Capabilities  `json:"capabilities"`
+	ID             string                `json:"id"`
+	Surface        surface.SurfaceKind   `json:"surface"`
+	Name           string                `json:"name"`
+	Alias          string                `json:"alias,omitempty"`
+	Status         surface.SessionStatus `json:"status"`
+	LastActive     time.Time             `json:"lastActive,omitempty"`
+	QueueCount     int                   `json:"queueCount"`
+	Open           bool                  `json:"open"`
+	Current        bool                  `json:"current"`
+	CurrentReason  string                `json:"currentReason,omitempty"`
+	Capabilities   surface.Capabilities  `json:"capabilities"`
+	ReadOnly       bool                  `json:"readOnly,omitempty"`
+	ReadOnlyReason string                `json:"readOnlyReason,omitempty"`
 }
 
 type dashboardState struct {
@@ -152,7 +154,84 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
 	mux.HandleFunc("/api/action", dashboard.guard(d.dashboardActionHandler))
+	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
+	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	return d.dashboardHeaders(mux)
+}
+
+func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	notifications, err := LoadNotificationConfig()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if r.Method == http.MethodGet {
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "notifications": notifications, "remoteAccess": RemoteAccessStatusForConfig(config), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		Action               string `json:"action"`
+		CodexRecentHours     int    `json:"codexRecentHours"`
+		NotificationsEnabled bool   `json:"notificationsEnabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
+		http.Error(w, "invalid settings request", http.StatusBadRequest)
+		return
+	}
+	switch request.Action {
+	case "remote-enable":
+		config, _, err = EnableRemoteAccess(config)
+	case "remote-disable":
+		config, err = DisableRemoteAccess(config)
+	case "dashboard-config":
+		config.CodexRecentHours = request.CodexRecentHours
+		err = SaveDashboardConfig(config)
+	case "notifications":
+		notifications.Enabled = request.NotificationsEnabled
+		err = SaveNotificationConfig(notifications)
+	default:
+		http.Error(w, "unsupported settings action", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	status := RemoteAccessStatusForConfig(config)
+	if !status.Enabled || status.URL == "" {
+		http.Error(w, "remote access is not enabled", http.StatusConflict)
+		return
+	}
+	image, err := RemoteAccessQR(status.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(image)
 }
 
 func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request) {
@@ -399,7 +478,8 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 				alias, _ := d.Registry.ReverseAlias(session.ID)
 				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: adapter.Capabilities()})
+				capabilities, readOnly, readOnlyReason := dashboardCapabilities(session, adapter.Capabilities())
+				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: capabilities, ReadOnly: readOnly, ReadOnlyReason: readOnlyReason})
 			}
 			mu.Unlock()
 		}()
@@ -417,6 +497,13 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	})
 	state.TotalSessions = len(state.Sessions)
 	return state, nil
+}
+
+func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
+	if session.Surface == surface.KindCodex && session.Status == surface.SessionStatus("notLoaded") {
+		return surface.Capabilities{}, true, "This thread is not loaded in Codex Desktop"
+	}
+	return capabilities, false, ""
 }
 
 func dashboardSessionPresence(session surface.Session, queueCount int, open bool, codexRecentHours int, now time.Time) (bool, string) {
@@ -651,6 +738,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
+	_, readOnly, reason := dashboardCapabilities(*session, adapter.Capabilities())
+	if readOnly {
+		http.Error(w, reason, http.StatusConflict)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -751,15 +843,21 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": adapter.Capabilities()}
-	if adapter.Capabilities().Goal {
+	capabilities, readOnly, readOnlyReason := dashboardCapabilities(*session, adapter.Capabilities())
+	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason}
+	if capabilities.Goal {
 		if goal, goalErr := adapter.GoalGet(ctx, session); goalErr == nil {
 			response["goal"] = goal
 		}
 	}
-	if adapter.Capabilities().Model {
+	if capabilities.Model {
 		if model, modelErr := adapter.Model(ctx, session, ""); modelErr == nil {
 			response["model"] = model
+		}
+	}
+	if lister, ok := adapter.(surface.ModelLister); ok && capabilities.Model {
+		if models, modelsErr := lister.Models(ctx); modelsErr == nil {
+			response["models"] = models
 		}
 	}
 	writeDashboardJSON(w, http.StatusOK, response)

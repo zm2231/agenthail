@@ -155,9 +155,9 @@ Dashboard (optional):
   dashboard status              Show dashboard state and URL
   dashboard config --codex-recent-hours <hours>
                                 Set the Codex current-session window
-  dashboard share               Enable private phone access with Tailscale + QR
-  dashboard share status        Show private sharing state and phone URL
-  dashboard share off           Remove Agenthail's Tailscale Serve route
+  dashboard remote              Enable private phone access with Tailscale + QR
+  dashboard remote status       Show remote access state and phone URL
+  dashboard remote off          Remove Agenthail's Tailscale Serve route
   dashboard                     Open an enabled dashboard
 
 Other:

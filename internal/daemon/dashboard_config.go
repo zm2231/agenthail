@@ -17,9 +17,10 @@ const (
 )
 
 type DashboardConfig struct {
-	Enabled          bool   `json:"enabled"`
-	Listen           string `json:"listen"`
-	CodexRecentHours int    `json:"codexRecentHours"`
+	Enabled          bool               `json:"enabled"`
+	Listen           string             `json:"listen"`
+	CodexRecentHours int                `json:"codexRecentHours"`
+	RemoteAccess     RemoteAccessConfig `json:"remoteAccess"`
 }
 
 func DashboardConfigPath() string {
@@ -32,7 +33,7 @@ func DashboardTokenPath() string {
 func LoadDashboardConfig() (DashboardConfig, error) {
 	data, err := os.ReadFile(DashboardConfigPath())
 	if os.IsNotExist(err) {
-		return DashboardConfig{Listen: defaultDashboardListen, CodexRecentHours: defaultCodexRecentHours}, nil
+		return DashboardConfig{Listen: defaultDashboardListen, CodexRecentHours: defaultCodexRecentHours, RemoteAccess: normalizeRemoteAccessConfig(RemoteAccessConfig{})}, nil
 	}
 	if err != nil {
 		return DashboardConfig{}, fmt.Errorf("read dashboard config: %w", err)
@@ -47,6 +48,7 @@ func LoadDashboardConfig() (DashboardConfig, error) {
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
 	}
+	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return DashboardConfig{}, err
 	}
@@ -63,6 +65,7 @@ func SaveDashboardConfig(config DashboardConfig) error {
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
 	}
+	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
 		return err
 	}

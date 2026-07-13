@@ -89,6 +89,13 @@ func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 	}
 }
 
+func TestDashboardCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
+	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
+	if !readOnly || reason == "" || capabilities.Send || capabilities.Model {
+		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", capabilities, readOnly, reason)
+	}
+}
+
 func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	dashboard := &dashboardServer{token: "secret"}

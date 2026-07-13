@@ -18,6 +18,7 @@ const app = {
   sessionViewport: null,
   mobileChatOpen: false,
   slashCommands: [],
+  settings: null,
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
 globalThis.escape = (value) =>
@@ -216,10 +217,13 @@ function showView(name) {
     if (first) selectSession(first.id);
   }
   syncConversationLayout();
+  if (view === "operations" && app.operationsTab === "settings") loadSettings();
 }
 const mobileConversationView = () => window.matchMedia("(max-width: 760px)").matches;
 function syncConversationLayout() {
-  document.querySelector(".conversation-layout")?.classList.toggle("mobile-chat-open", mobileConversationView() && app.mobileChatOpen);
+  const active = mobileConversationView() && app.mobileChatOpen;
+  document.querySelector(".conversation-layout")?.classList.toggle("mobile-chat-open", active);
+  document.body.classList.toggle("mobile-chat-active", active);
 }
 function statusPill(status) {
   return `<span class="status-pill ${escape(status)}">${escape(statusLabel(status))}</span>`;
@@ -432,6 +436,7 @@ function renderOperations() {
       )
       .join("") || '<div class="empty-card">No automatic handoffs yet.</div>';
   renderAudit();
+  renderSettings();
   document
     .querySelectorAll("[data-operations-panel]")
     .forEach((panel) =>
@@ -459,6 +464,32 @@ function renderOperations() {
 }
 function auditKindLabel(kind) {
   return String(kind || "event").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+async function loadSettings() {
+  try {
+    const response = await fetch("/api/settings");
+    if (!response.ok) throw Error(await response.text());
+    app.settings = await response.json();
+    renderSettings();
+  } catch (error) {
+    $("#remote-access-content").innerHTML = `<div class="empty-card">${escape(error.message)}</div>`;
+  }
+}
+function renderSettings() {
+  if (!app.settings) return;
+  const { dashboard, notifications, remoteAccess } = app.settings;
+  $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
+  $("#settings-listener").textContent = dashboard.listen;
+  $("#notification-toggle").textContent = notifications.enabled ? "On" : "Off";
+  $("#notification-toggle").dataset.enabled = String(notifications.enabled);
+  $("#remote-access-content").innerHTML = remoteAccess.enabled
+    ? `<div class="remote-ready"><img src="/api/settings/remote-qr" alt="QR code for this Agenthail dashboard"><div><span class="status-pill idle">Connected</span><p>${escape(remoteAccess.dnsName)}</p><div class="remote-actions"><button class="primary-button" data-copy-remote type="button">Copy phone link</button><button class="soft-button" data-remote-action="remote-disable" type="button">Turn off</button></div><small>On iPhone, open the link, tap Share, then Add to Home Screen.</small></div></div>`
+    : `<div class="remote-off"><p>${escape(remoteAccess.error || "Use Tailscale to reach this dashboard from your own devices.")}</p><button class="primary-button" data-remote-action="remote-enable" type="button">Enable phone access</button></div>`;
+}
+async function updateSettings(body) {
+  const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (!response.ok) throw Error(await response.text());
+  await loadSettings();
 }
 function renderAudit() {
   const audit = app.audit;
@@ -590,11 +621,11 @@ async function selectSession(id, focus = false) {
   $("#chat-surface").textContent = labels[session.surface] || session.surface;
   $("#chat-title").textContent = displayName(session);
   $("#chat-subtitle").textContent = conversationMeta(session);
-  $("#message").disabled = false;
-  $("#send").disabled = false;
-  $("#message").placeholder = `Message ${displayName(session)}`;
+  $("#message").disabled = Boolean(session.readOnly);
+  $("#send").disabled = Boolean(session.readOnly);
+  $("#message").placeholder = session.readOnly ? "Read only" : `Message ${displayName(session)}`;
   $("#composer-note").textContent =
-    "Delivered through the local daemon. Busy agents are queued safely.";
+    session.readOnly ? session.readOnlyReason : "Delivered through the local daemon. Busy agents are queued safely.";
   $("#chat-body").innerHTML =
     '<div class="empty-state">Loading recent messages…</div>';
   $("#chat-actions").innerHTML = "";
@@ -613,7 +644,7 @@ async function selectSession(id, focus = false) {
   }
 }
 function renderChat() {
-  const { exchanges = [], goal, model, capabilities = {} } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason } = app.history || {};
   const session = app.selected;
   const controls = [];
   if (session.status === "busy" && capabilities.steer)
@@ -636,6 +667,12 @@ function renderChat() {
     capabilities.model && ["/model", "Switch the session model"],
     capabilities.goal && ["/goal", "Set the session goal"],
   ].filter(Boolean);
+  if (readOnly) {
+    $("#message").disabled = true;
+    $("#send").disabled = true;
+    $("#message").placeholder = "Read only";
+    $("#composer-note").textContent = readOnlyReason;
+  }
   renderSlashMenu();
   $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
@@ -724,16 +761,29 @@ function renderSlashMenu() {
   const menu = $("#slash-menu");
   const value = $("#message")?.value.trimStart() || "";
   const query = value.split(/\s/, 1)[0].toLowerCase();
+  const choosingModel = value.toLowerCase().startsWith("/model ");
   const visible = value.startsWith("/") && !value.includes(" ");
-  const commands = visible
+  const commands = choosingModel
+    ? (app.history?.models || []).map((model) => [model.id, model.displayName || model.id, model.description || "", model.default])
+    : visible
     ? app.slashCommands.filter(([command]) => command.startsWith(query))
     : [];
   menu.hidden = commands.length === 0;
   menu.innerHTML = commands
-    .map(([command, description]) => `<button type="button" data-slash="${escape(command)}"><strong>${escape(command)}</strong><span>${escape(description)}</span></button>`)
+    .map(([command, description, detail, isDefault]) => choosingModel
+      ? `<button type="button" data-model-option="${escape(command)}"><strong>${escape(description)}</strong><span>${escape(detail || (isDefault ? "Default" : command))}</span></button>`
+      : `<button type="button" data-slash="${escape(command)}"><strong>${escape(command)}</strong><span>${escape(description)}</span></button>`)
     .join("");
 }
 document.addEventListener("click", async (event) => {
+  const modelOption = event.target.closest("[data-model-option]");
+  if (modelOption) {
+    $("#message").value = `/model ${modelOption.dataset.modelOption}`;
+    renderSlashMenu();
+    resizeComposer();
+    $("#message").focus();
+    return;
+  }
   const slash = event.target.closest("[data-slash]");
   if (slash) {
     const command = slash.dataset.slash;
@@ -760,6 +810,12 @@ document.addEventListener("click", async (event) => {
   const mode = event.target.closest("[data-inbox-mode]");
   if (mode) {
     app.inboxMode = mode.dataset.inboxMode;
+    if (app.inboxMode === "current") {
+      app.filters.surface = "all";
+      app.filters.status = "all";
+      $("#session-surface-filter").value = "all";
+      $("#session-status-filter").value = "all";
+    }
     app.sessionLimit = sessionBatchSize();
     renderSessions();
     return;
@@ -902,6 +958,46 @@ document.addEventListener("click", (event) => {
     app.operationsTab = tab.dataset.operationsTab;
     renderOperations();
     if (app.operationsTab === "audit" && !app.audit.loaded) loadAudit();
+    if (app.operationsTab === "settings") loadSettings();
+  }
+});
+document.addEventListener("click", async (event) => {
+  const remote = event.target.closest("[data-remote-action]");
+  if (remote) {
+    remote.disabled = true;
+    try {
+      await updateSettings({ action: remote.dataset.remoteAction });
+      toast(remote.dataset.remoteAction === "remote-enable" ? "Phone access enabled." : "Phone access disabled.");
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  if (event.target.closest("[data-copy-remote]")) {
+    try {
+      if (!navigator.clipboard) throw Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(app.settings.remoteAccess.url);
+      toast("Phone link copied.");
+    } catch {
+      window.prompt("Copy this phone link", app.settings.remoteAccess.url);
+    }
+  }
+});
+$("#dashboard-settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value) });
+    await load(true);
+    toast("Settings saved.");
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#notification-toggle").addEventListener("click", async () => {
+  try {
+    await updateSettings({ action: "notifications", notificationsEnabled: $("#notification-toggle").dataset.enabled !== "true" });
+  } catch (error) {
+    toast(error.message);
   }
 });
 $("#audit-search").addEventListener("input", (event) => {

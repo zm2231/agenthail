@@ -72,6 +72,17 @@ type OptionSender interface {
 	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
 }
 
+type ModelOption struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description,omitempty"`
+	Default     bool   `json:"default,omitempty"`
+}
+
+type ModelLister interface {
+	Models(ctx context.Context) ([]ModelOption, error)
+}
+
 type HealthChecker interface {
 	Health(ctx context.Context) error
 }

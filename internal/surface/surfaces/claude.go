@@ -467,6 +467,14 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 	return "", fmt.Errorf("model unavailable: no assistant turn recorded")
 }
 
+func (c *Claude) Models(context.Context) ([]surface.ModelOption, error) {
+	return []surface.ModelOption{
+		{ID: "fable", DisplayName: "Fable"},
+		{ID: "opus", DisplayName: "Opus"},
+		{ID: "sonnet", DisplayName: "Sonnet"},
+	}, nil
+}
+
 func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {
 	path := sess.Transcript
 	if path == "" {
