@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
@@ -109,6 +110,9 @@ func (a *App) cmdChannel(args []string) error {
 		sess, _, err := a.resolveTarget(ctx, args[2])
 		if err != nil {
 			return err
+		}
+		if surface.IsReadOnlySession(sess) {
+			return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
 		}
 		if err := a.Registry.AddToChannel(channelName, sess.ID); err != nil {
 			return err
@@ -247,6 +251,9 @@ func (a *App) cmdRelay(args []string) error {
 		toSess, _, err := a.resolveTarget(ctx, args[2])
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
+		}
+		if surface.IsReadOnlySession(toSess) {
+			return fmt.Errorf("to-target: %s", surface.ReadOnlySessionReason(toSess))
 		}
 		pattern := ".*"
 		if len(args) > 3 {

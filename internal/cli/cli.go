@@ -1049,6 +1049,17 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid queue id %q", args[1])
 		}
+		item, err := a.Registry.QueueItem(id)
+		if err != nil {
+			return err
+		}
+		session, err := a.Registry.Session(item.SessionID)
+		if err != nil {
+			return err
+		}
+		if surface.IsReadOnlySession(session) {
+			return errors.New(surface.ReadOnlySessionReason(session))
+		}
 		if err := a.Registry.RetryMessage(id); err != nil {
 			return err
 		}
@@ -1098,6 +1109,9 @@ func (a *App) cmdQueue(args []string) error {
 	}
 	if surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:")) {
 		return fmt.Errorf("a new Notion thread cannot be queued before it has a persisted UUID; use 'agenthail send %s ...'", positional[0])
+	}
+	if surface.IsReadOnlySession(sess) {
+		return errors.New(surface.ReadOnlySessionReason(sess))
 	}
 	message := strings.Join(positional[1:], " ")
 	if message == "-" {

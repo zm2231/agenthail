@@ -16,9 +16,10 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 		want    string
 	}{
 		{"vscode", "idle", false, codexTransportDesktop},
+		{"vscode", "notLoaded", true, codexTransportDesktop},
 		{"cli", "idle", true, codexTransportManaged},
+		{"cli", "notLoaded", true, codexTransportReadOnly},
 		{"cli", "idle", false, codexTransportReadOnly},
-		{"vscode", "notLoaded", false, codexTransportReadOnly},
 	}
 	for _, test := range cases {
 		if got := codexTransport(test.source, test.status, test.managed); got != test.want {
@@ -33,5 +34,20 @@ func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	_, err := codex.Send(context.Background(), session, "do not deliver")
 	if err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
+	legacy := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle}
+	unclassifiedDesktopSource := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode"}
+	desktop := &surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}
+	if !surface.IsReadOnlySession(legacy) {
+		t.Fatal("legacy unloaded session was writable")
+	}
+	if !surface.IsReadOnlySession(unclassifiedDesktopSource) {
+		t.Fatal("blank transport was writable")
+	}
+	if surface.IsReadOnlySession(desktop) {
+		t.Fatal("Desktop session was read only")
 	}
 }

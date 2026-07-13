@@ -96,10 +96,73 @@ func TestDashboardCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	}
 }
 
+func TestDashboardCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
+	capabilities := surface.Capabilities{Send: true, Model: true}
+	got, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}, capabilities)
+	if readOnly || reason != "" || !got.Send || !got.Model {
+		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
+	}
+}
+
 func TestDashboardCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
 	if !readOnly || reason == "" || capabilities.Send || capabilities.Steer || capabilities.Compact {
 		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", capabilities, readOnly, reason)
+	}
+}
+
+func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
+	daemon, registry, _, _, target := daemonFixture(t)
+	target.Source = "cli"
+	target.Transport = "readOnly"
+	if err := registry.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.CreateChannel("reviewers"); err != nil {
+		t.Fatal(err)
+	}
+	queueID, err := registry.QueueMessageWithOptions(target.ID, "do not retry", "", surface.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.ClaimNextMessage(target.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.NackMessage(queueID, fmt.Errorf("read only"), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"action":"channel-add","channel":"reviewers","targetId":"to"}`,
+		`{"action":"relay-add","fromId":"from","toId":"to","pattern":".*"}`,
+		fmt.Sprintf(`{"action":"queue-retry","queueId":%d}`, queueID),
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body))
+		daemon.dashboardActionHandler(response, request)
+		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "read only") {
+			t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
+		}
+	}
+	item, err := registry.QueueItem(queueID)
+	if err != nil || item.Status != "dead" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	members, err := registry.ChannelMembers("reviewers")
+	if err != nil || len(members) != 0 {
+		t.Fatalf("members=%v err=%v", members, err)
+	}
+	routes, err := registry.ListRoutes()
+	if err != nil || len(routes) != 0 {
+		t.Fatalf("routes=%v err=%v", routes, err)
+	}
+	if err := registry.AddToChannel("reviewers", target.ID); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
+	daemon.dashboardActionHandler(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "1 failed") {
+		t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 	}
 }
 

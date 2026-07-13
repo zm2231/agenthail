@@ -32,6 +32,13 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID, text string) {
 		if route.FromSession != from.ID || !matchPattern(route.Pattern, text) {
 			continue
 		}
+		target, targetErr := d.Registry.Session(route.ToSession)
+		if targetErr == nil && surface.IsReadOnlySession(target) {
+			reason := surface.ReadOnlySessionReason(target)
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})
+			d.log.Printf("drop relay %d to %s: %s", route.ID, d.resolveDisplay(route.ToSession), reason)
+			continue
+		}
 		payloadText := text
 		if len(payloadText) > maxRelayText {
 			payloadText = payloadText[:maxRelayText] + "\n[relay text truncated by agenthail]"

@@ -168,14 +168,11 @@ func codexSource(value any) string {
 }
 
 func codexTransport(source string, status any, managed bool) string {
-	if codexStatus(status) == surface.SessionStatus("notLoaded") {
-		return codexTransportReadOnly
-	}
-	if managed {
-		return codexTransportManaged
-	}
 	if source == "vscode" {
 		return codexTransportDesktop
+	}
+	if managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
+		return codexTransportManaged
 	}
 	return codexTransportReadOnly
 }

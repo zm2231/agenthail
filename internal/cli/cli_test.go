@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -198,6 +199,84 @@ func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 	}
 	if r.QueueCount("fresh") != 1 {
 		t.Fatal("qualified target was not registered and queued")
+	}
+}
+
+func TestQueueRejectsReadOnlyCodexTerminalSession(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
+		"plain": {ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
+	}}
+	app, r := cliFixture(t, fake)
+	err := app.cmdQueue([]string{"codex:plain", "do not queue"})
+	if err == nil || !strings.Contains(err.Error(), "read only") {
+		t.Fatalf("err=%v", err)
+	}
+	if count := r.QueueCount("plain"); count != 0 {
+		t.Fatalf("queue count=%d", count)
+	}
+}
+
+func TestQueueAllowsUnloadedCodexDesktopSession(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
+		"desktop": {ID: "desktop", Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"},
+	}}
+	app, r := cliFixture(t, fake)
+	if err := app.cmdQueue([]string{"codex:desktop", "deliver later"}); err != nil {
+		t.Fatal(err)
+	}
+	if count := r.QueueCount("desktop"); count != 1 {
+		t.Fatalf("queue count=%d", count)
+	}
+}
+
+func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, r := cliFixture(t, fake)
+	session := surface.Session{ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueMessageWithOptions(session.ID, "do not retry", "", surface.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ClaimNextMessage(session.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.NackMessage(id, errors.New("read only"), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.cmdQueue([]string{"retry", strconv.FormatInt(id, 10)}); err == nil || !strings.Contains(err.Error(), "read only") {
+		t.Fatalf("retry err=%v", err)
+	}
+	item, err := r.QueueItem(id)
+	if err != nil || item.Status != "dead" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+func TestRoutingRejectsReadOnlyCodexTerminalDestination(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
+		"source": {ID: "source", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"},
+		"plain":  {ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
+	}}
+	app, r := cliFixture(t, fake)
+	if _, err := r.CreateChannel("reviewers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.cmdChannel([]string{"add", "reviewers", "codex:plain"}); err == nil || !strings.Contains(err.Error(), "read only") {
+		t.Fatalf("channel add err=%v", err)
+	}
+	if err := app.cmdRelay([]string{"add", "codex:source", "codex:plain"}); err == nil || !strings.Contains(err.Error(), "read only") {
+		t.Fatalf("relay add err=%v", err)
+	}
+	members, err := r.ChannelMembers("reviewers")
+	if err != nil || len(members) != 0 {
+		t.Fatalf("members=%v err=%v", members, err)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 0 {
+		t.Fatalf("routes=%v err=%v", routes, err)
 	}
 }
 

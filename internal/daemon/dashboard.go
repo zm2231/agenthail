@@ -500,11 +500,8 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 }
 
 func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
-	if session.Surface == surface.KindCodex && session.Transport == "readOnly" {
-		return surface.Capabilities{}, true, "This terminal session is read only. Start a writable session with agenthail codex."
-	}
-	if session.Surface == surface.KindCodex && session.Status == surface.SessionStatus("notLoaded") {
-		return surface.Capabilities{}, true, "This Codex session is history only"
+	if surface.IsReadOnlySession(&session) {
+		return surface.Capabilities{}, true, surface.ReadOnlySessionReason(&session)
 	}
 	return capabilities, false, ""
 }
@@ -591,6 +588,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "queueId is required", http.StatusBadRequest)
 			return
 		}
+		item, itemErr := d.Registry.QueueItem(request.QueueID)
+		if itemErr != nil {
+			http.Error(w, itemErr.Error(), http.StatusBadRequest)
+			return
+		}
+		target, targetErr := d.Registry.Session(item.SessionID)
+		if targetErr != nil {
+			http.Error(w, targetErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if surface.IsReadOnlySession(target) {
+			http.Error(w, surface.ReadOnlySessionReason(target), http.StatusConflict)
+			return
+		}
 		if err := d.Registry.RetryMessage(request.QueueID); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -647,18 +658,21 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		sent, queued := 0, 0
+		sent, queued, failed := 0, 0, 0
 		for _, member := range members {
 			session, sessionErr := d.Registry.Session(member)
 			if sessionErr != nil {
+				failed++
 				continue
 			}
 			adapter := d.surfaceForKind(session.Surface)
-			if adapter == nil {
+			if adapter == nil || surface.IsReadOnlySession(session) {
+				failed++
 				continue
 			}
 			receipt, deliverErr := (delivery.Dispatcher{Registry: d.Registry}).Deliver(operationCtx, adapter, session, request.Message, "")
 			if deliverErr != nil {
+				failed++
 				continue
 			}
 			if receipt.Disposition == delivery.DispositionQueued {
@@ -667,7 +681,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				sent++
 			}
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued})
+		if failed > 0 {
+			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d failed", sent, queued, failed), http.StatusConflict)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued, "failed": failed})
 		return
 	}
 	if request.Action == "channel-add" || request.Action == "channel-remove" {
@@ -682,6 +700,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		var actionErr error
 		if request.Action == "channel-add" {
+			target, targetErr := d.Registry.Session(targetID)
+			if targetErr != nil {
+				http.Error(w, "session not found", http.StatusNotFound)
+				return
+			}
+			if surface.IsReadOnlySession(target) {
+				http.Error(w, surface.ReadOnlySessionReason(target), http.StatusConflict)
+				return
+			}
 			actionErr = d.Registry.AddToChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
 		} else {
 			actionErr = d.Registry.RemoveFromChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
@@ -706,6 +733,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		toID, toErr := d.Registry.ResolveTarget(request.ToID)
 		if toErr != nil {
 			http.Error(w, fmt.Sprintf("resolve destination agent: %s", toErr), http.StatusBadRequest)
+			return
+		}
+		toSession, toSessionErr := d.Registry.Session(toID)
+		if toSessionErr != nil {
+			http.Error(w, "destination session not found", http.StatusNotFound)
+			return
+		}
+		if surface.IsReadOnlySession(toSession) {
+			http.Error(w, surface.ReadOnlySessionReason(toSession), http.StatusConflict)
 			return
 		}
 		pattern := request.Pattern

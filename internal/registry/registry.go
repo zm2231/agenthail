@@ -549,6 +549,15 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	return result, rows.Err()
 }
 
+func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
+	var row QueueRow
+	err := r.db.QueryRow(`SELECT id,session_id,message,model,status,attempts,last_error,queued_at FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)

@@ -95,8 +95,8 @@ func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, s
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle}
-	to := surface.Session{ID: "to", Surface: surface.KindCodex, Status: surface.StatusIdle}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	to := surface.Session{ID: "to", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := r.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +160,26 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 		t.Fatal("relay exceeded hop limit")
 	}
 	history, err := r.ListHistory(10, "from")
+	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
+	daemon, r, _, from, to := daemonFixture(t)
+	to.Source = "cli"
+	to.Transport = "readOnly"
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "completion", "handoff")
+	if r.QueueCount(to.ID) != 0 {
+		t.Fatal("read-only relay destination was queued")
+	}
+	history, err := r.ListHistory(10, to.ID)
 	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}

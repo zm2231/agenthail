@@ -39,6 +39,23 @@ type Session struct {
 	LastActive time.Time     `json:"lastActive"`
 }
 
+func IsReadOnlySession(session *Session) bool {
+	if session == nil || session.Surface != KindCodex {
+		return false
+	}
+	return session.Transport == "readOnly" || session.Transport == ""
+}
+
+func ReadOnlySessionReason(session *Session) string {
+	if !IsReadOnlySession(session) {
+		return ""
+	}
+	if session.Source == "cli" || session.Transport == "readOnly" {
+		return "Codex terminal session is read only; start a writable session with 'agenthail codex'"
+	}
+	return "Codex session ownership is unknown; open it in Codex Desktop to make it writable"
+}
+
 type SendResult struct {
 	UUID     string `json:"uuid"`
 	Accepted bool   `json:"accepted"`
