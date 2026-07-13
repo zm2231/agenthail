@@ -267,12 +267,6 @@ textarea:focus-visible {
 .panel-heading h2 {
   font-size: 25px;
 }
-.attention-section {
-  padding: 28px 0;
-  border-top: 1px solid var(--rule);
-  border-bottom: 1px solid var(--rule);
-}
-.attention-list,
 .activity-list,
 .surface-stack,
 .operation-list,
@@ -280,7 +274,6 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
 }
-.attention-row,
 .activity-item,
 .surface-row,
 .operation-item {
@@ -289,20 +282,11 @@ textarea:focus-visible {
   background: transparent;
   text-align: left;
 }
-.attention-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 24px;
-  padding: 14px 0;
-}
-.attention-copy strong,
 .activity-name,
 .surface-name,
 .operation-title {
   font-weight: 700;
 }
-.attention-copy p,
 .activity-detail,
 .surface-detail,
 .operation-detail,
@@ -312,7 +296,6 @@ textarea:focus-visible {
   font-size: 14px;
   line-height: 1.45;
 }
-.attention-actions,
 .operation-actions {
   display: flex;
   align-items: center;
@@ -461,6 +444,9 @@ textarea:focus-visible {
   padding: 4px;
   border-radius: 13px;
   background: var(--panel);
+}
+.segmented.two {
+  grid-template-columns: repeat(2, 1fr);
 }
 .segmented button {
   padding: 9px 10px;
@@ -1150,9 +1136,6 @@ select {
   }
   .operation-actions {
     justify-content: flex-start;
-  }
-  .attention-row {
-    grid-template-columns: 1fr;
   }
   .labeled-form {
     grid-template-columns: 1fr;

@@ -329,9 +329,6 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 					continue
 				}
 				alias, _ := d.Registry.ReverseAlias(session.ID)
-				if runtime, found, runtimeErr := d.Registry.RuntimeState(session.ID); runtimeErr == nil && found && runtime.LastStatus != "" {
-					session.Status = runtime.LastStatus
-				}
 				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Capabilities: adapter.Capabilities()})
 			}
 			mu.Unlock()

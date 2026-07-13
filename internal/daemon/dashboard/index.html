@@ -49,18 +49,6 @@
             Open inbox <span>→</span>
           </button>
         </header>
-        <section class="attention-section">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Needs attention</p>
-              <h2>Waiting on you</h2>
-            </div>
-            <button class="text-button" type="button" data-open-operations>
-              Manage delivery <span>→</span>
-            </button>
-          </div>
-          <div class="attention-list" id="queue-preview"></div>
-        </section>
         <section class="overview-grid">
           <section>
             <div class="section-heading">
@@ -102,22 +90,16 @@
               </div>
               <span id="conversation-count">Loading</span>
             </div>
-            <div class="segmented" aria-label="Conversation scope">
+            <div class="segmented two" aria-label="Conversation scope">
               <button
                 class="active"
                 aria-pressed="true"
                 type="button"
-                data-inbox-mode="active"
+                data-inbox-mode="current"
               >
-                Active</button
-              ><button
-                aria-pressed="false"
-                type="button"
-                data-inbox-mode="recent"
-              >
-                Recent</button
+                Current</button
               ><button aria-pressed="false" type="button" data-inbox-mode="all">
-                All
+                History
               </button>
             </div>
             <div class="session-tools" id="session-tools">

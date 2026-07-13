@@ -2,11 +2,15 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestDashboardListenIsLoopbackOnly(t *testing.T) {
@@ -95,4 +99,28 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	if got := fake.listCalls.Load(); got != 1 {
 		t.Fatalf("surface list called %d times, want one cached discovery", got)
 	}
+}
+
+func TestDashboardStatePrefersLiveSurfaceStatus(t *testing.T) {
+	d, registry, fake, from, _ := daemonFixture(t)
+	if err := registry.SaveRuntimeState(from.ID, surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	from.Status = surface.StatusBusy
+	from.LastActive = time.Now()
+	fake.sessions[from.ID] = from
+
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range state.Sessions {
+		if session.ID == from.ID {
+			if session.Status != surface.StatusBusy {
+				t.Fatalf("dashboard status=%s, want live status %s", session.Status, surface.StatusBusy)
+			}
+			return
+		}
+	}
+	t.Fatal("live session missing from dashboard state")
 }

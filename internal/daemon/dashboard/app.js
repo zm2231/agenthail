@@ -11,7 +11,7 @@ const app = {
   selected: null,
   history: null,
   filters: { surface: "all", status: "all" },
-  inboxMode: "active",
+  inboxMode: "current",
   operationsTab: "queue",
   sessionLimit: 0,
   sessionViewport: null,
@@ -231,7 +231,7 @@ function surfaceIcon(name) {
   return name === "claude" ? "✦" : name === "codex" ? "◈" : "N";
 }
 function renderOverview() {
-  const { surfaces, sessions, queue } = app.state;
+  const { surfaces, sessions } = app.state;
   $("#daemon-status").textContent = app.state.daemon?.running
     ? "Running locally"
     : "Not running";
@@ -264,7 +264,8 @@ function renderOverview() {
     .slice(0, 6);
   const recent = working.length
     ? working
-    : [...sessions]
+    : sessions
+        .filter(sessionIsCurrent)
         .sort(
           (a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0),
         )
@@ -277,27 +278,20 @@ function renderOverview() {
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
-  $("#queue-preview").innerHTML =
-    queue
-      .slice(0, 4)
-      .map(
-        (item) =>
-          `<div class="attention-row"><div class="attention-copy"><strong>${escape(item.target)}</strong><p>${escape(item.message)}</p><p class="operation-meta">${escape(queueReason(item))}</p></div><div class="attention-actions">${statusPill(item.status)}</div></div>`,
-      )
-      .join("") ||
-    '<p class="empty-inline">You are all caught up. Nothing needs delivery.</p>';
+}
+function sessionIsCurrent(session) {
+  if (session.status === "busy" || session.queueCount > 0) return true;
+  if (["notLoaded", "unknown", "offline"].includes(session.status))
+    return false;
+  const lastActive = new Date(session.lastActive || 0).getTime();
+  return (
+    Number.isFinite(lastActive) &&
+    lastActive >= Date.now() - 24 * 60 * 60 * 1000
+  );
 }
 function scopedSessions() {
-  const now = Date.now();
-  const recentCutoff = now - 24 * 60 * 60 * 1000;
-  if (app.inboxMode === "active")
-    return app.state.sessions.filter(
-      (session) => session.status === "busy" || session.queueCount > 0,
-    );
-  if (app.inboxMode === "recent")
-    return app.state.sessions.filter(
-      (session) => new Date(session.lastActive || 0).getTime() >= recentCutoff,
-    );
+  if (app.inboxMode === "current")
+    return app.state.sessions.filter(sessionIsCurrent);
   return app.state.sessions;
 }
 function renderSessions() {
@@ -343,15 +337,13 @@ function renderSessions() {
       ),
     );
   $("#filter-summary").textContent =
-    app.inboxMode === "active"
+    app.inboxMode === "current"
       ? sessions.length
-        ? "Working or waiting for delivery"
-        : "Nothing active right now"
-      : app.inboxMode === "recent"
-        ? "Active in the last 24 hours"
-        : sessions.length > visible.length
-          ? `Showing ${visible.length} of ${sessions.length}`
-          : `${sessions.length} conversations`;
+        ? "Working, queued, or active in the last 24 hours"
+        : "Nothing current right now"
+      : sessions.length > visible.length
+        ? `Showing ${visible.length} of ${sessions.length}`
+        : `${sessions.length} conversations`;
   $("#session-list").innerHTML =
     visible
       .map(
@@ -359,7 +351,7 @@ function renderSessions() {
           `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(statusLabel(session.status))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
       .join("") ||
-    `<div class="empty-state compact"><p>${app.inboxMode === "active" ? "No active work. Open Recent to pick up a conversation." : "No conversations in this view."}</p></div>`;
+    `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Open History to find an older conversation." : "No conversations in this view."}</p></div>`;
   const more = $("#session-more");
   more.hidden = app.inboxMode !== "all" || visible.length >= sessions.length;
   more.textContent = `Show more (${sessions.length - visible.length})`;
@@ -489,8 +481,6 @@ async function load(fresh = false) {
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"
       : "daemon-presence offline";
-    if (!app.hasState && app.inboxMode === "active" && !scopedSessions().length)
-      app.inboxMode = "recent";
     app.hasState = true;
     if (app.selected) {
       const replacement = app.state.sessions.find(
@@ -513,7 +503,6 @@ async function load(fresh = false) {
     $("#surface-cards").innerHTML =
       `<div class="empty-state compact">${escape(message)}</div>`;
     $("#recent-activity").innerHTML = "";
-    $("#queue-preview").innerHTML = "";
     toast(message);
   } finally {
     clearTimeout(slowTimer);
