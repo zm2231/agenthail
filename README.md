@@ -97,13 +97,24 @@ The home page is deliberately simple: your connected surfaces and current work. 
 
 The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
 
-For private remote access, keep the listener local and put Tailscale in front of it:
+For private phone access, install Tailscale on the Mac and phone, sign both into the same tailnet, then run one command:
 
 ```bash
-tailscale serve --https=443 http://127.0.0.1:7412
+agenthail dashboard share
 ```
 
-Do not expose the dashboard directly to the public internet. A Cloudflare deployment needs a separate authenticated access policy before it is supported.
+This enables the dashboard config, starts the supervised daemon if needed, keeps Agenthail bound to loopback, configures a tailnet-only Tailscale Serve route, copies the authenticated phone URL, and opens both the URL and a QR code. It resolves the real macOS Tailscale app binary so App Store and Standalone CLI launchers do not depend on shell PATH behavior.
+
+On iPhone, open the generated URL, tap Share, then tap Add to Home Screen. The trusted-device cookie lasts one year; rotating the local dashboard token revokes saved access. Treat the generated URL and QR as private because they contain the dashboard token.
+
+```bash
+agenthail dashboard share status
+agenthail dashboard share off
+agenthail dashboard share --no-open
+agenthail dashboard share --json
+```
+
+Sharing fails with an actionable message when Tailscale is missing, offline, lacks MagicDNS, or already uses Agenthail's Serve port for another service. It never enables Funnel or public internet access. A Cloudflare deployment needs a separate authenticated access policy before it is supported.
 
 ## Finding your sessions
 

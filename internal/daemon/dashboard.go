@@ -35,6 +35,7 @@ var dashboardCSS []byte
 const (
 	dashboardStateCacheTTL = 30 * time.Second
 	dashboardRefreshBudget = 18 * time.Second
+	dashboardCookieMaxAge  = 365 * 24 * 60 * 60
 )
 
 type dashboardServer struct {
@@ -265,7 +266,7 @@ func (dashboard *dashboardServer) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if supplied := r.URL.Query().Get("token"); supplied != "" && subtle.ConstantTimeCompare([]byte(supplied), []byte(dashboard.token)) == 1 {
-		http.SetCookie(w, &http.Cookie{Name: "agenthail_dashboard", Value: dashboard.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 86400})
+		http.SetCookie(w, &http.Cookie{Name: "agenthail_dashboard", Value: dashboard.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: dashboardCookieMaxAge})
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}

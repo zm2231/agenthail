@@ -589,6 +589,9 @@ select {
   min-height: calc(100vh - 76px);
   padding: 40px 0 32px 50px;
 }
+.mobile-chat-back {
+  display: none;
+}
 .notebook-header {
   display: flex;
   align-items: start;
@@ -634,6 +637,7 @@ select {
   overflow-y: auto;
   overflow-wrap: anywhere;
   overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 .turn {
   position: relative;
@@ -784,6 +788,35 @@ select {
   width: min(100%, var(--conversation-width));
   margin: 0;
   padding: 14px 36px 0 0;
+}
+.slash-menu {
+  position: absolute;
+  right: 36px;
+  bottom: calc(100% - 6px);
+  left: 0;
+  z-index: 12;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 50px var(--shadow);
+}
+.slash-menu button {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.slash-menu button:hover {
+  background: var(--hover);
+}
+.slash-menu span {
+  color: var(--muted);
 }
 .composer form {
   display: grid;
@@ -1168,6 +1201,15 @@ select {
     border-right: 0;
     border-bottom: 1px solid var(--rule);
   }
+  .conversation-layout .notebook {
+    display: none;
+  }
+  .conversation-layout.mobile-chat-open .conversation-rail {
+    display: none;
+  }
+  .conversation-layout.mobile-chat-open .notebook {
+    display: block;
+  }
   .session-list {
     height: auto;
     max-height: 360px;
@@ -1176,21 +1218,49 @@ select {
     min-height: auto;
     padding: 28px 0 0;
   }
+  .mobile-chat-back {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    gap: 8px;
+    margin-bottom: 26px;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--raised);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .mobile-chat-back:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
   .notebook-header {
     display: block;
+  }
+  .notebook-header h1 {
+    font-size: 26px;
+  }
+  .notebook-header p:last-child {
+    margin-top: 7px;
+    font-size: 13px;
   }
   .chat-actions {
     justify-content: flex-start;
     margin-top: 18px;
   }
   .chat-body {
-    height: min(520px, 58vh);
-    min-height: 360px;
+    height: clamp(300px, 42dvh, 440px);
+    min-height: 0;
     padding: 24px 0;
   }
   .composer {
     width: 100%;
     padding: 12px 0 0;
+  }
+  .slash-menu {
+    right: 0;
   }
   .composer > p {
     display: none;

@@ -42,6 +42,9 @@ func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 		t.Fatalf("bootstrap status=%d cookies=%d", bootstrap.Code, len(bootstrap.Result().Cookies()))
 	}
 	cookie := bootstrap.Result().Cookies()[0]
+	if cookie.MaxAge != dashboardCookieMaxAge {
+		t.Fatalf("dashboard cookie max age=%d, want %d", cookie.MaxAge, dashboardCookieMaxAge)
+	}
 	state := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 	request.AddCookie(cookie)

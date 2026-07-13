@@ -16,6 +16,8 @@ const app = {
   audit: { items: [], kinds: [], nextBefore: 0, hasMore: true, loaded: false, loading: false, kind: "all", query: "", searchTimer: null },
   sessionLimit: 0,
   sessionViewport: null,
+  mobileChatOpen: false,
+  slashCommands: [],
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
 globalThis.escape = (value) =>
@@ -209,10 +211,15 @@ function showView(name) {
       link.classList.toggle("active", link.dataset.view === view),
     );
   if (location.hash !== `#${view}`) history.replaceState(null, "", `#${view}`);
-  if (view === "conversations" && app.hasState && !app.selected) {
+  if (view === "conversations" && app.hasState && !app.selected && !mobileConversationView()) {
     const first = scopedSessions()[0] || app.state.sessions[0];
     if (first) selectSession(first.id);
   }
+  syncConversationLayout();
+}
+const mobileConversationView = () => window.matchMedia("(max-width: 760px)").matches;
+function syncConversationLayout() {
+  document.querySelector(".conversation-layout")?.classList.toggle("mobile-chat-open", mobileConversationView() && app.mobileChatOpen);
 }
 function statusPill(status) {
   return `<span class="status-pill ${escape(status)}">${escape(statusLabel(status))}</span>`;
@@ -552,7 +559,7 @@ async function load(fresh = false) {
     renderAll();
     if (app.audit.loaded) await loadAudit(true, true);
     if (app.selected && app.history) renderChat();
-    if (!app.selected && location.hash === "#conversations") {
+    if (!app.selected && location.hash === "#conversations" && !mobileConversationView()) {
       const first = scopedSessions()[0] || app.state.sessions[0];
       if (first) selectSession(first.id);
     }
@@ -576,8 +583,10 @@ async function selectSession(id, focus = false) {
   if (!session) return;
   app.selected = session;
   app.history = null;
+  app.mobileChatOpen = mobileConversationView();
   renderSessions();
   showView("conversations");
+  syncConversationLayout();
   $("#chat-surface").textContent = labels[session.surface] || session.surface;
   $("#chat-title").textContent = displayName(session);
   $("#chat-subtitle").textContent = conversationMeta(session);
@@ -596,10 +605,8 @@ async function selectSession(id, focus = false) {
     if (!response.ok) throw Error(await response.text());
     app.history = await response.json();
     renderChat();
-    if (focus && window.matchMedia("(max-width: 800px)").matches)
-      document
-        .querySelector(".chat-pane")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (focus && mobileConversationView())
+      requestAnimationFrame(() => window.scrollTo(0, 0));
   } catch (error) {
     $("#chat-body").innerHTML =
       `<div class="empty-state"><h2>Could not load this conversation</h2><p>${escape(error.message)}</p></div>`;
@@ -619,7 +626,17 @@ function renderChat() {
     controls.push(
       '<button data-action="compact" type="button">Compact</button>',
     );
-  $("#chat-actions").innerHTML = controls.join("");
+  $("#chat-actions").innerHTML = mobileConversationView()
+    ? ""
+    : controls.join("");
+  app.slashCommands = [
+    capabilities.compact && ["/compact", "Compact this conversation"],
+    session.status === "busy" && capabilities.interrupt && ["/stop", "Stop the current turn"],
+    session.status === "busy" && capabilities.steer && ["/steer", "Redirect the current turn"],
+    capabilities.model && ["/model", "Switch the session model"],
+    capabilities.goal && ["/goal", "Set the session goal"],
+  ].filter(Boolean);
+  renderSlashMenu();
   $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
@@ -669,12 +686,29 @@ async function send() {
   if (!message) return;
   $("#send").disabled = true;
   try {
-    const result = await action("send", { message });
+    const [command, ...rest] = message.split(/\s+/);
+    const argument = rest.join(" ");
+    const commandActions = {
+      "/compact": ["compact", {}],
+      "/stop": ["interrupt", {}],
+      "/steer": ["steer", { message: argument }],
+      "/model": ["model", { model: argument }],
+      "/goal": ["goal-set", { message: argument }],
+    };
+    const commandAction = commandActions[command.toLowerCase()];
+    if (commandAction && ["/steer", "/model", "/goal"].includes(command.toLowerCase()) && !argument)
+      throw Error(`${command} needs a value`);
+    const result = commandAction
+      ? await action(commandAction[0], commandAction[1])
+      : await action("send", { message });
     $("#message").value = "";
     resizeComposer();
-    const queued = result.result?.disposition === "queued";
+    renderSlashMenu();
+    const queued = result?.result?.disposition === "queued";
     toast(
-      queued
+      commandAction
+        ? `${command} requested.`
+        : queued
         ? "This agent is busy, so your message is safely queued."
         : "Message sent.",
     );
@@ -686,7 +720,34 @@ async function send() {
     $("#send").disabled = false;
   }
 }
+function renderSlashMenu() {
+  const menu = $("#slash-menu");
+  const value = $("#message")?.value.trimStart() || "";
+  const query = value.split(/\s/, 1)[0].toLowerCase();
+  const visible = value.startsWith("/") && !value.includes(" ");
+  const commands = visible
+    ? app.slashCommands.filter(([command]) => command.startsWith(query))
+    : [];
+  menu.hidden = commands.length === 0;
+  menu.innerHTML = commands
+    .map(([command, description]) => `<button type="button" data-slash="${escape(command)}"><strong>${escape(command)}</strong><span>${escape(description)}</span></button>`)
+    .join("");
+}
 document.addEventListener("click", async (event) => {
+  const slash = event.target.closest("[data-slash]");
+  if (slash) {
+    const command = slash.dataset.slash;
+    $("#message").value = command + (["/steer", "/model", "/goal"].includes(command) ? " " : "");
+    renderSlashMenu();
+    resizeComposer();
+    $("#message").focus();
+    return;
+  }
+  const viewLink = event.target.closest("[data-view]");
+  if (viewLink?.dataset.view === "conversations" && mobileConversationView()) {
+    app.mobileChatOpen = false;
+    syncConversationLayout();
+  }
   const expand = event.target.closest("[data-expand-turn]");
   if (expand) {
     const turn = expand.closest(".turn");
@@ -760,7 +821,10 @@ document.addEventListener("click", async (event) => {
     control.disabled = false;
   }
 });
-$("#message").addEventListener("input", resizeComposer);
+$("#message").addEventListener("input", () => {
+  resizeComposer();
+  renderSlashMenu();
+});
 $("#composer").addEventListener("submit", (event) => {
   event.preventDefault();
   send();
@@ -826,6 +890,12 @@ $("#session-more").addEventListener("click", () => {
   app.sessionLimit += sessionBatchSize();
   renderSessions();
 });
+$("#mobile-chat-back").addEventListener("click", () => {
+  app.mobileChatOpen = false;
+  syncConversationLayout();
+  window.scrollTo(0, 0);
+  document.querySelector(`[data-session="${CSS.escape(app.selected?.id || "")}"]`)?.focus();
+});
 document.addEventListener("click", (event) => {
   const tab = event.target.closest("[data-operations-tab]");
   if (tab) {
@@ -850,6 +920,7 @@ $("#refresh").addEventListener("click", async () => {
 window.addEventListener("resize", () => {
   renderSessions();
   resizeComposer();
+  syncConversationLayout();
 });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 document.addEventListener("visibilitychange", () => {
