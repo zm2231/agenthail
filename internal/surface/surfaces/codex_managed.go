@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,11 +130,30 @@ func (c *Codex) openDesktop(ctx context.Context) (codexClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := c.ensureHooked(ctx, conn); err != nil {
+	if err := c.ensureDesktopHook(ctx, conn); err != nil {
 		_ = conn.close()
 		return nil, err
 	}
 	return &desktopCodexClient{owner: c, conn: conn}, nil
+}
+
+func (c *Codex) ensureDesktopHook(ctx context.Context, conn *cdpConn) error {
+	c.bridgeMu.Lock()
+	defer c.bridgeMu.Unlock()
+	now := time.Now()
+	if c.bridgeTarget == conn.target && c.bridgeErr != nil && now.Before(c.bridgeRetry) {
+		return c.bridgeErr
+	}
+	err := c.ensureHooked(ctx, conn)
+	c.bridgeTarget = conn.target
+	if err != nil && strings.Contains(err.Error(), "request dispatcher") {
+		c.bridgeErr = err
+		c.bridgeRetry = now.Add(10 * time.Second)
+		return err
+	}
+	c.bridgeErr = nil
+	c.bridgeRetry = time.Time{}
+	return err
 }
 
 func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable bool) (codexClient, error) {
@@ -141,7 +161,7 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 		return nil, fmt.Errorf("Codex terminal session is read only; start a writable session with 'agenthail codex'")
 	}
 	if sess.Transport == codexTransportManaged {
-		return dialManagedCodex(ctx)
+		return c.openManaged(ctx)
 	}
 	return c.openDesktop(ctx)
 }
@@ -167,9 +187,12 @@ func codexSource(value any) string {
 	return ""
 }
 
-func codexTransport(source string, status any, managed bool) string {
+func codexTransport(source string, status any, managed, desktopReachable bool) string {
 	if source == "vscode" {
-		return codexTransportDesktop
+		if desktopReachable {
+			return codexTransportDesktop
+		}
+		return codexTransportReadOnly
 	}
 	if managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
 		return codexTransportManaged

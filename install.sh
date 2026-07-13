@@ -1,6 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+INSTALL_SKILL="${AGENTHAIL_INSTALL_SKILL:-1}"
+for arg in "$@"; do
+	case "$arg" in
+		--no-skill) INSTALL_SKILL=0 ;;
+		--with-skill) INSTALL_SKILL=1 ;;
+		-h|--help)
+			cat <<'USAGE'
+usage: ./install.sh [--no-skill]
+
+  --no-skill   do not link the agenthail-operations skill into ~/.claude/skills
+               or ~/.codex/skills (they are only touched if they already exist)
+
+environment:
+  AGENTHAIL_INSTALL_DIR   directory for the agenthail wrapper
+  AGENTHAIL_DATA_DIR      directory for the binary and sidecar
+  AGENTHAIL_PYTHON        absolute path to a Python 3.10+ interpreter
+  AGENTHAIL_VERSION       override the stamped version string
+USAGE
+			exit 0
+			;;
+		*)
+			echo "error: unknown argument $arg (try --help)" >&2
+			exit 1
+			;;
+	esac
+done
+
 DEFAULT_INSTALL_DIR="$HOME/.local/bin"
 if [ -d /opt/homebrew/bin ] && [ -w /opt/homebrew/bin ]; then
 	DEFAULT_INSTALL_DIR=/opt/homebrew/bin
@@ -129,26 +156,28 @@ cd "$REPO_DIR"
 if [ -n "${AGENTHAIL_PREBUILT_BINARY:-}" ]; then
 	cp "$AGENTHAIL_PREBUILT_BINARY" "$STAGE_DIR/agenthail"
 elif [ -d "$REPO_DIR/cmd/agenthail" ]; then
-	go build -trimpath -ldflags='-s -w' -o "$STAGE_DIR/agenthail" ./cmd/agenthail
+	BUILD_VERSION="${AGENTHAIL_VERSION:-dev}"
+	BUILD_REVISION="unknown"
+	BUILD_AT=""
+	if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+		BUILD_REVISION="$(git -C "$REPO_DIR" rev-parse HEAD)"
+		if [ -z "${AGENTHAIL_VERSION:-}" ]; then
+			BUILD_VERSION="$(git -C "$REPO_DIR" describe --tags --always 2>/dev/null || echo dev)"
+		fi
+		if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
+			BUILD_VERSION="$BUILD_VERSION-dirty"
+		fi
+		BUILD_AT="$(date -u -r "$(git -C "$REPO_DIR" show -s --format=%ct HEAD)" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+	fi
+	go build -trimpath \
+		-ldflags="-s -w -X main.version=$BUILD_VERSION -X main.revision=$BUILD_REVISION -X main.builtAt=$BUILD_AT" \
+		-o "$STAGE_DIR/agenthail" ./cmd/agenthail
 elif [ -x "$REPO_DIR/agenthail" ]; then
 	cp "$REPO_DIR/agenthail" "$STAGE_DIR/agenthail"
 else
 	echo "error: no Go source tree or prebuilt agenthail binary found" >&2
 	exit 1
 fi
-
-echo "agenthail: building macOS companion"
-if [ -n "${AGENTHAIL_PREBUILT_MAC_APP:-}" ]; then
-	cp -R "$AGENTHAIL_PREBUILT_MAC_APP" "$STAGE_DIR/Agenthail.app"
-elif [ -d "$REPO_DIR/Agenthail.app" ]; then
-	cp -R "$REPO_DIR/Agenthail.app" "$STAGE_DIR/Agenthail.app"
-elif [ -x "$REPO_DIR/scripts/build-macos-app.sh" ]; then
-	"$REPO_DIR/scripts/build-macos-app.sh" "$STAGE_DIR/Agenthail.app" "$(uname -m)" >/dev/null
-else
-	echo "error: Agenthail.app is missing and cannot be built" >&2
-	exit 1
-fi
-test -x "$STAGE_DIR/Agenthail.app/Contents/MacOS/Agenthail"
 
 echo ""
 echo "agenthail: installing sidecar deps (curl_cffi, sweet-cookie)"
@@ -162,8 +191,6 @@ echo ""
 echo "agenthail: installing to $DATA_DIR"
 chmod +x "$STAGE_DIR/agenthail"
 codesign --verify "$STAGE_DIR/agenthail" 2>/dev/null || codesign --force --sign - "$STAGE_DIR/agenthail" 2>/dev/null || true
-codesign --verify --deep --strict "$STAGE_DIR/Agenthail.app"
-
 cp sidecar/sidecar.py "$STAGE_DIR/sidecar.py"
 cp sidecar/cookie.mjs "$STAGE_DIR/cookie.mjs"
 if [ -d "$REPO_DIR/skills" ]; then
@@ -243,14 +270,12 @@ printf -v SIDECAR_SHELL '%q' "$DATA_DIR/sidecar.py"
 printf -v COOKIE_BRIDGE_SHELL '%q' "$DATA_DIR/cookie.mjs"
 printf -v PYTHON_SHELL '%q' "$PYTHON_BIN"
 printf -v PYDEPS_SHELL '%q' "$DATA_DIR/pydeps"
-printf -v MAC_APP_SHELL '%q' "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
 cat >"$INSTALL_DIR/agenthail" <<EOF
 #!/usr/bin/env bash
 # agenthail-managed-wrapper-v1
 export AGENTHAIL_SIDECAR=$SIDECAR_SHELL
 export AGENTHAIL_COOKIE_BRIDGE=$COOKIE_BRIDGE_SHELL
 export AGENTHAIL_PYTHON=$PYTHON_SHELL
-export AGENTHAIL_MAC_APP=$MAC_APP_SHELL
 export PYTHONPATH=$PYDEPS_SHELL:\${PYTHONPATH:-}
 exec $DATA_BINARY_SHELL "\$@"
 EOF
@@ -269,29 +294,6 @@ elif [ "$RESTART_DAEMON" -eq 1 ]; then
 	"$INSTALL_DIR/agenthail" daemon start
 fi
 
-if [ "${AGENTHAIL_SKIP_MAC_APP_LAUNCH:-0}" != "1" ]; then
-	LEGACY_MENUBAR_LOADED=0
-	if launchctl print "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 && [ -f "$LEGACY_MENUBAR_PLIST" ]; then
-		LEGACY_MENUBAR_LOADED=1
-		launchctl bootout "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 || true
-	fi
-	if SERVICE_OUTPUT="$($DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail service enable 2>&1)"; then
-		rm -f "$LEGACY_MENUBAR_PLIST"
-		killall Agenthail >/dev/null 2>&1 || true
-		open -gja "$DATA_DIR/Agenthail.app" || true
-	else
-		echo "warning: Agenthail login item could not be registered ($SERVICE_OUTPUT)" >&2
-		if [ "$LEGACY_MENUBAR_LOADED" -eq 1 ] && [ -f "$LEGACY_MENUBAR_PLIST" ]; then
-			if ! launchctl bootstrap "gui/$UID" "$LEGACY_MENUBAR_PLIST" >/dev/null 2>&1; then
-				echo "warning: previous menu service could not be restored; opening Agenthail directly" >&2
-				open -gja "$DATA_DIR/Agenthail.app" || true
-			fi
-		else
-			open -gja "$DATA_DIR/Agenthail.app" || true
-		fi
-	fi
-fi
-
 if [ "${#OWNED_WRAPPERS[@]}" -gt 0 ]; then
 	for wrapper in "${OWNED_WRAPPERS[@]}"; do
 		if [ "$wrapper" != "$INSTALL_DIR/agenthail" ]; then
@@ -299,6 +301,14 @@ if [ "${#OWNED_WRAPPERS[@]}" -gt 0 ]; then
 		fi
 	done
 fi
+
+LEGACY_APP="$PREVIOUS_DIR/Agenthail.app/Contents/MacOS/Agenthail"
+if [ -x "$LEGACY_APP" ]; then
+	"$LEGACY_APP" service disable >/dev/null 2>&1 || true
+fi
+launchctl bootout "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 || true
+rm -f "$LEGACY_MENUBAR_PLIST" "$HOME/.agenthail/notifications.json"
+pkill -f '/Agenthail.app/Contents/MacOS/Agenthail' >/dev/null 2>&1 || true
 
 INSTALL_SUCCEEDED=1
 rm -rf "$PREVIOUS_DIR"
@@ -308,14 +318,34 @@ trap - EXIT
 # Remove old claude-worker wrapper if present
 rm -f "$INSTALL_DIR/claude-worker" 2>/dev/null || true
 
+SKILL_SOURCE="$DATA_DIR/skills/agenthail-operations"
+SKILL_LINKS=()
+if [ "$INSTALL_SKILL" -eq 1 ] && [ -f "$SKILL_SOURCE/SKILL.md" ]; then
+	for runtime_dir in "$HOME/.claude" "$HOME/.codex"; do
+		[ -d "$runtime_dir" ] || continue
+		link="$runtime_dir/skills/agenthail-operations"
+		if [ -e "$link" ] && [ ! -L "$link" ]; then
+			echo "warning: $link exists and is not an agenthail symlink; leaving it alone" >&2
+			continue
+		fi
+		mkdir -p "$runtime_dir/skills"
+		ln -sfn "$SKILL_SOURCE" "$link"
+		SKILL_LINKS+=("$link")
+	done
+fi
+
 echo ""
 echo "installed: agenthail $INSTALL_DIR/agenthail"
 echo "  sidecar:  $DATA_DIR/sidecar.py"
 echo "  python:   $PYTHON_BIN"
 echo "  cookies:  $DATA_DIR/cookie.mjs"
-echo "  mac app:  $DATA_DIR/Agenthail.app"
-if [ -f "$DATA_DIR/skills/agenthail-operations/SKILL.md" ]; then
-  echo "  skill:    $DATA_DIR/skills/agenthail-operations/SKILL.md"
+if [ -f "$SKILL_SOURCE/SKILL.md" ]; then
+  echo "  skill:    $SKILL_SOURCE/SKILL.md"
+fi
+if [ "${#SKILL_LINKS[@]}" -gt 0 ]; then
+  for link in "${SKILL_LINKS[@]}"; do
+    echo "  linked:   $link"
+  done
 fi
 echo ""
 echo "verify:    agenthail doctor"

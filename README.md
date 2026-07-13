@@ -1,67 +1,108 @@
 # agenthail
 
-I kept ending up with the same problem: Claude was working in one session, Codex in another, and something useful was sitting in Notion. Each agent could do the work. None of them could reach the others, so I was spending half my time copying messages between windows and trying to remember which agent was busy.
+**Your agents are already working. agenthail keeps everyone connected.**
 
-agenthail gives those sessions one address book.
+[![CI](https://github.com/zm2231/agenthail/actions/workflows/ci.yml/badge.svg)](https://github.com/zm2231/agenthail/actions/workflows/ci.yml) ![macOS](https://img.shields.io/badge/macOS-black) ![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8) ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue) ![status](https://img.shields.io/badge/status-early-orange)
 
-You can hail an agent by name, send work to whichever surface it already lives in, queue the next instruction while it is busy, or wire two agents together so one picks up when the other finishes. Claude/Codex/Notion stay where they are. agenthail handles the connection between them.
+agenthail connects the AI agents already working across your devices and apps, both to each other and back to you.
+
+![The agenthail dashboard: one view of every running agent, its status, and what it is working on](docs/dashboard.png)
 
 ```bash
-agenthail send claude:test-session "check the failing tests" --reply
-agenthail send codex:test-session-23 "implement the fix" --reply
-agenthail send @reviewer "review what Codex changed"
+agenthail send @investigator "find the root cause" --reply
+agenthail relay add @investigator @builder
 ```
 
-## What this solves
+## The problem
 
-Most agent tooling assumes you are starting a new agent inside its own system. That falls apart once the useful work is already spread across a few real sessions with their own context, permissions, files, and history.
+Your work is spread across running agents, and there is no unified way to reach them, watch them, or help them work together.
 
-agenthail works with the sessions you already have open:
+Claude Code is mid-investigation in one window. Codex is waiting for instructions in another. Each session understands its own assignment perfectly well and knows nothing about what happened next door. Everything connecting them is you: reading one answer, deciding who needs it, switching windows, pasting, and trying to remember which session is still mid-turn so you don't interrupt it.
 
-- Name a Claude, Codex, or Notion session once and reach it as `@writer`, `@reviewer`, or whatever makes sense to you.
-- Send a message and wait for the actual new reply, instead of accidentally reading the last thing the agent said.
-- Keep working while an agent is active. The next message waits in a durable queue and goes out when the session is idle.
-- Use `steer` when the current turn needs guidance now.
-- Group agents into a channel and hail the whole team.
-- Relay a completed answer into another session, including regex-filtered handoffs like `FAIL|NO-SHIP`.
+Then you walk away from the desk and the whole thing stops, because you were the part that moved work between them.
 
-The part I care about is that the agents start feeling like one system. You keep the Claude session with its project context/the Codex session attached to the app/the Notion thread where the research lives, while agenthail gives you one way to communicate across all three.
+## Connect the agents to each other
 
-## A small example
-
-Say Claude is investigating a bug and Codex is handling implementation.
+There is no setup step. agenthail finds the sessions that are already running, and you can reach one, queue work for it, steer it mid-turn, or wire its finished answers straight into another agent.
 
 ```bash
-# Give the sessions names
-agenthail identify claude:test-session investigator
-agenthail identify codex:test-session-23 builder
+agenthail list
 
-# Send work directly
-agenthail send @investigator "find the root cause" --reply
-
-# Hand every completed Claude answer to Codex
-agenthail relay add @investigator @builder
+agenthail send codex:test-session-23 "implement the fix" --reply
+agenthail relay add claude:test-session codex:test-session-23
 agenthail daemon install
 ```
 
-If Codex is already mid-turn, the relay waits. If you want to change what Codex is doing right now, steer it:
+That relay is the idea in one line. Every completed answer from the Claude Code session now arrives in Codex, in order, without you. If Codex is mid-turn, it waits. If the daemon restarts, it picks up where it left off.
+
+You can target a session by `surface:target`, its PID, a session-ID prefix, or a fragment of its working directory. Aliases are optional sugar, for when you are tired of typing a session ID:
 
 ```bash
-agenthail steer @builder "focus on the registry path first"
-```
+agenthail identify claude:test-session investigator
+agenthail identify codex:test-session-23 builder
 
-You can also keep the handoff narrow:
-
-```bash
+agenthail send @investigator "find the root cause" --reply
 agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 ```
 
-The route remembers which completed turn it already delivered, including across restarts. Old answers stay old.
-Routes are validated as a graph when created, so self-routes and cycles such as `@a → @b → @a` are rejected before they can create a relay loop. Relay payloads carry a bounded hop count as a second guard, and are bounded before they enter the next agent's context.
+That last relay only hands work across when the investigation actually says something worth acting on.
+
+Nothing about your setup changes. No tmux, no wrappers, no rebuilding your agents inside somebody's framework. You keep using Claude Code and Codex exactly the way you already do, and agenthail attaches to the sessions that are already running, with their context and permissions and open files intact.
+
+## Connect the agents back to you
+
+The other half is you being able to reach them, especially when you are not at the keyboard.
+
+```bash
+agenthail dashboard enable
+```
+
+The dashboard is one live view of every agent and its status. Check in, steer a turn, queue what comes next, or pass one agent's result to another. It binds to `127.0.0.1:7412` behind a per-install access token, and nothing listens until you enable it.
+
+Then walk away. The daemon keeps the handoffs moving and holds the next instructions for whichever agent is still busy. The dashboard stays available for checking progress and steering work.
+
+To pick it up from your phone, install Tailscale on the Mac and the phone, sign both into the same tailnet, then:
+
+```bash
+agenthail dashboard remote
+```
+
+That configures a tailnet-only Tailscale Serve route and prints an authenticated link and QR code. agenthail stays bound to loopback; Funnel and public internet exposure are never enabled. The link and the QR contain the dashboard token, so treat them as private. Rotating the token revokes saved access.
+
+```bash
+agenthail dashboard remote status
+agenthail dashboard remote off
+```
+
+## See everything that happened
+
+Every message agenthail moves is written to a local audit trail, so you can come back to a machine that has been running agents for six hours and reconstruct what actually went where.
+
+The dashboard keeps it under Operations → Audit, with a search box, an event-type filter, and older activity paged in on demand. The same record is on the CLI:
+
+```bash
+agenthail history
+agenthail history @writer 25
+agenthail history --json
+```
+
+Each event says what happened, not just that something did. A message is `queued`, then `sent` or `delivered`; a target that was mid-turn is `busy`; a relay that fired is `relay`, and one that was filtered out or hit the hop limit is `relay-dropped`. Failures are `failed`, retries are `retry`, and a delivery whose outcome could not be confirmed is `unknown`. Withdrawn instructions are `canceled`, so a message you pulled back leaves a trace instead of vanishing.
+
+The queue is inspectable the same way, including work that failed and is waiting on you:
+
+```bash
+agenthail queue list
+agenthail queue list --all --json
+agenthail queue retry 12
+agenthail queue rm 12
+agenthail queue clear @writer
+```
+
+Nothing here leaves your machine. The trail is bounded on purpose (the newest 2000 events, each field capped at 16 KiB and marked `[truncated]` past that), so it records what the daemon decided without turning into a second copy of every transcript. Writing history is treated as observability, never as delivery, so a problem recording an event cannot fail a message that actually went out.
 
 ## Install
 
-agenthail currently targets macOS. A source install needs Go, Swift, Node.js, Python 3.10 or newer, Chrome, and the desktop/web apps for the surfaces you want to use. The installer selects a supported Python interpreter, installs sidecar dependencies with that exact interpreter, and pins its absolute path into the wrapper and daemon service.
+macOS only, for now. A source install needs Go, Node.js, Python 3.10 or newer, and Chrome.
 
 ```bash
 git clone https://github.com/zm2231/agenthail.git
@@ -70,74 +111,74 @@ cd agenthail
 agenthail doctor
 ```
 
-The installer packages the Go binary, Python/Node helpers, native Agenthail menu bar app, and Agenthail operations skill under `~/.local/share/agenthail`, then puts the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). The small menu bar icon opens the dashboard, shows daemon health, controls notifications, and can restart the daemon. It does not replace the daemon or contact agent providers. Running `./install.sh` again upgrades the installation without nesting dependencies. If the daemon is running, the installer restarts it on the new binary. The packaged skill lives at `~/.local/share/agenthail/skills/agenthail-operations/SKILL.md` for agent setups that load local operator skills.
+The installer puts the binary and sidecar under `~/.local/share/agenthail`, then drops the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running it again upgrades in place and restarts the daemon on the new binary.
 
-Release archives produced by `scripts/package-release.sh` contain the binary and native app, so the same installer works without Go or Swift toolchains after extraction. The script requires a clean worktree, embeds the exact revision/build time, uses a Developer ID signing identity, notarizes and staples the app through `AGENTHAIL_NOTARY_PROFILE`, and writes a SHA-256 checksum next to the archive. A production build fails closed when signing or notarization is missing. `AGENTHAIL_ALLOW_UNNOTARIZED=1` is available only for an intentional local artifact that should not be published.
+If you already run Claude Code or Codex, it also links the agenthail operations skill into `~/.claude/skills` and `~/.codex/skills`, so your agents know how to drive the CLI themselves. It never creates those directories, so nothing shows up on a machine that does not use them. Skip it with `./install.sh --no-skill`.
 
-For queues and relays that survive logouts/reboots:
+For queues and relays that survive logouts and reboots:
 
 ```bash
 agenthail daemon install
 agenthail daemon status
 ```
 
-That installs a launchd service with restart-on-crash. If you prefer to run it only when needed, use `agenthail daemon start` and `agenthail daemon stop`.
+That installs a launchd service with restart-on-crash. To run it only when you want it, use `agenthail daemon start` and `agenthail daemon stop`.
 
-## Writable Codex terminal sessions
+## Surfaces
 
-Start new Codex terminal work with Agenthail when you want to send, steer, stop, compact, or change models from the dashboard later:
+A surface is somewhere your agents already live. Claude Code and Codex are the two that carry the work. Notion is optional, and it is there because a research thread is sometimes the thing you want to hand to a builder.
+
+They are independent, so one being unavailable never blocks the others.
+
+| | Claude Code | Codex | Notion |
+|---|---:|---:|---:|
+| Find existing sessions | yes | yes | yes |
+| Send and read replies | yes | yes | yes |
+| Stream a turn | yes | yes | |
+| Steer / interrupt | yes | yes | |
+| Compact | yes | yes | |
+| Session model switch | yes | yes | |
+| Per-message model | | yes | yes |
+| Goal tracking | | yes | |
+
+Claude Code model switching goes through the session's `/model` command. agenthail waits for the local confirmation, so an unknown model returns an error instead of looking like it worked.
+
+### Codex: which sessions agenthail can write to
+
+Codex is not one thing. agenthail can *read* every Codex session and its history, but whether it can *send* depends on how that session was started.
+
+| How the session started | Read | Send |
+|---|:---:|:---:|
+| `agenthail codex` (terminal) | yes | yes |
+| Codex Desktop, launched with `agenthail launch codex` | yes | yes |
+| Codex Desktop, opened normally | yes | no |
+| `codex` (plain terminal) | yes | no |
+
+**Terminal.** Start Codex through agenthail and the session is fully writable:
 
 ```bash
 agenthail codex
 agenthail codex --model gpt-5.6-sol
 ```
 
-This starts Codex on Agenthail's local app-server without replacing the `codex` command or changing your shell. Existing sessions started with plain `codex` still appear in history, but they are read-only because the standard terminal process has no safe external input path. Codex Desktop sessions remain writable, including sessions resumed from Desktop history.
+That runs Codex on agenthail's local app-server. It does not replace the `codex` command and does not change your shell. Sessions you started with plain `codex` stay readable, and agenthail can see their history, but it cannot send into them: a standard terminal process gives it no safe external input path. This is being fixed.
 
-## Optional dashboard
-
-The dashboard is off by default. When you enable it, the running daemon serves a private local control room for the surfaces you have connected. Claude, Codex, and Notion are independent, so an unavailable surface never blocks the rest.
+**Desktop.** Codex Desktop is writable, but only when it is running agenthail's local bridge, which means it has to be launched through agenthail at least once:
 
 ```bash
-agenthail dashboard enable
-agenthail dashboard status
-agenthail dashboard config --codex-recent-hours 5
+agenthail launch codex
 ```
 
-The home page is deliberately simple: your connected surfaces and current work. Claude sessions count as current while their terminal process is open. Codex sessions count as current while working, queued, or used within the configured window, which defaults to five hours. Open History for older threads. Plain `codex` terminal sessions remain readable but cannot accept messages or actions. Type `/` in a writable conversation to see supported commands; `/model` uses the model catalog reported by that surface. Operations contains delivery, handoffs, audit, remote access, and dashboard settings.
-
-The dashboard binds to `127.0.0.1:7412`, uses a per-install access token, and rejects cross-origin actions. It is optional: nothing listens until you explicitly run `agenthail dashboard enable`.
-
-For private phone access, install Tailscale on the Mac and phone, sign both into the same tailnet, then open Operations → Settings and choose Enable phone access. The dashboard shows the authenticated QR code, phone link, connection status, and the option to turn access off.
-
-The CLI offers the same controls for automation:
-
-```bash
-agenthail dashboard remote
-```
-
-Both paths keep Agenthail bound to loopback and configure a tailnet-only Tailscale Serve route. The CLI also copies the authenticated phone URL and opens its QR code.
-
-On iPhone, open the generated URL, tap Share, then tap Add to Home Screen. The trusted-device cookie lasts one year; rotating the local dashboard token revokes saved access. Treat the generated URL and QR as private because they contain the dashboard token.
-
-```bash
-agenthail dashboard remote status
-agenthail dashboard remote off
-agenthail dashboard remote --no-open
-agenthail dashboard remote --json
-```
-
-Remote access fails with an actionable message when Tailscale is missing, offline, lacks MagicDNS, or already uses Agenthail's Serve port for another service. It never enables Funnel or public internet access. A Cloudflare deployment needs a separate authenticated access policy before it is supported.
+Open Codex Desktop straight from the Dock and agenthail can still read it, but has nothing to send through. `agenthail doctor` tells you which state you are in.
 
 ## Finding your sessions
 
 ```bash
 agenthail list
-agenthail list --all
 agenthail list --all --json
 ```
 
-For scripts, qualify the surface so there is no guessing:
+In scripts, qualify the surface so there is no guessing:
 
 ```text
 claude:test-session
@@ -145,75 +186,49 @@ codex:test-session-23
 notion:3978aba0-0606-80ac-a1ae-00a9eb229fc0
 ```
 
-For daily use, aliases are nicer:
-
-```bash
-agenthail identify claude:test-session writer
-agenthail send @writer "give me the short version" --reply
-```
-
-Ambiguous names fail and show the candidates. agenthail will ask you to use `surface:target` rather than picking a random session.
+For daily use, aliases are nicer. Ambiguous names fail and print the candidates; agenthail asks you to qualify rather than picking a session at random.
 
 ## The commands I actually use
 
 ```bash
-# Send and get the completed reply
+# Send and wait for the completed reply
 agenthail send @writer "draft the explanation" --reply
-
-# Slow/long generations can choose their own wait boundary
 agenthail send @writer "produce the full report" --reply --timeout 5m
 
-# Watch a supported response as it arrives
+# Watch a turn as it arrives
 agenthail send @writer "walk through the issue" --stream
 
 # Read without sending
 agenthail reply @writer
 agenthail last @writer 5 --full
 
-# Busy agent: wait for idle
+# Busy agent: leave the next instruction for when it goes idle
 agenthail queue @writer "after that, tighten the intro"
 
-# Busy agent: affect the turn already running
+# Busy agent: change the turn that is running right now
 agenthail steer @writer "keep the example, cut the setup"
 
-# See what is waiting or failed
+# See what is waiting, failed, or already went out
 agenthail queue list
 agenthail queue retry 12
-
-# See what the daemon sent, queued, retried, or failed
-agenthail history
 agenthail history @writer 25
 
-# Take back a pending instruction
-agenthail queue rm 12
-agenthail queue clear @writer
-
-# Get a macOS notification when an observed turn finishes
-agenthail daemon notify on
-
-# Verify delivery or open macOS notification settings
-agenthail daemon notify test
-agenthail daemon notify settings
-
-# Stop or compact a supported session
+# Stop or compact a session
 agenthail interrupt @writer
 agenthail compact @writer
 ```
 
-Long prompts can go through stdin:
+Long prompts can come from stdin:
 
 ```bash
 agenthail send @writer - < prompt.txt
-generate-prompt | agenthail queue @writer -
 ```
 
-When `send` hits an active agent, it queues the message and tells you when `steer` is the better fit. When the daemon is down, the queued message stays in SQLite and the CLI tells you exactly what to start.
-
-Use `agenthail send <target> "message" --no-queue` when the caller requires immediate delivery. If the target is active, the command fails without creating a queue row.
+When `send` hits an active agent it queues the message and tells you when `steer` would have been the better call. Use `--no-queue` when the caller needs immediate delivery or nothing; if the target is active it fails instead of creating a queue row.
 
 ## Channels
 
-Channels are useful when two or three sessions need the same context.
+When two or three sessions need the same context:
 
 ```bash
 agenthail channel create launch
@@ -222,96 +237,95 @@ agenthail channel add launch @builder
 agenthail channel send launch "new requirement: keep the old API working" --from zain
 ```
 
-Every member gets a result. A partial failure exits nonzero so a script can catch it; busy members go to the queue.
+Every member gets a result. Busy members go to the queue. A partial failure exits nonzero so a script can catch it.
 
-## What works today
+## Notion threads
 
-| | Claude | Codex | Notion |
-|---|---:|---:|---:|
-| Find existing sessions | yes | yes | yes |
-| Send and read replies | yes | yes | yes |
-| Stream a turn | yes | yes |  |
-| Steer / interrupt | yes | yes |  |
-| Compact | yes | yes |  |
-| Session model switch | yes | yes |  |
-| Per-message model |  | yes | yes |
-| Goal tracking |  | yes |  |
-
-Claude model switching goes through the session's `/model` command. agenthail waits for Claude's local confirmation, so an unknown model returns an error instead of looking successful.
-
-Notion works with existing threads, including a known thread UUID that has fallen outside the 50 most recent results, and can create a persistent thread directly:
+Notion works with existing threads, including a known thread UUID that has fallen outside the 50 most recent results, and can create a persistent one:
 
 ```bash
 agenthail send notion:new "Start a research thread" --reply
 agenthail send notion:new:launch-notes "Draft the launch notes" --reply
 ```
 
-The delivery receipt returns the persisted thread UUID, which AgentHail registers for replies and follow-up messages. In `new:launch-notes`, `launch-notes` becomes a durable local AgentHail alias; Notion still generates the visible thread title from the first message.
+The receipt returns the persisted thread UUID, which agenthail registers for replies and follow-ups. In `new:launch-notes`, the name becomes a durable local alias; Notion still generates the visible title from the first message.
 
-## A few useful guarantees
+## What makes the handoffs trustworthy
 
-Queues preserve the full message and its model choice. Delivery stays ordered per session. A rejected/busy delivery remains queued, known pre-dispatch failures retry with a bounded backoff, and repeated failures become visible dead letters instead of disappearing. If the daemon dies, or an external response fails after dispatch, in the window where a message may have reached the agent but was not acknowledged locally, agenthail marks the outcome unknown instead of silently sending the instruction twice. You decide whether to retry it.
+None of the above is worth much if a handoff can silently drop, duplicate, or loop. So:
 
-Replies are tied to a new completed turn. Streams are tied to the session/turn that started them, so an old Codex event from another thread cannot leak into the output. Relay delivery is recorded before the next poll and survives daemon restarts.
+Queues preserve the full message and its model choice, and delivery stays ordered per session. A busy or rejected delivery stays queued. Known pre-dispatch failures retry with a bounded backoff, and repeated failures become visible dead letters instead of disappearing.
 
-The sidecar reads fresh Chrome cookies without printing them. If the cookie bridge fails, the request stops there. Upstream responses are read in chunks with a 16 MiB default ceiling, and long Claude transcript records get an explicit error at 32 MiB rather than silent truncation.
+If the daemon dies in the window where a message may have reached the agent but was not acknowledged locally, agenthail marks the outcome **unknown** rather than sending the instruction a second time. You decide whether to retry. Quietly double-sending an instruction to a coding agent is worse than stopping and asking.
+
+Relay routes are validated as a graph when you create them, so a self-route or a cycle like `@a → @b → @a` is rejected before it can exist. Relay payloads are truncated before they enter the next agent's context. Each route remembers which completed turn it already delivered, across restarts, so old answers stay old.
+
+Replies are bound to a new completed turn, which is why `--reply` cannot hand you the last thing the agent happened to say before you asked. Streams are bound to the session and turn that started them, so a Codex event from another thread cannot leak into your output.
+
+## Security
+
+agenthail reads browser cookies and runs a local HTTP server, so it is worth being specific. [SECURITY.md](SECURITY.md) has the full threat model.
+
+Short version: everything stays on your machine. Nothing listens until you run `agenthail dashboard enable`, and when you do, it binds to loopback behind a per-install token and rejects cross-origin actions. The sidecar reads fresh Chrome cookies without printing them, and if the cookie bridge fails the request stops there instead of falling back to something weaker. There is no agenthail server, no telemetry, and no account.
 
 ## Surface setup
 
-Claude and Notion use the Chrome profile where you are already signed in. The default is `Default`:
+Claude Code and Notion use the Chrome profile you are already signed into. The default is `Default`:
 
 ```bash
 AGENTHAIL_CHROME_PROFILE="Profile 2" agenthail doctor
 ```
 
-Codex needs a local bridge into the Desktop app. Launch it once through AgentHail:
+Codex needs a local bridge into the Desktop app. Launch it once through agenthail:
 
 ```bash
 agenthail launch codex
 ```
 
-Fresh launches expose only Chromium's renderer debugger on loopback. AgentHail then asks the renderer to use Desktop's own app-server connection, so messages and turns stay visible in the existing app. It does not write to the app-server child process or launch Codex with Node's crash-prone `--inspect` flag.
+Fresh launches expose only Chromium's renderer debugger on loopback. agenthail then asks the renderer to use Desktop's own app-server connection, so messages and turns stay visible in the app you are already looking at. It does not write to the app-server child process, and it does not launch Codex with Node's crash-prone `--inspect` flag.
 
-The renderer bridge uses port `9231` by default. To choose another local port:
+Agenthail's background service also keeps the Codex read connection available after login and restarts it if it disappears. `agenthail doctor` reports whether that connection is reachable and supervised.
+
+The bridge uses port `9231` by default:
 
 ```bash
 AGENTHAIL_CODEX_REMOTE=9331 agenthail launch codex
-AGENTHAIL_CODEX_REMOTE=9331 agenthail doctor
 ```
 
-If Codex is already open without the renderer bridge, `agenthail launch codex` can activate a delayed compatibility connection. The next clean launch should still go through AgentHail so it can use the safer renderer-only path. `AGENTHAIL_CODEX_INSPECT` remains a deprecated alias for one release cycle.
-
-The remaining environment variables are mostly escape hatches:
+The rest of the environment variables are escape hatches:
 
 | Variable | Use |
 |---|---|
-| `AGENTHAIL_CHROME_PROFILE` | Chrome profile for Claude/Notion cookies |
-| `AGENTHAIL_PYTHON` | Absolute Python 3.10+ interpreter used by the sidecar and installer |
+| `AGENTHAIL_CHROME_PROFILE` | Chrome profile for Claude Code / Notion cookies |
+| `AGENTHAIL_PYTHON` | Absolute Python 3.10+ interpreter for the sidecar |
+| `AGENTHAIL_CODEX_BIN` | Codex executable to use when it is outside `PATH` |
 | `AGENTHAIL_CODEX_REMOTE` | Loopback Codex renderer-debugging port, default `9231` |
-| `AGENTHAIL_CODEX_INSPECT` | Deprecated alias for `AGENTHAIL_CODEX_REMOTE` |
 | `AGENTHAIL_NOTION_SPACE` | Pin a Notion space when auto-detection is ambiguous |
 | `AGENTHAIL_NOTION_USER` | Pin a Notion user when auto-detection is ambiguous |
-| `AGENTHAIL_NOTION_TZ` | Timezone sent with Notion messages |
 | `AGENTHAIL_MAX_RESPONSE_BYTES` | Sidecar response limit, default 16 MiB |
-| `AGENTHAIL_DEBUG=1` | Safe sidecar diagnostics without cookie values |
+| `AGENTHAIL_DEBUG=1` | Sidecar diagnostics, without cookie values |
 
-## Build / verify from source
+## Build and verify from source
 
 ```bash
 go test ./... -race -count=1
 go vet ./...
-scripts/package-release.sh
 scripts/test-install-upgrade.sh
+scripts/package-release.sh
 bash -n install.sh
 python3 -m py_compile sidecar/sidecar.py
 ```
 
-Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `agenthail doctor --json`, `list --json`, `send --json`, `history --json`, and the queue commands return stable JSON documents for anything you want to script around. Delivery history is bounded and local, so it records the daemon's decisions without copying unbounded transcripts.
+Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `doctor`, `list`, `send`, `history`, and the queue commands all take `--json` and return stable documents, so you can script around them. Delivery history is bounded and local: it records what the daemon decided, without copying whole transcripts.
 
-Desktop notifications are opt-in and macOS-only. They use the native Agenthail app, so macOS shows Agenthail as the sender and a notification can open the dashboard. Disable them with `agenthail daemon notify off`; enabling them does not change provider traffic or polling. The menu bar app starts at login, stays out of the Dock, and can be quit without stopping the daemon.
+Release archives from `scripts/package-release.sh` carry the binary, sidecar, installer, and skills, so extraction does not require Go. The packager requires a clean worktree, embeds the exact revision and build time, signs the macOS binary with a Developer ID identity, submits it for notarization, and emits a SHA-256 checksum. A production build fails closed when signing or notarization is unavailable.
 
-Claude/Codex/Notion all expose integration surfaces that can change underneath us. `agenthail doctor` is the first command I run after one of those apps updates. Then I try the real thing, because the system only counts as working when one agent can actually reach the next one.
+## Where this breaks
+
+Claude Code, Codex, and Notion all expose integration surfaces that can change underneath agenthail, and sometimes they do. `agenthail doctor` is the first thing I run after any of those apps updates.
+
+Then I try the real thing, because the only test that counts is whether one agent can still reach the next one.
 
 ## License
 
-Agenthail is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE), not an OSI-approved open-source license. Personal, research, educational, nonprofit, public-interest, and other noncommercial use are permitted under its terms. Commercial use requires a separate license; see [COMMERCIAL.md](COMMERCIAL.md) or contact [zainmer@protonmail.com](mailto:zainmer@protonmail.com).
+Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE), which is not an OSI-approved open-source license. Personal, research, educational, nonprofit, and other noncommercial use are permitted under its terms. Commercial use needs a separate license: see [COMMERCIAL.md](COMMERCIAL.md) or contact [zainmer@protonmail.com](mailto:zainmer@protonmail.com).

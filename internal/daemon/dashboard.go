@@ -40,6 +40,7 @@ const (
 
 type dashboardServer struct {
 	server  *http.Server
+	cancel  context.CancelFunc
 	listen  string
 	token   string
 	stateMu sync.Mutex
@@ -48,10 +49,15 @@ type dashboardServer struct {
 }
 
 type dashboardSurface struct {
-	Name         string               `json:"name"`
-	Connected    bool                 `json:"connected"`
-	Error        string               `json:"error,omitempty"`
-	Capabilities surface.Capabilities `json:"capabilities"`
+	Name         string                 `json:"name"`
+	Connected    bool                   `json:"connected"`
+	Error        string                 `json:"error,omitempty"`
+	Health       string                 `json:"health"`
+	HealthDetail string                 `json:"healthDetail,omitempty"`
+	Runtime      *surface.RuntimeStatus `json:"runtime,omitempty"`
+	RepairAction string                 `json:"repairAction,omitempty"`
+	RepairLabel  string                 `json:"repairLabel,omitempty"`
+	Capabilities surface.Capabilities   `json:"capabilities"`
 }
 
 type dashboardSession struct {
@@ -71,16 +77,27 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt        time.Time          `json:"updatedAt"`
-	Daemon           map[string]any     `json:"daemon"`
-	Surfaces         []dashboardSurface `json:"surfaces"`
-	Sessions         []dashboardSession `json:"sessions"`
-	TotalSessions    int                `json:"totalSessions"`
-	Queue            []dashboardQueue   `json:"queue"`
-	Channels         []dashboardChannel `json:"channels"`
-	Relays           []dashboardRelay   `json:"relays"`
-	History          []dashboardHistory `json:"history"`
-	CodexRecentHours int                `json:"codexRecentHours"`
+	UpdatedAt        time.Time            `json:"updatedAt"`
+	Daemon           map[string]any       `json:"daemon"`
+	Surfaces         []dashboardSurface   `json:"surfaces"`
+	Sessions         []dashboardSession   `json:"sessions"`
+	TotalSessions    int                  `json:"totalSessions"`
+	Queue            []dashboardQueue     `json:"queue"`
+	Channels         []dashboardChannel   `json:"channels"`
+	Relays           []dashboardRelay     `json:"relays"`
+	History          []dashboardHistory   `json:"history"`
+	Attention        []dashboardAttention `json:"attention"`
+	CodexRecentHours int                  `json:"codexRecentHours"`
+}
+
+type dashboardAttention struct {
+	ID              int64  `json:"id"`
+	SessionID       string `json:"sessionId"`
+	Target          string `json:"target"`
+	QueueID         int64  `json:"queueId"`
+	Reason          string `json:"reason"`
+	RequestedAction string `json:"requestedAction"`
+	CreatedAt       string `json:"createdAt"`
 }
 
 type dashboardQueue struct {
@@ -134,8 +151,13 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen dashboard on %s: %w", config.Listen, err)
 	}
-	dashboard := &dashboardServer{listen: config.Listen, token: token}
-	dashboard.server = &http.Server{Handler: d.dashboardHandler(dashboard), ReadHeaderTimeout: 5 * time.Second}
+	serverCtx, cancel := context.WithCancel(context.Background())
+	dashboard := &dashboardServer{listen: config.Listen, token: token, cancel: cancel}
+	dashboard.server = &http.Server{
+		Handler:           d.dashboardHandler(dashboard),
+		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return serverCtx },
+	}
 	go func() {
 		if serveErr := dashboard.server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
 			d.log.Printf("dashboard server: %s", serveErr)
@@ -145,6 +167,13 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	return dashboard, nil
 }
 
+func (d *dashboardServer) shutdown() error {
+	if d.cancel != nil {
+		d.cancel()
+	}
+	return d.server.Close()
+}
+
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)
@@ -152,11 +181,37 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
+	mux.HandleFunc("/api/stream", dashboard.guard(d.dashboardStreamHandler))
+	mux.HandleFunc("/api/models", dashboard.guard(d.dashboardModelsHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
 	mux.HandleFunc("/api/action", dashboard.guard(d.dashboardActionHandler))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	return d.dashboardHeaders(mux)
+}
+
+func (d *Daemon) dashboardModelsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	adapter := d.surfaceForKind(surface.SurfaceKind(r.URL.Query().Get("surface")))
+	lister, ok := adapter.(surface.ModelLister)
+	if adapter == nil || !ok {
+		http.Error(w, "this surface does not list models", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	models, err := lister.Models(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("list models: %s", err), http.StatusBadGateway)
+		return
+	}
+	if models == nil {
+		models = []surface.ModelOption{}
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
 func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -165,9 +220,8 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	notifications := GetNotificationStatus()
 	if r.Method == http.MethodGet {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "notifications": notifications, "remoteAccess": RemoteAccessStatusForConfig(config), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "remoteAccess": RemoteAccessStatusForConfig(config), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -175,9 +229,8 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var request struct {
-		Action               string `json:"action"`
-		CodexRecentHours     int    `json:"codexRecentHours"`
-		NotificationsEnabled bool   `json:"notificationsEnabled"`
+		Action           string `json:"action"`
+		CodexRecentHours int    `json:"codexRecentHours"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid settings request", http.StatusBadRequest)
@@ -191,15 +244,6 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	case "dashboard-config":
 		config.CodexRecentHours = request.CodexRecentHours
 		err = SaveDashboardConfig(config)
-	case "notifications":
-		if request.NotificationsEnabled {
-			notifications, err = EnableNotifications()
-		} else {
-			err = DisableNotifications()
-			notifications = GetNotificationStatus()
-		}
-	case "notification-settings":
-		err = OpenNotificationSettings()
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)
 		return
@@ -208,7 +252,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "notifications": notifications})
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (d *Daemon) dashboardRemoteQRHandler(w http.ResponseWriter, r *http.Request) {
@@ -433,7 +477,11 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read delivery history: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), CodexRecentHours: config.CodexRecentHours}
+	attention, err := d.Registry.ListAttentionItems(false)
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
+	}
+	state := dashboardState{UpdatedAt: now.UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
@@ -449,6 +497,9 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	for _, entry := range history {
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
+	}
+	for _, item := range attention {
+		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
 	var mu sync.Mutex
 	var wait sync.WaitGroup
@@ -467,10 +518,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 			operationCtx, cancel := context.WithTimeout(ctx, listBudget)
 			sessions, listErr := adapter.List(operationCtx)
 			cancel()
-			entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Capabilities: adapter.Capabilities()}
-			if listErr != nil {
-				entry.Error = listErr.Error()
-			}
+			entry := d.dashboardSurfaceHealth(ctx, adapter, listErr)
 			mu.Lock()
 			state.Surfaces = append(state.Surfaces, entry)
 			for _, session := range sessions {
@@ -499,6 +547,48 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	})
 	state.TotalSessions = len(state.Sessions)
 	return state, nil
+}
+
+func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
+	entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
+	if listErr != nil {
+		entry.Error = listErr.Error()
+		entry.Health = "unavailable"
+		entry.HealthDetail = listErr.Error()
+	}
+	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if checker, ok := adapter.(surface.HealthChecker); ok {
+		if err := checker.Health(healthCtx); err != nil {
+			if entry.Connected {
+				entry.Health = "degraded"
+			}
+			entry.HealthDetail = err.Error()
+			if adapter.Name() == surface.KindCodex {
+				entry.RepairAction = "codex-launch"
+				entry.RepairLabel = "Launch Codex through Agenthail"
+			}
+		}
+	}
+	if provider, ok := adapter.(surface.RuntimeStatusProvider); ok {
+		runtimeStatus := provider.RuntimeStatus(healthCtx)
+		if runtimeStatus.Name != "" {
+			entry.Runtime = &runtimeStatus
+			if !runtimeStatus.Reachable || !runtimeStatus.Durable {
+				if entry.Health == "healthy" {
+					entry.Health = "degraded"
+				}
+				if entry.HealthDetail == "" {
+					entry.HealthDetail = runtimeStatus.Detail
+				}
+				if !runtimeStatus.Reachable && entry.RepairAction == "" {
+					entry.RepairAction = "runtime-ensure"
+					entry.RepairLabel = "Repair managed runtime"
+				}
+			}
+		}
+	}
+	return entry
 }
 
 func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
@@ -572,6 +662,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Action    string `json:"action"`
 		SessionID string `json:"sessionId"`
 		Message   string `json:"message"`
+		Alias     string `json:"alias"`
 		Model     string `json:"model"`
 		QueueID   int64  `json:"queueId"`
 		Channel   string `json:"channel"`
@@ -580,9 +671,85 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		ToID      string `json:"toId"`
 		Pattern   string `json:"pattern"`
 		RelayID   int64  `json:"relayId"`
+		Surface   string `json:"surface"`
+		Cwd       string `json:"cwd"`
+		Approval  string `json:"approvalPolicy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		return
+	}
+	if request.Action == "session-create" {
+		adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
+		starter, ok := adapter.(surface.SessionStarter)
+		if adapter == nil || !ok {
+			http.Error(w, "this surface cannot start conversations", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(request.Message) == "" {
+			http.Error(w, "message is required", http.StatusBadRequest)
+			return
+		}
+		cwd, cwdErr := dashboardStartCwd(request.Cwd)
+		if cwdErr != nil {
+			http.Error(w, cwdErr.Error(), http.StatusBadRequest)
+			return
+		}
+		approval := strings.TrimSpace(request.Approval)
+		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
+			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+		defer cancel()
+		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval})
+		if session != nil {
+			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
+				http.Error(w, fmt.Sprintf("register conversation: %s", registerErr), http.StatusInternalServerError)
+				return
+			}
+			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
+				if aliasErr := d.Registry.SetAlias(alias, session.ID); aliasErr != nil {
+					http.Error(w, fmt.Sprintf("name conversation: %s", aliasErr), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+		if startErr != nil {
+			kind := "failed"
+			unknown := surface.IsDeliveryOutcomeUnknown(startErr)
+			if unknown {
+				kind = "unknown"
+			}
+			sessionID := ""
+			if session != nil {
+				sessionID = session.ID
+			}
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
+			if unknown && session != nil {
+				writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "unknown": true, "session": session, "error": startErr.Error()})
+				return
+			}
+			http.Error(w, startErr.Error(), http.StatusBadGateway)
+			return
+		}
+		result := ""
+		if sent != nil {
+			result = sent.UUID
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: request.Message, Result: result})
+		writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "session": session, "result": sent})
+		return
+	}
+	if request.Action == "notion-create" {
+		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+		defer cancel()
+		receipt, createErr := d.createNotionThread(ctx, request.Message, request.Alias, request.Model)
+		if createErr != nil {
+			http.Error(w, createErr.Error(), http.StatusBadGateway)
+			return
+		}
+		writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "result": receipt, "sessionId": receipt.SessionID})
 		return
 	}
 	if request.Action == "queue-retry" {
@@ -765,6 +932,44 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
+	if request.Action == "codex-launch" {
+		executable, executableErr := os.Executable()
+		if executableErr != nil {
+			http.Error(w, fmt.Sprintf("find Agenthail executable: %s", executableErr), http.StatusInternalServerError)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		output, launchErr := exec.CommandContext(ctx, executable, "launch", "codex").CombinedOutput()
+		if launchErr != nil {
+			detail := strings.TrimSpace(string(output))
+			if detail == "" {
+				detail = launchErr.Error()
+			} else {
+				detail += ": " + launchErr.Error()
+			}
+			http.Error(w, detail, http.StatusBadGateway)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": strings.TrimSpace(string(output))})
+		return
+	}
+	if request.Action == "runtime-ensure" {
+		adapter := d.surfaceForKind(surface.KindCodex)
+		ensurer, ok := adapter.(surface.RuntimeEnsurer)
+		if adapter == nil || !ok {
+			http.Error(w, "Codex managed runtime cannot be repaired here", http.StatusConflict)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		if err := ensurer.EnsureRuntime(ctx); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 	if request.SessionID == "" {
 		http.Error(w, "sessionId is required", http.StatusBadRequest)
 		return
@@ -772,6 +977,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	session, err := d.Registry.Session(request.SessionID)
 	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if request.Action == "alias" {
+		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
+		if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
+			http.Error(w, "name must be 1 to 80 characters without spaces, /, or #", http.StatusBadRequest)
+			return
+		}
+		if err := d.Registry.ReplaceAlias(alias, session.ID); err != nil {
+			http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
+			return
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "identified", SessionID: session.ID, Result: "@" + alias})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "alias": alias})
 		return
 	}
 	adapter := d.surfaceForKind(session.Surface)
@@ -848,6 +1067,31 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+}
+
+func dashboardStartCwd(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("find home directory: %w", err)
+	}
+	if value == "" || value == "~" {
+		value = home
+	} else if strings.HasPrefix(value, "~/") {
+		value = filepath.Join(home, strings.TrimPrefix(value, "~/"))
+	}
+	value, err = filepath.Abs(value)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	info, err := os.Stat(value)
+	if err != nil {
+		return "", fmt.Errorf("working directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("working directory is not a directory")
+	}
+	return filepath.Clean(value), nil
 }
 
 func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request) {

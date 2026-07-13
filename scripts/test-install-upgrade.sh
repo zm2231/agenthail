@@ -55,21 +55,19 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 (cd "$ROOT" && go build -trimpath -o "$TMP/agenthail" ./cmd/agenthail)
-"$ROOT/scripts/build-macos-app.sh" "$TMP/Agenthail.app" "$(uname -m)" >/dev/null
 
 install_once() {
 	local home="$1"
 	local install_dir="$2"
 	local data_dir="$3"
+	shift 3
 	HOME="$home" \
 	PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
 	AGENTHAIL_PREBUILT_BINARY="$TMP/agenthail" \
-	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
-	AGENTHAIL_SKIP_MAC_APP_LAUNCH=1 \
 	AGENTHAIL_INSTALL_DIR="$install_dir" \
 	AGENTHAIL_DATA_DIR="$data_dir" \
-	"$ROOT/install.sh"
+	"$ROOT/install.sh" "$@"
 }
 
 mkdir -p "$COLLISION_BIN"
@@ -85,16 +83,53 @@ grep -Fq 'echo unrelated' "$COLLISION_BIN/agenthail"
 install_once "$TEST_HOME" "$OLD_BIN" "$DATA_DIR" >/dev/null
 HOME="$TEST_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$OLD_BIN/agenthail" daemon start >/dev/null
 
+mkdir -p "$DATA_DIR/Agenthail.app/Contents/MacOS" "$TEST_HOME/.agenthail"
+cat >"$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "service" ] && [ "${2:-}" = "disable" ]; then
+	touch "$HOME/legacy-app-disabled"
+fi
+EOF
+chmod +x "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
+printf '{"enabled":true}\n' >"$TEST_HOME/.agenthail/notifications.json"
+
 install_once "$TEST_HOME" "$NEW_BIN" "$DATA_DIR" >"$TMP/upgrade.log"
 
 test ! -e "$OLD_BIN/agenthail"
 test -x "$NEW_BIN/agenthail"
-test -x "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
+test ! -e "$DATA_DIR/Agenthail.app"
+test -f "$TEST_HOME/legacy-app-disabled"
+test ! -e "$TEST_HOME/.agenthail/notifications.json"
 grep -Fq 'stopping running daemon for upgrade' "$TMP/upgrade.log"
 grep -Fq 'restarting daemon with the upgraded binary' "$TMP/upgrade.log"
 grep -Fq 'agenthail-managed-wrapper-v1' "$NEW_BIN/agenthail"
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$NEW_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail version --json >/dev/null
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$NEW_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail daemon status >/dev/null
+
+test -f "$DATA_DIR/skills/agenthail-operations/SKILL.md"
+test ! -e "$TEST_HOME/.claude"
+
+SKILL_HOME="$TMP/skill home"
+SKILL_BIN="$SKILL_HOME/bin"
+SKILL_DATA="$SKILL_HOME/share/agenthail"
+mkdir -p "$SKILL_HOME/.claude" "$SKILL_HOME/.codex/skills"
+
+install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >/dev/null
+test -L "$SKILL_HOME/.claude/skills/agenthail-operations"
+test -L "$SKILL_HOME/.codex/skills/agenthail-operations"
+test -f "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
+test -f "$SKILL_HOME/.codex/skills/agenthail-operations/SKILL.md"
+
+rm -rf "$SKILL_HOME/.claude/skills" "$SKILL_HOME/.codex/skills"
+install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" --no-skill >/dev/null
+test ! -e "$SKILL_HOME/.claude/skills/agenthail-operations"
+test ! -e "$SKILL_HOME/.codex/skills/agenthail-operations"
+
+mkdir -p "$SKILL_HOME/.claude/skills/agenthail-operations"
+printf 'mine\n' >"$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
+install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >"$TMP/skill-collision.log" 2>&1
+grep -Fq 'is not an agenthail symlink' "$TMP/skill-collision.log"
+grep -Fqx 'mine' "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 
 install_once "$CUSTOM_HOME" "$CUSTOM_BIN" "$CUSTOM_DATA_1" >/dev/null
 HOME="$CUSTOM_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$CUSTOM_BIN/agenthail" daemon start >/dev/null
@@ -138,7 +173,6 @@ grep -Fq 'refusing to overwrite unmanaged executable' "$TMP/supervised-data-coll
 SUPERVISED_PLIST="$SUPERVISED_HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract ProgramArguments.0 raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/agenthail"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVISED_PLIST")" = "$PYTHON_BIN"
-test "$(plutil -extract EnvironmentVariables.AGENTHAIL_MAC_APP raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/Agenthail.app/Contents/MacOS/Agenthail"
 
 echo "legacy wrapper migration: OK"
 echo "custom wrapper upgrade: OK"

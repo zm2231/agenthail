@@ -126,6 +126,18 @@ func remoteServe(path string) (tailscaleServeStatus, error) {
 	return status, json.Unmarshal(output, &status)
 }
 
+func remoteServeUsesHTTPS(path, dnsName string, port int) (bool, error) {
+	output, err := runTailscale(path, "serve", "status")
+	if err != nil {
+		return false, err
+	}
+	host := dnsName
+	if port != 443 {
+		host = remoteHost(dnsName, port)
+	}
+	return strings.Contains(string(output), "https://"+host), nil
+}
+
 func remoteHost(dnsName string, port int) string {
 	return net.JoinHostPort(dnsName, strconv.Itoa(port))
 }
@@ -147,7 +159,7 @@ func remoteURL(dnsName, localURL string, port int) (string, error) {
 	if err != nil || local.Query().Get("token") == "" {
 		return "", fmt.Errorf("dashboard access token is unavailable")
 	}
-	return (&url.URL{Scheme: "http", Host: remoteHost(dnsName, port), Path: "/", RawQuery: local.RawQuery, Fragment: "overview"}).String(), nil
+	return (&url.URL{Scheme: "https", Host: remoteHost(dnsName, port), Path: "/", RawQuery: local.RawQuery, Fragment: "overview"}).String(), nil
 }
 
 func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
@@ -170,12 +182,17 @@ func RemoteAccessStatusForConfig(config DashboardConfig) RemoteAccessStatus {
 		return result
 	}
 	result.Proxy = remoteProxy(serve, node.Self.DNSName, remote.Port)
+	httpsReady, httpsErr := remoteServeUsesHTTPS(path, node.Self.DNSName, remote.Port)
+	if httpsErr != nil {
+		result.Error = httpsErr.Error()
+		return result
+	}
 	target, _ := remoteTarget(config.Listen)
 	if serve.AllowFunnel[remoteHost(node.Self.DNSName, remote.Port)] {
 		result.Error = "Tailscale Funnel is enabled on the Agenthail port"
 		return result
 	}
-	result.Enabled = result.Proxy == target
+	result.Enabled = result.Proxy == target && httpsReady
 	if result.Enabled {
 		if local, urlErr := DashboardURL(); urlErr == nil {
 			result.URL, _ = remoteURL(node.Self.DNSName, local, remote.Port)
@@ -207,14 +224,27 @@ func EnableRemoteAccess(config DashboardConfig) (DashboardConfig, RemoteAccessSt
 		return config, RemoteAccessStatus{}, err
 	}
 	proxy := remoteProxy(status, node.Self.DNSName, config.RemoteAccess.Port)
+	httpsReady, err := remoteServeUsesHTTPS(path, node.Self.DNSName, config.RemoteAccess.Port)
+	if err != nil {
+		return config, RemoteAccessStatus{}, err
+	}
 	if _, used := status.TCP[strconv.Itoa(config.RemoteAccess.Port)]; used && proxy != "" && proxy != target {
 		return config, RemoteAccessStatus{}, fmt.Errorf("port %d already proxies another service", config.RemoteAccess.Port)
 	}
 	if _, used := status.TCP[strconv.Itoa(config.RemoteAccess.Port)]; used && proxy == "" {
 		return config, RemoteAccessStatus{}, fmt.Errorf("port %d is already in use", config.RemoteAccess.Port)
 	}
-	if proxy != target {
-		if _, err := runTailscale(path, "serve", "--bg", "--yes", "--http="+strconv.Itoa(config.RemoteAccess.Port), target); err != nil {
+	ownedHTTP := proxy == target && !httpsReady
+	if ownedHTTP {
+		if _, err := runTailscale(path, "serve", "--http="+strconv.Itoa(config.RemoteAccess.Port), "off"); err != nil {
+			return config, RemoteAccessStatus{}, err
+		}
+	}
+	if proxy != target || !httpsReady {
+		if _, err := runTailscale(path, "serve", "--bg", "--yes", "--https="+strconv.Itoa(config.RemoteAccess.Port), target); err != nil {
+			if ownedHTTP {
+				_, _ = runTailscale(path, "serve", "--bg", "--yes", "--http="+strconv.Itoa(config.RemoteAccess.Port), target)
+			}
 			return config, RemoteAccessStatus{}, err
 		}
 	}
@@ -249,11 +279,19 @@ func DisableRemoteAccess(config DashboardConfig) (DashboardConfig, error) {
 		return config, err
 	}
 	proxy := remoteProxy(status, node.Self.DNSName, config.RemoteAccess.Port)
+	httpsReady, err := remoteServeUsesHTTPS(path, node.Self.DNSName, config.RemoteAccess.Port)
+	if err != nil {
+		return config, err
+	}
 	if proxy != "" && proxy != target {
 		return config, fmt.Errorf("refusing to remove a remote route owned by another service")
 	}
 	if proxy == target {
-		if _, err := runTailscale(path, "serve", "--http="+strconv.Itoa(config.RemoteAccess.Port), "off"); err != nil {
+		protocol := "--http="
+		if httpsReady {
+			protocol = "--https="
+		}
+		if _, err := runTailscale(path, "serve", protocol+strconv.Itoa(config.RemoteAccess.Port), "off"); err != nil {
 			return config, err
 		}
 	}

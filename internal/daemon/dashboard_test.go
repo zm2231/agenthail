@@ -3,11 +3,15 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +93,362 @@ func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 	}
 }
 
+func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	setAlias := func(name string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"action": "alias", "sessionId": "from", "alias": name})
+		request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+		request.Header.Set("Origin", "http://example.test")
+		request.Host = "example.test"
+		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := setAlias("reviewer"); response.Code != http.StatusOK {
+		t.Fatalf("first alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := setAlias("shipper"); response.Code != http.StatusOK {
+		t.Fatalf("second alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := registry.LookupAlias("reviewer"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("old alias still resolves: %v", err)
+	}
+	alias, err := registry.ReverseAlias("from")
+	if err != nil || alias != "shipper" {
+		t.Fatalf("alias=%q err=%v", alias, err)
+	}
+	state := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	handler.ServeHTTP(state, request)
+	if state.Code != http.StatusOK || !strings.Contains(state.Body.String(), `"alias":"shipper"`) {
+		t.Fatalf("state=%d body=%s", state.Code, state.Body.String())
+	}
+	history := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/history?limit=10", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	handler.ServeHTTP(history, request)
+	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), `"kind":"identified"`) || !strings.Contains(history.Body.String(), `"result":"@shipper"`) {
+		t.Fatalf("history=%d body=%s", history.Code, history.Body.String())
+	}
+}
+
+func TestDashboardSurfaceHealthNamesDegradedCodexAndRepair(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	adapter := &healthDaemonSurface{
+		daemonSurface: &daemonSurface{kind: surface.KindCodex},
+		healthErr:     errors.New("Codex Desktop bridge is unavailable"),
+		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Durable: true, Backend: "launchd"},
+	}
+	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
+	if entry.Health != "degraded" || entry.HealthDetail != "Codex Desktop bridge is unavailable" || entry.RepairAction != "codex-launch" || entry.RepairLabel != "Launch Codex through Agenthail" {
+		t.Fatalf("entry=%+v", entry)
+	}
+}
+
+func TestDashboardSurfaceHealthNamesMissingManagedRuntime(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	adapter := &healthDaemonSurface{
+		daemonSurface: &daemonSurface{kind: surface.KindCodex},
+		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Detail: "socket missing"},
+	}
+	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
+	if entry.Health != "degraded" || entry.HealthDetail != "socket missing" || entry.RepairAction != "runtime-ensure" || entry.RepairLabel != "Repair managed runtime" {
+		t.Fatalf("entry=%+v", entry)
+	}
+}
+
+func TestDashboardRepairsManagedRuntime(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	base := &daemonSurface{kind: surface.KindCodex}
+	adapter := &runtimeDaemonSurface{daemonSurface: base}
+	d = New(registry, []surface.Surface{adapter})
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body, _ := json.Marshal(map[string]string{"action": "runtime-ensure"})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || adapter.ensureCalls.Load() != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, adapter.ensureCalls.Load(), response.Body.String())
+	}
+}
+
+func TestDashboardExposesConversationNamingControls(t *testing.T) {
+	script := string(dashboardJS)
+	if !strings.Contains(script, `["/name", "Name this conversation"]`) ||
+		!strings.Contains(script, `data-tool="alias"`) ||
+		!strings.Contains(script, `"/name": ["alias", { alias: argument }]`) {
+		t.Fatal("dashboard is missing conversation naming controls")
+	}
+}
+
+func TestDashboardOverviewSubtitleUsesLiveState(t *testing.T) {
+	script := string(dashboardJS)
+	if strings.Contains(script, "Private and ready") ||
+		!strings.Contains(script, `surface${connected === 1 ? "" : "s"} connected`) ||
+		!strings.Contains(script, `message${queued === 1 ? "" : "s"} waiting`) {
+		t.Fatal("overview subtitle is not derived from live state")
+	}
+}
+
+func TestDashboardHidesChannelActionsUntilChannelExists(t *testing.T) {
+	markup := string(dashboardHTML)
+	script := string(dashboardJS)
+	if !strings.Contains(markup, `id="channel-actions" hidden`) ||
+		!strings.Contains(script, `$("#channel-actions").hidden = channels.length === 0`) {
+		t.Fatal("channel actions are not progressively disclosed")
+	}
+	create := strings.Index(markup, `data-network-form="channel-create"`)
+	empty := strings.Index(markup, `id="channel-list"`)
+	actions := strings.Index(markup, `id="channel-actions"`)
+	if create < 0 || empty <= create || actions <= empty {
+		t.Fatal("channel empty state and controls are ordered incorrectly")
+	}
+}
+
+func TestDashboardLongMessagesUseCleanCrop(t *testing.T) {
+	styles := string(dashboardCSS)
+	if strings.Contains(styles, "linear-gradient(transparent, var(--paper))") ||
+		!strings.Contains(styles, "height: 1.7em") ||
+		!strings.Contains(styles, "background: var(--paper)") {
+		t.Fatal("long messages do not use a clean opaque crop")
+	}
+}
+
+func TestDashboardConversationEntryAlignsLatestTurn(t *testing.T) {
+	script := string(dashboardJS)
+	if !strings.Contains(script, "app.pendingEntryScroll = true") ||
+		!strings.Contains(script, `latest.getBoundingClientRect().top - chatBody.getBoundingClientRect().top`) ||
+		!strings.Contains(script, "alignTranscriptTop(chatBody)") ||
+		!strings.Contains(script, `querySelectorAll("tr, pre, blockquote, li, h2, h3, h4, p")`) {
+		t.Fatal("conversation entry does not align to the latest turn boundary")
+	}
+}
+
+func TestDashboardExposesSurfaceHealthAndRepairs(t *testing.T) {
+	script := string(dashboardJS)
+	page := string(dashboardHTML)
+	for _, fragment := range []string{
+		`id="surface-health-list"`,
+		`data-surface-repair=`,
+		`await action(repair.dataset.surfaceRepair)`,
+		`Claude Code needs to reconnect to your signed-in account.`,
+	} {
+		if !strings.Contains(page+script, fragment) {
+			t.Fatalf("dashboard is missing %q", fragment)
+		}
+	}
+}
+
+func TestDashboardClipsLongMessagesWithoutFadingText(t *testing.T) {
+	styles := string(dashboardCSS)
+	if !strings.Contains(styles, ".turn-crop:after {") || !strings.Contains(styles, "background: var(--paper);") || strings.Contains(styles, "linear-gradient") {
+		t.Fatal("long-message crop must use an opaque cutoff without a text fade")
+	}
+	if !strings.Contains(string(dashboardJS), "Show full message") {
+		t.Fatal("long-message crop has no expansion control")
+	}
+}
+
+func TestDashboardListsModelsForNewConversation(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.modelOptions = []surface.ModelOption{{ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol", Default: true}}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/models?surface=codex", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"gpt-5.6-sol"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestDashboardStartsWritableCodexConversation(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	cwd := t.TempDir()
+	body, _ := json.Marshal(map[string]string{
+		"action": "session-create", "surface": "codex", "message": "Build this", "cwd": cwd,
+		"model": "gpt-5.6-sol", "approvalPolicy": "on-request", "alias": "builder",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(fake.startOptions) != 1 || fake.startOptions[0].Cwd != cwd || fake.startOptions[0].Model != "gpt-5.6-sol" || fake.startOptions[0].ApprovalPolicy != "on-request" {
+		t.Fatalf("options=%+v", fake.startOptions)
+	}
+	session, err := registry.Session("started")
+	if err != nil || session.Transport != "managed" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+	if alias, err := registry.ReverseAlias("started"); err != nil || alias != "builder" {
+		t.Fatalf("alias=%q err=%v", alias, err)
+	}
+	history, err := registry.ListHistory(5, "started")
+	if err != nil || len(history) != 1 || history[0].Kind != "sent" || history[0].Result != "started-turn" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	fake.startErr = surface.DeliveryOutcomeUnknown(errors.New("turn outcome unknown"))
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"unknown":true`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := registry.Session("started"); err != nil {
+		t.Fatalf("created session was not registered: %v", err)
+	}
+	history, err := registry.ListHistory(5, "started")
+	if err != nil || len(history) != 1 || history[0].Kind != "unknown" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestDashboardStartCwdExpandsHomeAndRejectsFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	project := filepath.Join(home, "project")
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := dashboardStartCwd("~/project")
+	if err != nil || resolved != project {
+		t.Fatalf("resolved=%q err=%v", resolved, err)
+	}
+	file := filepath.Join(home, "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dashboardStartCwd(file); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDashboardCreatesAndRegistersNotionThread(t *testing.T) {
+	registry, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { registry.Close() })
+	const threadID = "3978aba0-0606-80ac-a1ae-00a9eb229fc0"
+	fake := &daemonSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}, accepted: true, turnID: threadID}
+	handler := New(registry, []surface.Surface{fake}).dashboardHandler(&dashboardServer{token: "secret"})
+	body, _ := json.Marshal(map[string]string{"action": "notion-create", "message": "Research the launch", "alias": "research", "model": "fast"})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), threadID) || len(fake.sent) != 1 || fake.sent[0] != "Research the launch" || len(fake.models) != 1 || fake.models[0] != "fast" {
+		t.Fatalf("status=%d sent=%v models=%v body=%s", response.Code, fake.sent, fake.models, response.Body.String())
+	}
+	session, err := registry.Session(threadID)
+	if err != nil || session.Name != "research" || session.Surface != surface.KindNotion {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+	resolved, err := registry.ResolveTarget("research")
+	if err != nil || resolved != threadID {
+		t.Fatalf("resolved=%q err=%v", resolved, err)
+	}
+	history, err := registry.ListHistory(5, threadID)
+	if err != nil || len(history) != 1 || history[0].SessionID != threadID || history[0].Kind != "sent" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.caps = surface.Capabilities{Stream: true}
+	fake.streamEvents = []surface.StreamEvent{{Kind: "text", Text: "hello"}, {Kind: "tool_use", Text: "tests"}, {Kind: "done"}}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/stream?id=from", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(body, `"kind":"text","text":"hello"`) || !strings.Contains(body, `"kind":"done"`) {
+		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), body)
+	}
+}
+
+func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
+	serverCtx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := &dashboardServer{cancel: cancel}
+	dashboard.server = &http.Server{
+		BaseContext: func(net.Listener) context.Context { return serverCtx },
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		}),
+	}
+	go dashboard.server.Serve(listener)
+	requestDone := make(chan error, 1)
+	go func() {
+		response, requestErr := http.Get("http://" + listener.Addr().String())
+		if response != nil {
+			response.Body.Close()
+		}
+		requestDone <- requestErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("stream did not start")
+	}
+	if err := dashboard.shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case <-requestDone:
+	case <-time.After(time.Second):
+		t.Fatal("stream request survived shutdown")
+	}
+}
+
+func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		"new EventSource(`/api/stream?id=${encodeURIComponent(session.id)}`)",
+		`app.liveSource && app.liveSessionID === session.id`,
+		`app.liveText += delta.text || ""`,
+		`setInterval(() =>`,
+		`}, 30000)`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard live stream missing %q", fragment)
+		}
+	}
+}
+
 func TestDashboardCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
 	if !readOnly || reason == "" || capabilities.Send || capabilities.Model {
@@ -104,10 +464,152 @@ func TestDashboardCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 	}
 }
 
+func TestDashboardCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
+	capabilities := surface.Capabilities{Send: true, Model: true}
+	got, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)
+	if !readOnly || got.Send || got.Model || !strings.Contains(reason, "agenthail launch codex") {
+		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
+	}
+}
+
 func TestDashboardCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
 	if !readOnly || reason == "" || capabilities.Send || capabilities.Steer || capabilities.Compact {
 		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", capabilities, readOnly, reason)
+	}
+}
+
+func TestDashboardRemoteQRCodeRequiresExplicitReveal(t *testing.T) {
+	source := string(dashboardJS)
+	if !strings.Contains(source, "remoteQRVisible: false") || !strings.Contains(source, "data-reveal-remote-qr") {
+		t.Fatal("remote QR does not default to an explicit reveal state")
+	}
+	hidden := strings.Index(source, "const remoteQR = app.remoteQRVisible")
+	if hidden < 0 {
+		t.Fatal("remote QR conditional is missing")
+	}
+	image := strings.Index(source[hidden:], `/api/settings/remote-qr`)
+	reveal := strings.Index(source[hidden:], "data-reveal-remote-qr")
+	if image < 0 || reveal < 0 || image > reveal {
+		t.Fatal("remote QR image is not confined to the revealed branch")
+	}
+	if !strings.Contains(source, "navigator.clipboard.writeText(app.settings.remoteAccess.url)") {
+		t.Fatal("hidden QR removed copy-phone-link behavior")
+	}
+}
+
+func TestDashboardNormalizesEmptyStateAndShowsDeliveryOutcomes(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		"surfaces: state.surfaces || []",
+		"sessions: state.sessions || []",
+		"queue: state.queue || []",
+		"delivery-history",
+		`["sent", "delivered", "failed", "unknown", "expired", "canceled"]`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard source missing %q", fragment)
+		}
+	}
+	if !strings.Contains(string(dashboardHTML), `id="delivery-history"`) {
+		t.Fatal("delivery outcomes have no rendered surface")
+	}
+}
+
+func TestDashboardPreservesTranscriptStateAcrossPolls(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		"expandedTurns: new Set()",
+		"app.transcriptSignature === signature",
+		"app.expandedTurns.add(turn.dataset.turnKey)",
+		"chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24",
+		"Math.min(previousScrollTop, chatBody.scrollHeight - chatBody.clientHeight)",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard source missing %q", fragment)
+		}
+	}
+}
+
+func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		`drafts: new Map()`,
+		`app.drafts.set(app.selected.id, $("#message").value)`,
+		`$("#message").value = app.drafts.get(session.id) || ""`,
+		`sendButton.dataset.mode = stopping ? "interrupt" : "send"`,
+		`"Send queues this for next. Steer now changes the turn in progress."`,
+		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
+		`await action("interrupt")`,
+		`await action("steer", { message })`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard source missing %q", fragment)
+		}
+	}
+	if !strings.Contains(string(dashboardHTML), `id="steer-message"`) {
+		t.Fatal("busy composer has no inline steer action")
+	}
+}
+
+func TestDashboardExposesNewConversationFormForCodexAndNotion(t *testing.T) {
+	for _, fragment := range []string{
+		`id="new-conversation-form"`,
+		`<option value="on-request">Ask when needed</option>`,
+		`fetch("/api/models?surface=codex")`,
+		`values.surface === "notion" ? "notion-create" : "session-create"`,
+		`response.sessionId || response.session?.id`,
+	} {
+		if !strings.Contains(string(dashboardHTML)+string(dashboardJS), fragment) {
+			t.Fatalf("new conversation surface missing %q", fragment)
+		}
+	}
+}
+
+func TestDashboardExplainsSurfacePresenceWindow(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		"<span>Current</span>",
+		`? "Open now"`,
+		"`Past ${app.state.codexRecentHours || 5}h`",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard source missing %q", fragment)
+		}
+	}
+}
+
+func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
+	d, registry, _, _, target := daemonFixture(t)
+	if err := registry.QueueMessage(target.ID, "requires a decision"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := d.dashboardState(context.Background())
+	if err != nil || len(state.Attention) != 0 {
+		t.Fatalf("pending attention=%+v err=%v", state.Attention, err)
+	}
+	item, err := registry.ClaimNextMessage(target.ID, time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := registry.DeadLetterUnknown(item.ID, errors.New("connection closed")); err != nil {
+		t.Fatal(err)
+	}
+	state, err = d.dashboardState(context.Background())
+	if err != nil || len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
+		t.Fatalf("dead attention=%+v err=%v", state.Attention, err)
+	}
+	if err := registry.CancelMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, err = d.dashboardState(context.Background())
+	if err != nil || len(state.Attention) != 0 {
+		t.Fatalf("resolved attention=%+v err=%v", state.Attention, err)
+	}
+	for _, fragment := range []string{"attention: state.attention || []", "attentionPanel.hidden = attention.length === 0", `id="attention-panel" hidden`} {
+		if !strings.Contains(string(dashboardJS)+string(dashboardHTML), fragment) {
+			t.Fatalf("dashboard attention surface missing %q", fragment)
+		}
 	}
 }
 

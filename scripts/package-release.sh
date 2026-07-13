@@ -48,18 +48,11 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 		exit 1
 	fi
 	if [ "$WORKTREE_DIRTY" -eq 0 ] && [ -z "${AGENTHAIL_NOTARY_PROFILE:-}" ] && [ "${AGENTHAIL_ALLOW_UNNOTARIZED:-0}" != "1" ]; then
-		echo "error: production macOS releases require AGENTHAIL_NOTARY_PROFILE (or explicit AGENTHAIL_ALLOW_UNNOTARIZED=1)" >&2
+		echo "error: production macOS releases require AGENTHAIL_NOTARY_PROFILE" >&2
 		exit 1
 	fi
 	codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$STAGE/agenthail"
-	AGENTHAIL_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" "$ROOT/scripts/build-macos-app.sh" "$STAGE/Agenthail.app" "$GOARCH_VALUE" >/dev/null
-	if [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
-		NOTARY_ARCHIVE="$DIST/.release-stage/Agenthail-notary.zip"
-		ditto -c -k --keepParent "$STAGE/Agenthail.app" "$NOTARY_ARCHIVE"
-		xcrun notarytool submit "$NOTARY_ARCHIVE" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --wait
-		xcrun stapler staple "$STAGE/Agenthail.app"
-		rm -f "$NOTARY_ARCHIVE"
-	fi
+	codesign --verify --strict --verbose=2 "$STAGE/agenthail"
 fi
 
 cp README.md LICENSE COMMERCIAL.md install.sh "$STAGE/"
@@ -67,12 +60,23 @@ cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lo
 cp -R skills "$STAGE/"
 test -f "$STAGE/skills/agenthail-operations/SKILL.md"
 test -f "$STAGE/skills/agenthail-operations/agents/openai.yaml"
+
+if [ "$GOOS_VALUE" = "darwin" ] && [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
+	NOTARY_ARCHIVE="$DIST/.release-stage/$NAME-notary.zip"
+	ditto -c -k --keepParent "$STAGE" "$NOTARY_ARCHIVE"
+	xcrun notarytool submit "$NOTARY_ARCHIVE" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --wait
+	rm -f "$NOTARY_ARCHIVE"
+fi
 find "$DIST/.release-stage" -exec touch -t "$STAMP" {} +
 
 ARCHIVE="$DIST/$NAME.tar.gz"
 COPYFILE_DISABLE=1 tar -C "$DIST/.release-stage" -cf - "$NAME" | gzip -n > "$ARCHIVE"
 (cd "$DIST" && shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
 
-"$STAGE/agenthail" version --json
+if [ "$(go env GOHOSTOS)" = "$GOOS_VALUE" ] && [ "$(go env GOHOSTARCH)" = "$GOARCH_VALUE" ]; then
+	"$STAGE/agenthail" version --json
+else
+	go version -m "$STAGE/agenthail"
+fi
 echo "archive: $ARCHIVE"
 echo "checksum: $ARCHIVE.sha256"

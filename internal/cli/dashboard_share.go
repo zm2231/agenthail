@@ -135,6 +135,18 @@ func serveProxy(status tailscaleServeStatus, dnsName string, port int) string {
 	return entry.Handlers["/"].Proxy
 }
 
+func serveUsesHTTPS(run dashboardShareRunner, dnsName string, port int) (bool, error) {
+	output, err := run("serve", "status")
+	if err != nil {
+		return false, err
+	}
+	host := dnsName
+	if port != 443 {
+		host = net.JoinHostPort(dnsName, strconv.Itoa(port))
+	}
+	return strings.Contains(string(output), "https://"+host), nil
+}
+
 func configureDashboardShare(run dashboardShareRunner, dnsName, target string, port int) error {
 	status, err := readTailscaleServe(run)
 	if err != nil {
@@ -142,6 +154,10 @@ func configureDashboardShare(run dashboardShareRunner, dnsName, target string, p
 	}
 	portKey := strconv.Itoa(port)
 	proxy := serveProxy(status, dnsName, port)
+	httpsReady, err := serveUsesHTTPS(run, dnsName, port)
+	if err != nil {
+		return err
+	}
 	if funnelEnabled(status, dnsName, port) {
 		return fmt.Errorf("Tailscale Funnel is enabled on port %d; disable Funnel before sharing Agenthail privately", port)
 	}
@@ -151,8 +167,17 @@ func configureDashboardShare(run dashboardShareRunner, dnsName, target string, p
 	if _, used := status.TCP[portKey]; used && proxy == "" {
 		return fmt.Errorf("Tailscale Serve port %d is already in use by another service", port)
 	}
-	if proxy != target {
-		if _, err := run("serve", "--bg", "--yes", "--http="+portKey, target); err != nil {
+	ownedHTTP := proxy == target && !httpsReady
+	if ownedHTTP {
+		if _, err := run("serve", "--http="+portKey, "off"); err != nil {
+			return err
+		}
+	}
+	if proxy != target || !httpsReady {
+		if _, err := run("serve", "--bg", "--yes", "--https="+portKey, target); err != nil {
+			if ownedHTTP {
+				_, _ = run("serve", "--bg", "--yes", "--http="+portKey, target)
+			}
 			return err
 		}
 	}
@@ -162,6 +187,12 @@ func configureDashboardShare(run dashboardShareRunner, dnsName, target string, p
 	}
 	if serveProxy(status, dnsName, port) != target {
 		return fmt.Errorf("Tailscale Serve did not retain the Agenthail proxy on port %d", port)
+	}
+	if httpsReady, err := serveUsesHTTPS(run, dnsName, port); err != nil || !httpsReady {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("Tailscale Serve did not enable HTTPS on port %d", port)
 	}
 	if funnelEnabled(status, dnsName, port) {
 		return fmt.Errorf("Tailscale Funnel became enabled on port %d; sharing was not accepted", port)
@@ -177,7 +208,7 @@ func remoteDashboardURL(dnsName, localURL string, port int) (string, error) {
 	if local.Query().Get("token") == "" {
 		return "", fmt.Errorf("local dashboard URL is missing its access token")
 	}
-	remote := &url.URL{Scheme: "http", Host: net.JoinHostPort(dnsName, strconv.Itoa(port)), Path: "/", RawQuery: local.RawQuery, Fragment: "conversations"}
+	remote := &url.URL{Scheme: "https", Host: net.JoinHostPort(dnsName, strconv.Itoa(port)), Path: "/", RawQuery: local.RawQuery, Fragment: "conversations"}
 	return remote.String(), nil
 }
 
@@ -272,6 +303,10 @@ func dashboardDaemonRunning() bool {
 	return running
 }
 
+func dashboardRemoteEnabled(config daemon.DashboardConfig, status tailscaleServeStatus, dnsName, target string, httpsReady bool) bool {
+	return config.Enabled && target != "" && serveProxy(status, dnsName, dashboardSharePort) == target && httpsReady && !funnelEnabled(status, dnsName, dashboardSharePort)
+}
+
 func (a *App) cmdDashboardRemote(args, positional []string) error {
 	action := "on"
 	if len(positional) > 0 {
@@ -316,7 +351,15 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if proxy != target {
 			return fmt.Errorf("refusing to remove Tailscale Serve port %d because it now proxies %s", dashboardSharePort, proxy)
 		}
-		if _, err := run("serve", "--http="+strconv.Itoa(dashboardSharePort), "off"); err != nil {
+		httpsReady, err := serveUsesHTTPS(run, node.Self.DNSName, dashboardSharePort)
+		if err != nil {
+			return err
+		}
+		protocol := "--http="
+		if httpsReady {
+			protocol = "--https="
+		}
+		if _, err := run("serve", protocol+strconv.Itoa(dashboardSharePort), "off"); err != nil {
 			return err
 		}
 		config.RemoteAccess.Enabled = false
@@ -341,9 +384,13 @@ func (a *App) cmdDashboardRemote(args, positional []string) error {
 		if err != nil {
 			return err
 		}
-		enabled := config.Enabled && serveProxy(status, node.Self.DNSName, dashboardSharePort) == target && target != "" && !funnelEnabled(status, node.Self.DNSName, dashboardSharePort)
+		httpsReady, err := serveUsesHTTPS(run, node.Self.DNSName, dashboardSharePort)
+		if err != nil {
+			return err
+		}
+		enabled := dashboardRemoteEnabled(config, status, node.Self.DNSName, target, httpsReady)
 		if asJSON {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "port": dashboardSharePort, "proxy": serveProxy(status, node.Self.DNSName, dashboardSharePort)})
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"enabled": enabled, "dashboardEnabled": config.Enabled, "dnsName": node.Self.DNSName, "https": httpsReady, "port": dashboardSharePort, "proxy": serveProxy(status, node.Self.DNSName, dashboardSharePort)})
 		}
 		if !enabled {
 			fmt.Println("remote dashboard access: off")

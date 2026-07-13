@@ -57,6 +57,7 @@ const codexHookJS = `
         const imports = /(?:from\s*|import\s*\(|import\s*)["']([^"']+\.js)["']/g;
         let match;
         while ((match = imports.exec(source))) queue.push(new URL(match[1], url).href);
+        for (const asset of source.matchAll(/["'](\.\/[^"']+\.js)["']/g)) queue.push(new URL(asset[1], url).href);
       } catch {}
     }
     return null;

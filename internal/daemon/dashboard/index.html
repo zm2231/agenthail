@@ -8,7 +8,7 @@
     />
     <meta name="color-scheme" content="dark" />
     <title>Agenthail</title>
-    <link rel="stylesheet" href="/tokens.css?v=8" />
+    <link rel="stylesheet" href="/tokens.css?v=10" />
   </head>
   <body>
     <main class="shell">
@@ -39,7 +39,6 @@
       <section class="view" id="overview-view" data-view-panel="overview">
         <header class="page-heading">
           <div>
-            <p class="eyebrow">Today</p>
             <h1>Your agents, in one place.</h1>
             <p class="lede" id="daemon-detail">
               Connecting to the local daemon.
@@ -49,11 +48,19 @@
             Open inbox <span>→</span>
           </button>
         </header>
+        <section class="attention-panel" id="attention-panel" hidden>
+          <div class="section-heading">
+            <div>
+              <h2>Needs attention</h2>
+              <p>A delivery needs your decision before it can move.</p>
+            </div>
+          </div>
+          <div class="attention-list" id="attention-list"></div>
+        </section>
         <section class="overview-grid">
           <section>
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Working now</p>
                 <h2>Current conversations</h2>
               </div>
             </div>
@@ -62,7 +69,6 @@
           <section>
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Connections</p>
                 <h2>Your surfaces</h2>
               </div>
               <button class="text-button" type="button" data-open-conversations>
@@ -85,11 +91,53 @@
           <aside class="conversation-rail">
             <div class="rail-heading">
               <div>
-                <p class="eyebrow">Inbox</p>
                 <h1>Conversations</h1>
               </div>
-              <span id="conversation-count">Loading</span>
+              <div class="rail-actions">
+                <span id="conversation-count">Loading</span>
+                <button class="rail-new-button" id="new-conversation-toggle" type="button">
+                  + New
+                </button>
+              </div>
             </div>
+            <form class="new-thread-form" id="new-conversation-form" hidden>
+              <div class="new-thread-heading">
+                <strong>New conversation</strong>
+                <button type="button" id="new-conversation-close" aria-label="Close new conversation form">×</button>
+              </div>
+              <label>
+                <span>Surface</span>
+                <select name="surface" id="new-conversation-surface"></select>
+              </label>
+              <label>
+                <span>Name <small>optional</small></span>
+                <input name="alias" maxlength="80" placeholder="research" />
+              </label>
+              <label data-codex-start>
+                <span>Working directory</span>
+                <input name="cwd" value="~" placeholder="~/project" />
+              </label>
+              <label data-codex-start>
+                <span>Model</span>
+                <select name="model" id="new-conversation-model">
+                  <option value="">Use Codex default</option>
+                </select>
+              </label>
+              <label data-codex-start>
+                <span>Approvals</span>
+                <select name="approvalPolicy">
+                  <option value="">Use Codex default</option>
+                  <option value="on-request">Ask when needed</option>
+                  <option value="untrusted">Ask for untrusted work</option>
+                  <option value="never">Never ask</option>
+                </select>
+              </label>
+              <label>
+                <span>First message</span>
+                <textarea name="message" maxlength="120000" rows="4" required placeholder="What should this thread work on?"></textarea>
+              </label>
+              <button class="primary-button" type="submit">Start conversation</button>
+            </form>
             <div class="segmented two" aria-label="Conversation scope">
               <button
                 class="active"
@@ -145,7 +193,7 @@
             </button>
             <header class="notebook-header">
               <div>
-                <p class="eyebrow" id="chat-surface">Choose a conversation</p>
+                <p class="context-label" id="chat-surface">Choose a conversation</p>
                 <h1 id="chat-title">Your workbench</h1>
                 <p id="chat-subtitle">
                   Pick an active or recent conversation to continue.
@@ -178,6 +226,15 @@
                   disabled
                   placeholder="Select a conversation to send"
                 ></textarea
+                ><button
+                  class="steer-button"
+                  id="steer-message"
+                  disabled
+                  hidden
+                  type="button"
+                >
+                  Steer now
+                </button
                 ><button class="send-button" id="send" disabled type="submit">
                   <span>Send</span><span aria-hidden="true">↑</span>
                 </button>
@@ -197,7 +254,6 @@
       >
         <header class="page-heading">
           <div>
-            <p class="eyebrow">Operations</p>
             <h1>Delivery and handoffs.</h1>
             <p class="lede">
               Manage messages, shared channels, automatic relays, and the daemon
@@ -234,21 +290,29 @@
             Settings
           </button>
         </div>
-        <section class="operation-panel" data-operations-panel="queue">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Delivery queue</p>
-              <h2>Messages waiting to move</h2>
+        <section class="operation-panel delivery-grid" data-operations-panel="queue">
+          <section>
+            <div class="panel-heading">
+              <div>
+                <h2>Messages waiting to move</h2>
+              </div>
+              <p>Busy agents receive these when they become available.</p>
             </div>
-            <p>Busy agents receive these when they become available.</p>
-          </div>
-          <div id="queue-list" class="operation-list"></div>
+            <div id="queue-list" class="operation-list"></div>
+          </section>
+          <aside class="delivery-recent">
+            <div class="panel-heading">
+              <div>
+                <h2>Recent outcomes</h2>
+              </div>
+            </div>
+            <div id="delivery-history" class="delivery-history"></div>
+          </aside>
         </section>
         <section class="operation-panel hidden" data-operations-panel="network">
           <div class="settings-grid">
             <section class="settings-card">
               <div class="settings-card-heading">
-                <p class="eyebrow">Channels</p>
                 <h2>Shared handoffs</h2>
                 <p>Group agents that should receive the same context.</p>
               </div>
@@ -263,43 +327,44 @@
                   </button>
                 </div>
               </form>
-              <form class="labeled-form" data-network-form="channel-add">
-                <label
-                  ><span>Channel</span
-                  ><input
-                    name="channel"
-                    placeholder="Launch review"
-                    required /></label
-                ><label
-                  ><span>Agent</span
-                  ><input name="targetId" placeholder="@writer" required
-                /></label>
-                <div class="form-action">
-                  <button class="soft-button" type="submit">Add agent</button>
-                </div>
-              </form>
               <div id="channel-list" class="operation-list compact-list"></div>
-              <form class="labeled-form" data-network-form="channel-send">
-                <label
-                  ><span>Channel</span
-                  ><input
-                    name="channel"
-                    placeholder="Launch review"
-                    required /></label
-                ><label
-                  ><span>Message</span
-                  ><input name="message" placeholder="Share an update" required
-                /></label>
-                <div class="form-action">
-                  <button class="primary-button" type="submit">
-                    Send update
-                  </button>
-                </div>
-              </form>
+              <div id="channel-actions" hidden>
+                <form class="labeled-form" data-network-form="channel-add">
+                  <label
+                    ><span>Channel</span
+                    ><input
+                      name="channel"
+                      placeholder="Launch review"
+                      required /></label
+                  ><label
+                    ><span>Agent</span
+                    ><input name="targetId" placeholder="@writer" required
+                  /></label>
+                  <div class="form-action">
+                    <button class="soft-button" type="submit">Add agent</button>
+                  </div>
+                </form>
+                <form class="labeled-form" data-network-form="channel-send">
+                  <label
+                    ><span>Channel</span
+                    ><input
+                      name="channel"
+                      placeholder="Launch review"
+                      required /></label
+                  ><label
+                    ><span>Message</span
+                    ><input name="message" placeholder="Share an update" required
+                  /></label>
+                  <div class="form-action">
+                    <button class="primary-button" type="submit">
+                      Send update
+                    </button>
+                  </div>
+                </form>
+              </div>
             </section>
             <section class="settings-card">
               <div class="settings-card-heading">
-                <p class="eyebrow">Relays</p>
                 <h2>Automatic handoffs</h2>
                 <p>Pass completed work from one agent to another.</p>
               </div>
@@ -333,7 +398,6 @@
         >
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">Audit trail</p>
               <h2>What the daemon did</h2>
             </div>
             <p>Newest activity appears first.</p>
@@ -347,9 +411,15 @@
         </section>
         <section class="operation-panel hidden" data-operations-panel="settings">
           <div class="settings-grid">
+            <section class="settings-card surface-health-card">
+              <div class="settings-card-heading">
+                <h2>Surface health</h2>
+                <p>Live connection checks and the exact fix when something is unavailable.</p>
+              </div>
+              <div id="surface-health-list" class="surface-health-list"></div>
+            </section>
             <section class="settings-card remote-access-card">
               <div class="settings-card-heading">
-                <p class="eyebrow">Remote access</p>
                 <h2>Open Agenthail on your phone</h2>
                 <p>Private to devices signed into your Tailscale network.</p>
               </div>
@@ -359,7 +429,6 @@
             </section>
             <section class="settings-card">
               <div class="settings-card-heading">
-                <p class="eyebrow">Dashboard</p>
                 <h2>Current work</h2>
                 <p>Choose how long Codex threads remain in your current inbox.</p>
               </div>
@@ -367,10 +436,6 @@
                 <label><span>Codex recent window</span><select id="settings-codex-hours" name="codexRecentHours"><option value="1">1 hour</option><option value="3">3 hours</option><option value="5">5 hours</option><option value="8">8 hours</option><option value="12">12 hours</option><option value="24">24 hours</option></select></label>
                 <button class="soft-button" type="submit">Save</button>
               </form>
-              <div class="setting-row">
-                <div><strong>Desktop notifications</strong><p id="notification-status">Notify when an agent finishes.</p></div>
-                <button class="soft-button" id="notification-toggle" type="button" aria-describedby="notification-status">Loading</button>
-              </div>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>
             </section>
           </div>
@@ -378,6 +443,6 @@
       </section>
     </main>
     <div class="toast" id="toast" role="status" hidden></div>
-    <script src="/app.js?v=9"></script>
+    <script src="/app.js?v=12"></script>
   </body>
 </html>

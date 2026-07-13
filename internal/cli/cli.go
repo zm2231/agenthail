@@ -30,12 +30,13 @@ type SurfaceEntry struct {
 }
 
 type App struct {
-	Registry       *registry.Registry
-	Surfaces       []SurfaceEntry
-	DefaultTimeout time.Duration
-	Version        string
-	Revision       string
-	BuiltAt        string
+	Registry            *registry.Registry
+	Surfaces            []SurfaceEntry
+	DefaultTimeout      time.Duration
+	Version             string
+	Revision            string
+	BuiltAt             string
+	daemonServiceLoaded func() bool
 }
 
 func (a *App) Run(args []string) error {
@@ -150,7 +151,6 @@ Daemon:
   daemon stop                   Stop the daemon
   daemon restart                Restart manual or supervised daemon
   daemon status                 Is the daemon running?
-  daemon notify on|off|status|test|settings  Native macOS completion notifications
   daemon install                Install/start a supervised macOS launchd service
   daemon uninstall              Remove the macOS launchd service
 
@@ -1211,11 +1211,12 @@ func (a *App) cmdDoctor(args []string) error {
 	}
 	ctx := context.Background()
 	type doctorResult struct {
-		Surface      string   `json:"surface"`
-		Capabilities []string `json:"capabilities"`
-		Sessions     int      `json:"sessions"`
-		OK           bool     `json:"ok"`
-		Error        string   `json:"error,omitempty"`
+		Surface      string                 `json:"surface"`
+		Capabilities []string               `json:"capabilities"`
+		Sessions     int                    `json:"sessions"`
+		OK           bool                   `json:"ok"`
+		Error        string                 `json:"error,omitempty"`
+		Runtime      *surface.RuntimeStatus `json:"runtime,omitempty"`
 	}
 	var results []doctorResult
 	failures := 0
@@ -1246,9 +1247,6 @@ func (a *App) cmdDoctor(args []string) error {
 		if caps.Steer {
 			enabled = append(enabled, "steer")
 		}
-		if caps.Fork {
-			enabled = append(enabled, "fork")
-		}
 		var healthErr error
 		if checker, ok := e.Surface.(surface.HealthChecker); ok {
 			healthErr = checker.Health(ctx)
@@ -1261,6 +1259,29 @@ func (a *App) cmdDoctor(args []string) error {
 			err = healthErr
 		}
 		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), OK: err == nil}
+		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {
+			runtimeStatus := provider.RuntimeStatus(ctx)
+			if runtimeStatus.Name != "" {
+				if runtimeStatus.Reachable && !runtimeStatus.Durable && runtimeStatus.Backend == "pid" && a.isDaemonServiceLoaded() {
+					runtimeStatus.Durable = true
+					runtimeStatus.Detail = "supervised by Agenthail across reboot"
+					runtimeStatus.Remediation = ""
+				}
+				result.Runtime = &runtimeStatus
+				if !runtimeStatus.Reachable || !runtimeStatus.Durable {
+					result.OK = false
+					if err == nil {
+						if runtimeStatus.Reachable {
+							err = fmt.Errorf("%s is reachable but unsupervised", runtimeStatus.Name)
+						} else if runtimeStatus.Detail != "" {
+							err = fmt.Errorf("%s is unavailable: %s", runtimeStatus.Name, runtimeStatus.Detail)
+						} else {
+							err = fmt.Errorf("%s is unavailable", runtimeStatus.Name)
+						}
+					}
+				}
+			}
+		}
 		if err != nil {
 			result.Error = err.Error()
 			failures++
@@ -1274,6 +1295,25 @@ func (a *App) cmdDoctor(args []string) error {
 	} else {
 		for _, result := range results {
 			fmt.Printf("[%s] capabilities: %s\n", result.Surface, strings.Join(result.Capabilities, ", "))
+			if result.Runtime != nil {
+				state := "unavailable"
+				if result.Runtime.Reachable && result.Runtime.Durable {
+					state = "reachable and durable"
+				} else if result.Runtime.Reachable {
+					state = "reachable but unsupervised"
+				}
+				fmt.Printf("  runtime: %s", state)
+				if result.Runtime.Backend != "" {
+					fmt.Printf(" via %s", result.Runtime.Backend)
+				}
+				if result.Runtime.Detail != "" {
+					fmt.Printf(" (%s)", result.Runtime.Detail)
+				}
+				fmt.Println()
+				if result.Runtime.Remediation != "" {
+					fmt.Printf("  fix: %s\n", result.Runtime.Remediation)
+				}
+			}
 			if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)
 			} else {
@@ -1285,6 +1325,13 @@ func (a *App) cmdDoctor(args []string) error {
 		return fmt.Errorf("doctor found %d unhealthy surface(s)", failures)
 	}
 	return nil
+}
+
+func (a *App) isDaemonServiceLoaded() bool {
+	if a.daemonServiceLoaded != nil {
+		return a.daemonServiceLoaded()
+	}
+	return daemonServiceLoaded()
 }
 
 func (a *App) cmdLaunch(args []string) error {

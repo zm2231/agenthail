@@ -61,6 +61,20 @@ func TestOpenMigratesLegacyQueue(t *testing.T) {
 	if status != "delivered" {
 		t.Fatalf("status=%q", status)
 	}
+	var queueHops int
+	if err := r.db.QueryRow(`SELECT relay_hops FROM message_queue WHERE message='old'`).Scan(&queueHops); err != nil || queueHops != 0 {
+		t.Fatalf("queue relay_hops=%d err=%v", queueHops, err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "runtime", Surface: surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRuntimeState("runtime", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err := r.RuntimeState("runtime")
+	if err != nil || !found || state.RelayHops != 0 {
+		t.Fatalf("runtime=%+v found=%v err=%v", state, found, err)
+	}
 }
 
 func TestForeignKeysAndChannelValidation(t *testing.T) {
@@ -80,6 +94,30 @@ func TestForeignKeysAndChannelValidation(t *testing.T) {
 	}
 }
 
+func TestReplaceAliasKeepsOneNamePerSession(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "session-alias", Surface: surface.KindClaude, Name: "Alias test"}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("first", session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReplaceAlias("second", session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.LookupAlias("first"); err == nil {
+		t.Fatal("old alias still resolves")
+	}
+	alias, err := r.ReverseAlias(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alias != "second" {
+		t.Fatalf("alias = %q, want second", alias)
+	}
+}
+
 func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	r := openTestRegistry(t)
 	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop"}
@@ -92,6 +130,41 @@ func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	}
 	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal || got.Source != want.Source || got.Transport != want.Transport {
 		t.Fatalf("session=%+v want=%+v", got, want)
+	}
+}
+
+func TestRegisterSessionPreservesManagedCodexOwnershipAcrossDiscovery(t *testing.T) {
+	r := openTestRegistry(t)
+	managed := surface.Session{ID: "managed", Surface: surface.KindCodex, Name: "Started here", Status: surface.StatusBusy, Source: "agenthail", Transport: "managed"}
+	if err := r.RegisterSession(managed); err != nil {
+		t.Fatal(err)
+	}
+	discovered := managed
+	discovered.Name = "Updated title"
+	discovered.Status = surface.SessionStatus("notLoaded")
+	discovered.Source = "vscode"
+	discovered.Transport = "readOnly"
+	if err := r.RegisterSession(discovered); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.Session(managed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != "agenthail" || got.Transport != "managed" || got.Name != "Updated title" || got.Status != surface.SessionStatus("notLoaded") {
+		t.Fatalf("session=%+v", got)
+	}
+	desktop := surface.Session{ID: "desktop", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop"}
+	if err := r.RegisterSession(desktop); err != nil {
+		t.Fatal(err)
+	}
+	desktop.Transport = "readOnly"
+	if err := r.RegisterSession(desktop); err != nil {
+		t.Fatal(err)
+	}
+	got, err = r.Session(desktop.ID)
+	if err != nil || got.Transport != "readOnly" {
+		t.Fatalf("desktop=%+v err=%v", got, err)
 	}
 }
 
@@ -149,6 +222,44 @@ func TestAddRouteValidatesPatternAndCycles(t *testing.T) {
 	}
 }
 
+func TestAddRouteConcurrentOppositeEdgesNeverCommitCycle(t *testing.T) {
+	r := openTestRegistry(t)
+	for iteration := 0; iteration < 200; iteration++ {
+		from := fmt.Sprintf("concurrent-a-%d", iteration)
+		to := fmt.Sprintf("concurrent-b-%d", iteration)
+		register(t, r, from, to)
+		start := make(chan struct{})
+		errors := make(chan error, 2)
+		var wg sync.WaitGroup
+		for _, edge := range [][2]string{{from, to}, {to, from}} {
+			wg.Add(1)
+			go func(edge [2]string) {
+				defer wg.Done()
+				<-start
+				_, err := r.AddRoute(edge[0], edge[1], ".*")
+				errors <- err
+			}(edge)
+		}
+		close(start)
+		wg.Wait()
+		close(errors)
+		succeeded := 0
+		rejectedCycle := 0
+		for err := range errors {
+			if err == nil {
+				succeeded++
+			} else if strings.Contains(err.Error(), "cycle") {
+				rejectedCycle++
+			} else {
+				t.Fatalf("iteration %d unexpected error: %v", iteration, err)
+			}
+		}
+		if succeeded != 1 || rejectedCycle != 1 {
+			t.Fatalf("iteration %d succeeded=%d rejectedCycle=%d", iteration, succeeded, rejectedCycle)
+		}
+	}
+}
+
 func TestQueueLifecycleAndIdempotency(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
@@ -162,7 +273,7 @@ func TestQueueLifecycleAndIdempotency(t *testing.T) {
 	}
 	now := time.Unix(100, 0)
 	item, err := r.ClaimNextMessage("s", now)
-	if err != nil || item == nil || item.Attempts != 1 {
+	if err != nil || item == nil || item.Attempts != 1 || item.RelayHops != 0 {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 	if err := r.NackMessage(item.ID, sql.ErrConnDone, now, 3); err != nil {
@@ -180,6 +291,35 @@ func TestQueueLifecycleAndIdempotency(t *testing.T) {
 	}
 	if count := r.QueueCount("s"); count != 0 {
 		t.Fatalf("pending=%d", count)
+	}
+}
+
+func TestRelayLineageSurvivesDeliveryUntilCompletion(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if _, err := r.QueueRelayMessage("s", "relay", "relay-key", 3); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil || item.RelayHops != 3 {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.AckMessageWithRelayHops(item.ID, "s", item.RelayHops); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRuntimeState("s", surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err := r.RuntimeState("s")
+	if err != nil || !found || state.RelayHops != 3 {
+		t.Fatalf("busy runtime=%+v found=%v err=%v", state, found, err)
+	}
+	if err := r.SaveRuntimeState("s", surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err = r.RuntimeState("s")
+	if err != nil || !found || state.RelayHops != 0 {
+		t.Fatalf("completed runtime=%+v found=%v err=%v", state, found, err)
 	}
 }
 
@@ -296,6 +436,75 @@ func TestQueueDeadLetterAndExplicitRetry(t *testing.T) {
 	item, err := r.ClaimNextMessage("s", now)
 	if err != nil || item == nil || item.Attempts != 1 {
 		t.Fatalf("retried=%+v err=%v", item, err)
+	}
+}
+
+func TestAttentionItemsTrackDeadLetterResolutionWithoutStatusInference(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "needs a decision"); err != nil {
+		t.Fatal(err)
+	}
+	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
+		t.Fatalf("pending attention=%+v err=%v", items, err)
+	}
+	now := time.Now()
+	item, err := r.ClaimNextMessage("s", now)
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.NackMessage(item.ID, sql.ErrConnDone, now, 2); err != nil {
+		t.Fatal(err)
+	}
+	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
+		t.Fatalf("retryable attention=%+v err=%v", items, err)
+	}
+	item, err = r.ClaimNextMessage("s", now.Add(time.Minute))
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.NackMessage(item.ID, sql.ErrConnDone, now.Add(time.Minute), 2); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.ListAttentionItems(false)
+	if err != nil || len(items) != 1 || items[0].SessionID != "s" || items[0].QueueID != item.ID || items[0].ResolvedAt != "" {
+		t.Fatalf("dead attention=%+v err=%v", items, err)
+	}
+	if err := r.RetryMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if open, err := r.ListAttentionItems(false); err != nil || len(open) != 0 {
+		t.Fatalf("open attention=%+v err=%v", open, err)
+	}
+	all, err := r.ListAttentionItems(true)
+	if err != nil || len(all) != 1 || all[0].Resolution != "retrying" || all[0].ResolvedAt == "" {
+		t.Fatalf("resolved attention=%+v err=%v", all, err)
+	}
+}
+
+func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "cancel this"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.DeadLetterUnknown(item.ID, errors.New("uncertain")); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.ListAttentionItems(false)
+	if err != nil || len(items) != 1 || items[0].Reason != "Delivery outcome could not be confirmed" {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if err := r.CancelMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.ListAttentionItems(true)
+	if err != nil || len(all) != 1 || all[0].Resolution != "canceled" || all[0].ResolvedAt == "" {
+		t.Fatalf("all=%+v err=%v", all, err)
 	}
 }
 

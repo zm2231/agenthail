@@ -33,6 +33,13 @@ type cliSurface struct {
 	streamEvents []surface.StreamEvent
 }
 
+type runtimeCLISurface struct {
+	*cliSurface
+	status surface.RuntimeStatus
+}
+
+func (f *runtimeCLISurface) RuntimeStatus(context.Context) surface.RuntimeStatus { return f.status }
+
 func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	err := (&App{}).Run([]string{"codex", "--remote", "ws://example.test"})
 	if err == nil || !strings.Contains(err.Error(), "manages the remote transport") {
@@ -157,6 +164,46 @@ func TestCommandTimeout(t *testing.T) {
 	}
 	if _, err := commandTimeout([]string{"--timeout", "forever"}, time.Second); err == nil {
 		t.Fatal("invalid timeout accepted")
+	}
+}
+
+func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "thread", Surface: surface.KindCodex}}}
+	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail daemon install"}}
+	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = runtimeSurface
+	app.daemonServiceLoaded = func() bool { return false }
+	output, err := captureStdout(t, func() error { return app.cmdDoctor([]string{"--json"}) })
+	if err == nil || !strings.Contains(err.Error(), "unhealthy") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	var payload struct {
+		Surfaces []struct {
+			OK      bool                  `json:"ok"`
+			Runtime surface.RuntimeStatus `json:"runtime"`
+		} `json:"surfaces"`
+	}
+	if json.Unmarshal([]byte(output), &payload) != nil || len(payload.Surfaces) != 1 {
+		t.Fatalf("output=%s", output)
+	}
+	result := payload.Surfaces[0]
+	if result.OK || !result.Runtime.Reachable || result.Runtime.Durable || result.Runtime.Remediation != "agenthail daemon install" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid"}}
+	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = runtimeSurface
+	app.daemonServiceLoaded = func() bool { return true }
+	output, err := captureStdout(t, func() error { return app.cmdDoctor([]string{"--json"}) })
+	if err != nil {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	if !strings.Contains(output, `"durable":true`) || !strings.Contains(output, "supervised by Agenthail") {
+		t.Fatalf("output=%s", output)
 	}
 }
 

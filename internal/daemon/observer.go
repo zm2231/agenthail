@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -11,6 +10,21 @@ import (
 const surfaceOperationTimeout = 20 * time.Second
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
+	for _, adapter := range d.Surfaces {
+		ensurer, ok := adapter.(surface.RuntimeEnsurer)
+		if !ok {
+			continue
+		}
+		operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+		err := ensurer.EnsureRuntime(operationCtx)
+		cancel()
+		key := "runtime:" + string(adapter.Name())
+		if err != nil {
+			d.logRuntimeError(key, err)
+			continue
+		}
+		d.clearObserveError(key)
+	}
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {
 		d.log.Printf("scan watched sessions: %s", err)
@@ -36,9 +50,10 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	observation, err := adapter.Observe(operationCtx, session)
 	cancel()
 	if err != nil {
-		d.log.Printf("observe %s: %s", d.resolveDisplay(session.ID), err)
+		d.logObserveError(session.ID, err)
 		return
 	}
+	d.clearObserveError(session.ID)
 	if observation == nil {
 		d.log.Printf("observe %s: empty observation", d.resolveDisplay(session.ID))
 		return
@@ -55,18 +70,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			text = observation.Reply.Text
 		}
 		if text != "" {
-			d.fireRelays(session, observation.CompletedTurnID, text)
-		}
-		if observation.Reply != nil && observation.Reply.Done {
-			notification := fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
-			if observation.Reply.Error != "" {
-				notification = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
-			}
-			go func() {
-				if err := Notify("Agenthail", notification); err != nil {
-					d.log.Printf("desktop notification: %s", err)
-				}
-			}()
+			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
 	}
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {

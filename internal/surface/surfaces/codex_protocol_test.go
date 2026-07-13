@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -248,6 +249,177 @@ func TestCodexBridgeNeverTouchesAppServerChildStdio(t *testing.T) {
 	if !strings.Contains(codexHookJS, "send-cli-request-for-host") || !strings.Contains(codexHookJS, "seen.size < 400") {
 		t.Fatal("renderer dispatcher discovery or bound is missing")
 	}
+}
+
+func TestCodexBridgeScansViteDependencyMapModules(t *testing.T) {
+	if !strings.Contains(codexHookJS, `matchAll(/["'](\.\/[^"']+\.js)["']/g)`) {
+		t.Fatal("Vite dependency map module discovery is missing")
+	}
+}
+
+func TestCodexDesktopDiscoveryRetriesImmediatelyForReplacementTarget(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var mu sync.Mutex
+	target := "one"
+	hookCalls := map[string]int{}
+	compatible := map[string]bool{"one": true, "three": true, "four": true}
+	var server *httptest.Server
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		current := target
+		mu.Unlock()
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/" + current}})
+	})
+	for _, name := range []string{"one", "two", "three", "four"} {
+		name := name
+		handler.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			for {
+				var request map[string]any
+				if conn.ReadJSON(&request) != nil {
+					return
+				}
+				params, _ := request["params"].(map[string]any)
+				expression, _ := params["expression"].(string)
+				var value any
+				if expression == codexRendererCapabilityJS {
+					value = true
+				} else {
+					mu.Lock()
+					hookCalls[name]++
+					mu.Unlock()
+					if compatible[name] {
+						value = "hooked"
+					} else {
+						value = "no-request-dispatcher"
+					}
+				}
+				_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+			}
+		})
+	}
+	server = httptest.NewServer(handler)
+	defer server.Close()
+	codex := NewCodex(server.URL)
+	client, err := codex.openDesktop(context.Background())
+	if err != nil {
+		t.Fatalf("initial target did not connect: %v", err)
+	}
+	client.Close()
+	mu.Lock()
+	target = "two"
+	mu.Unlock()
+	if client, err := codex.openDesktop(context.Background()); err == nil {
+		client.Close()
+		t.Fatal("replacement without a dispatcher connected")
+	}
+	mu.Lock()
+	firstCalls := hookCalls["two"]
+	mu.Unlock()
+	if client, err := codex.openDesktop(context.Background()); err == nil {
+		client.Close()
+		t.Fatal("unsupported replacement target reconnected")
+	}
+	mu.Lock()
+	secondCalls := hookCalls["two"]
+	target = "three"
+	mu.Unlock()
+	if secondCalls != firstCalls {
+		t.Fatalf("same target repeated expensive discovery: first=%d second=%d", firstCalls, secondCalls)
+	}
+	client, err = codex.openDesktop(context.Background())
+	if err != nil {
+		t.Fatalf("replacement target did not rebind: %v", err)
+	}
+	client.Close()
+	mu.Lock()
+	target = "four"
+	mu.Unlock()
+	client, err = codex.openDesktop(context.Background())
+	if err != nil {
+		t.Fatalf("second replacement target did not rebind: %v", err)
+	}
+	client.Close()
+	mu.Lock()
+	thirdCalls := hookCalls["three"]
+	fourthCalls := hookCalls["four"]
+	mu.Unlock()
+	if thirdCalls == 0 || fourthCalls == 0 {
+		t.Fatalf("replacement dispatchers were not rediscovered: three=%d four=%d", thirdCalls, fourthCalls)
+	}
+}
+
+func TestCodexDesktopDiscoveryRetriesSameTargetAfterBackoff(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var mu sync.Mutex
+	ready := false
+	hookCalls := 0
+	var server *httptest.Server
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/renderer"}})
+	})
+	handler.HandleFunc("/renderer", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var request map[string]any
+			if conn.ReadJSON(&request) != nil {
+				return
+			}
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			var value any = true
+			if expression != codexRendererCapabilityJS {
+				mu.Lock()
+				hookCalls++
+				if ready {
+					value = "hooked"
+				} else {
+					value = "no-request-dispatcher"
+				}
+				mu.Unlock()
+			}
+			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+		}
+	})
+	server = httptest.NewServer(handler)
+	defer server.Close()
+	codex := NewCodex(server.URL)
+	if client, err := codex.openDesktop(context.Background()); err == nil {
+		client.Close()
+		t.Fatal("unready renderer connected")
+	}
+	mu.Lock()
+	firstCalls := hookCalls
+	mu.Unlock()
+	if client, err := codex.openDesktop(context.Background()); err == nil {
+		client.Close()
+		t.Fatal("cached unready renderer connected")
+	}
+	mu.Lock()
+	secondCalls := hookCalls
+	ready = true
+	mu.Unlock()
+	if secondCalls != firstCalls {
+		t.Fatalf("same target repeated discovery before backoff: first=%d second=%d", firstCalls, secondCalls)
+	}
+	codex.bridgeMu.Lock()
+	codex.bridgeRetry = time.Now().Add(-time.Millisecond)
+	codex.bridgeMu.Unlock()
+	client, err := codex.openDesktop(context.Background())
+	if err != nil {
+		t.Fatalf("same target did not recover after backoff: %v", err)
+	}
+	client.Close()
 }
 
 func TestCodexTurnCorrelationRequiresThreadAndRequestedTurn(t *testing.T) {

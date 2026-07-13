@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/daemon"
 )
 
 func TestTailscaleExecutableResolvesSymlink(t *testing.T) {
@@ -62,22 +64,61 @@ func TestConfigureDashboardShareIsIdempotent(t *testing.T) {
 			}
 			return []byte(`{"TCP":{"7412":{"HTTP":true}},"Web":{"agent.tailnet.ts.net:7412":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7412"}}}}}`), nil
 		}
+		if reflect.DeepEqual(args, []string{"serve", "status"}) {
+			if configured {
+				return []byte("https://agent.tailnet.ts.net:7412\n"), nil
+			}
+			return nil, nil
+		}
 		configured = true
 		return []byte("ok"), nil
 	}
 	if err := configureDashboardShare(run, "agent.tailnet.ts.net", "http://127.0.0.1:7412", 7412); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"serve", "--bg", "--yes", "--http=7412", "http://127.0.0.1:7412"}
-	if !reflect.DeepEqual(calls[1], want) {
-		t.Fatalf("configure call=%v, want %v", calls[1], want)
+	want := []string{"serve", "--bg", "--yes", "--https=7412", "http://127.0.0.1:7412"}
+	if !reflect.DeepEqual(calls[2], want) {
+		t.Fatalf("configure call=%v, want %v", calls[2], want)
 	}
 	calls = nil
 	if err := configureDashboardShare(run, "agent.tailnet.ts.net", "http://127.0.0.1:7412", 7412); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 2 {
+	if len(calls) != 4 {
 		t.Fatalf("idempotent calls=%v", calls)
+	}
+}
+
+func TestConfigureDashboardShareMigratesOwnedHTTPRoute(t *testing.T) {
+	httpsReady := false
+	var calls [][]string
+	run := func(args ...string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		switch {
+		case reflect.DeepEqual(args, []string{"serve", "status", "--json"}):
+			return []byte(`{"TCP":{"7412":{"HTTP":true}},"Web":{"agent.tailnet.ts.net:7412":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7412"}}}}}`), nil
+		case reflect.DeepEqual(args, []string{"serve", "status"}):
+			if httpsReady {
+				return []byte("https://agent.tailnet.ts.net:7412\n"), nil
+			}
+			return []byte("http://agent.tailnet.ts.net:7412\n"), nil
+		case len(args) > 3 && args[3] == "--https=7412":
+			httpsReady = true
+		}
+		return []byte("ok"), nil
+	}
+	if err := configureDashboardShare(run, "agent.tailnet.ts.net", "http://127.0.0.1:7412", 7412); err != nil {
+		t.Fatal(err)
+	}
+	wantOff := []string{"serve", "--http=7412", "off"}
+	wantHTTPS := []string{"serve", "--bg", "--yes", "--https=7412", "http://127.0.0.1:7412"}
+	foundOff, foundHTTPS := false, false
+	for _, call := range calls {
+		foundOff = foundOff || reflect.DeepEqual(call, wantOff)
+		foundHTTPS = foundHTTPS || reflect.DeepEqual(call, wantHTTPS)
+	}
+	if !foundOff || !foundHTTPS {
+		t.Fatalf("migration calls=%v", calls)
 	}
 }
 
@@ -113,7 +154,7 @@ func TestRemoteDashboardURLAndQR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != "http://agent.tailnet.ts.net:7412/?token=secret#conversations" {
+	if value != "https://agent.tailnet.ts.net:7412/?token=secret#conversations" {
 		t.Fatalf("URL=%q", value)
 	}
 	path := filepath.Join(t.TempDir(), "share.png")
@@ -138,5 +179,22 @@ func TestDashboardShareTargetAlwaysUsesLoopbackIP(t *testing.T) {
 		if target != "http://127.0.0.1:7412" {
 			t.Fatalf("listen=%q target=%q", listen, target)
 		}
+	}
+}
+
+func TestDashboardRemoteEnabledRequiresHTTPS(t *testing.T) {
+	config := daemon.DashboardConfig{Enabled: true}
+	status := tailscaleServeStatus{Web: map[string]struct {
+		Handlers map[string]struct {
+			Proxy string `json:"Proxy"`
+		} `json:"Handlers"`
+	}{"agent.tailnet.ts.net:7412": {Handlers: map[string]struct {
+		Proxy string `json:"Proxy"`
+	}{"/": {Proxy: "http://127.0.0.1:7412"}}}}}
+	if dashboardRemoteEnabled(config, status, "agent.tailnet.ts.net", "http://127.0.0.1:7412", false) {
+		t.Fatal("HTTP-only route reported enabled")
+	}
+	if !dashboardRemoteEnabled(config, status, "agent.tailnet.ts.net", "http://127.0.0.1:7412", true) {
+		t.Fatal("HTTPS route reported disabled")
 	}
 }

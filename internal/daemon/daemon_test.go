@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -14,18 +17,57 @@ import (
 )
 
 type daemonSurface struct {
+	kind         surface.SurfaceKind
 	sessions     map[string]surface.Session
 	observations map[string]*surface.TurnObservation
 	accepted     bool
 	sent         []string
 	models       []string
+	modelOptions []surface.ModelOption
 	listCalls    atomic.Int32
 	resolveCalls atomic.Int32
 	rejectBusy   bool
 	sendErr      error
+	turnID       string
+	observeErr   error
+	startOptions []surface.SessionStartOptions
+	startErr     error
+	caps         surface.Capabilities
+	streamEvents []surface.StreamEvent
+	streamErr    error
 }
 
-func (*daemonSurface) Name() surface.SurfaceKind { return surface.KindCodex }
+type runtimeDaemonSurface struct {
+	*daemonSurface
+	ensureCalls atomic.Int32
+	ensureErr   error
+}
+
+type healthDaemonSurface struct {
+	*daemonSurface
+	healthErr error
+	runtime   surface.RuntimeStatus
+}
+
+func (f *healthDaemonSurface) Health(context.Context) error {
+	return f.healthErr
+}
+
+func (f *healthDaemonSurface) RuntimeStatus(context.Context) surface.RuntimeStatus {
+	return f.runtime
+}
+
+func (f *runtimeDaemonSurface) EnsureRuntime(context.Context) error {
+	f.ensureCalls.Add(1)
+	return f.ensureErr
+}
+
+func (f *daemonSurface) Name() surface.SurfaceKind {
+	if f.kind != "" {
+		return f.kind
+	}
+	return surface.KindCodex
+}
 func (f *daemonSurface) List(context.Context) ([]surface.Session, error) {
 	f.listCalls.Add(1)
 	result := make([]surface.Session, 0, len(f.sessions))
@@ -43,6 +85,9 @@ func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session,
 	return &session, nil
 }
 func (f *daemonSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	if f.observeErr != nil {
+		return nil, f.observeErr
+	}
 	return f.observations[session.ID], nil
 }
 func (f *daemonSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
@@ -53,7 +98,11 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
-	return &surface.SendResult{UUID: "turn", Accepted: f.accepted}, nil
+	turnID := f.turnID
+	if turnID == "" {
+		turnID = "turn"
+	}
+	return &surface.SendResult{UUID: turnID, Accepted: f.accepted}, nil
 }
 func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
@@ -64,7 +113,20 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
-	return &surface.SendResult{UUID: "turn", Accepted: f.accepted}, nil
+	turnID := f.turnID
+	if turnID == "" {
+		turnID = "turn"
+	}
+	return &surface.SendResult{UUID: turnID, Accepted: f.accepted}, nil
+}
+func (f *daemonSurface) StartSession(_ context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	f.startOptions = append(f.startOptions, options)
+	session := &surface.Session{ID: "started", Surface: surface.KindCodex, Name: "Started conversation", Cwd: options.Cwd, Status: surface.StatusBusy, Source: "appServer", Transport: "managed", LastActive: time.Now()}
+	f.sessions[session.ID] = *session
+	if f.startErr != nil {
+		return session, nil, f.startErr
+	}
+	return session, &surface.SendResult{UUID: "started-turn", Accepted: true}, nil
 }
 func (*daemonSurface) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
 	return nil, nil
@@ -72,8 +134,11 @@ func (*daemonSurface) Reply(context.Context, *surface.Session, int) (*surface.Re
 func (*daemonSurface) Tail(context.Context, *surface.Session, int) ([]surface.Exchange, error) {
 	return nil, nil
 }
-func (*daemonSurface) Stream(context.Context, *surface.Session, string, func(surface.StreamEvent), time.Duration) error {
-	return nil
+func (f *daemonSurface) Stream(_ context.Context, _ *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
+	for _, event := range f.streamEvents {
+		onEvent(event)
+	}
+	return f.streamErr
 }
 func (*daemonSurface) GoalSet(context.Context, *surface.Session, string) error { return nil }
 func (*daemonSurface) GoalClear(context.Context, *surface.Session) error       { return nil }
@@ -84,9 +149,12 @@ func (*daemonSurface) Compact(context.Context, *surface.Session) error { return 
 func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "", nil
 }
+func (f *daemonSurface) Models(context.Context) ([]surface.ModelOption, error) {
+	return f.modelOptions, nil
+}
 func (*daemonSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
 func (*daemonSurface) Steer(context.Context, *surface.Session, string) error { return nil }
-func (*daemonSurface) Capabilities() surface.Capabilities                    { return surface.Capabilities{} }
+func (f *daemonSurface) Capabilities() surface.Capabilities                  { return f.caps }
 
 func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, surface.Session, surface.Session) {
 	t.Helper()
@@ -151,19 +219,41 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 }
 
 func TestRelayStopsAtHopLimit(t *testing.T) {
-	daemon, r, _, from, _ := daemonFixture(t)
-	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
-		t.Fatal(err)
+	daemon, r, fake, _, _ := daemonFixture(t)
+	for index := 0; index <= maxRelayHops; index++ {
+		id := fmt.Sprintf("hop-%d", index)
+		session := surface.Session{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+		fake.sessions[id] = session
 	}
-	daemon.fireRelays(&from, "loop", "[agenthail relay hops=8 source=previous] loop")
-	if r.QueueCount("to") != 0 {
+	for index := 0; index < maxRelayHops; index++ {
+		if _, err := r.AddRoute(fmt.Sprintf("hop-%d", index), fmt.Sprintf("hop-%d", index+1), ".*"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake.observations["hop-0"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline-0", Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
+	daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions["hop-0"]))
+	fake.observations["hop-0"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "done-0", Reply: &surface.ReplyResult{Text: "Done", Done: true}}
+	daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions["hop-0"]))
+	for index := 1; index <= maxRelayHops; index++ {
+		id := fmt.Sprintf("hop-%d", index)
+		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline-" + id, Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
+		daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions[id]))
+		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "done-" + id, Reply: &surface.ReplyResult{Text: "Done", Done: true}}
+		daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions[id]))
+	}
+	if r.QueueCount(fmt.Sprintf("hop-%d", maxRelayHops)) != 0 {
 		t.Fatal("relay exceeded hop limit")
 	}
-	history, err := r.ListHistory(10, "from")
+	history, err := r.ListHistory(20, fmt.Sprintf("hop-%d", maxRelayHops))
 	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
+
+func sessionPointer(session surface.Session) *surface.Session { return &session }
 
 func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
 	daemon, r, _, from, to := daemonFixture(t)
@@ -175,7 +265,7 @@ func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
-	daemon.fireRelays(&from, "completion", "handoff")
+	daemon.fireRelays(&from, "completion", 0, "handoff")
 	if r.QueueCount(to.ID) != 0 {
 		t.Fatal("read-only relay destination was queued")
 	}
@@ -203,6 +293,36 @@ func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
 	}
 }
 
+func TestScanEnsuresSurfaceRuntimeBeforeObservation(t *testing.T) {
+	daemon, _, fake, _, _ := daemonFixture(t)
+	runtimeSurface := &runtimeDaemonSurface{daemonSurface: fake}
+	daemon.Surfaces = []surface.Surface{runtimeSurface}
+	daemon.scanAndRelay(context.Background())
+	if runtimeSurface.ensureCalls.Load() != 1 {
+		t.Fatalf("ensure calls=%d", runtimeSurface.ensureCalls.Load())
+	}
+}
+
+func TestScanThrottlesRepeatedRuntimeFailuresAndRecovers(t *testing.T) {
+	daemon, _, fake, _, _ := daemonFixture(t)
+	runtimeSurface := &runtimeDaemonSurface{daemonSurface: fake, ensureErr: errors.New("managed runtime unavailable")}
+	daemon.Surfaces = []surface.Surface{runtimeSurface}
+	var output bytes.Buffer
+	daemon.log = log.New(&output, "", 0)
+	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(context.Background())
+	if got := strings.Count(output.String(), "managed runtime unavailable"); got != 1 {
+		t.Fatalf("runtime errors=%d output=%q", got, output.String())
+	}
+	runtimeSurface.ensureErr = nil
+	daemon.scanAndRelay(context.Background())
+	runtimeSurface.ensureErr = errors.New("managed runtime unavailable")
+	daemon.scanAndRelay(context.Background())
+	if got := strings.Count(output.String(), "managed runtime unavailable"); got != 2 {
+		t.Fatalf("runtime errors after recovery=%d output=%q", got, output.String())
+	}
+}
+
 func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 	daemon, r, fake, _, to := daemonFixture(t)
 	to.Status = surface.StatusBusy
@@ -219,6 +339,50 @@ func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 
 	if r.QueueCount(to.ID) != 0 || len(fake.sent) != 1 || fake.sent[0] != "deliver after idle" {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
+	}
+}
+
+func TestQueueWaitsForBridgeRecoveryAndDeliversExactlyOnce(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	if err := r.QueueMessage(to.ID, "deliver after bridge recovery"); err != nil {
+		t.Fatal(err)
+	}
+	fake.observeErr = errors.New("Codex Desktop request dispatcher is unavailable")
+	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(context.Background())
+	fake.observeErr = errors.New("Codex Desktop renderer was replaced; rebinding")
+	daemon.scanAndRelay(context.Background())
+	item, err := r.QueueItem(1)
+	if err != nil || item.Status != "pending" || item.Attempts != 0 || len(fake.sent) != 0 {
+		t.Fatalf("unavailable item=%+v sent=%v err=%v", item, fake.sent, err)
+	}
+	fake.observeErr = nil
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	daemon.scanAndRelay(context.Background())
+	daemon.scanAndRelay(context.Background())
+	item, err = r.QueueItem(1)
+	if err != nil || item.Status != "delivered" || item.Attempts != 1 || len(fake.sent) != 1 {
+		t.Fatalf("recovered item=%+v sent=%v err=%v", item, fake.sent, err)
+	}
+}
+
+func TestObservationErrorsAreThrottledUntilRecovery(t *testing.T) {
+	daemon, _, fake, _, to := daemonFixture(t)
+	var output bytes.Buffer
+	daemon.log = log.New(&output, "", 0)
+	fake.observeErr = errors.New("bridge unavailable")
+	daemon.observeSession(context.Background(), fake, &to)
+	daemon.observeSession(context.Background(), fake, &to)
+	if strings.Count(output.String(), "bridge unavailable") != 1 {
+		t.Fatalf("repeated error log=%q", output.String())
+	}
+	fake.observeErr = nil
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	daemon.observeSession(context.Background(), fake, &to)
+	fake.observeErr = errors.New("bridge unavailable")
+	daemon.observeSession(context.Background(), fake, &to)
+	if strings.Count(output.String(), "bridge unavailable") != 2 {
+		t.Fatalf("recovery did not reset throttle log=%q", output.String())
 	}
 }
 

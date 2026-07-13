@@ -58,7 +58,7 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if err := d.Registry.AckMessage(item.ID); err != nil {
+	if err := d.Registry.AckMessageWithRelayHops(item.ID, session.ID, item.RelayHops); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
 		return

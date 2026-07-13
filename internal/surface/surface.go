@@ -50,6 +50,9 @@ func ReadOnlySessionReason(session *Session) string {
 	if !IsReadOnlySession(session) {
 		return ""
 	}
+	if session.Source == "vscode" {
+		return "Codex Desktop is not bridged; run 'agenthail launch codex'"
+	}
 	if session.Source == "cli" || session.Transport == "readOnly" {
 		return "Codex terminal session is read only; start a writable session with 'agenthail codex'"
 	}
@@ -87,6 +90,17 @@ type SendOptions struct {
 	Model string `json:"model,omitempty"`
 }
 
+type SessionStartOptions struct {
+	Message        string `json:"message"`
+	Cwd            string `json:"cwd,omitempty"`
+	Model          string `json:"model,omitempty"`
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
+}
+
+type SessionStarter interface {
+	StartSession(ctx context.Context, options SessionStartOptions) (*Session, *SendResult, error)
+}
+
 type OptionSender interface {
 	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
 }
@@ -104,6 +118,23 @@ type ModelLister interface {
 
 type HealthChecker interface {
 	Health(ctx context.Context) error
+}
+
+type RuntimeStatus struct {
+	Name        string `json:"name"`
+	Reachable   bool   `json:"reachable"`
+	Durable     bool   `json:"durable"`
+	Backend     string `json:"backend,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
+type RuntimeStatusProvider interface {
+	RuntimeStatus(ctx context.Context) RuntimeStatus
+}
+
+type RuntimeEnsurer interface {
+	EnsureRuntime(ctx context.Context) error
 }
 
 type TurnObservation struct {
@@ -146,7 +177,6 @@ type Capabilities struct {
 	Model     bool `json:"model"`
 	Interrupt bool `json:"interrupt"`
 	Steer     bool `json:"steer"`
-	Fork      bool `json:"fork"`
 }
 
 type Surface interface {

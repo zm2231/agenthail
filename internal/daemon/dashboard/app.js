@@ -7,6 +7,7 @@ const app = {
     channels: [],
     relays: [],
     history: [],
+    attention: [],
   },
   selected: null,
   history: null,
@@ -18,7 +19,18 @@ const app = {
   sessionViewport: null,
   mobileChatOpen: false,
   slashCommands: [],
+  drafts: new Map(),
+  expandedTurns: new Set(),
+  transcriptSignature: null,
+  pendingEntryScroll: false,
+  liveSource: null,
+  liveSessionID: "",
+  liveText: "",
+  liveTools: [],
   settings: null,
+  remoteQRVisible: false,
+  remoteQRHideTimer: null,
+  startModels: {},
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
 globalThis.escape = (value) =>
@@ -170,10 +182,85 @@ function handoffMessage(value) {
   }
   return { label, text };
 }
-function renderMessage(text, kind, label) {
+function renderMessage(text, kind, label, turnKey) {
   const safeText = String(text || "");
   const isLong = safeText.length > 2400;
-  return `<article class="turn ${kind}${isLong ? " long" : ""}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content${isLong ? " turn-crop" : ""}">${markdown(safeText)}</div>${isLong ? '<button class="expand-turn" type="button" data-expand-turn>Show full message</button>' : ""}</article>`;
+  const expanded = isLong && app.expandedTurns.has(turnKey);
+  return `<article class="turn ${kind}${isLong ? " long" : ""}${expanded ? " expanded" : ""}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content${isLong ? " turn-crop" : ""}">${markdown(safeText)}</div>${isLong ? `<button class="expand-turn" type="button" data-expand-turn>${expanded ? "Show less" : "Show full message"}</button>` : ""}</article>`;
+}
+function stopLiveStream(clear = false) {
+  if (app.liveSource) app.liveSource.close();
+  app.liveSource = null;
+  app.liveSessionID = "";
+  if (clear) {
+    app.liveText = "";
+    app.liveTools = [];
+    $("#live-turn")?.remove();
+  }
+}
+function renderLiveTurn() {
+  const body = $("#chat-body");
+  if (!body || (!app.liveText && app.liveTools.length === 0)) return;
+  const wasPinned = body.scrollHeight - body.scrollTop - body.clientHeight <= 24;
+  let turn = $("#live-turn");
+  if (!turn) {
+    turn = document.createElement("article");
+    turn.id = "live-turn";
+    turn.className = "turn agent live-turn";
+    turn.innerHTML = `<header class="turn-header"><span class="turn-label">${escape(labels[app.selected.surface] || app.selected.surface)} · live</span></header><div class="turn-content live-turn-content"></div><div class="live-tools"></div>`;
+    body.append(turn);
+  }
+  turn.querySelector(".live-turn-content").textContent = app.liveText;
+  turn.querySelector(".live-tools").textContent = app.liveTools.length ? `Working with ${app.liveTools.join(", ")}` : "";
+  if (wasPinned) body.scrollTop = body.scrollHeight;
+}
+function alignTranscriptTop(container) {
+  const top = container.getBoundingClientRect().top;
+  const crossing = [...container.querySelectorAll("tr, pre, blockquote, li, h2, h3, h4, p")].find((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.top < top && bounds.bottom > top;
+  });
+  if (!crossing) return;
+  const bounds = crossing.getBoundingClientRect();
+  if (crossing.matches("p, li")) {
+    const lineHeight = Number.parseFloat(getComputedStyle(crossing).lineHeight);
+    if (Number.isFinite(lineHeight) && lineHeight > 0) {
+      const lines = Math.floor((top - bounds.top) / lineHeight);
+      container.scrollTop += bounds.top + lines * lineHeight - top;
+      return;
+    }
+  }
+  container.scrollTop += bounds.top - top;
+}
+function startLiveStream() {
+  const session = app.selected;
+  const canStream = app.history?.capabilities?.stream;
+  const viewingChat = location.hash === "#conversations" && (!mobileConversationView() || app.mobileChatOpen);
+  if (!session || !canStream || document.hidden || !viewingChat) {
+    stopLiveStream();
+    return;
+  }
+  if (app.liveSource && app.liveSessionID === session.id) return;
+  stopLiveStream(true);
+  app.liveSessionID = session.id;
+  const source = new EventSource(`/api/stream?id=${encodeURIComponent(session.id)}`);
+  app.liveSource = source;
+  source.addEventListener("delta", (event) => {
+    if (app.liveSessionID !== session.id || app.selected?.id !== session.id) return;
+    const delta = JSON.parse(event.data);
+    if (delta.kind === "text") app.liveText += delta.text || "";
+    if (delta.kind === "tool_use" && delta.text && !app.liveTools.includes(delta.text)) app.liveTools.push(delta.text);
+    if (delta.kind === "done") {
+      stopLiveStream();
+      load(true).then(() => selectSession(session.id));
+      return;
+    }
+    app.selected.status = "busy";
+    renderLiveTurn();
+    syncComposerAction();
+    $("#chat-subtitle").textContent = conversationMeta(app.selected, app.history?.model);
+  });
+  source.addEventListener("stream-error", () => stopLiveStream());
 }
 function resizeComposer() {
   const input = $("#message");
@@ -183,6 +270,30 @@ function resizeComposer() {
   const height = Math.min(input.scrollHeight, maxHeight);
   input.style.height = `${height}px`;
   input.style.overflowY = input.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+function syncComposerAction() {
+  const input = $("#message");
+  const sendButton = $("#send");
+  const steerButton = $("#steer-message");
+  const capabilities = app.history?.capabilities || {};
+  const busy = app.selected?.status === "busy";
+  const hasMessage = Boolean(input.value.trim());
+  const readOnly = Boolean(app.history?.readOnly || app.selected?.readOnly);
+  const stopping = busy && capabilities.interrupt && !hasMessage && !readOnly;
+  sendButton.dataset.mode = stopping ? "interrupt" : "send";
+  sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
+  sendButton.querySelector("span:last-child").textContent = stopping ? "■" : "↑";
+  sendButton.disabled = readOnly || (!hasMessage && !stopping);
+  steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly);
+  steerButton.disabled = steerButton.hidden;
+  $("#composer").classList.toggle("is-stopping", stopping);
+  $("#composer").classList.toggle("has-steer", !steerButton.hidden);
+  if (readOnly) return;
+  $("#composer-note").textContent = busy
+    ? hasMessage
+      ? "Send queues this for next. Steer now changes the turn in progress."
+      : "This agent is working. Stop ends the current turn."
+    : "Delivered through the local daemon.";
 }
 function friendlyError(error) {
   return /failed to fetch|networkerror/i.test(String(error))
@@ -217,6 +328,8 @@ function showView(name) {
     if (first) selectSession(first.id);
   }
   syncConversationLayout();
+  if (view === "conversations") startLiveStream();
+  else stopLiveStream();
   if (view === "operations" && app.operationsTab === "settings") loadSettings();
 }
 const mobileConversationView = () => window.matchMedia("(max-width: 760px)").matches;
@@ -264,14 +377,34 @@ function surfaceIcon(name) {
   return name === "claude" ? "✦" : name === "codex" ? "◈" : "N";
 }
 function renderOverview() {
-  const { surfaces, sessions } = app.state;
+  const { surfaces, sessions, attention } = app.state;
+  const connected = surfaces.filter((surface) => surface.connected).length;
+  const working = sessions.filter(
+    (session) => session.currentReason === "working",
+  ).length;
+  const queued = sessions.reduce(
+    (total, session) => total + session.queueCount,
+    0,
+  );
+  const surfaceStatus =
+    connected === 0
+      ? "No surfaces connected"
+      : `${connected} surface${connected === 1 ? "" : "s"} connected`;
+  const activityStatus = [
+    working > 0
+      ? `${working} agent${working === 1 ? "" : "s"} working`
+      : "",
+    queued > 0
+      ? `${queued} message${queued === 1 ? "" : "s"} waiting`
+      : "",
+  ].filter(Boolean);
   $("#daemon-status").textContent = app.state.daemon?.running
     ? "Running locally"
     : "Not running";
   $("#daemon-detail").textContent = app.state.daemon?.stale
     ? `Showing cached data. ${app.state.daemon.refreshError || "Surface refresh is temporarily unavailable"}`
     : app.state.daemon?.running
-      ? "Private and ready"
+      ? [surfaceStatus, ...activityStatus].join(" · ") || "Nothing needs delivery"
       : "Start the daemon to deliver work";
   $("#surface-cards").innerHTML =
     surfaces
@@ -292,8 +425,16 @@ function renderOverview() {
           0,
         );
         const name = labels[surface.name] || surface.name;
-        const presenceName = surface.name === "claude" ? "Open" : "Recent";
-        return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${surface.connected ? "" : "offline"}"><i></i>${surface.connected ? "Connected" : surface.error ? escape(surface.error) : "Not connected"}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>${presenceName}</span><strong>${present}</strong></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
+        const presenceWindow =
+          surface.name === "claude"
+            ? "Open now"
+            : `Past ${app.state.codexRecentHours || 5}h`;
+        const healthLabel = surface.health === "degraded"
+          ? "Needs attention"
+          : surface.connected
+            ? "Connected"
+            : "Not connected";
+        return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${escape(surface.health || (surface.connected ? "healthy" : "unavailable"))}" title="${escape(surface.healthDetail || surface.error || "")}"><i></i>${escape(healthLabel)}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>Current</span><strong>${present}</strong><small>${presenceWindow}</small></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
       })
       .join("") ||
     '<div class="empty-state compact">No surfaces are connected yet.</div>';
@@ -307,7 +448,7 @@ function renderOverview() {
         reasonOrder || new Date(b.lastActive || 0) - new Date(a.lastActive || 0)
       );
     })
-    .slice(0, 6);
+    .slice(0, 8);
   $("#recent-activity").innerHTML =
     recent
       .map(
@@ -316,6 +457,14 @@ function renderOverview() {
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
+  const attentionPanel = $("#attention-panel");
+  attentionPanel.hidden = attention.length === 0;
+  $("#attention-list").innerHTML = attention
+    .map(
+      (item) =>
+        `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`,
+    )
+    .join("");
 }
 function sessionIsCurrent(session) {
   return session.current === true;
@@ -422,10 +571,33 @@ function renderOperations() {
     queue
       .map(
         (item) =>
-          `<article class="operation-item"><div class="operation-main"><div class="operation-title"><i class="operation-dot ${escape(item.status)}"></i>${escape(item.target)}</div><div class="operation-detail">${escape(item.message)}${item.lastError ? `<br><span class="operation-error">${escape(item.lastError)}</span>` : ""}</div><div class="operation-meta">${escape(queueReason(item))} · queued ${timeAgo(item.queuedAt)}</div></div><div class="operation-actions">${statusPill(item.status)}${item.status === "dead" ? `<button class="button quiet" data-retry="${item.id}" type="button">Retry</button>` : ""}${item.status === "pending" ? `<button class="button quiet" data-cancel="${item.id}" type="button">Cancel</button>` : ""}</div></article>`,
+          `<article class="operation-item"><div class="operation-main"><div class="operation-title"><i class="operation-dot ${escape(item.status)}"></i>${escape(item.target)}</div><div class="operation-detail queue-message">${escape(item.message)}${item.lastError ? `<br><span class="operation-error">${escape(item.lastError)}</span>` : ""}</div><div class="operation-meta">${escape(queueReason(item))} · queued ${timeAgo(item.queuedAt)}</div></div><div class="operation-actions">${statusPill(item.status)}${item.status === "dead" ? `<button class="button quiet" data-retry="${item.id}" type="button">Retry</button>` : ""}${item.status === "pending" ? `<button class="button quiet" data-cancel="${item.id}" type="button">Cancel</button>` : ""}</div></article>`,
       )
       .join("") ||
     '<div class="empty-card">Nothing is waiting to be delivered.</div>';
+  const outcomes = history
+    .filter((entry) =>
+      ["sent", "delivered", "failed", "unknown", "expired", "canceled"].includes(
+        entry.kind,
+      ),
+    )
+    .slice(0, 8);
+  $("#delivery-history").innerHTML =
+    outcomes
+      .map((entry) => {
+        const label = {
+          sent: "Sent",
+          delivered: "Delivered",
+          failed: "Failed",
+          unknown: "Delivery uncertain",
+          expired: "Expired",
+          canceled: "Canceled",
+        }[entry.kind] || auditKindLabel(entry.kind);
+        const detail = entry.error || entry.message || entry.result || "No details recorded";
+        return `<article class="delivery-event"><div class="delivery-event-heading"><strong>${escape(label)} · ${escape(entry.target || "Agenthail")}</strong><time>${timeAgo(entry.createdAt)}</time></div><p>${escape(detail)}</p></article>`;
+      })
+      .join("") ||
+    '<div class="empty-card">No delivery outcomes have been recorded yet.</div>';
   $("#channel-list").innerHTML =
     channels
       .map(
@@ -433,6 +605,7 @@ function renderOperations() {
           `<article class="operation-item"><div class="operation-main"><div class="operation-title">#${escape(channel.name)}</div><div class="operation-detail">${escape(channel.members.join(" · ") || "No members yet")}</div></div><button class="button quiet" data-network-action="channel-delete" data-channel="${escape(channel.name)}" type="button">Remove</button></article>`,
       )
       .join("") || '<div class="empty-card">No shared channels yet.</div>';
+  $("#channel-actions").hidden = channels.length === 0;
   $("#relay-list").innerHTML =
     relays
       .map(
@@ -482,29 +655,55 @@ async function loadSettings() {
 }
 function renderSettings() {
   if (!app.settings) return;
-  const { dashboard, notifications, remoteAccess } = app.settings;
+  const { dashboard, remoteAccess } = app.settings;
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
   $("#settings-listener").textContent = dashboard.listen;
-  const notificationButton = $("#notification-toggle");
-  notificationButton.dataset.enabled = String(notifications.enabled);
-  notificationButton.dataset.action = notifications.authorization === "denied" ? "settings" : "toggle";
-  notificationButton.disabled = !notifications.available && notifications.authorization !== "denied";
-  notificationButton.textContent = notifications.authorization === "denied"
-    ? "Open settings"
-    : !notifications.available
-      ? "Unavailable"
-      : notifications.enabled
-        ? "On"
-        : "Turn on";
-  $("#notification-status").textContent = notifications.error
-    || (notifications.authorization === "denied"
-      ? "Agenthail is blocked in System Settings."
-      : notifications.enabled
-        ? "Native alerts and sounds are on."
-        : "Turn on native alerts when an agent finishes.");
+  renderSurfaceHealth();
+  const remoteQR = app.remoteQRVisible
+    ? `<div class="remote-qr"><img src="/api/settings/remote-qr" alt="QR code for this Agenthail dashboard"><button class="soft-button remote-qr-button" data-hide-remote-qr type="button">Hide QR</button></div>`
+    : `<button class="remote-qr-cover" data-reveal-remote-qr type="button"><span>QR hidden</span><strong>Reveal phone QR</strong></button>`;
+  const remoteName = app.remoteQRVisible
+    ? `<p>${escape(remoteAccess.dnsName)}</p>`
+    : `<p>Phone link hidden</p>`;
   $("#remote-access-content").innerHTML = remoteAccess.enabled
-    ? `<div class="remote-ready"><img src="/api/settings/remote-qr" alt="QR code for this Agenthail dashboard"><div><span class="status-pill idle">Connected</span><p>${escape(remoteAccess.dnsName)}</p><div class="remote-actions"><button class="primary-button" data-copy-remote type="button">Copy phone link</button><button class="soft-button" data-remote-action="remote-disable" type="button">Turn off</button></div><small>On iPhone, open the link, tap Share, then Add to Home Screen.</small></div></div>`
+    ? `<div class="remote-ready">${remoteQR}<div><span class="status-pill idle">Connected</span>${remoteName}<div class="remote-actions"><button class="primary-button" data-copy-remote type="button">Copy phone link</button><button class="soft-button" data-remote-action="remote-disable" type="button">Turn off</button></div><small>On iPhone, open the link, tap Share, then Add to Home Screen.</small></div></div>`
     : `<div class="remote-off"><p>${escape(remoteAccess.error || "Use Tailscale to reach this dashboard from your own devices.")}</p><button class="primary-button" data-remote-action="remote-enable" type="button">Enable phone access</button></div>`;
+}
+function renderSurfaceHealth() {
+  const surfaces = app.state.surfaces || [];
+  $("#surface-health-list").innerHTML = surfaces.map((surface) => {
+    const name = labels[surface.name] || surface.name;
+    const health = surface.health || (surface.connected ? "healthy" : "unavailable");
+    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : "Unavailable";
+    const rawDetail = surface.healthDetail || surface.error || "Ready";
+    const detail = /cookie bridge/i.test(rawDetail)
+      ? "Claude Code needs to reconnect to your signed-in account."
+      : /notion.*(?:401|context)/i.test(rawDetail)
+        ? "Notion is not signed in on this Mac."
+        : /reachable but not supervised/i.test(rawDetail)
+          ? "The Codex background service will stop after a restart."
+          : rawDetail;
+    const runtime = surface.runtime?.name
+      ? `<p><strong>${escape(surface.runtime.name)}</strong> ${escape(surface.runtime.reachable ? surface.runtime.durable ? "is supervised" : "is running without supervision" : "is unavailable")}</p>${surface.runtime.remediation ? `<p>Fix: ${escape(surface.runtime.remediation)}</p>` : ""}`
+      : "";
+    const repair = surface.repairAction
+      ? `<button class="soft-button" data-surface-repair="${escape(surface.repairAction)}" type="button">${escape(surface.repairLabel || "Repair")}</button>`
+      : "";
+    return `<article class="surface-health-row"><div class="surface-health-icon ${escape(health)}">${surfaceIcon(surface.name)}</div><div class="surface-health-copy"><div><strong>${escape(name)}</strong><span class="health-state ${escape(health)}">${escape(state)}</span></div><p>${escape(detail)}</p>${runtime}</div>${repair}</article>`;
+  }).join("") || '<div class="empty-card">No surfaces are configured.</div>';
+}
+function hideRemoteQR() {
+  if (app.remoteQRHideTimer) clearTimeout(app.remoteQRHideTimer);
+  app.remoteQRHideTimer = null;
+  if (!app.remoteQRVisible) return;
+  app.remoteQRVisible = false;
+  renderSettings();
+}
+function revealRemoteQR() {
+  if (app.remoteQRHideTimer) clearTimeout(app.remoteQRHideTimer);
+  app.remoteQRVisible = true;
+  app.remoteQRHideTimer = setTimeout(hideRemoteQR, 60000);
+  renderSettings();
 }
 async function updateSettings(body) {
   const response = await fetch("/api/settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -576,8 +775,10 @@ function renderAll() {
       `<div class="empty-card">Could not render connected surfaces: ${escape(error.message || error)}</div>`;
   }
   renderSurfaceFilter();
+  renderStartSurfaceOptions();
   renderSessions();
   renderOperations();
+  if (app.settings && app.operationsTab === "settings") renderSettings();
   $("#sync").textContent =
     `Synced ${new Date(app.state.updatedAt || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
@@ -596,7 +797,17 @@ async function load(fresh = false) {
   try {
     const response = await fetch(`/api/state${fresh ? "?fresh=1" : ""}`);
     if (!response.ok) throw Error(await response.text());
-    app.state = await response.json();
+    const state = await response.json();
+    app.state = {
+      ...state,
+      surfaces: state.surfaces || [],
+      sessions: state.sessions || [],
+      queue: state.queue || [],
+      channels: state.channels || [],
+      relays: state.relays || [],
+      history: state.history || [],
+      attention: state.attention || [],
+    };
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"
       : "daemon-presence offline";
@@ -632,8 +843,12 @@ async function load(fresh = false) {
 async function selectSession(id, focus = false) {
   const session = app.state.sessions.find((item) => item.id === id);
   if (!session) return;
+  if (app.selected?.id !== id) stopLiveStream(true);
+  if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
   app.selected = session;
   app.history = null;
+  app.transcriptSignature = null;
+  app.pendingEntryScroll = true;
   app.mobileChatOpen = mobileConversationView();
   renderSessions();
   showView("conversations");
@@ -642,10 +857,13 @@ async function selectSession(id, focus = false) {
   $("#chat-title").textContent = displayName(session);
   $("#chat-subtitle").textContent = conversationMeta(session);
   $("#message").disabled = Boolean(session.readOnly);
+  $("#message").value = app.drafts.get(session.id) || "";
+  resizeComposer();
   $("#send").disabled = Boolean(session.readOnly);
   $("#message").placeholder = session.readOnly ? "Read only" : `Message ${displayName(session)}`;
   $("#composer-note").textContent =
     session.readOnly ? session.readOnlyReason : "Delivered through the local daemon. Busy agents are queued safely.";
+  syncComposerAction();
   $("#chat-body").innerHTML =
     '<div class="empty-state">Loading recent messages…</div>';
   $("#chat-actions").innerHTML = "";
@@ -681,6 +899,7 @@ function renderChat() {
     ? ""
     : controls.join("");
   app.slashCommands = [
+    ["/name", "Name this conversation"],
     capabilities.compact && ["/compact", "Compact this conversation"],
     session.status === "busy" && capabilities.interrupt && ["/stop", "Stop the current turn"],
     session.status === "busy" && capabilities.steer && ["/steer", "Redirect the current turn"],
@@ -693,39 +912,75 @@ function renderChat() {
     $("#message").placeholder = "Read only";
     $("#composer-note").textContent = readOnlyReason;
   }
+  syncComposerAction();
   renderSlashMenu();
   $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
-  const toolRows = [];
+  startLiveStream();
+  const settings = [`<form class="session-tools" data-tool="alias"><label><span>Conversation name</span><input name="alias" value="${escape(session.alias || "")}" maxlength="80" placeholder="research"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save name</button></div></form>`];
   if (capabilities.goal)
-    toolRows.push(
-      `<details class="session-details"><summary>Conversation settings</summary><form class="session-tools" data-tool="goal"><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"><button class="soft-button" type="submit">Save goal</button>${goal?.objective ? '<button class="soft-button" data-action="goal-clear" type="button">Clear</button>' : ""}</form></details>`,
-    );
+    settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save goal</button>${goal?.objective ? '<button class="soft-button" data-action="goal-clear" type="button">Clear</button>' : ""}</div></form>`);
+  const toolRows = [`<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`];
+  const signature = JSON.stringify([
+    session.id,
+    exchanges,
+    goal?.objective || "",
+    Boolean(capabilities.goal),
+  ]);
+  if (app.transcriptSignature === signature) return;
+  const chatBody = $("#chat-body");
+  const previousScrollTop = chatBody.scrollTop;
+  const wasPinned =
+    chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24;
   const messages = exchanges
-    .flatMap((exchange) => {
+    .flatMap((exchange, index) => {
       const user = handoffMessage(exchange.user);
       const assistant = String(exchange.assistant || "");
       return [
-        exchange.user ? renderMessage(user.text, "user", user.label) : "",
+        exchange.user
+          ? renderMessage(
+              user.text,
+              "user",
+              user.label,
+              `${session.id}:user:${index}`,
+            )
+          : "",
         assistant
           ? renderMessage(
               assistant,
               "agent",
               labels[session.surface] || session.surface,
+              `${session.id}:agent:${index}`,
             )
           : "",
       ];
     })
     .join("");
-  $("#chat-body").innerHTML =
+  chatBody.innerHTML =
     `${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
-  $("#chat-body").scrollTop = $("#chat-body").scrollHeight;
+  renderLiveTurn();
+  app.transcriptSignature = signature;
+  if (app.pendingEntryScroll) {
+    const turns = chatBody.querySelectorAll(".turn");
+    const latest = turns[turns.length - 1];
+    chatBody.scrollTop = latest
+      ? chatBody.scrollTop + latest.getBoundingClientRect().top - chatBody.getBoundingClientRect().top
+      : 0;
+    alignTranscriptTop(chatBody);
+    app.pendingEntryScroll = false;
+  } else {
+    chatBody.scrollTop = wasPinned
+      ? chatBody.scrollHeight
+      : Math.min(previousScrollTop, chatBody.scrollHeight - chatBody.clientHeight);
+  }
 }
 async function action(action, extra = {}) {
   const networkAction =
     action.startsWith("channel-") ||
     action.startsWith("relay-") ||
+    action === "notion-create" ||
+    action === "session-create" ||
     action === "queue-retry" ||
     action === "queue-cancel";
   if (!app.selected && !networkAction)
@@ -738,10 +993,26 @@ async function action(action, extra = {}) {
   if (!response.ok) throw Error(await response.text());
   return response.json();
 }
-async function send() {
+async function send(requestedAction = "send") {
   const message = $("#message").value.trim();
+  const composerAction = requestedAction === "send" ? $("#send").dataset.mode : requestedAction;
+  if (composerAction === "interrupt") {
+    $("#send").disabled = true;
+    try {
+      await action("interrupt");
+      toast("Current turn stopped.");
+      await load(true);
+      await selectSession(app.selected.id);
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      syncComposerAction();
+    }
+    return;
+  }
   if (!message) return;
   $("#send").disabled = true;
+  $("#steer-message").disabled = true;
   try {
     const [command, ...rest] = message.split(/\s+/);
     const argument = rest.join(" ");
@@ -751,19 +1022,25 @@ async function send() {
       "/steer": ["steer", { message: argument }],
       "/model": ["model", { model: argument }],
       "/goal": ["goal-set", { message: argument }],
+      "/name": ["alias", { alias: argument }],
     };
     const commandAction = commandActions[command.toLowerCase()];
-    if (commandAction && ["/steer", "/model", "/goal"].includes(command.toLowerCase()) && !argument)
+    if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
-    const result = commandAction
+    const result = composerAction === "steer"
+      ? await action("steer", { message })
+      : commandAction
       ? await action(commandAction[0], commandAction[1])
       : await action("send", { message });
     $("#message").value = "";
+    app.drafts.delete(app.selected.id);
     resizeComposer();
     renderSlashMenu();
     const queued = result?.result?.disposition === "queued";
     toast(
-      commandAction
+      composerAction === "steer"
+        ? "Current turn redirected."
+        : commandAction
         ? `${command} requested.`
         : queued
         ? "This agent is busy, so your message is safely queued."
@@ -774,7 +1051,7 @@ async function send() {
   } catch (error) {
     toast(error.message);
   } finally {
-    $("#send").disabled = false;
+    syncComposerAction();
   }
 }
 function renderSlashMenu() {
@@ -807,7 +1084,7 @@ document.addEventListener("click", async (event) => {
   const slash = event.target.closest("[data-slash]");
   if (slash) {
     const command = slash.dataset.slash;
-    $("#message").value = command + (["/steer", "/model", "/goal"].includes(command) ? " " : "");
+    $("#message").value = command + (["/steer", "/model", "/goal", "/name"].includes(command) ? " " : "");
     renderSlashMenu();
     resizeComposer();
     $("#message").focus();
@@ -822,9 +1099,10 @@ document.addEventListener("click", async (event) => {
   if (expand) {
     const turn = expand.closest(".turn");
     turn.classList.toggle("expanded");
-    expand.textContent = turn.classList.contains("expanded")
-      ? "Show less"
-      : "Show full message";
+    const expanded = turn.classList.contains("expanded");
+    if (expanded) app.expandedTurns.add(turn.dataset.turnKey);
+    else app.expandedTurns.delete(turn.dataset.turnKey);
+    expand.textContent = expanded ? "Show less" : "Show full message";
     return;
   }
   const mode = event.target.closest("[data-inbox-mode]");
@@ -903,19 +1181,28 @@ document.addEventListener("click", async (event) => {
 $("#message").addEventListener("input", () => {
   resizeComposer();
   renderSlashMenu();
+  syncComposerAction();
 });
+$("#steer-message").addEventListener("click", () => send("steer"));
 $("#composer").addEventListener("submit", (event) => {
   event.preventDefault();
   send();
 });
 document.addEventListener("submit", async (event) => {
-  const form = event.target.closest('[data-tool="goal"]');
+  const form = event.target.closest("[data-tool]");
   if (!form) return;
   event.preventDefault();
+  const tool = form.dataset.tool;
   const input = form.querySelector("input");
   try {
-    await action("goal-set", { message: input.value.trim() });
-    toast("Goal saved.");
+    if (tool === "alias") {
+      await action("alias", { alias: input.value.trim() });
+      toast("Conversation name saved.");
+      await load();
+    } else {
+      await action("goal-set", { message: input.value.trim() });
+      toast("Goal saved.");
+    }
     await selectSession(app.selected.id);
   } catch (error) {
     toast(error.message);
@@ -955,6 +1242,84 @@ $("#session-search").addEventListener("input", () => {
   app.sessionLimit = sessionBatchSize();
   renderSessions();
 });
+function startableSurfaces() {
+  return app.state.surfaces.filter(
+    (item) => item.connected && ["codex", "notion"].includes(item.name),
+  );
+}
+function renderStartSurfaceOptions() {
+  const select = $("#new-conversation-surface");
+  const current = select.value;
+  const surfaces = startableSurfaces();
+  select.innerHTML = surfaces
+    .map((item) => `<option value="${escape(item.name)}">${escape(labels[item.name] || item.name)}</option>`)
+    .join("");
+  if (surfaces.some((item) => item.name === current)) select.value = current;
+  $("#new-conversation-toggle").hidden = surfaces.length === 0;
+  syncStartForm();
+}
+function syncStartForm() {
+  const isCodex = $("#new-conversation-surface").value === "codex";
+  document.querySelectorAll("[data-codex-start]").forEach((field) => {
+    field.hidden = !isCodex;
+    field.querySelectorAll("input,select").forEach((input) => {
+      input.disabled = !isCodex;
+    });
+  });
+}
+async function loadStartModels() {
+  const surfaceName = $("#new-conversation-surface").value;
+  if (surfaceName !== "codex") return;
+  const select = $("#new-conversation-model");
+  if (!app.startModels.codex) {
+    const response = await fetch("/api/models?surface=codex");
+    if (!response.ok) throw Error(await response.text());
+    const payload = await response.json();
+    app.startModels.codex = payload.models || [];
+  }
+  const current = select.value;
+  select.innerHTML = [
+    '<option value="">Use Codex default</option>',
+    ...app.startModels.codex.map(
+      (model) => `<option value="${escape(model.id)}">${escape(model.displayName || model.id)}${model.default ? " (default)" : ""}</option>`,
+    ),
+  ].join("");
+  if (app.startModels.codex.some((model) => model.id === current)) select.value = current;
+}
+function toggleNewConversationForm(show) {
+  const form = $("#new-conversation-form");
+  form.hidden = !show;
+  if (!show) return;
+  renderStartSurfaceOptions();
+  loadStartModels().catch((error) => toast(friendlyError(error)));
+  form.querySelector('input[name="alias"]').focus();
+}
+$("#new-conversation-toggle").addEventListener("click", () => toggleNewConversationForm(true));
+$("#new-conversation-close").addEventListener("click", () => toggleNewConversationForm(false));
+$("#new-conversation-surface").addEventListener("change", () => {
+  syncStartForm();
+  loadStartModels().catch((error) => toast(friendlyError(error)));
+});
+$("#new-conversation-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const values = Object.fromEntries(new FormData(form).entries());
+  button.disabled = true;
+  try {
+    const response = await action(values.surface === "notion" ? "notion-create" : "session-create", values);
+    form.reset();
+    toggleNewConversationForm(false);
+    await load(true);
+    toast(response.unknown ? "Conversation created. Delivery could not be confirmed. Check it before retrying." : "Conversation started.");
+    const sessionID = response.sessionId || response.session?.id;
+    if (sessionID) await selectSession(sessionID, true);
+  } catch (error) {
+    toast(friendlyError(error));
+  } finally {
+    button.disabled = false;
+  }
+});
 $("#session-surface-filter").addEventListener("change", (event) => {
   app.sessionLimit = sessionBatchSize();
   app.filters.surface = event.target.value;
@@ -985,6 +1350,28 @@ document.addEventListener("click", (event) => {
   }
 });
 document.addEventListener("click", async (event) => {
+  const repair = event.target.closest("[data-surface-repair]");
+  if (repair) {
+    repair.disabled = true;
+    try {
+      await action(repair.dataset.surfaceRepair);
+      await load(true);
+      toast("Surface repaired.");
+    } catch (error) {
+      toast(friendlyError(error));
+    } finally {
+      repair.disabled = false;
+    }
+    return;
+  }
+  if (event.target.closest("[data-reveal-remote-qr]")) {
+    revealRemoteQR();
+    return;
+  }
+  if (event.target.closest("[data-hide-remote-qr]")) {
+    hideRemoteQR();
+    return;
+  }
   const remote = event.target.closest("[data-remote-action]");
   if (remote) {
     remote.disabled = true;
@@ -1006,24 +1393,16 @@ document.addEventListener("click", async (event) => {
     }
   }
 });
+window.addEventListener("blur", hideRemoteQR);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) hideRemoteQR();
+});
 $("#dashboard-settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value) });
     await load(true);
     toast("Settings saved.");
-  } catch (error) {
-    toast(error.message);
-  }
-});
-$("#notification-toggle").addEventListener("click", async () => {
-  try {
-    const button = $("#notification-toggle");
-    if (button.dataset.action === "settings") {
-      await updateSettings({ action: "notification-settings" });
-      return;
-    }
-    await updateSettings({ action: "notifications", notificationsEnabled: button.dataset.enabled !== "true" });
   } catch (error) {
     toast(error.message);
   }
@@ -1048,10 +1427,15 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") load();
+  if (document.visibilityState === "visible") {
+    load();
+    startLiveStream();
+  } else {
+    stopLiveStream();
+  }
 });
 showView(location.hash.slice(1) || "overview");
 load();
 setInterval(() => {
   if (document.visibilityState === "visible") load();
-}, 10000);
+}, 30000);

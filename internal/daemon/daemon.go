@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,9 +21,16 @@ const (
 )
 
 type Daemon struct {
-	Registry *registry.Registry
-	Surfaces []surface.Surface
-	log      *log.Logger
+	Registry      *registry.Registry
+	Surfaces      []surface.Surface
+	log           *log.Logger
+	errorMu       sync.Mutex
+	observeErrors map[string]observedError
+}
+
+type observedError struct {
+	message string
+	at      time.Time
 }
 
 func (d *Daemon) resolveDisplay(sessionID string) string {
@@ -41,10 +49,45 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	return &Daemon{
-		Registry: reg,
-		Surfaces: surfaces,
-		log:      log.New(os.Stderr, "[daemon] ", log.LstdFlags),
+		Registry:      reg,
+		Surfaces:      surfaces,
+		log:           log.New(os.Stderr, "[daemon] ", log.LstdFlags),
+		observeErrors: map[string]observedError{},
 	}
+}
+
+func (d *Daemon) logObserveError(sessionID string, err error) {
+	now := time.Now()
+	message := err.Error()
+	d.errorMu.Lock()
+	previous, found := d.observeErrors[sessionID]
+	if found && previous.message == message && now.Sub(previous.at) < time.Minute {
+		d.errorMu.Unlock()
+		return
+	}
+	d.observeErrors[sessionID] = observedError{message: message, at: now}
+	d.errorMu.Unlock()
+	d.log.Printf("observe %s: %s", d.resolveDisplay(sessionID), err)
+}
+
+func (d *Daemon) clearObserveError(sessionID string) {
+	d.errorMu.Lock()
+	delete(d.observeErrors, sessionID)
+	d.errorMu.Unlock()
+}
+
+func (d *Daemon) logRuntimeError(key string, err error) {
+	now := time.Now()
+	message := err.Error()
+	d.errorMu.Lock()
+	previous, found := d.observeErrors[key]
+	if found && previous.message == message && now.Sub(previous.at) < time.Minute {
+		d.errorMu.Unlock()
+		return
+	}
+	d.observeErrors[key] = observedError{message: message, at: now}
+	d.errorMu.Unlock()
+	d.log.Printf("%s: %s", key, err)
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
@@ -91,9 +134,7 @@ func (d *Daemon) RunWithSignal() error {
 	}
 	if dashboard != nil {
 		defer func() {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if shutdownErr := dashboard.server.Shutdown(shutdownCtx); shutdownErr != nil {
+			if shutdownErr := dashboard.shutdown(); shutdownErr != nil {
 				d.log.Printf("dashboard shutdown: %s", shutdownErr)
 			}
 		}()
