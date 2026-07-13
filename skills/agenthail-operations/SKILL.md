@@ -1,109 +1,284 @@
 ---
 name: agenthail-operations
-description: "Operate AgentHail safely: install and diagnose it, resolve existing Claude, Codex, and Notion sessions, send or stream work, manage aliases, channels, relays, queues, and the daemon."
+description: "Operate AgentHail across Claude, Codex, and Notion: discover sessions, create Notion threads, send and observe work, manage queues, aliases, channels, relay subscriptions, daemon notifications, and the dashboard."
 ---
 
 # AgentHail Operations
 
-Use this skill for the `agenthail` CLI. It connects to existing Claude, Codex, and Notion sessions; it does not create a Photon or Spectrum/iMessage integration.
+AgentHail connects to agents that already exist on the local Mac. Its CLI owns
+target resolution, surface capability checks, durable delivery, and ambiguity
+errors. Do not build a second target picker or choose between ambiguous matches.
 
-## Start Safely
+## Install And Verify
 
-AgentHail targets macOS. It needs Go, Node.js, Python 3.10+, Chrome, and a signed-in desktop or web surface for each target. Install from a checkout with:
+```bash
+brew install zm2231/tap/agenthail
+brew services start agenthail
+agenthail version --json
+agenthail doctor --json
+agenthail list --json
+```
+
+For a source checkout:
 
 ```bash
 ./install.sh
+agenthail daemon install
 agenthail doctor --json
+```
+
+AgentHail targets macOS. Claude and Notion use a signed-in Chrome profile. Codex
+uses AgentHail's local app-server bridge. Relevant overrides are
+`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CODEX_BIN`,
+`AGENTHAIL_CODEX_REMOTE`, `AGENTHAIL_NOTION_SPACE`, and
+`AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
+credentials.
+
+One unhealthy surface does not block the others. Preserve the `errors` object
+from JSON discovery output when reporting partial availability.
+
+## Surface Contract
+
+| Operation | Claude | Codex | Notion |
+|---|---:|---:|---:|
+| Find existing sessions | yes | yes | yes |
+| Send and read replies | yes | yes | yes |
+| Start a new session or thread | manual | TTY or dashboard | CLI |
+| Stream, interrupt, steer, compact | yes | yes | no |
+| Persistent session model | yes | yes | no |
+| One-message model override | no | yes | yes |
+| Goal tracking | no | yes | no |
+
+Claude model changes use the session's `/model` flow and require confirmation.
+Notion supports one-message model overrides. Do not attempt streaming, steering,
+interruption, compaction, persistent model changes, or goals on Notion.
+
+Codex sessions have separate read and write boundaries:
+
+| Codex launch path | Read | Send |
+|---|:---:|:---:|
+| `agenthail codex` | yes | yes |
+| Desktop launched with `agenthail launch codex` | yes | yes |
+| Desktop opened normally | yes | no |
+| Plain `codex` terminal | yes | no |
+
+Let AgentHail report read-only sessions. Do not claim a send succeeded when the
+target has no writable transport.
+
+## Find And Resolve Targets
+
+Start with the 15 most recent sessions. Use `--all` only when the target is
+older or missing from the recent window.
+
+```bash
+agenthail list --json
 agenthail list --all --json
 ```
 
-`doctor` is the first check after a desktop app or Chrome update. For Codex, start its loopback renderer bridge when needed:
+Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, or a
+qualified `surface:target` value. If AgentHail reports ambiguity, show the
+candidates and ask for one qualification. Never select heuristically.
 
 ```bash
-agenthail launch codex
-agenthail doctor
-```
-
-Use `AGENTHAIL_CHROME_PROFILE` for the signed-in Chrome profile. Use `AGENTHAIL_PYTHON` to pin a Python 3.10+ sidecar interpreter and `AGENTHAIL_CODEX_REMOTE` for a non-default Codex renderer-debugging port. Fresh AgentHail launches do not enable Node `--inspect`; an already-open app may temporarily use the delayed compatibility bridge until its next clean launch. Do not print or collect browser cookies, credentials, or other secrets.
-
-## Resolve Before Sending
-
-List first, then use an unambiguous target in automation:
-
-```bash
-agenthail list --all
 agenthail identify claude:<session-id> researcher
 agenthail identify codex:<session-id> builder
 agenthail identify notion:<thread-uuid> notes
 agenthail identify list
+agenthail identify rm notes
 ```
 
-Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, or `surface:target`. If resolution is ambiguous, qualify it as `claude:...`, `codex:...`, or `notion:...`; never choose a candidate heuristically. Existing Notion thread UUIDs can be resolved even when they are outside the recent-list window. Use `notion:new` or `notion:new:<name>` to create a persistent thread; keep the returned UUID for later aliases and follow-ups.
+## Start New Sessions And Threads
 
-## Send, Read, and Control
+Notion is the only surface with non-interactive CLI thread creation:
 
 ```bash
-agenthail send @researcher "Investigate the failing test." --reply --timeout 5m
-agenthail send @builder "Implement the confirmed fix." --stream
-agenthail reply @builder
-agenthail last @builder 5 --full
-agenthail steer @builder "Prioritize the registry path."
-agenthail queue @builder "Then add focused tests."
-agenthail queue list --all
-agenthail queue retry 12
+agenthail send notion:new "Start a research thread" --reply --json
+agenthail send notion:new:<name> "Draft the launch notes" --reply --json
 ```
 
-`send` delivers to an idle target. If it is busy, it queues by default; use `--no-queue` when immediate delivery is required. Use `queue` for the next instruction after the active turn finishes. Use `steer` only to influence the active turn now. Queued work needs a running daemon.
+Creation must happen immediately and cannot be queued. The receipt contains the
+real persisted thread UUID. `notion:new:<name>` also stores `<name>` as a durable
+AgentHail alias. Keep the UUID or alias for replies and future sends. Notion
+chooses the visible title from the first message.
 
-`--reply` waits for a new completed reply; `--stream` watches a supported active turn. Long input may be read from stdin: `agenthail send @builder - < prompt.txt`.
+Start a writable Codex thread with `agenthail codex` in a human TTY, or through
+the enabled AgentHail dashboard. `agenthail launch codex` starts Desktop with a
+writable bridge but does not itself create a thread. AgentHail does not expose a
+non-interactive CLI command for creating a Claude session. Open Claude manually,
+then discover it with `agenthail list`.
 
-| Operation | Claude | Codex | Notion |
-|---|---:|---:|---:|
-| Find existing sessions; send; read reply | yes | yes | yes |
-| Stream; interrupt; steer; compact | yes | yes | no |
-| Session model | yes | yes | no |
-| Per-message `send --model` | no | yes | yes |
-| Goal tracking | no | yes | no |
+## Send, Read, And Control
 
-Do not attempt `stream`, `steer`, `interrupt`, `compact`, persistent session-model changes, or goals on Notion. Notion supports `send --model` for a single message. Claude model changes use the session's `/model` command and require confirmation. Check support with `agenthail doctor` and handle an unsupported-operation error rather than assuming parity.
+```bash
+agenthail send @builder "Implement the confirmed fix." --reply --json --timeout 5m
+agenthail send @builder "Implement the confirmed fix." --json
+agenthail send @builder "Walk through the issue." --stream --timeout 2m
+agenthail send @builder - --reply --json < prompt.txt
 
-## Coordinate Sessions
+agenthail reply @builder --json
+agenthail last @builder 5 --full --json
+agenthail stream @builder --timeout 10s
+agenthail steer @builder "Prioritize the failing test."
+agenthail interrupt @builder
+agenthail compact @builder
+agenthail model @builder
+agenthail model @builder <model-name>
+agenthail goal @builder --json
+agenthail goal @builder "Ship the verified fix."
+agenthail goal @builder clear
+```
+
+`send` queues a busy target by default. `--no-queue` requires immediate
+delivery. `--reply` waits for one new completed reply only when delivery is
+immediate. A queued `--reply` returns the durable queue receipt. `--stream`
+watches live deltas and cannot be combined with `--reply` or `--json`.
+
+Use `--model` only for a one-message Codex or Notion override. Use `--from` when
+the receiving agent needs a human-readable sender label. Long content should go
+through stdin.
+
+## Follow, Subscribe, And Notify
+
+AgentHail has four distinct completion behaviors:
+
+1. `send --reply` waits for one completed turn.
+2. `stream` or `send --stream` watches one live Claude or Codex turn.
+3. A relay is a persistent agent-to-agent subscription to completed turns.
+4. Daemon notifications alert the human through the AgentHail macOS app.
+
+Persistent agent-to-agent subscription:
+
+```bash
+agenthail relay add @researcher @builder
+agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
+agenthail relay list
+agenthail relay rm <id>
+```
+
+The first target is the completion source. The second receives each matching
+completed reply. The optional filter is a regular expression. Relays reject
+self-routes and cycles, remember delivered completion IDs across restarts, and
+require the daemon.
+
+Human completion notifications:
+
+```bash
+agenthail daemon notify on
+agenthail daemon notify status
+agenthail daemon notify test
+agenthail daemon notify settings
+agenthail daemon notify off
+```
+
+Notifications require a supporting AgentHail build, the macOS companion app,
+and System Settings authorization. They are not agent-to-agent relays.
+
+There is no generic CLI callback that subscribes an arbitrary Photon, Slack, or
+webhook conversation to future queued completions. Do not promise automatic
+delivery back to the current messaging conversation unless the host application
+implements that callback itself.
+
+When a user says "subscribe," determine whether they mean a one-turn reply, a
+live stream, a persistent relay to another agent, or a human macOS notification.
+
+## Durable Queue And History
+
+```bash
+agenthail queue @builder "Then add focused tests."
+agenthail queue list --json
+agenthail queue list --all --json
+agenthail queue retry <id>
+agenthail queue rm <id>
+agenthail queue clear @builder
+agenthail history --json
+agenthail history @builder 25 --json
+```
+
+The daemon delivers queued work when a target becomes idle. Queue delivery is
+ordered per session. Known pre-dispatch failures retry with bounded backoff.
+Repeated failures become dead letters. An `unknown` outcome means delivery may
+already have happened; inspect history and the target before retrying.
+
+## Channels
 
 ```bash
 agenthail channel create launch
 agenthail channel add launch @researcher
 agenthail channel add launch @builder
+agenthail channel list
 agenthail channel send launch "Keep the existing API compatible." --from operator
-
-agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
-agenthail relay list
-agenthail relay rm 3
+agenthail channel rm launch @researcher
+agenthail channel rm launch --all
 ```
 
-Channels broadcast to all members. Busy members are queued; partial channel failure exits nonzero. Relays deliver completed replies from one session to another. The optional relay filter is a regular expression, and cycles are rejected. Start the daemon before relying on queues or relays.
+Channels broadcast to every member. Busy members queue. Partial failure exits
+nonzero so the caller can report which deliveries failed.
 
-## Daemon Lifecycle
+## Daemon
 
 ```bash
 agenthail daemon status
 agenthail daemon start
 agenthail daemon stop
+agenthail daemon restart
 agenthail daemon install
 agenthail daemon uninstall
 ```
 
-`daemon start` is an on-demand process. `daemon install` creates and starts a supervised macOS launchd service. A launchd-managed daemon must be stopped with `daemon uninstall`, not `daemon stop`. Check `daemon status` and `queue list --all` before and after lifecycle changes; do not retry an `unknown` queue delivery automatically.
+Homebrew manages its service with `brew services start|stop|restart agenthail`.
+For a source install, `daemon install` creates a supervised launchd service.
+Remove that service with `daemon uninstall`, not `daemon stop`. Check daemon
+status before relying on queues, relays, or background observation.
+
+## Dashboard
+
+```bash
+agenthail dashboard enable
+agenthail dashboard enable --no-open
+agenthail dashboard disable
+agenthail dashboard status
+agenthail dashboard
+agenthail dashboard config --codex-recent-hours 12
+agenthail dashboard remote
+agenthail dashboard remote status
+agenthail dashboard remote off
+```
+
+The local dashboard binds to loopback behind a per-install token. Remote access
+uses a private Tailscale Serve route. Its authenticated URL and QR code contain
+the dashboard token. Share them only when the user explicitly requests access.
+
+## Launching Surfaces
+
+```bash
+agenthail launch codex
+agenthail codex
+```
+
+`launch codex` opens Desktop with AgentHail's writable renderer bridge.
+`agenthail codex` starts an interactive writable terminal session and requires a
+human TTY. Claude and Notion must be opened and signed in manually.
 
 ## Verification Boundary
 
-For a non-mutating health check, run:
+Non-mutating checks:
 
 ```bash
 agenthail version --json
 agenthail doctor --json
-agenthail list --all --json
+agenthail list --json
 agenthail daemon status
-agenthail queue list --all
+agenthail queue list --json
+agenthail history 10 --json
+agenthail identify list
+agenthail channel list
+agenthail relay list
+agenthail dashboard status
 ```
 
-`daemon status` exits nonzero when it is stopped; report that state rather than treating it as a failed installation. Sending, queueing, steering, interruption, compaction, aliases, channels, relays, and daemon install/uninstall all alter state or sessions. Perform them only when the requested operation calls for it, then verify the resulting status and delivery output.
+Status commands may exit nonzero for stopped, disabled, unavailable, or partly
+unhealthy states. Preserve and interpret their output instead of hiding it.
+Sending, queueing, steering, interruption, compaction, model or goal changes,
+aliases, channels, relays, notification changes, dashboard changes, and daemon
+lifecycle operations mutate local state or active sessions. Run them only when
+the user's request calls for them, then verify the resulting status or receipt.
