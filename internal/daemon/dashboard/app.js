@@ -844,6 +844,7 @@ document.addEventListener("click", async (event) => {
   if (sessionButton) return selectSession(sessionButton.dataset.session, true);
   const surfaceButton = event.target.closest("[data-surface]");
   if (surfaceButton) {
+    app.mobileChatOpen = false;
     showView("conversations");
     $("#session-search").value = "";
     app.inboxMode = "all";
@@ -853,8 +854,10 @@ document.addEventListener("click", async (event) => {
     renderSessions();
     return;
   }
-  if (event.target.closest("[data-open-conversations]"))
+  if (event.target.closest("[data-open-conversations]")) {
+    app.mobileChatOpen = false;
     return showView("conversations");
+  }
   if (event.target.closest("[data-open-operations]"))
     return showView("operations");
   const retry = event.target.closest("[data-retry]");

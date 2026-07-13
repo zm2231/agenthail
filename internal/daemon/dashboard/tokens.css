@@ -1201,11 +1201,12 @@ select {
     gap: 10px;
   }
   .nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-column: 1/-1;
     grid-row: 2;
     order: 3;
     height: 45px;
-    justify-content: space-between;
     gap: 0;
     overflow-x: visible;
   }
