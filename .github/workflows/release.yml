@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version such as v0.1.6
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-package:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+      - name: Configure notarization
+        env:
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+      - name: Test source
+        run: |
+          go test ./... -race -count=1
+          go vet ./...
+      - name: Build package
+        env:
+          AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+          AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: scripts/build-pkg.sh
+      - name: Verify package artifact
+        run: scripts/test-pkg-artifact.sh dist/Agenthail-*.pkg
+      - name: Verify clean install, upgrade, and uninstall
+        run: scripts/test-pkg-install.sh dist/Agenthail-*.pkg
+      - name: Build release archive
+        env:
+          AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+          AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: scripts/package-release.sh
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          draft: true
+          files: |
+            dist/Agenthail-*.pkg
+            dist/Agenthail-*.pkg.sha256
+            dist/agenthail-*.tar.gz
+            dist/agenthail-*.tar.gz.sha256

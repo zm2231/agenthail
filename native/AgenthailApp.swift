@@ -247,7 +247,24 @@ private enum AgenthailProcess {
         let process = Process()
         process.executableURL = executableURL()
         process.arguments = arguments
+        var environment = ProcessInfo.processInfo.environment
+        let root = "/Library/Application Support/Agenthail"
+        if FileManager.default.fileExists(atPath: "\(root)/agenthail") {
+            environment["AGENTHAIL_SIDECAR"] = "\(root)/sidecar.py"
+            environment["AGENTHAIL_COOKIE_BRIDGE"] = "\(root)/cookie.mjs"
+            environment["AGENTHAIL_PYTHON"] = "\(root)/runtime/python/bin/python3"
+            environment["AGENTHAIL_MAC_APP"] = Bundle.main.executableURL?.path
+            environment["PYTHONPATH"] = "\(root)/pydeps" + environmentSuffix(environment["PYTHONPATH"])
+            environment["PATH"] = "\(root)/runtime/node/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin" + environmentSuffix(environment["PATH"])
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        }
+        process.environment = environment
         return process
+    }
+
+    private static func environmentSuffix(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "" }
+        return ":\(value)"
     }
 
     private static func executableURL() -> URL {

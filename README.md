@@ -27,15 +27,22 @@ Then you walk away from the desk and the whole thing stops, because you were the
 
 ## Install
 
-Agenthail currently supports Apple silicon Macs. Install it with Homebrew:
+Agenthail currently supports Apple silicon Macs. Download the latest `Agenthail-*-arm64.pkg` from [GitHub Releases](https://github.com/zm2231/agenthail/releases), open it, then verify the connected surfaces:
+
+```bash
+agenthail doctor
+```
+
+The signed and notarized package includes the CLI, native menu bar app, local sidecars, pinned runtimes, and operations skill. It needs no Homebrew, language runtime, or developer tools on the target Mac. It keeps the daemon running across logins and opens the companion for dashboard access, daemon status, and native completion notifications.
+
+Homebrew remains available as an alternative:
 
 ```bash
 brew install zm2231/tap/agenthail
 brew services start agenthail
-agenthail doctor
 ```
 
-Homebrew installs the signed and notarized CLI, native menu bar app, local sidecars, and operations skill. It keeps the daemon running across logins and opens the companion for dashboard access, daemon status, and native completion notifications.
+Remove a package installation with `sudo agenthail-uninstall`. Local registry, queue, history, and dashboard data are preserved unless you pass `--purge-data`.
 
 The skill is linked into any supported agent home already on your Mac: `~/.claude/skills`, `~/.codex/skills`, and `~/.hermes/skills`. Agenthail does not create homes for agents you do not use and never overwrites a real skill directory at the same path.
 
@@ -313,6 +320,8 @@ python3 -m py_compile sidecar/sidecar.py
 Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `doctor`, `list`, `send`, `history`, and the queue commands all take `--json` and return stable documents, so you can script around them. Delivery history is bounded and local: it records what the daemon decided, without copying whole transcripts.
 
 Release archives from `scripts/package-release.sh` carry the binary, native app, sidecar, installer, and skills, so extraction does not require Go or Swift. The packager requires a clean worktree, embeds the exact revision and build time, signs the complete macOS payload with a Developer ID identity, submits it for notarization, staples the app, and emits a SHA-256 checksum. A production build fails closed when signing or notarization is unavailable.
+
+The primary release artifact is the self-contained `.pkg` built by `scripts/build-pkg.sh`. It includes pinned Python and Node runtimes and is verified by `scripts/test-pkg-artifact.sh` without using Homebrew paths. See [docs/packaging.md](docs/packaging.md) for the installed layout, release credentials, migration behavior, and complete uninstall command.
 
 ## Where this breaks
 

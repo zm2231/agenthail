@@ -12,12 +12,16 @@ errors. Do not build a second target picker or choose between ambiguous matches.
 ## Install And Verify
 
 ```bash
-brew install zm2231/tap/agenthail
-brew services start agenthail
 agenthail version --json
 agenthail doctor --json
 agenthail list --json
 ```
+
+The primary install is the signed `Agenthail-*-arm64.pkg` from the GitHub
+release. It includes its own Python and Node runtimes, installs the launchd
+daemon and companion, and does not require Homebrew or developer tools.
+Homebrew remains an alternative with `brew install zm2231/tap/agenthail`
+followed by `brew services start agenthail`.
 
 For a source checkout:
 

@@ -344,7 +344,7 @@ func (a *App) daemonInstallService() error {
 	if output, err := exec.Command("launchctl", "kickstart", "-k", domain+"/"+daemonLaunchdLabel).CombinedOutput(); err != nil {
 		return fmt.Errorf("start launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if pid, running := daemon.IsRunning(); running {
 			fmt.Printf("installed and started launchd service %s (pid %d)\n", daemonLaunchdLabel, pid)
