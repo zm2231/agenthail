@@ -221,6 +221,39 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 	}
 }
 
+func TestCodexManagedRuntimeStatusReportsSupervisedPIDBackend(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "codex")
+	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"pid\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "homebrew")
+	status := NewCodex("").RuntimeStatus(context.Background())
+	if !status.Reachable || !status.Durable || status.Backend != "pid" {
+		t.Fatalf("status=%+v", status)
+	}
+	if status.Detail != "" || status.Remediation != "" {
+		t.Fatalf("supervised status=%+v", status)
+	}
+}
+
+func TestCodexManagedRuntimeStatusRejectsUnknownSupervisor(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "codex")
+	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"pid\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "unknown")
+	status := NewCodex("").RuntimeStatus(context.Background())
+	if !status.Reachable || status.Durable {
+		t.Fatalf("status=%+v", status)
+	}
+}
+
 func TestCodexManagedRuntimeStatusReportsDurableSupervisedBackend(t *testing.T) {
 	root := t.TempDir()
 	script := filepath.Join(root, "codex")

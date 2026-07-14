@@ -21,3 +21,10 @@ AGENTS.md
 CLAUDE.md
 .todos/
 .hallmark/
+
+docs/brand/internal/*
+!docs/brand/internal/menubar-v1-18.png
+!docs/brand/internal/menubar-v1-36.png
+docs/brand/*.jpg
+/index.pre.js
+/package.json

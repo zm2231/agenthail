@@ -53,11 +53,13 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 	fi
 	codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$STAGE/agenthail"
 	codesign --verify --strict --verbose=2 "$STAGE/agenthail"
+	AGENTHAIL_CLI_SOURCE="$STAGE/agenthail" AGENTHAIL_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" AGENTHAIL_APP_VERSION="$VERSION" AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" "$ROOT/scripts/build-macos-app.sh" "$STAGE/Agenthail.app" "$GOARCH_VALUE" >/dev/null
 fi
 
 cp README.md LICENSE COMMERCIAL.md install.sh "$STAGE/"
 cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
 cp -R skills "$STAGE/"
+find "$STAGE/skills" -name .DS_Store -delete
 test -f "$STAGE/skills/agenthail-operations/SKILL.md"
 test -f "$STAGE/skills/agenthail-operations/agents/openai.yaml"
 
@@ -65,6 +67,7 @@ if [ "$GOOS_VALUE" = "darwin" ] && [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
 	NOTARY_ARCHIVE="$DIST/.release-stage/$NAME-notary.zip"
 	ditto -c -k --keepParent "$STAGE" "$NOTARY_ARCHIVE"
 	xcrun notarytool submit "$NOTARY_ARCHIVE" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --wait
+	xcrun stapler staple "$STAGE/Agenthail.app"
 	rm -f "$NOTARY_ARCHIVE"
 fi
 find "$DIST/.release-stage" -exec touch -t "$STAMP" {} +

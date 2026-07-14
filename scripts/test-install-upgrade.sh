@@ -55,6 +55,7 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 (cd "$ROOT" && go build -trimpath -o "$TMP/agenthail" ./cmd/agenthail)
+AGENTHAIL_CLI_SOURCE="$TMP/agenthail" "$ROOT/scripts/build-macos-app.sh" "$TMP/Agenthail.app" "$(uname -m)" >/dev/null
 
 install_once() {
 	local home="$1"
@@ -65,6 +66,8 @@ install_once() {
 	PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
 	AGENTHAIL_PREBUILT_BINARY="$TMP/agenthail" \
+	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
+	AGENTHAIL_SKIP_MAC_APP_LAUNCH=1 \
 	AGENTHAIL_INSTALL_DIR="$install_dir" \
 	AGENTHAIL_DATA_DIR="$data_dir" \
 	"$ROOT/install.sh" "$@"
@@ -83,23 +86,12 @@ grep -Fq 'echo unrelated' "$COLLISION_BIN/agenthail"
 install_once "$TEST_HOME" "$OLD_BIN" "$DATA_DIR" >/dev/null
 HOME="$TEST_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$OLD_BIN/agenthail" daemon start >/dev/null
 
-mkdir -p "$DATA_DIR/Agenthail.app/Contents/MacOS" "$TEST_HOME/.agenthail"
-cat >"$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail" <<'EOF'
-#!/usr/bin/env bash
-if [ "${1:-}" = "service" ] && [ "${2:-}" = "disable" ]; then
-	touch "$HOME/legacy-app-disabled"
-fi
-EOF
-chmod +x "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
-printf '{"enabled":true}\n' >"$TEST_HOME/.agenthail/notifications.json"
-
 install_once "$TEST_HOME" "$NEW_BIN" "$DATA_DIR" >"$TMP/upgrade.log"
 
 test ! -e "$OLD_BIN/agenthail"
 test -x "$NEW_BIN/agenthail"
-test ! -e "$DATA_DIR/Agenthail.app"
-test -f "$TEST_HOME/legacy-app-disabled"
-test ! -e "$TEST_HOME/.agenthail/notifications.json"
+test -x "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
+test -x "$DATA_DIR/Agenthail.app/Contents/Resources/agenthail"
 grep -Fq 'stopping running daemon for upgrade' "$TMP/upgrade.log"
 grep -Fq 'restarting daemon with the upgraded binary' "$TMP/upgrade.log"
 grep -Fq 'agenthail-managed-wrapper-v1' "$NEW_BIN/agenthail"
@@ -108,22 +100,29 @@ HOME="$TEST_HOME" PATH="$FAKE_BIN:$NEW_BIN:/opt/homebrew/bin:/usr/bin:/bin" agen
 
 test -f "$DATA_DIR/skills/agenthail-operations/SKILL.md"
 test ! -e "$TEST_HOME/.claude"
+test ! -e "$TEST_HOME/.hermes"
 
 SKILL_HOME="$TMP/skill home"
 SKILL_BIN="$SKILL_HOME/bin"
 SKILL_DATA="$SKILL_HOME/share/agenthail"
-mkdir -p "$SKILL_HOME/.claude" "$SKILL_HOME/.codex/skills"
+mkdir -p "$SKILL_HOME/.claude" "$SKILL_HOME/.codex/skills" "$SKILL_HOME/.hermes"
 
-install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >/dev/null
+install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >"$TMP/skill-install.log"
+grep -Fq 'run /config, and enable Remote Control for all sessions' "$TMP/skill-install.log"
 test -L "$SKILL_HOME/.claude/skills/agenthail-operations"
 test -L "$SKILL_HOME/.codex/skills/agenthail-operations"
+test -L "$SKILL_HOME/.hermes/skills/agenthail-operations"
 test -f "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 test -f "$SKILL_HOME/.codex/skills/agenthail-operations/SKILL.md"
+test -f "$SKILL_HOME/.hermes/skills/agenthail-operations/SKILL.md"
 
-rm -rf "$SKILL_HOME/.claude/skills" "$SKILL_HOME/.codex/skills"
-install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" --no-skill >/dev/null
+rm -rf "$SKILL_HOME/.claude/skills" "$SKILL_HOME/.codex/skills" "$SKILL_HOME/.hermes/skills"
+printf '{"remoteControlAtStartup":true}\n' >"$SKILL_HOME/.claude/settings.json"
+install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" --no-skill >"$TMP/skill-disabled.log"
+grep -Fq 'Remote Control is enabled for all sessions' "$TMP/skill-disabled.log"
 test ! -e "$SKILL_HOME/.claude/skills/agenthail-operations"
 test ! -e "$SKILL_HOME/.codex/skills/agenthail-operations"
+test ! -e "$SKILL_HOME/.hermes/skills/agenthail-operations"
 
 mkdir -p "$SKILL_HOME/.claude/skills/agenthail-operations"
 printf 'mine\n' >"$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"

@@ -10,14 +10,16 @@ for arg in "$@"; do
 			cat <<'USAGE'
 usage: ./install.sh [--no-skill]
 
-  --no-skill   do not link the agenthail-operations skill into ~/.claude/skills
-               or ~/.codex/skills (they are only touched if they already exist)
+  --no-skill   do not link the agenthail-operations skill into ~/.claude/skills,
+               ~/.codex/skills, or ~/.hermes/skills
+               (they are only touched if they already exist)
 
 environment:
   AGENTHAIL_INSTALL_DIR   directory for the agenthail wrapper
   AGENTHAIL_DATA_DIR      directory for the binary and sidecar
   AGENTHAIL_PYTHON        absolute path to a Python 3.10+ interpreter
   AGENTHAIL_VERSION       override the stamped version string
+  AGENTHAIL_SKIP_MAC_APP_LAUNCH  install without opening the menu bar app
 USAGE
 			exit 0
 			;;
@@ -179,6 +181,19 @@ else
 	exit 1
 fi
 
+echo "agenthail: preparing macOS companion"
+if [ -n "${AGENTHAIL_PREBUILT_MAC_APP:-}" ]; then
+	cp -R "$AGENTHAIL_PREBUILT_MAC_APP" "$STAGE_DIR/Agenthail.app"
+elif [ -d "$REPO_DIR/Agenthail.app" ]; then
+	cp -R "$REPO_DIR/Agenthail.app" "$STAGE_DIR/Agenthail.app"
+elif [ -x "$REPO_DIR/scripts/build-macos-app.sh" ]; then
+	AGENTHAIL_CLI_SOURCE="$STAGE_DIR/agenthail" "$REPO_DIR/scripts/build-macos-app.sh" "$STAGE_DIR/Agenthail.app" "$(uname -m)" >/dev/null
+else
+	echo "error: Agenthail.app is missing and cannot be built" >&2
+	exit 1
+fi
+test -x "$STAGE_DIR/Agenthail.app/Contents/MacOS/Agenthail"
+
 echo ""
 echo "agenthail: installing sidecar deps (curl_cffi, sweet-cookie)"
 echo "agenthail: Python runtime: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
@@ -270,12 +285,14 @@ printf -v SIDECAR_SHELL '%q' "$DATA_DIR/sidecar.py"
 printf -v COOKIE_BRIDGE_SHELL '%q' "$DATA_DIR/cookie.mjs"
 printf -v PYTHON_SHELL '%q' "$PYTHON_BIN"
 printf -v PYDEPS_SHELL '%q' "$DATA_DIR/pydeps"
+printf -v MAC_APP_SHELL '%q' "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
 cat >"$INSTALL_DIR/agenthail" <<EOF
 #!/usr/bin/env bash
 # agenthail-managed-wrapper-v1
 export AGENTHAIL_SIDECAR=$SIDECAR_SHELL
 export AGENTHAIL_COOKIE_BRIDGE=$COOKIE_BRIDGE_SHELL
 export AGENTHAIL_PYTHON=$PYTHON_SHELL
+export AGENTHAIL_MAC_APP=$MAC_APP_SHELL
 export PYTHONPATH=$PYDEPS_SHELL:\${PYTHONPATH:-}
 exec $DATA_BINARY_SHELL "\$@"
 EOF
@@ -302,13 +319,16 @@ if [ "${#OWNED_WRAPPERS[@]}" -gt 0 ]; then
 	done
 fi
 
-LEGACY_APP="$PREVIOUS_DIR/Agenthail.app/Contents/MacOS/Agenthail"
-if [ -x "$LEGACY_APP" ]; then
-	"$LEGACY_APP" service disable >/dev/null 2>&1 || true
-fi
 launchctl bootout "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 || true
-rm -f "$LEGACY_MENUBAR_PLIST" "$HOME/.agenthail/notifications.json"
-pkill -f '/Agenthail.app/Contents/MacOS/Agenthail' >/dev/null 2>&1 || true
+rm -f "$LEGACY_MENUBAR_PLIST"
+if [ "${AGENTHAIL_SKIP_MAC_APP_LAUNCH:-0}" != "1" ]; then
+	pkill -f '/Agenthail.app/Contents/MacOS/Agenthail' >/dev/null 2>&1 || true
+	SERVICE_OUTPUT="$($DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail service enable 2>&1 || true)"
+	if [ "$SERVICE_OUTPUT" = "requiresApproval" ]; then
+		echo "agenthail: menu bar login item needs approval in System Settings"
+	fi
+	open -gja "$DATA_DIR/Agenthail.app" || true
+fi
 
 INSTALL_SUCCEEDED=1
 rm -rf "$PREVIOUS_DIR"
@@ -321,7 +341,7 @@ rm -f "$INSTALL_DIR/claude-worker" 2>/dev/null || true
 SKILL_SOURCE="$DATA_DIR/skills/agenthail-operations"
 SKILL_LINKS=()
 if [ "$INSTALL_SKILL" -eq 1 ] && [ -f "$SKILL_SOURCE/SKILL.md" ]; then
-	for runtime_dir in "$HOME/.claude" "$HOME/.codex"; do
+	for runtime_dir in "$HOME/.claude" "$HOME/.codex" "$HOME/.hermes"; do
 		[ -d "$runtime_dir" ] || continue
 		link="$runtime_dir/skills/agenthail-operations"
 		if [ -e "$link" ] && [ ! -L "$link" ]; then
@@ -339,6 +359,7 @@ echo "installed: agenthail $INSTALL_DIR/agenthail"
 echo "  sidecar:  $DATA_DIR/sidecar.py"
 echo "  python:   $PYTHON_BIN"
 echo "  cookies:  $DATA_DIR/cookie.mjs"
+echo "  mac app:  $DATA_DIR/Agenthail.app"
 if [ -f "$SKILL_SOURCE/SKILL.md" ]; then
   echo "  skill:    $SKILL_SOURCE/SKILL.md"
 fi
@@ -350,6 +371,27 @@ fi
 echo ""
 echo "verify:    agenthail doctor"
 echo ""
+echo "Claude Code:"
+CLAUDE_REMOTE_CONTROL=""
+if [ -f "$HOME/.claude/settings.json" ]; then
+	CLAUDE_REMOTE_CONTROL="$("$PYTHON_BIN" - "$HOME/.claude/settings.json" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        enabled = json.load(handle).get("remoteControlAtStartup") is True
+except (OSError, ValueError, TypeError):
+    enabled = False
+print("enabled" if enabled else "disabled")
+PY
+)"
+fi
+if [ "$CLAUDE_REMOTE_CONTROL" = "enabled" ]; then
+	echo "  Remote Control is enabled for all sessions."
+else
+	echo "  Open Claude Code, run /config, and enable Remote Control for all sessions."
+fi
 echo "Codex Desktop:"
 echo "  agenthail launch codex       # launch with the local control bridge"
 echo "Codex terminal:"

@@ -32,6 +32,12 @@ var dashboardJS []byte
 //go:embed dashboard/tokens.css
 var dashboardCSS []byte
 
+//go:embed dashboard/logo.png
+var dashboardLogo []byte
+
+//go:embed dashboard/favicon.png
+var dashboardFavicon []byte
+
 const (
 	dashboardStateCacheTTL = 30 * time.Second
 	dashboardRefreshBudget = 18 * time.Second
@@ -179,6 +185,9 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
 	mux.HandleFunc("/tokens.css", dashboard.asset("text/css; charset=utf-8", dashboardCSS))
+	mux.HandleFunc("/logo.png", dashboard.asset("image/png", dashboardLogo))
+	mux.HandleFunc("/favicon.png", dashboard.asset("image/png", dashboardFavicon))
+	mux.HandleFunc("/favicon.ico", dashboard.asset("image/png", dashboardFavicon))
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
 	mux.HandleFunc("/api/stream", dashboard.guard(d.dashboardStreamHandler))

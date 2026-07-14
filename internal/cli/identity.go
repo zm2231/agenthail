@@ -305,8 +305,50 @@ func (a *App) cmdRelay(args []string) error {
 }
 
 func (a *App) cmdDaemon(args []string) error {
+	if len(args) == 2 && args[0] == "notify" {
+		switch args[1] {
+		case "on", "enable":
+			status, err := daemon.EnableNotifications()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("desktop notifications: enabled (%s)\n", status.Authorization)
+			return nil
+		case "off", "disable":
+			if err := daemon.DisableNotifications(); err != nil {
+				return err
+			}
+			fmt.Println("desktop notifications: disabled")
+			return nil
+		case "status":
+			status := daemon.GetNotificationStatus()
+			state := "disabled"
+			if status.Enabled {
+				state = "enabled"
+			}
+			fmt.Printf("desktop notifications: %s (%s)\n", state, status.Authorization)
+			if status.Error != "" {
+				fmt.Printf("native app: unavailable (%s)\n", status.Error)
+			}
+			return nil
+		case "test":
+			status := daemon.GetNotificationStatus()
+			if !status.Enabled {
+				return fmt.Errorf("desktop notifications are not enabled (%s)", status.Authorization)
+			}
+			if err := daemon.Notify("Agenthail", "Native notifications are ready."); err != nil {
+				return err
+			}
+			fmt.Println("test notification sent")
+			return nil
+		case "settings":
+			return daemon.OpenNotificationSettings()
+		default:
+			return fmt.Errorf("usage: agenthail daemon notify <on|off|status|test|settings>")
+		}
+	}
 	if len(args) != 1 {
-		return fmt.Errorf("usage: agenthail daemon <start|stop|restart|status|install|uninstall>")
+		return fmt.Errorf("usage: agenthail daemon <start|stop|restart|status|install|uninstall> | daemon notify <on|off|status|test|settings>")
 	}
 	switch args[0] {
 	case "start":

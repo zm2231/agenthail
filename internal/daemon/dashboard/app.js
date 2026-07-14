@@ -367,6 +367,12 @@ function presenceLabel(session) {
     }[session.currentReason] || statusLabel(session.status)
   );
 }
+
+function presenceTone(session) {
+  if (session.status === "busy" || ["working", "open"].includes(session.currentReason)) return "active";
+  if (session.status === "idle" || ["queued", "blocked"].includes(session.currentReason)) return "idle";
+  return session.status;
+}
 function conversationMeta(session, model = "") {
   const parts = [statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
@@ -453,7 +459,7 @@ function renderOverview() {
     recent
       .map(
         (session) =>
-          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${session.status === "busy" ? "working now" : timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
+          `<button class="activity-item" type="button" data-session="${escape(session.id)}"><div class="activity-main"><div class="activity-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="activity-detail">${escape(labels[session.surface] || session.surface)} · ${session.status === "busy" ? "working now" : timeAgo(session.lastActive)}</div></div><span class="status-pill ${escape(session.currentReason || session.status)}">${escape(presenceLabel(session))}</span></button>`,
       )
       .join("") ||
     '<p class="empty-inline">No conversations are active right now.</p>';
@@ -528,7 +534,7 @@ function renderSessions() {
     visible
       .map(
         (session) =>
-          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(session.status)}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
+          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
       .join("") ||
     `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Open History to find an older conversation." : "No conversations in this view."}</p></div>`;

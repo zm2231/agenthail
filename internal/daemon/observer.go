@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -64,6 +65,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
+	notificationMessage := ""
 	if found && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID {
 		text := ""
 		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
@@ -72,10 +74,23 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		if text != "" {
 			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
+		if observation.Reply != nil && observation.Reply.Done {
+			notificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+			if observation.Reply.Error != "" {
+				notificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+			}
+		}
 	}
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
+	}
+	if notificationMessage != "" {
+		go func(message string) {
+			if err := Notify("Agenthail", message); err != nil {
+				d.log.Printf("desktop notification: %s", err)
+			}
+		}(notificationMessage)
 	}
 	if observation.Status == surface.StatusIdle && observation.ActiveTurnID == "" {
 		d.drainMessageQueue(ctx, adapter, session)

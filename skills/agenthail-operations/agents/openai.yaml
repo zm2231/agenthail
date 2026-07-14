@@ -1,4 +1,4 @@
 interface:
   display_name: "AgentHail Operations"
-  short_description: "Operate AgentHail sessions and relays safely"
-  default_prompt: "Use $agenthail-operations to inspect and safely operate my existing AgentHail sessions."
+  short_description: "Operate AgentHail sessions, queues, and dashboard"
+  default_prompt: "Use $agenthail-operations to inspect and safely operate AgentHail sessions, queues, relays, and dashboard access."

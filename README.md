@@ -25,16 +25,85 @@ Claude Code is mid-investigation in one window. Codex is waiting for instruction
 
 Then you walk away from the desk and the whole thing stops, because you were the part that moved work between them.
 
+## Install
+
+Agenthail currently supports Apple silicon Macs. Install it with Homebrew:
+
+```bash
+brew install zm2231/tap/agenthail
+brew services start agenthail
+agenthail doctor
+```
+
+Homebrew installs the signed and notarized CLI, native menu bar app, local sidecars, and operations skill. It keeps the daemon running across logins and opens the companion for dashboard access, daemon status, and native completion notifications.
+
+The skill is linked into any supported agent home already on your Mac: `~/.claude/skills`, `~/.codex/skills`, and `~/.hermes/skills`. Agenthail does not create homes for agents you do not use and never overwrites a real skill directory at the same path.
+
+To install from source, you need Go, Xcode Command Line Tools, Node.js, Python 3.10 or newer, and Chrome:
+
+```bash
+git clone https://github.com/zm2231/agenthail.git
+cd agenthail
+./install.sh
+```
+
+The source installer puts Agenthail under `~/.local/share/agenthail`, selects a standard command directory for the wrapper, links the operations skill, opens the companion, and restarts an existing Agenthail daemon on upgrades. Use `./install.sh --no-skill` to skip skill links.
+
+## Surfaces
+
+A surface is somewhere your agents already live. Claude Code and Codex carry the work. Notion is optional and works well as an external research workspace. Each surface connects independently, so one unavailable account never blocks the others.
+
+| | Claude Code | Codex | Notion |
+|---|---:|---:|---:|
+| Find existing sessions | yes | yes | yes |
+| Send and read replies | yes | yes | yes |
+| Stream a turn | yes | yes | |
+| Steer / interrupt | yes | yes | |
+| Compact | yes | yes | |
+| Session model switch | yes | yes | |
+| Per-message model | | yes | yes |
+| Goal tracking | | yes | |
+
+### Claude Code
+
+Agenthail reaches Claude Code through Claude's Remote Control connection. In Claude Code, run `/config` and enable **Remote Control for all sessions**. You can also enable one session with `/rc` or start it with `claude --remote-control`.
+
+This is an explicit Claude setting. Agenthail detects it during installation but does not turn it on without you. Claude and Notion also use the Chrome profile already signed into their web apps. The default is `Default`; set `AGENTHAIL_CHROME_PROFILE` when yours is different.
+
+### Codex
+
+Agenthail can read every discovered Codex thread, but sending depends on how the session started.
+
+| How the session started | Read | Send |
+|---|:---:|:---:|
+| `agenthail codex` terminal | yes | yes |
+| Codex Desktop through `agenthail launch codex` | yes | yes |
+| Codex Desktop opened normally | yes | no |
+| Plain `codex` terminal | yes | no |
+
+Start a writable terminal thread with `agenthail codex`. For Desktop, quit Codex once and launch it through Agenthail:
+
+```bash
+agenthail launch codex
+```
+
+Opening Desktop normally still leaves its history readable, but Agenthail has no writable bridge into that app process. The dashboard marks those threads read-only instead of presenting a send box.
+
+### Notion
+
+Notion is optional. If you are signed into Notion in the configured Chrome profile, Agenthail discovers existing threads and can create a new one with `notion:new`.
+
+Run `agenthail doctor` after setup or after any connected app updates. It reports each surface separately and tells you when Codex needs the bridge or an account needs to reconnect.
+
 ## Connect the agents to each other
 
-There is no setup step. agenthail finds the sessions that are already running, and you can reach one, queue work for it, steer it mid-turn, or wire its finished answers straight into another agent.
+Once the surfaces you use are connected, agenthail finds their running sessions. You can reach one, queue work for it, steer it mid-turn, or wire its finished answers straight into another agent.
 
 ```bash
 agenthail list
 
 agenthail send codex:test-session-23 "implement the fix" --reply
 agenthail relay add claude:test-session codex:test-session-23
-agenthail daemon install
 ```
 
 That relay is the idea in one line. Every completed answer from the Claude Code session now arrives in Codex, in order, without you. If Codex is mid-turn, it waits. If the daemon restarts, it picks up where it left off.
@@ -105,86 +174,6 @@ agenthail queue clear @writer
 ```
 
 Nothing here leaves your machine. The trail is bounded on purpose (the newest 2000 events, each field capped at 16 KiB and marked `[truncated]` past that), so it records what the daemon decided without turning into a second copy of every transcript. Writing history is treated as observability, never as delivery, so a problem recording an event cannot fail a message that actually went out.
-
-## Install
-
-macOS on Apple silicon, for now. Install Agenthail with Homebrew:
-
-```bash
-brew install zm2231/tap/agenthail
-brew services start agenthail
-agenthail doctor
-```
-
-Homebrew installs the signed and notarized binary, native menu bar app, and local sidecars. It puts `agenthail` on your PATH, keeps the daemon running across logins, and opens the companion for dashboard access, daemon status, and native completion notifications. Upgrade later with `brew upgrade agenthail && brew services restart agenthail` so the running daemon switches to the new binary.
-
-To install from source instead, you need Go, the Swift toolchain from Xcode Command Line Tools, Node.js, Python 3.10 or newer, and Chrome:
-
-```bash
-git clone https://github.com/zm2231/agenthail.git
-cd agenthail
-./install.sh
-```
-
-The source installer puts the binary, sidecar, and menu bar app under `~/.local/share/agenthail`, then drops the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running it again upgrades in place, reopens the companion, and restarts the daemon on the new binary.
-
-If you already run Claude Code or Codex, it also links the agenthail operations skill into `~/.claude/skills` and `~/.codex/skills`, so your agents know how to drive the CLI themselves. It never creates those directories, so nothing shows up on a machine that does not use them. Skip it with `./install.sh --no-skill`.
-
-The Homebrew service already keeps queues and relays alive across logouts and reboots. For a source install, enable the native launchd service with:
-
-```bash
-agenthail daemon install
-agenthail daemon status
-```
-
-That installs a launchd service with restart-on-crash. To run it only when you want it, use `agenthail daemon start` and `agenthail daemon stop`.
-
-## Surfaces
-
-A surface is somewhere your agents already live. Claude Code and Codex are the two that carry the work. Notion is optional, and it is there because a research thread is sometimes the thing you want to hand to a builder.
-
-They are independent, so one being unavailable never blocks the others.
-
-| | Claude Code | Codex | Notion |
-|---|---:|---:|---:|
-| Find existing sessions | yes | yes | yes |
-| Send and read replies | yes | yes | yes |
-| Stream a turn | yes | yes | |
-| Steer / interrupt | yes | yes | |
-| Compact | yes | yes | |
-| Session model switch | yes | yes | |
-| Per-message model | | yes | yes |
-| Goal tracking | | yes | |
-
-Claude Code model switching goes through the session's `/model` command. agenthail waits for the local confirmation, so an unknown model returns an error instead of looking like it worked.
-
-### Codex: which sessions agenthail can write to
-
-Codex is not one thing. agenthail can *read* every Codex session and its history, but whether it can *send* depends on how that session was started.
-
-| How the session started | Read | Send |
-|---|:---:|:---:|
-| `agenthail codex` (terminal) | yes | yes |
-| Codex Desktop, launched with `agenthail launch codex` | yes | yes |
-| Codex Desktop, opened normally | yes | no |
-| `codex` (plain terminal) | yes | no |
-
-**Terminal.** Start Codex through agenthail and the session is fully writable:
-
-```bash
-agenthail codex
-agenthail codex --model gpt-5.6-sol
-```
-
-That runs Codex on agenthail's local app-server. It does not replace the `codex` command and does not change your shell. Sessions you started with plain `codex` stay readable, and agenthail can see their history, but it cannot send into them: a standard terminal process gives it no safe external input path. This is being fixed.
-
-**Desktop.** Codex Desktop is writable, but only when it is running agenthail's local bridge, which means it has to be launched through agenthail at least once:
-
-```bash
-agenthail launch codex
-```
-
-Open Codex Desktop straight from the Dock and agenthail can still read it, but has nothing to send through. `agenthail doctor` tells you which state you are in.
 
 ## Finding your sessions
 
@@ -283,7 +272,7 @@ agenthail reads browser cookies and runs a local HTTP server, so it is worth bei
 
 Short version: everything stays on your machine. Nothing listens until you run `agenthail dashboard enable`, and when you do, it binds to loopback behind a per-install token and rejects cross-origin actions. The sidecar reads fresh Chrome cookies without printing them, and if the cookie bridge fails the request stops there instead of falling back to something weaker. There is no agenthail server, no telemetry, and no account.
 
-## Surface setup
+## Configuration
 
 Claude Code and Notion use the Chrome profile you are already signed into. The default is `Default`:
 
@@ -291,17 +280,7 @@ Claude Code and Notion use the Chrome profile you are already signed into. The d
 AGENTHAIL_CHROME_PROFILE="Profile 2" agenthail doctor
 ```
 
-Codex needs a local bridge into the Desktop app. Launch it once through agenthail:
-
-```bash
-agenthail launch codex
-```
-
-Fresh launches expose only Chromium's renderer debugger on loopback. agenthail then asks the renderer to use Desktop's own app-server connection, so messages and turns stay visible in the app you are already looking at. It does not write to the app-server child process, and it does not launch Codex with Node's crash-prone `--inspect` flag.
-
-Agenthail's background service also keeps the Codex read connection available after login and restarts it if it disappears. `agenthail doctor` reports whether that connection is reachable and supervised.
-
-The bridge uses port `9231` by default:
+The Codex Desktop bridge uses port `9231` by default. Change it when another local tool already owns that port:
 
 ```bash
 AGENTHAIL_CODEX_REMOTE=9331 agenthail launch codex
