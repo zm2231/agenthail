@@ -194,8 +194,24 @@ func (a *App) cmdCodex(args []string) error {
 	if err := start.Run(); err != nil {
 		return fmt.Errorf("start Codex app-server: %w", err)
 	}
-	argv := append([]string{"codex", "--remote", "unix://"}, args...)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve current directory: %w", err)
+	}
+	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
 	return syscall.Exec(path, argv, os.Environ())
+}
+
+func codexRemoteArgs(args []string, cwd string) []string {
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if arg == "-C" || arg == "--cd" || strings.HasPrefix(arg, "--cd=") || strings.HasPrefix(arg, "-C=") || (strings.HasPrefix(arg, "-C") && len(arg) > 2) {
+			return args
+		}
+	}
+	return append([]string{"--cd", cwd}, args...)
 }
 
 func (a *App) cmdVersion(args []string) error {

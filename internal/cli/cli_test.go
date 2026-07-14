@@ -48,6 +48,31 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	}
 }
 
+func TestCodexRemoteArgsUseCallerDirectory(t *testing.T) {
+	got := codexRemoteArgs([]string{"--model", "gpt-5.6-sol"}, "/tmp/project")
+	want := []string{"--cd", "/tmp/project", "--model", "gpt-5.6-sol"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("got=%q want=%q", got, want)
+	}
+}
+
+func TestCodexRemoteArgsPreserveExplicitDirectory(t *testing.T) {
+	for _, args := range [][]string{{"-C", "/tmp/other"}, {"-C/tmp/other"}, {"--cd", "/tmp/other"}, {"--cd=/tmp/other"}} {
+		got := codexRemoteArgs(args, "/tmp/project")
+		if strings.Join(got, "\x00") != strings.Join(args, "\x00") {
+			t.Fatalf("args=%q got=%q", args, got)
+		}
+	}
+}
+
+func TestCodexRemoteArgsIgnoreArgumentsAfterTerminator(t *testing.T) {
+	got := codexRemoteArgs([]string{"--", "-C", "literal"}, "/tmp/project")
+	want := []string{"--cd", "/tmp/project", "--", "-C", "literal"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("got=%q want=%q", got, want)
+	}
+}
+
 func (f *cliSurface) Name() surface.SurfaceKind                       { return f.kind }
 func (f *cliSurface) List(context.Context) ([]surface.Session, error) { return f.listed, nil }
 func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session, error) {

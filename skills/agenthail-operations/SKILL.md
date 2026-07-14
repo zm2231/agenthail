@@ -117,8 +117,9 @@ real persisted thread UUID. `notion:new:<name>` also stores `<name>` as a durabl
 AgentHail alias. Keep the UUID or alias for replies and future sends. Notion
 chooses the visible title from the first message.
 
-Start a writable Codex thread with `agenthail codex` in a human TTY, or through
-the enabled AgentHail dashboard. `agenthail launch codex` starts Desktop with a
+Start a writable Codex thread with `agenthail codex` in a human TTY. It uses the
+caller's current directory unless `--cd` is provided. The enabled AgentHail
+dashboard can also create one. `agenthail launch codex` starts Desktop with a
 writable bridge but does not itself create a thread. AgentHail does not expose a
 non-interactive CLI command for creating a Claude session. Open Claude manually,
 then discover it with `agenthail list`.

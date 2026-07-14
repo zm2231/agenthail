@@ -81,7 +81,7 @@ Agenthail can read every discovered Codex thread, but sending depends on how the
 | Codex Desktop opened normally | yes | no |
 | Plain `codex` terminal | yes | no |
 
-Start a writable terminal thread with `agenthail codex`. For Desktop, quit Codex once and launch it through Agenthail:
+Start a writable terminal thread with `agenthail codex`. It uses the directory where you run the command; pass Codex's `--cd` option to choose another project. For Desktop, quit Codex once and launch it through Agenthail:
 
 ```bash
 agenthail launch codex
