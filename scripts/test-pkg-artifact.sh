@@ -53,7 +53,7 @@ while IFS= read -r path; do
 		otool -L "$path" >> "$linkage" 2>/dev/null || true
 	fi
 done < <(find "$root" -type f)
-if rg -n '/opt/homebrew|/usr/local/Cellar' "$linkage"; then
+if grep -En '/opt/homebrew|/usr/local/Cellar' "$linkage"; then
 	echo "error: package has a Homebrew runtime linkage" >&2
 	exit 1
 fi
