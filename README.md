@@ -1,12 +1,16 @@
 # agenthail
 
+<p align="center">
+  <img src="docs/brand/logo-512.png" alt="agenthail" width="96" height="96" />
+</p>
+
 **Your agents are already working. agenthail keeps everyone connected.**
 
 [![CI](https://github.com/zm2231/agenthail/actions/workflows/ci.yml/badge.svg)](https://github.com/zm2231/agenthail/actions/workflows/ci.yml) ![macOS](https://img.shields.io/badge/macOS-black) ![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8) ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue) ![status](https://img.shields.io/badge/status-early-orange)
 
 agenthail connects the AI agents already working across your devices and apps, both to each other and back to you.
 
-![The agenthail dashboard: one view of every running agent, its status, and what it is working on](docs/dashboard.png)
+![The agenthail dashboard: one view of every running agent, its status, and what it is working on](docs/brand/agenthail-dashboard-demo.gif)
 
 ```bash
 agenthail send @investigator "find the root cause" --reply
@@ -74,6 +78,8 @@ agenthail dashboard remote status
 agenthail dashboard remote off
 ```
 
+The dashboard is one way to reach your agents from your phone. If you would rather drive them from iMessage than a web view, the [agenthail-operator](https://github.com/zm2231/photon-agent-examples/tree/main/examples/agenthail-operator) example wires these same controls into a text thread through Photon: session inventory, sending work, and subscribing to the replies.
+
 ## See everything that happened
 
 Every message agenthail moves is written to a local audit trail, so you can come back to a machine that has been running agents for six hours and reconstruct what actually went where.
@@ -110,9 +116,9 @@ brew services start agenthail
 agenthail doctor
 ```
 
-Homebrew installs the signed and notarized binary plus its local sidecars, puts `agenthail` on your PATH, and keeps the daemon running across logins. Upgrade later with `brew upgrade agenthail`.
+Homebrew installs the signed and notarized binary, native menu bar app, and local sidecars. It puts `agenthail` on your PATH, keeps the daemon running across logins, and opens the companion for dashboard access, daemon status, and native completion notifications. Upgrade later with `brew upgrade agenthail && brew services restart agenthail` so the running daemon switches to the new binary.
 
-To install from source instead, you need Go, Node.js, Python 3.10 or newer, and Chrome:
+To install from source instead, you need Go, the Swift toolchain from Xcode Command Line Tools, Node.js, Python 3.10 or newer, and Chrome:
 
 ```bash
 git clone https://github.com/zm2231/agenthail.git
@@ -120,7 +126,7 @@ cd agenthail
 ./install.sh
 ```
 
-The source installer puts the binary and sidecar under `~/.local/share/agenthail`, then drops the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running it again upgrades in place and restarts the daemon on the new binary.
+The source installer puts the binary, sidecar, and menu bar app under `~/.local/share/agenthail`, then drops the `agenthail` wrapper in the first writable standard command directory (`/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`). Running it again upgrades in place, reopens the companion, and restarts the daemon on the new binary.
 
 If you already run Claude Code or Codex, it also links the agenthail operations skill into `~/.claude/skills` and `~/.codex/skills`, so your agents know how to drive the CLI themselves. It never creates those directories, so nothing shows up on a machine that does not use them. Skip it with `./install.sh --no-skill`.
 
@@ -327,7 +333,7 @@ python3 -m py_compile sidecar/sidecar.py
 
 Runtime state lives in `~/.agenthail` (`registry.db`, daemon lock/PID/log). `doctor`, `list`, `send`, `history`, and the queue commands all take `--json` and return stable documents, so you can script around them. Delivery history is bounded and local: it records what the daemon decided, without copying whole transcripts.
 
-Release archives from `scripts/package-release.sh` carry the binary, sidecar, installer, and skills, so extraction does not require Go. The packager requires a clean worktree, embeds the exact revision and build time, signs the macOS binary with a Developer ID identity, submits it for notarization, and emits a SHA-256 checksum. A production build fails closed when signing or notarization is unavailable.
+Release archives from `scripts/package-release.sh` carry the binary, native app, sidecar, installer, and skills, so extraction does not require Go or Swift. The packager requires a clean worktree, embeds the exact revision and build time, signs the complete macOS payload with a Developer ID identity, submits it for notarization, staples the app, and emits a SHA-256 checksum. A production build fails closed when signing or notarization is unavailable.
 
 ## Where this breaks
 
