@@ -6,7 +6,7 @@ pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-pkgutil --check-signature "$pkg"
+pkgutil --check-signature "$pkg" || [ "${AGENTHAIL_ALLOW_UNNOTARIZED:-0}" = "1" ]
 pkgutil --expand-full "$pkg" "$work/expanded"
 component="$work/expanded/Agenthail-component.pkg"
 payload="$component/Payload"

@@ -50,3 +50,26 @@ jobs:
           cache-dependency-path: sidecar/package-lock.json
       - name: Install and upgrade test
         run: scripts/test-install-upgrade.sh
+
+  package:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build package
+        env:
+          AGENTHAIL_ALLOW_UNNOTARIZED: "1"
+          AGENTHAIL_VERSION: v0.0.0-ci
+        run: scripts/build-pkg.sh
+      - name: Verify package artifact
+        env:
+          AGENTHAIL_ALLOW_UNNOTARIZED: "1"
+        run: scripts/test-pkg-artifact.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
+      - name: Verify install, upgrade, and uninstall
+        run: scripts/test-pkg-install.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
