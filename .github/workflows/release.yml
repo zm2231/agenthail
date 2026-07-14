@@ -28,10 +28,29 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+      - name: Import Developer ID certificates
+        env:
+          APPLICATION_P12: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          INSTALLER_P12: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          : "${APPLICATION_P12:?missing APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64}"
+          : "${INSTALLER_P12:?missing APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64}"
+          : "${P12_PASSWORD:?missing APPLE_DEVELOPER_ID_P12_PASSWORD}"
+          umask 077
+          KEYCHAIN_PATH="$RUNNER_TEMP/agenthail-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          printf '%s' "$APPLICATION_P12" | base64 --decode > "$RUNNER_TEMP/Application.p12"
+          printf '%s' "$INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/Installer.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/Application.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/Installer.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security find-identity -v "$KEYCHAIN_PATH"
       - name: Configure notarization
         env:
           NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}

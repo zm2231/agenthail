@@ -38,11 +38,14 @@ Production builds fail closed without Developer ID Application, Developer ID Ins
 
 The release workflow expects these repository secrets:
 
-- `APPLE_DEVELOPER_ID_P12_BASE64`
+- `APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64`
+- `APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64`
 - `APPLE_DEVELOPER_ID_P12_PASSWORD`
 - `APPLE_NOTARY_KEY_BASE64`
 - `APPLE_NOTARY_KEY_ID`
 - `APPLE_NOTARY_ISSUER_ID`
+
+Export the Developer ID Application and Developer ID Installer identities as separate `.p12` files using the same password. Store each file as base64 in its matching secret and store their shared export password in `APPLE_DEVELOPER_ID_P12_PASSWORD`.
 
 The `.pkg` verifier expands the real artifact, checks signatures and expected files, runs the embedded CLI and both runtimes with a restricted `PATH`, rejects Homebrew-linked Mach-O files, and rejects AppleDouble metadata.
 
