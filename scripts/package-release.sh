@@ -66,7 +66,8 @@ test -f "$STAGE/skills/agenthail-operations/agents/openai.yaml"
 if [ "$GOOS_VALUE" = "darwin" ] && [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
 	NOTARY_ARCHIVE="$DIST/.release-stage/$NAME-notary.zip"
 	ditto -c -k --keepParent "$STAGE" "$NOTARY_ARCHIVE"
-	xcrun notarytool submit "$NOTARY_ARCHIVE" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --wait
+	echo "Submitting release archive for notarization"
+	xcrun notarytool submit "$NOTARY_ARCHIVE" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --no-s3-acceleration --wait --timeout "${AGENTHAIL_NOTARY_TIMEOUT:-20m}"
 	xcrun stapler staple "$STAGE/Agenthail.app"
 	rm -f "$NOTARY_ARCHIVE"
 fi

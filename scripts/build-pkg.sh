@@ -106,7 +106,8 @@ fi
 
 pkgutil --check-signature "$output" || [ "${AGENTHAIL_ALLOW_UNNOTARIZED:-0}" = "1" ]
 if [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
-	xcrun notarytool submit "$output" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --wait
+	echo "Submitting package for notarization"
+	xcrun notarytool submit "$output" --keychain-profile "$AGENTHAIL_NOTARY_PROFILE" --no-s3-acceleration --wait --timeout "${AGENTHAIL_NOTARY_TIMEOUT:-20m}"
 	xcrun stapler staple "$output"
 	xcrun stapler validate "$output"
 	spctl --assess --type install --verbose=2 "$output"

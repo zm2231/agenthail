@@ -19,7 +19,7 @@ concurrency:
 jobs:
   macos-package:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,6 +64,7 @@ jobs:
           go test ./... -race -count=1
           go vet ./...
       - name: Build package
+        timeout-minutes: 30
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
@@ -73,6 +74,7 @@ jobs:
       - name: Verify clean install, upgrade, and uninstall
         run: scripts/test-pkg-install.sh dist/Agenthail-*.pkg
       - name: Build release archive
+        timeout-minutes: 30
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
