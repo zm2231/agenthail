@@ -46,7 +46,7 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$RUNNER_TEMP/Application.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security import "$RUNNER_TEMP/Installer.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/productsign
+          security import "$RUNNER_TEMP/Installer.p12" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/productbuild -T /usr/bin/productsign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -d user -s "$KEYCHAIN_PATH"
