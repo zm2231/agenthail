@@ -109,6 +109,7 @@ mkdir -p "$SKILL_HOME/.claude" "$SKILL_HOME/.codex/skills" "$SKILL_HOME/.hermes"
 
 install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >"$TMP/skill-install.log"
 grep -Fq 'run /config, and enable Remote Control for all sessions' "$TMP/skill-install.log"
+grep -Fq 'agenthail thread create codex "task" --json' "$TMP/skill-install.log"
 test -L "$SKILL_HOME/.claude/skills/agenthail-operations"
 test -L "$SKILL_HOME/.codex/skills/agenthail-operations"
 test -L "$SKILL_HOME/.hermes/skills/agenthail-operations"

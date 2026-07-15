@@ -1,6 +1,6 @@
 ---
 name: agenthail-operations
-description: "Operate AgentHail across Claude, Codex, and Notion: discover sessions, create Notion threads, send and observe work, manage queues, aliases, channels, relay subscriptions, daemon notifications, and the dashboard."
+description: "Operate AgentHail across Claude, Codex, and Notion: discover sessions, create Codex and Notion threads, send and observe work, manage queues, aliases, channels, relay subscriptions, daemon notifications, and the dashboard."
 ---
 
 # AgentHail Operations
@@ -53,7 +53,7 @@ from JSON discovery output when reporting partial availability.
 |---|---:|---:|---:|
 | Find existing sessions | yes | yes | yes |
 | Send and read replies | yes | yes | yes |
-| Start a new session or thread | manual | TTY or dashboard | CLI |
+| Start a new session or thread | manual | CLI, TTY, or dashboard | CLI |
 | Stream, interrupt, steer, compact | yes | yes | no |
 | Persistent session model | yes | yes | no |
 | One-message model override | no | yes | yes |
@@ -109,7 +109,20 @@ agenthail identify rm notes
 
 ## Start New Sessions And Threads
 
-Notion is the only surface with non-interactive CLI thread creation:
+Create a writable Codex thread non-interactively:
+
+```bash
+agenthail thread create codex "Implement the verified fix" --alias builder --json
+agenthail thread create codex --message - --cwd /path/to/project --model gpt-5.6-sol --approval on-request --json < task.md
+```
+
+The working directory defaults to the caller's current directory. The command
+creates and registers the thread, starts its first turn, and returns the session
+and delivery result. Keep the returned thread ID or alias. Valid approval modes
+are `untrusted`, `on-request`, and `never`. Use `--timeout` to bound the complete
+operation.
+
+Create a Notion thread non-interactively:
 
 ```bash
 agenthail send notion:new "Start a research thread" --reply --json
@@ -121,12 +134,12 @@ real persisted thread UUID. `notion:new:<name>` also stores `<name>` as a durabl
 AgentHail alias. Keep the UUID or alias for replies and future sends. Notion
 chooses the visible title from the first message.
 
-Start a writable Codex thread with `agenthail codex` in a human TTY. It uses the
-caller's current directory unless `--cd` is provided. The enabled AgentHail
-dashboard can also create one. `agenthail launch codex` starts Desktop with a
-writable bridge but does not itself create a thread. AgentHail does not expose a
-non-interactive CLI command for creating a Claude session. Open Claude manually,
-then discover it with `agenthail list`.
+Start an interactive writable Codex thread with `agenthail codex` in a human
+TTY. It uses the caller's current directory unless `--cd` is provided. The
+enabled AgentHail dashboard can also create one. `agenthail launch codex` starts
+Desktop with a writable bridge but does not itself create a thread. AgentHail
+does not expose a non-interactive CLI command for creating a Claude session.
+Open Claude manually, then discover it with `agenthail list`.
 
 ## Send, Read, And Control
 
@@ -269,16 +282,18 @@ The local dashboard binds to loopback behind a per-install token. Remote access
 uses a private Tailscale Serve route. Its authenticated URL and QR code contain
 the dashboard token. Share them only when the user explicitly requests access.
 
-## Launching Surfaces
+## Starting And Launching Surfaces
 
 ```bash
+agenthail thread create codex "Start this task" --alias builder --json
 agenthail launch codex
 agenthail codex
 ```
 
-`launch codex` opens Desktop with AgentHail's writable renderer bridge.
-`agenthail codex` starts an interactive writable terminal session and requires a
-human TTY. Claude and Notion must be opened and signed in manually.
+`thread create codex` starts a managed thread without a TTY. `launch codex`
+opens Desktop with AgentHail's writable renderer bridge. `agenthail codex`
+starts an interactive writable terminal session and requires a human TTY.
+Claude and Notion must be opened and signed in manually.
 
 ## Verification Boundary
 

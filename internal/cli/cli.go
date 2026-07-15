@@ -79,6 +79,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdQueue(rest)
 	case "history":
 		return a.cmdHistory(rest)
+	case "thread":
+		return a.cmdThread(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
 	case "channel":
@@ -113,6 +115,7 @@ Usage:
 
 Session commands:
   codex [args]                  Start a writable Codex terminal session
+  thread create codex "msg"    Start a writable Codex thread non-interactively
   list [--all]                   List active sessions (default 15, sorted by recency)
   send <target> "msg"|-       Send (--from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
@@ -334,6 +337,7 @@ func validateCommandFlags(command string, args []string) error {
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {bools: map[string]bool{"--full": true, "--json": true}}, "tail": {bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},

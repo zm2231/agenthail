@@ -14,6 +14,7 @@ test -x "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test -x "/Library/Application Support/Agenthail/runtime/node/bin/node"
 test -x /Applications/Agenthail.app/Contents/MacOS/Agenthail
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
+/usr/local/bin/agenthail help | grep -q 'thread create codex'
 test -L "$HOME/.codex/skills/agenthail-operations"
 
 if ! /usr/local/bin/agenthail daemon status >/dev/null 2>&1; then

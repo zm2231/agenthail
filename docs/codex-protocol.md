@@ -5,7 +5,7 @@ Agenthail implements Codex protocol methods only when they support a user-facing
 ## Supported now
 
 - Discover, read, resume, and observe threads
-- Start a managed thread and its first turn from the dashboard
+- Start a managed thread and its first turn from the CLI or dashboard
 - Send, steer, interrupt, compact, and change models
 - Stream active turn events into the dashboard
 

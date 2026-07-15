@@ -64,6 +64,7 @@ A surface is somewhere your agents already live. Claude Code and Codex carry the
 |---|---:|---:|---:|
 | Find existing sessions | yes | yes | yes |
 | Send and read replies | yes | yes | yes |
+| Start a new thread | manual | yes | yes |
 | Stream a turn | yes | yes | |
 | Steer / interrupt | yes | yes | |
 | Compact | yes | yes | |
@@ -88,7 +89,16 @@ Agenthail can read every discovered Codex thread, but sending depends on how the
 | Codex Desktop opened normally | yes | no |
 | Plain `codex` terminal | yes | no |
 
-Start a writable terminal thread with `agenthail codex`. It uses the directory where you run the command; pass Codex's `--cd` option to choose another project. For Desktop, quit Codex once and launch it through Agenthail:
+Start a writable terminal thread with `agenthail codex`. It uses the directory where you run the command; pass Codex's `--cd` option to choose another project. An agent or script can create a managed thread without opening a terminal UI:
+
+```bash
+agenthail thread create codex "Implement the verified fix" --alias builder --json
+agenthail thread create codex --message "Review this repository" --cwd /path/to/project --model gpt-5.6-sol --approval on-request --json
+```
+
+The working directory defaults to wherever the command runs. The JSON response contains the registered session, first-turn delivery result, and alias. Use `--message -` to read a long initial instruction from stdin.
+
+For Desktop, quit Codex once and launch it through Agenthail:
 
 ```bash
 agenthail launch codex
@@ -109,6 +119,7 @@ Once the surfaces you use are connected, agenthail finds their running sessions.
 ```bash
 agenthail list
 
+agenthail thread create codex "implement the fix" --alias builder --json
 agenthail send codex:test-session-23 "implement the fix" --reply
 agenthail relay add claude:test-session codex:test-session-23
 ```
