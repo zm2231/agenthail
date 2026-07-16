@@ -42,6 +42,8 @@ jobs:
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
           scripts/test-xcodegen-project.sh
+      - name: iOS release device build
+        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
       - name: iOS simulator tests
         run: |
           derived="$RUNNER_TEMP/ios-derived"

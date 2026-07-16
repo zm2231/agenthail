@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import SwiftUI
 
 struct QRCodeScanner: UIViewControllerRepresentable {
@@ -16,6 +16,7 @@ struct QRCodeScanner: UIViewControllerRepresentable {
 final class ScannerController: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
     var onCode: ((String) -> Void)?
     nonisolated(unsafe) private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "com.agenthail.camera")
     private var preview: AVCaptureVideoPreviewLayer?
     private var delivered = false
 
@@ -35,7 +36,7 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
         preview.videoGravity = .resizeAspectFill
         view.layer.addSublayer(preview)
         self.preview = preview
-        DispatchQueue.global(qos: .userInitiated).async { self.session.startRunning() }
+        sessionQueue.async { [session] in session.startRunning() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -46,7 +47,7 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
         guard !delivered, let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject, let value = object.stringValue else { return }
         delivered = true
-        session.stopRunning()
+        sessionQueue.async { [session] in session.stopRunning() }
         onCode?(value)
     }
 }
