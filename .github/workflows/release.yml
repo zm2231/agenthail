@@ -110,7 +110,7 @@ jobs:
           retention-days: 7
 
   ios-archive:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +171,7 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
+          test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" -ge 26
           xcodebuild archive \
             -project native/Agenthail.xcodeproj \
             -scheme AgenthailIOS \
@@ -226,6 +227,9 @@ jobs:
             printf 'IPA validation attempt %s of 3\n%s\n' "$attempt" "$output"
             if [[ "$result" -eq 0 ]] && ! grep -q 'ERROR:' <<<"$output"; then
               exit 0
+            fi
+            if grep -Eq 'STATE_ERROR\.VALIDATION_ERROR|Validation failed \([0-9]{3}\)' <<<"$output"; then
+              exit 1
             fi
             if [[ "$attempt" -lt 3 ]]; then
               sleep $((attempt * 10))
