@@ -228,7 +228,11 @@ jobs:
             if [[ "$result" -eq 0 ]] && ! grep -q 'ERROR:' <<<"$output"; then
               exit 0
             fi
-            if grep -Eq 'STATE_ERROR\.VALIDATION_ERROR|Validation failed \([0-9]{3}\)' <<<"$output"; then
+            validation_code="$(sed -nE 's/.*Validation failed \(([0-9]{3})\).*/\1/p' <<<"$output" | head -n 1)"
+            if [[ "$validation_code" =~ ^4[0-9]{2}$ ]] && [[ "$validation_code" != "429" ]]; then
+              exit 1
+            fi
+            if [[ -z "$validation_code" ]] && grep -q 'STATE_ERROR\.VALIDATION_ERROR' <<<"$output"; then
               exit 1
             fi
             if [[ "$attempt" -lt 3 ]]; then
