@@ -116,6 +116,6 @@ if [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
 	xcrun stapler validate "$output"
 	spctl --assess --type install --verbose=2 "$output"
 fi
-shasum -a 256 "$output" > "$checksum"
+(cd "$dist" && shasum -a 256 "$(basename "$output")" > "$(basename "$checksum")")
 echo "package: $output"
 echo "checksum: $checksum"

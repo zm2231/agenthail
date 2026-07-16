@@ -3,8 +3,19 @@ set -euo pipefail
 
 pkg="${1:?usage: scripts/test-pkg-artifact.sh <Agenthail.pkg>}"
 pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
+checksum="$pkg.sha256"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+
+if [ -f "$checksum" ]; then
+	checksum_name="$(awk 'NF {print $2; exit}' "$checksum")"
+	checksum_name="${checksum_name#\*}"
+	if [ "$checksum_name" != "$(basename "$pkg")" ]; then
+		echo "error: package checksum must name $(basename "$pkg"), not $checksum_name" >&2
+		exit 1
+	fi
+	(cd "$(dirname "$pkg")" && shasum -a 256 -c "$(basename "$checksum")")
+fi
 
 pkgutil --check-signature "$pkg" || [ "${AGENTHAIL_ALLOW_UNNOTARIZED:-0}" = "1" ]
 pkgutil --expand-full "$pkg" "$work/expanded"
