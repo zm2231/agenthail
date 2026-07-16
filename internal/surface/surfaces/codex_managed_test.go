@@ -212,6 +212,7 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("XPC_SERVICE_NAME", "")
 	status := NewCodex("").RuntimeStatus(context.Background())
 	if !status.Reachable || status.Durable || status.Backend != "pid" {
 		t.Fatalf("status=%+v", status)
@@ -266,6 +267,7 @@ func TestCodexManagedRuntimeStatusRejectsUnknownSupervisor(t *testing.T) {
 	}
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
 	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "unknown")
+	t.Setenv("XPC_SERVICE_NAME", "")
 	status := NewCodex("").RuntimeStatus(context.Background())
 	if !status.Reachable || status.Durable {
 		t.Fatalf("status=%+v", status)
