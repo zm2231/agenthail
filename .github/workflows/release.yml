@@ -201,7 +201,7 @@ jobs:
   publish:
     needs: [push-relay-check, macos-package, ios-archive]
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 55
     env:
       RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
     steps:
@@ -214,6 +214,11 @@ jobs:
         with:
           name: agenthail-ios-release
           path: ios
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: push-relay/package-lock.json
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -242,11 +247,13 @@ jobs:
           output="$(xcrun altool --upload-app -f ios/Agenthail.ipa -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1)"
           printf '%s\n' "$output"
           if grep -q 'ERROR:' <<<"$output"; then exit 1; fi
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: push-relay/package-lock.json
+      - name: Wait for TestFlight processing
+        env:
+          ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          ASC_BUILD_NUMBER: ${{ github.run_number }}
+          ASC_MARKETING_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: node push-relay/scripts/wait-testflight-build.mjs
       - name: Deploy validated relay
         working-directory: push-relay
         env:
