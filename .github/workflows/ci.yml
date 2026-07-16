@@ -41,8 +41,7 @@ jobs:
       - name: Verify generated iOS project
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
-          (cd native && xcodegen generate --spec project.yml)
-          git diff --exit-code -- native/Agenthail.xcodeproj native/iOS/Info.plist
+          scripts/test-xcodegen-project.sh
       - name: iOS simulator tests
         run: |
           derived="$RUNNER_TEMP/ios-derived"
