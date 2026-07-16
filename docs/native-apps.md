@@ -30,7 +30,7 @@ The Mac daemon triggers notifications when a newly observed turn completes or fa
 
 Production deployment requires an Apple Push Notification authentication key created in the Apple Developer portal for the Agenthail team. An App Store Connect API key cannot sign APNs requests. The Worker expects `APNS_KEY_P8`, `APNS_KEY_ID`, `APPLE_TEAM_ID`, and `APNS_TOPIC` secrets. `APNS_TOPIC` must match the iOS bundle ID.
 
-The release workflow builds and validates the Mac package, iPhone archive, and relay before publication. Its final job creates a draft GitHub release, deploys and checks the matching relay, uploads the validated iPhone build, and only then makes the GitHub release public. `/health` reports the deployed relay version, protocol, and capabilities. If a relay deployment is unhealthy, redeploy the last known-good tag from `push-relay` and verify `/health` before retrying the native release.
+The release workflow builds and validates the Mac package, iPhone archive, and relay before publication. Its final job creates a draft GitHub release, uploads the validated iPhone build, deploys and checks the matching relay, and only then makes the GitHub release public. `/health` reports the deployed relay version, protocol, and capabilities. If a relay deployment is unhealthy, redeploy the last known-good tag from `push-relay` and verify `/health` before retrying the native release.
 
 ## Protocol compatibility
 
