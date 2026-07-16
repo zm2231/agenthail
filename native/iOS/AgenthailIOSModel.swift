@@ -267,6 +267,11 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    func openNotificationSettings() {
+        guard let url = URL(string: UIApplication.openNotificationSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
     func turnOffNotifications() {
         Task { await disableNotifications(status: "Not enabled") }
     }

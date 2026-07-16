@@ -350,6 +350,8 @@ struct SettingsView: View {
                 LabeledContent("Status", value: model.notificationStatus)
                 if model.notificationStatus == "Enabled" {
                     Button("Turn off notifications", role: .destructive) { model.turnOffNotifications() }
+                } else if model.notificationStatus == "Not allowed" {
+                    Button("Open iOS Settings") { model.openNotificationSettings() }
                 } else {
                     Button("Enable notifications") { model.requestNotifications() }
                 }
