@@ -38,6 +38,7 @@ type App struct {
 	Revision            string
 	BuiltAt             string
 	daemonServiceLoaded func() bool
+	update              *updateDeps
 }
 
 func (a *App) Run(args []string) error {
@@ -99,6 +100,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdDashboard(rest)
 	case "version", "--version":
 		return a.cmdVersion(rest)
+	case "update", "upgrade":
+		return a.cmdUpdate(rest)
 	case "help", "-h", "--help":
 		a.usage()
 		return nil
@@ -174,6 +177,8 @@ Dashboard (optional):
 Other:
   launch <surface>              Launch a surface app with debug settings
   doctor [--json]               Health check (nonzero when any surface is unhealthy)
+  update [--check] [--json]     Install the latest Agenthail release
+  upgrade [--check] [--json]    Alias for update
   version [--json]              Build and revision information
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
@@ -340,6 +345,7 @@ func validateCommandFlags(command string, args []string) error {
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
+		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]

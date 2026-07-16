@@ -44,6 +44,15 @@ brew services start agenthail
 
 Remove a package installation with `sudo agenthail-uninstall`. Local registry, queue, history, and dashboard data are preserved unless you pass `--purge-data`.
 
+Update the complete installation, including the CLI, daemon, sidecars, skill, and menu bar app:
+
+```bash
+agenthail update --check
+agenthail update
+```
+
+`upgrade` is an alias for `update`. Package updates are downloaded from the latest GitHub release, checked against the published SHA-256 checksum, verified against Agenthail's Apple developer identity and notarization, then installed with the macOS system installer. Homebrew installations update through Homebrew. Source installations stay explicit with `git pull` and `./install.sh`.
+
 The skill is linked into any supported agent home already on your Mac: `~/.claude/skills`, `~/.codex/skills`, and `~/.hermes/skills`. Agenthail does not create homes for agents you do not use and never overwrites a real skill directory at the same path.
 
 To install from source, you need Go, Xcode Command Line Tools, Node.js, Python 3.10 or newer, and Chrome:

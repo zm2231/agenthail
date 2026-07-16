@@ -13,6 +13,7 @@ errors. Do not build a second target picker or choose between ambiguous matches.
 
 ```bash
 agenthail version --json
+agenthail update --check
 agenthail doctor --json
 agenthail list --json
 ```
@@ -22,6 +23,11 @@ release. It includes its own Python and Node runtimes, installs the launchd
 daemon and companion, and does not require Homebrew or developer tools.
 Homebrew remains an alternative with `brew install zm2231/tap/agenthail`
 followed by `brew services start agenthail`.
+
+Update a package or Homebrew installation with `agenthail update`. Use
+`agenthail update --check` to check a package installation without changing it.
+`agenthail upgrade` is an alias. Source checkouts update with `git pull` and
+`./install.sh`.
 
 For a source checkout:
 
@@ -303,6 +309,7 @@ Non-mutating checks:
 
 ```bash
 agenthail version --json
+agenthail update --check
 agenthail doctor --json
 agenthail list --json
 agenthail daemon status

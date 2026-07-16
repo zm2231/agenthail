@@ -41,6 +41,7 @@ mkdir -p "$work/home/.claude/skills" "$work/home/.codex"
 mkdir -p "$work/user-skill"
 ln -s "$work/user-skill" "$work/home/.claude/skills/agenthail-operations"
 env -i HOME="$work/home" AGENTHAIL_ROOT="$root" AGENTHAIL_MAC_APP="$app/Contents/MacOS/Agenthail" PATH=/usr/bin:/bin "$payload/usr/local/bin/agenthail" version --json | jq -e '.version and .revision'
+env -i HOME="$work/home" AGENTHAIL_ROOT="$root" AGENTHAIL_MAC_APP="$app/Contents/MacOS/Agenthail" PATH=/usr/bin:/bin "$payload/usr/local/bin/agenthail" update --help | grep -q 'agenthail update'
 test -L "$work/home/.codex/skills/agenthail-operations"
 test "$(readlink "$work/home/.codex/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
 test "$(readlink "$work/home/.claude/skills/agenthail-operations")" = "$work/user-skill"

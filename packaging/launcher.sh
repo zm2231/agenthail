@@ -17,9 +17,7 @@ if [ -f "$skill/SKILL.md" ]; then
 		link="$runtime/skills/agenthail-operations"
 		mkdir -p "$runtime/skills"
 		if [ -L "$link" ]; then
-			if [ "$(readlink "$link")" = "$skill" ]; then
-				ln -sfn "$skill" "$link"
-			fi
+			continue
 		elif [ ! -e "$link" ]; then
 			ln -s "$skill" "$link"
 		fi

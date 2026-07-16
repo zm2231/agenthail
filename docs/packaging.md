@@ -51,6 +51,8 @@ The `.pkg` verifier expands the real artifact, checks signatures and expected fi
 
 The release runner then installs the real package, verifies the supervised daemon, dashboard, skills, and doctor output, installs the same package again to exercise upgrade and daemon replacement, and runs the packaged uninstaller. Publication does not run until that lifecycle passes.
 
+Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, pins the Developer ID Installer team to `Q5Y75DVV4M`, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and companion app together.
+
 ## Uninstall
 
 ```bash
