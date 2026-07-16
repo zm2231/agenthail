@@ -218,9 +218,20 @@ jobs:
           ASC_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
-          output="$(xcrun altool --validate-app -f "$RUNNER_TEMP/export/Agenthail.ipa" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1)"
-          printf '%s\n' "$output"
-          if grep -q 'ERROR:' <<<"$output"; then exit 1; fi
+          for attempt in 1 2 3; do
+            set +e
+            output="$(xcrun altool --validate-app -f "$RUNNER_TEMP/export/Agenthail.ipa" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1)"
+            result=$?
+            set -e
+            printf 'IPA validation attempt %s of 3\n%s\n' "$attempt" "$output"
+            if [[ "$result" -eq 0 ]] && ! grep -q 'ERROR:' <<<"$output"; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: agenthail-ios-release
