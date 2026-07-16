@@ -79,9 +79,9 @@ while IFS= read -r path; do
 	fi
 	if file "$path" | grep -q 'Mach-O'; then
 		if [ "$app_identity" = "-" ] && [ "$path" = "$payload/runtime/python/bin/python3.13" ]; then
-			codesign "${sign_args[@]}" --entitlements "$ROOT/packaging/python-local-entitlements.plist" "$path"
+			"$ROOT/scripts/codesign-with-retry.sh" "${sign_args[@]}" --entitlements "$ROOT/packaging/python-local-entitlements.plist" "$path"
 		else
-			codesign "${sign_args[@]}" "$path"
+			"$ROOT/scripts/codesign-with-retry.sh" "${sign_args[@]}" "$path"
 		fi
 	fi
 done < <(find "$payload" -type f -perm -111 -o -type f \( -name '*.dylib' -o -name '*.so' \))

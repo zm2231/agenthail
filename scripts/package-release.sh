@@ -51,7 +51,7 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 		echo "error: production macOS releases require AGENTHAIL_NOTARY_PROFILE" >&2
 		exit 1
 	fi
-	codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$STAGE/agenthail"
+	"$ROOT/scripts/codesign-with-retry.sh" --force --options runtime --sign "$CODESIGN_IDENTITY" "$STAGE/agenthail"
 	codesign --verify --strict --verbose=2 "$STAGE/agenthail"
 	AGENTHAIL_CLI_SOURCE="$STAGE/agenthail" AGENTHAIL_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" AGENTHAIL_APP_VERSION="$VERSION" AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" "$ROOT/scripts/build-macos-app.sh" "$STAGE/Agenthail.app" "$GOARCH_VALUE" >/dev/null
 fi

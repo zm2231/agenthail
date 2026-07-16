@@ -66,6 +66,7 @@ jobs:
       - name: Installer lint
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
+          scripts/test-codesign-retry.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
 
