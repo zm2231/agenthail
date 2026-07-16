@@ -88,7 +88,9 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 	}
 	status.Reachable = version.Status == "running"
 	status.Backend = version.Backend
-	status.Durable = version.Backend != "" && version.Backend != "pid" || status.Reachable && strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_SUPERVISOR")) == "homebrew"
+	supervisor := strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_SUPERVISOR"))
+	launchdService := strings.TrimSpace(os.Getenv("XPC_SERVICE_NAME")) == "com.agenthail.daemon"
+	status.Durable = version.Backend != "" && version.Backend != "pid" || status.Reachable && (supervisor == "homebrew" || launchdService)
 	if status.Reachable && !status.Durable {
 		status.Detail = "reachable but not supervised across reboot"
 	}
