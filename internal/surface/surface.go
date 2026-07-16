@@ -164,8 +164,31 @@ type GoalState struct {
 }
 
 type StreamEvent struct {
-	Kind string `json:"kind"`
-	Text string `json:"text"`
+	Kind    string        `json:"kind"`
+	Text    string        `json:"text"`
+	Context *ContextUsage `json:"context,omitempty"`
+}
+
+type ContextUsage struct {
+	UsedTokens            int64     `json:"usedTokens"`
+	ContextWindow         int64     `json:"contextWindow"`
+	CumulativeTokens      int64     `json:"cumulativeTokens,omitempty"`
+	InputTokens           int64     `json:"inputTokens,omitempty"`
+	CachedInputTokens     int64     `json:"cachedInputTokens,omitempty"`
+	OutputTokens          int64     `json:"outputTokens,omitempty"`
+	ReasoningOutputTokens int64     `json:"reasoningOutputTokens,omitempty"`
+	Compacting            bool      `json:"compacting"`
+	CompactionCount       int       `json:"compactionCount"`
+	LastCompactedAt       time.Time `json:"lastCompactedAt,omitempty"`
+	PreCompactTokens      int64     `json:"preCompactTokens,omitempty"`
+	PostCompactTokens     int64     `json:"postCompactTokens,omitempty"`
+	ReclaimedTokens       int64     `json:"reclaimedTokens,omitempty"`
+	WindowEstimated       bool      `json:"windowEstimated,omitempty"`
+	UpdatedAt             time.Time `json:"updatedAt,omitempty"`
+}
+
+type ContextUsageProvider interface {
+	ContextUsage(ctx context.Context, sess *Session) (*ContextUsage, error)
 }
 
 type Capabilities struct {

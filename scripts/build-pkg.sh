@@ -78,7 +78,11 @@ while IFS= read -r path; do
 		continue
 	fi
 	if file "$path" | grep -q 'Mach-O'; then
-		codesign "${sign_args[@]}" "$path"
+		if [ "$app_identity" = "-" ] && [ "$path" = "$payload/runtime/python/bin/python3.13" ]; then
+			codesign "${sign_args[@]}" --entitlements "$ROOT/packaging/python-local-entitlements.plist" "$path"
+		else
+			codesign "${sign_args[@]}" "$path"
+		fi
 	fi
 done < <(find "$payload" -type f -perm -111 -o -type f \( -name '*.dylib' -o -name '*.so' \))
 codesign --verify --strict --verbose=2 "$payload/agenthail"

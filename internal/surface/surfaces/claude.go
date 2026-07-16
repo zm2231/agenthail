@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -21,6 +22,8 @@ type Claude struct {
 	profile      string
 	home         string
 	cookieBridge string
+	contextMu    sync.Mutex
+	contextState map[string]*claudeContextState
 }
 
 func NewClaude(profile, home string) *Claude {
@@ -398,11 +401,20 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 	}
 	baseline := len(initial)
 	lastText := ""
+	var lastContext surface.ContextUsage
+	var nextContextPoll time.Time
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		if !time.Now().Before(nextContextPoll) {
+			nextContextPoll = time.Now().Add(time.Second)
+			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
+				lastContext = *usage
+				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+			}
 		}
 		turns, err := readClaudeTurns(path)
 		if err != nil {

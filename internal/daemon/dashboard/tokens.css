@@ -757,6 +757,23 @@ select {
   text-transform: uppercase;
   width: min(100%, var(--conversation-width));
 }
+.thread-stats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.context-usage {
+  color: var(--good);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.context-usage.warning,
+.context-usage.compacting {
+  color: var(--accent);
+}
+.context-usage.critical {
+  color: var(--bad);
+}
 .chat-body {
   width: min(100%, var(--conversation-width));
   height: calc(100vh - 340px);
@@ -1627,6 +1644,9 @@ select {
   .thread-meta {
     padding: 9px 0;
     font-size: 9px;
+  }
+  .thread-stats {
+    gap: 9px;
   }
   .chat-actions {
     justify-content: flex-start;

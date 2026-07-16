@@ -38,9 +38,10 @@ func (c *desktopCodexClient) Request(ctx context.Context, method string, params 
 func (c *desktopCodexClient) Close() error { return c.conn.close() }
 
 type managedCodexClient struct {
-	ws   *websocket.Conn
-	mu   sync.Mutex
-	next int
+	ws            *websocket.Conn
+	mu            sync.Mutex
+	next          int
+	notifications []codexEvent
 }
 
 func managedCodexSocketPath() string {
@@ -114,6 +115,13 @@ func (c *managedCodexClient) Request(ctx context.Context, method string, params 
 		}
 		responseID, ok := response["id"].(float64)
 		if !ok || int(responseID) != id {
+			if method, _ := response["method"].(string); method != "" {
+				params, _ := response["params"].(map[string]any)
+				c.notifications = append(c.notifications, codexEvent{Method: method, Params: params})
+				if len(c.notifications) > 1000 {
+					c.notifications = c.notifications[len(c.notifications)-1000:]
+				}
+			}
 			continue
 		}
 		if envelope, ok := response["error"].(map[string]any); ok {
@@ -121,6 +129,14 @@ func (c *managedCodexClient) Request(ctx context.Context, method string, params 
 		}
 		return response, nil
 	}
+}
+
+func (c *managedCodexClient) DrainNotifications() []codexEvent {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	events := c.notifications
+	c.notifications = nil
+	return events
 }
 
 func (c *managedCodexClient) Close() error { return c.ws.Close() }

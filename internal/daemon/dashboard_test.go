@@ -31,6 +31,25 @@ func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	}
 }
 
+func TestDashboardSessionIncludesContextUsage(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.contextUsage = &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}
+	response := httptest.NewRecorder()
+	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Context surface.ContextUsage `json:"context"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Context.UsedTokens != 150000 || body.Context.ContextWindow != 200000 || body.Context.CompactionCount != 2 {
+		t.Fatalf("context=%+v", body.Context)
+	}
+}
+
 func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -211,6 +230,21 @@ func TestDashboardExposesConversationNamingControls(t *testing.T) {
 		!strings.Contains(script, `data-tool="alias"`) ||
 		!strings.Contains(script, `"/name": ["alias", { alias: argument }]`) {
 		t.Fatal("dashboard is missing conversation naming controls")
+	}
+}
+
+func TestDashboardShowsCompactContextUsage(t *testing.T) {
+	source := string(dashboardJS) + string(dashboardHTML) + string(dashboardCSS)
+	for _, fragment := range []string{
+		`id="context-usage"`,
+		`delta.kind === "context"`,
+		`Context ${compactTokenCount(context.usedTokens)}`,
+		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
+		`.context-usage.critical`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard context surface missing %q", fragment)
+		}
 	}
 }
 
@@ -407,14 +441,14 @@ func TestDashboardCreatesAndRegistersNotionThread(t *testing.T) {
 func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	fake.caps = surface.Capabilities{Stream: true}
-	fake.streamEvents = []surface.StreamEvent{{Kind: "text", Text: "hello"}, {Kind: "tool_use", Text: "tests"}, {Kind: "done"}}
+	fake.streamEvents = []surface.StreamEvent{{Kind: "context", Context: &surface.ContextUsage{UsedTokens: 90000, ContextWindow: 200000}}, {Kind: "text", Text: "hello"}, {Kind: "tool_use", Text: "tests"}, {Kind: "done"}}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/stream?id=from", nil)
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	body := response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(body, `"kind":"text","text":"hello"`) || !strings.Contains(body, `"kind":"done"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(body, `"kind":"context"`) || !strings.Contains(body, `"usedTokens":90000`) || !strings.Contains(body, `"kind":"text","text":"hello"`) || !strings.Contains(body, `"kind":"done"`) {
 		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), body)
 	}
 }

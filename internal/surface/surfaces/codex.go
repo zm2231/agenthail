@@ -24,6 +24,8 @@ type Codex struct {
 	bridgeRetry  time.Time
 	runtimeMu    sync.Mutex
 	runtimeReady bool
+	contextMu    sync.Mutex
+	contextState map[string]*codexContextState
 }
 
 func NewCodex(remoteURL string) *Codex {
@@ -589,6 +591,8 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		cursor = 0
 	}
 	emittedText := ""
+	var lastContext surface.ContextUsage
+	var nextContextPoll time.Time
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		select {
@@ -607,7 +611,15 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		}
 		cursor = float64(batch.Cursor)
 		for _, event := range batch.Events {
-			if !codexContainsID(event.Params, sess.ID) || (uuid != "" && !codexContainsID(event.Params, uuid)) {
+			if !codexContainsID(event.Params, sess.ID) {
+				continue
+			}
+			if usage, ok := c.applyContextEvent(sess, event, lastContext); ok {
+				lastContext = *usage
+				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+				continue
+			}
+			if uuid != "" && !codexContainsID(event.Params, uuid) {
 				continue
 			}
 			method := event.Method
@@ -643,6 +655,13 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				return nil
 			}
 		}
+		if !time.Now().Before(nextContextPoll) {
+			nextContextPoll = time.Now().Add(time.Second)
+			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
+				lastContext = *usage
+				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+			}
+		}
 		time.Sleep(300 * time.Millisecond)
 	}
 	return fmt.Errorf("stream timed out after %s", timeout)
@@ -660,6 +679,8 @@ func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid s
 func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	emitted := ""
 	baselineTurnID := ""
+	var lastContext surface.ContextUsage
+	var nextContextPoll time.Time
 	if uuid == "" {
 		thread, readErr := c.readThread(ctx, client, sess.ID)
 		if readErr != nil {
@@ -679,6 +700,24 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		thread, err := c.readThread(ctx, client, sess.ID)
 		if err != nil {
 			return err
+		}
+		if source, ok := client.(interface{ DrainNotifications() []codexEvent }); ok {
+			for _, event := range source.DrainNotifications() {
+				if !codexContainsID(event.Params, sess.ID) {
+					continue
+				}
+				if usage, matched := c.applyContextEvent(sess, event, lastContext); matched {
+					lastContext = *usage
+					onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+				}
+			}
+		}
+		if !time.Now().Before(nextContextPoll) {
+			nextContextPoll = time.Now().Add(time.Second)
+			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
+				lastContext = *usage
+				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+			}
 		}
 		turn := codexTurnByID(thread, uuid)
 		if uuid == "" && len(thread.Turns) > 0 {

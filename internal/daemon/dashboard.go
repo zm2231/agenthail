@@ -1139,6 +1139,11 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	capabilities, readOnly, readOnlyReason := dashboardCapabilities(*session, adapter.Capabilities())
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason}
+	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
+		if usage, usageErr := provider.ContextUsage(ctx, session); usageErr == nil && usage != nil {
+			response["context"] = usage
+		}
+	}
 	if capabilities.Goal {
 		if goal, goalErr := adapter.GoalGet(ctx, session); goalErr == nil {
 			response["goal"] = goal

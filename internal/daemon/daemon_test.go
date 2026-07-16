@@ -35,6 +35,7 @@ type daemonSurface struct {
 	caps         surface.Capabilities
 	streamEvents []surface.StreamEvent
 	streamErr    error
+	contextUsage *surface.ContextUsage
 }
 
 type runtimeDaemonSurface struct {
@@ -155,6 +156,9 @@ func (f *daemonSurface) Models(context.Context) ([]surface.ModelOption, error) {
 func (*daemonSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
 func (*daemonSurface) Steer(context.Context, *surface.Session, string) error { return nil }
 func (f *daemonSurface) Capabilities() surface.Capabilities                  { return f.caps }
+func (f *daemonSurface) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
+	return f.contextUsage, nil
+}
 
 func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, surface.Session, surface.Session) {
 	t.Helper()

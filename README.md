@@ -157,7 +157,7 @@ The other half is you being able to reach them, especially when you are not at t
 agenthail dashboard enable
 ```
 
-The dashboard is one live view of every agent and its status. Check in, steer a turn, queue what comes next, or pass one agent's result to another. It binds to `127.0.0.1:7412` behind a per-install access token, and nothing listens until you enable it.
+The dashboard is one live view of every agent and its status. Check in, see how much context a Claude or Codex conversation is using, steer a turn, queue what comes next, or pass one agent's result to another. It binds to `127.0.0.1:7412` behind a per-install access token, and nothing listens until you enable it.
 
 Then walk away. The daemon keeps the handoffs moving and holds the next instructions for whichever agent is still busy. The dashboard stays available for checking progress and steering work.
 

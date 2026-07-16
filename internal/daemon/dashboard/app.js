@@ -248,6 +248,11 @@ function startLiveStream() {
   source.addEventListener("delta", (event) => {
     if (app.liveSessionID !== session.id || app.selected?.id !== session.id) return;
     const delta = JSON.parse(event.data);
+    if (delta.kind === "context" && delta.context) {
+      app.history.context = delta.context;
+      renderContextUsage(delta.context);
+      return;
+    }
     if (delta.kind === "text") app.liveText += delta.text || "";
     if (delta.kind === "tool_use" && delta.text && !app.liveTools.includes(delta.text)) app.liveTools.push(delta.text);
     if (delta.kind === "done") {
@@ -888,7 +893,7 @@ async function selectSession(id, focus = false) {
   }
 }
 function renderChat() {
-  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context } = app.history || {};
   const session = app.selected;
   const controls = [];
   if (session.status === "busy" && capabilities.steer)
@@ -923,6 +928,7 @@ function renderChat() {
   $("#chat-subtitle").textContent = conversationMeta(session, model);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
+  renderContextUsage(context);
   startLiveStream();
   const settings = [`<form class="session-tools" data-tool="alias"><label><span>Conversation name</span><input name="alias" value="${escape(session.alias || "")}" maxlength="80" placeholder="research"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save name</button></div></form>`];
   if (capabilities.goal)
@@ -980,6 +986,43 @@ function renderChat() {
       ? chatBody.scrollHeight
       : Math.min(previousScrollTop, chatBody.scrollHeight - chatBody.clientHeight);
   }
+}
+function compactTokenCount(value) {
+  const count = Number(value || 0);
+  if (count >= 1000000) return `${(count / 1000000).toFixed(count >= 10000000 ? 0 : 1).replace(/\.0$/, "")}m`;
+  if (count >= 1000) return `${Math.round(count / 1000)}k`;
+  return String(count);
+}
+function renderContextUsage(context) {
+  const indicator = $("#context-usage");
+  if (!context || (!context.contextWindow && !context.compactionCount)) {
+    indicator.hidden = true;
+    indicator.textContent = "";
+    indicator.className = "";
+    return;
+  }
+  const percent = context.contextWindow
+    ? Math.min(999, Math.round((context.usedTokens / context.contextWindow) * 100))
+    : 0;
+  indicator.hidden = false;
+  indicator.className = context.compacting
+    ? "context-usage compacting"
+    : percent >= 90
+      ? "context-usage critical"
+      : percent >= 80
+        ? "context-usage warning"
+        : "context-usage";
+  indicator.textContent = context.compacting
+    ? "Compacting context"
+    : context.contextWindow
+      ? `Context ${compactTokenCount(context.usedTokens)} / ${compactTokenCount(context.contextWindow)} · ${percent}%`
+      : `${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`;
+  const details = [];
+  if (context.windowEstimated) details.push("Claude context window is estimated from the active model");
+  if (context.compactionCount) details.push(`${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`);
+  if (context.preCompactTokens && context.postCompactTokens)
+    details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);
+  indicator.title = details.join(". ");
 }
 async function action(action, extra = {}) {
   const networkAction =
@@ -1178,6 +1221,10 @@ document.addEventListener("click", async (event) => {
       message: $("#message").value.trim(),
     });
     const queued = result?.result?.disposition === "queued";
+    if (control.dataset.action === "compact" && !queued && app.history?.context) {
+      app.history.context.compacting = true;
+      renderContextUsage(app.history.context);
+    }
     toast(queued ? `${control.textContent} queued until this turn finishes.` : `${control.textContent} requested.`);
     await load();
     await selectSession(app.selected.id);
