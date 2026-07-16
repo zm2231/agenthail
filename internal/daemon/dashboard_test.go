@@ -93,6 +93,33 @@ func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 	}
 }
 
+func TestDashboardCompactQueuesWorkingClaudeSession(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "claude", Surface: surface.KindClaude, Name: "claude", Status: surface.StatusBusy}
+	if err := registry.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	fake := &daemonSurface{
+		kind:         surface.KindClaude,
+		sessions:     map[string]surface.Session{session.ID: session},
+		observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.StatusBusy, ActiveTurnID: "turn"}},
+		rejectBusy:   true,
+		accepted:     true,
+		caps:         surface.Capabilities{Compact: true},
+	}
+	d := New(registry, []surface.Surface{fake})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"compact","sessionId":"claude"}`))
+	d.dashboardActionHandler(response, request)
+	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"disposition":"queued"`) {
+		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
+	}
+	rows, err := registry.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Message != "/compact" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
 func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -542,6 +569,8 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
 		`await action("interrupt")`,
 		`await action("steer", { message })`,
+		`"Compact queued and will run when this turn finishes."`,
+		"queued until this turn finishes.",
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)

@@ -1044,7 +1044,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
 			return
 		}
-		err = adapter.Compact(ctx, session)
+		result, err = (delivery.Dispatcher{Registry: d.Registry}).Compact(ctx, adapter, session)
 	case "goal-set":
 		if !adapter.Capabilities().Goal || strings.TrimSpace(request.Message) == "" {
 			http.Error(w, "this session cannot accept a goal", http.StatusBadRequest)

@@ -78,6 +78,81 @@ func TestClaudeInterruptedTurnIsNotReportedBusyOrComplete(t *testing.T) {
 	}
 }
 
+func TestClaudeCompletedTurnClearsPreviouslyBusyStatus(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	claude := NewClaude("Default", t.TempDir())
+	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusBusy, Transcript: path})
+	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" || observation.CompletedTurnID != "m1" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestClaudeCompactRemainsBusyUntilCommandCompletes(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"user","uuid":"compact","message":{"content":"/compact"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	session := &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path}
+
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "compact" {
+		t.Fatalf("pending observation=%+v err=%v", observation, err)
+	}
+
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("{\"type\":\"user\",\"message\":{\"content\":\"<command-name>/compact</command-name><command-args></command-args>\"}}\n{\"type\":\"system\",\"subtype\":\"local_command\",\"content\":\"<local-command-stdout>Not enough messages to compact.</local-command-stdout>\"}\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
+		t.Fatalf("completed observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestClaudeCompactBoundaryDoesNotConsumeFollowingCompact(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"c1","message":{"content":"/compact"}}
+{"type":"user","uuid":"c2","message":{"content":"/compact"}}
+{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}
+{"type":"user","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}
+{"type":"user","message":{"content":"<local-command-stdout>Compacted</local-command-stdout>"}}`)
+	pending, err := claudeCompactPending(path)
+	if err != nil || !pending {
+		t.Fatalf("pending=%v err=%v", pending, err)
+	}
+}
+
+func TestClaudePendingCompactDoesNotReviveOfflineSession(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"compact","message":{"content":"/compact"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusOffline, Transcript: path})
+	if err != nil || observation.Status != surface.StatusOffline || observation.ActiveTurnID != "" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestClaudeCompletedTurnDoesNotReviveOfflineSession(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	claude := NewClaude("Default", t.TempDir())
+	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusOffline, Transcript: path})
+	if err != nil || observation.Status != surface.StatusOffline || observation.ActiveTurnID != "" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+}
+
 func TestClaudeUserInterruptMarkerTerminatesPartialTurn(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"long answer"}}

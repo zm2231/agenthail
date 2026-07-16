@@ -58,3 +58,22 @@ func TestClaudePostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeCompactPostsRemoteSlashCommandWithoutTranscriptConfirmation(t *testing.T) {
+	original := claudeSendRequest
+	t.Cleanup(func() { claudeSendRequest = original })
+	var body string
+	claudeSendRequest = func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
+			t.Fatalf("method=%s url=%s", method, url)
+		}
+		body = requestBody
+		return 200, `{}`, nil
+	}
+	if err := (&Claude{}).Compact(context.Background(), &surface.Session{ID: "session_test"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, `"content":"/compact"`) {
+		t.Fatalf("body=%s", body)
+	}
+}

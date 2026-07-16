@@ -100,6 +100,60 @@ func readClaudeTurns(path string) ([]claudeTurn, error) {
 	return turns, nil
 }
 
+func claudeCompactPending(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	pending := 0
+	commandMarkers := 0
+	completedWithBoundary := 0
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
+	for scanner.Scan() {
+		var record claudeRecord
+		if json.Unmarshal(scanner.Bytes(), &record) != nil {
+			continue
+		}
+		if record.Type == "user" {
+			content := strings.TrimSpace(transcriptText(record.Message.Content))
+			switch {
+			case content == "/compact":
+				pending++
+			case strings.Contains(content, "<command-name>/compact</command-name>"):
+				commandMarkers++
+			case commandMarkers > 0 && strings.HasPrefix(content, "<local-command-stdout>"):
+				commandMarkers--
+				if completedWithBoundary > 0 {
+					completedWithBoundary--
+				} else if pending > 0 {
+					pending--
+				}
+			}
+			continue
+		}
+		if record.Type == "system" && record.Subtype == "compact_boundary" && pending > 0 {
+			pending--
+			completedWithBoundary++
+			continue
+		}
+		if record.Type == "system" && record.Subtype == "local_command" && commandMarkers > 0 {
+			commandMarkers--
+			if completedWithBoundary > 0 {
+				completedWithBoundary--
+			} else if pending > 0 {
+				pending--
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("scan Claude transcript: %w", err)
+	}
+	return pending > 0, nil
+}
+
 func isClaudeInterruptMarker(text string) bool {
 	text = strings.TrimSpace(text)
 	return strings.HasPrefix(text, "[Request interrupted") || strings.HasPrefix(text, "[Request to interrupt")
@@ -167,8 +221,7 @@ func isHumanTranscriptText(text string) bool {
 	if text == "" {
 		return false
 	}
-	// Claude writes slash commands twice: once as the literal command and once
-	// as tagged local-command metadata. Neither entry represents an agent turn.
+	// Claude writes slash commands as literal and tagged records; neither is an agent turn.
 	if text == "/compact" || text == "/model" || strings.HasPrefix(text, "/model ") {
 		return false
 	}

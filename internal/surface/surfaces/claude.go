@@ -285,13 +285,27 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if err != nil {
 		return nil, err
 	}
+	compactPending, err := claudeCompactPending(path)
+	if err != nil {
+		return nil, err
+	}
 	if len(turns) == 0 {
+		if compactPending && observation.Status != surface.StatusOffline && observation.Status != surface.StatusUnknown {
+			observation.Status = surface.StatusBusy
+			observation.ActiveTurnID = "compact"
+		}
 		return observation, nil
 	}
 	last := turns[len(turns)-1]
 	if !last.Done && !last.Interrupted {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = last.UserID
+	} else if observation.Status == surface.StatusBusy {
+		observation.Status = surface.StatusIdle
+	}
+	if compactPending && observation.Status != surface.StatusOffline && observation.Status != surface.StatusUnknown {
+		observation.Status = surface.StatusBusy
+		observation.ActiveTurnID = "compact"
 	}
 	for i := len(turns) - 1; i >= 0; i-- {
 		turn := turns[i]
@@ -439,8 +453,7 @@ func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.G
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
-	_, err := c.confirmedCommand(ctx, sess, "/compact", "", 30*time.Second)
-	return err
+	return c.sendCommand(ctx, sess, "/compact")
 }
 
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {

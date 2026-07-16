@@ -345,6 +345,45 @@ func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 	}
 }
 
+func TestCompactQueuesWorkingClaudeSession(t *testing.T) {
+	session := surface.Session{ID: "busy", Surface: surface.KindClaude, Name: "busy", Status: surface.StatusBusy}
+	fake := &cliSurface{
+		kind:        surface.KindClaude,
+		sessions:    map[string]surface.Session{"busy": session},
+		caps:        surface.Capabilities{Compact: true},
+		observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"},
+		sendResult:  &surface.SendResult{Accepted: false},
+	}
+	app, registry := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"busy"}) })
+	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("busy") != 1 {
+		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("busy"), err)
+	}
+	rows, err := registry.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Message != "/compact" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestCompactRequestsIdleClaudeSessionWithoutWaiting(t *testing.T) {
+	session := surface.Session{ID: "idle", Surface: surface.KindClaude, Name: "idle", Status: surface.StatusIdle}
+	fake := &cliSurface{
+		kind:        surface.KindClaude,
+		sessions:    map[string]surface.Session{"idle": session},
+		caps:        surface.Capabilities{Compact: true},
+		observation: &surface.TurnObservation{Status: surface.StatusIdle},
+		sendResult:  &surface.SendResult{UUID: "compact-turn", Accepted: true},
+	}
+	app, registry := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"idle"}) })
+	if err != nil || !strings.Contains(output, "compact requested") || registry.QueueCount("idle") != 0 {
+		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("idle"), err)
+	}
+	if len(fake.sent) != 1 || fake.sent[0] != "/compact" {
+		t.Fatalf("sent=%v", fake.sent)
+	}
+}
+
 func TestQueueRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
 		"plain": {ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},

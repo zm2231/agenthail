@@ -162,6 +162,8 @@ agenthail goal @builder "Ship the verified fix."
 agenthail goal @builder clear
 ```
 
+`compact` runs immediately for an idle target. For a working Claude session it creates a durable `/compact` queue item and returns without waiting; the daemon delivers it when the current turn finishes. Codex uses its native compact operation.
+
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`

@@ -1046,6 +1046,8 @@ async function send(requestedAction = "send") {
     toast(
       composerAction === "steer"
         ? "Current turn redirected."
+        : queued && command.toLowerCase() === "/compact"
+        ? "Compact queued and will run when this turn finishes."
         : commandAction
         ? `${command} requested.`
         : queued
@@ -1172,10 +1174,11 @@ document.addEventListener("click", async (event) => {
   if (!control) return;
   control.disabled = true;
   try {
-    await action(control.dataset.action, {
+    const result = await action(control.dataset.action, {
       message: $("#message").value.trim(),
     });
-    toast(`${control.textContent} requested.`);
+    const queued = result?.result?.disposition === "queued";
+    toast(queued ? `${control.textContent} queued until this turn finishes.` : `${control.textContent} requested.`);
     await load();
     await selectSession(app.selected.id);
   } catch (error) {

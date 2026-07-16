@@ -342,6 +342,34 @@ func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 	}
 }
 
+func TestQueuedCompactBlocksFollowingMessageUntilCompletion(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	if err := r.QueueMessage(to.ID, "/compact"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(to.ID, "follow-up"); err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+
+	daemon.scanAndRelay(context.Background())
+	if len(fake.sent) != 1 || fake.sent[0] != "/compact" || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("after compact sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
+	}
+
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "compact"}
+	daemon.scanAndRelay(context.Background())
+	if len(fake.sent) != 1 || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("before completion sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
+	}
+
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	daemon.scanAndRelay(context.Background())
+	if len(fake.sent) != 2 || fake.sent[1] != "follow-up" || r.QueueCount(to.ID) != 0 {
+		t.Fatalf("after completion sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
+	}
+}
+
 func TestQueueWaitsForBridgeRecoveryAndDeliversExactlyOnce(t *testing.T) {
 	daemon, r, fake, _, to := daemonFixture(t)
 	if err := r.QueueMessage(to.ID, "deliver after bridge recovery"); err != nil {

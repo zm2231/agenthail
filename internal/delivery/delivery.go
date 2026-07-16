@@ -42,6 +42,25 @@ func (d Dispatcher) DeliverWithoutQueue(ctx context.Context, adapter surface.Sur
 	return d.deliver(ctx, adapter, session, message, deliveryKey, options, false)
 }
 
+func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, session *surface.Session) (*Receipt, error) {
+	if adapter.Name() == surface.KindClaude {
+		observation, err := adapter.Observe(ctx, session)
+		if err != nil {
+			return nil, fmt.Errorf("observe before compact: %w", err)
+		}
+		if observation != nil {
+			session.Status = observation.Status
+		}
+		return d.Deliver(ctx, adapter, session, "/compact", "")
+	}
+	if err := adapter.Compact(ctx, session); err != nil {
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: "/compact", Error: err.Error()})
+		return nil, err
+	}
+	d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: "/compact"})
+	return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID}, nil
+}
+
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
 	var result *surface.SendResult
 	var err error

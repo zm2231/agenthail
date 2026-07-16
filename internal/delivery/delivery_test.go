@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,17 +13,28 @@ import (
 )
 
 type fakeSurface struct {
-	result *surface.SendResult
-	err    error
+	kind         surface.SurfaceKind
+	result       *surface.SendResult
+	err          error
+	observe      *surface.TurnObservation
+	observeErr   error
+	sent         []string
+	compactCalls int
 }
 
-func (*fakeSurface) Name() surface.SurfaceKind                                 { return surface.KindCodex }
+func (f *fakeSurface) Name() surface.SurfaceKind {
+	if f.kind != "" {
+		return f.kind
+	}
+	return surface.KindCodex
+}
 func (*fakeSurface) List(context.Context) ([]surface.Session, error)           { return nil, nil }
 func (*fakeSurface) Resolve(context.Context, string) (*surface.Session, error) { return nil, nil }
-func (*fakeSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
-	return nil, nil
+func (f *fakeSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
+	return f.observe, f.observeErr
 }
-func (f *fakeSurface) Send(context.Context, *surface.Session, string) (*surface.SendResult, error) {
+func (f *fakeSurface) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	f.sent = append(f.sent, message)
 	return f.result, f.err
 }
 func (*fakeSurface) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
@@ -39,7 +51,10 @@ func (*fakeSurface) GoalClear(context.Context, *surface.Session) error       { r
 func (*fakeSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
 	return nil, nil
 }
-func (*fakeSurface) Compact(context.Context, *surface.Session) error                 { return nil }
+func (f *fakeSurface) Compact(context.Context, *surface.Session) error {
+	f.compactCalls++
+	return f.err
+}
 func (*fakeSurface) Model(context.Context, *surface.Session, string) (string, error) { return "", nil }
 func (*fakeSurface) Interrupt(context.Context, *surface.Session) error               { return nil }
 func (*fakeSurface) Steer(context.Context, *surface.Session, string) error           { return nil }
@@ -94,5 +109,48 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	}
 	if got := r.QueueCount("s"); got != 0 {
 		t.Fatalf("expected no queued rows, got %d", got)
+	}
+}
+
+func TestDispatcherCompactUsesClaudeCommandDeliveryAndCodexNativeOperation(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	claudeSession := &surface.Session{ID: "claude", Surface: surface.KindClaude, Status: surface.StatusBusy}
+	codexSession := &surface.Session{ID: "codex", Surface: surface.KindCodex, Status: surface.StatusIdle}
+	for _, session := range []*surface.Session{claudeSession, codexSession} {
+		if err := r.RegisterSession(*session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dispatcher := Dispatcher{Registry: r}
+	claude := &fakeSurface{
+		kind:    surface.KindClaude,
+		observe: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "active"},
+		result:  &surface.SendResult{Accepted: false},
+	}
+	receipt, err := dispatcher.Compact(context.Background(), claude, claudeSession)
+	if err != nil || receipt.Disposition != DispositionQueued || receipt.QueueID == 0 {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+	item, err := r.QueueItem(receipt.QueueID)
+	if err != nil || item.Message != "/compact" || claude.compactCalls != 0 || len(claude.sent) != 1 || claude.sent[0] != "/compact" {
+		t.Fatalf("item=%+v sent=%v compactCalls=%d err=%v", item, claude.sent, claude.compactCalls, err)
+	}
+	codex := &fakeSurface{kind: surface.KindCodex}
+	receipt, err = dispatcher.Compact(context.Background(), codex, codexSession)
+	if err != nil || receipt.Disposition != DispositionAccepted || codex.compactCalls != 1 || len(codex.sent) != 0 {
+		t.Fatalf("receipt=%+v sent=%v compactCalls=%d err=%v", receipt, codex.sent, codex.compactCalls, err)
+	}
+}
+
+func TestDispatcherCompactRejectsUnobservableClaudeSession(t *testing.T) {
+	session := &surface.Session{ID: "claude", Surface: surface.KindClaude}
+	adapter := &fakeSurface{kind: surface.KindClaude, observeErr: errors.New("transcript unavailable")}
+	receipt, err := (Dispatcher{}).Compact(context.Background(), adapter, session)
+	if err == nil || !strings.Contains(err.Error(), "observe before compact") || receipt != nil || len(adapter.sent) != 0 {
+		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
 	}
 }

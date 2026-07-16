@@ -240,6 +240,8 @@ agenthail interrupt @writer
 agenthail compact @writer
 ```
 
+Claude compaction uses the same remote command path as sending `/compact`. If the session is working, Agenthail queues the compact request and the daemon delivers it when the turn finishes. Codex keeps using its native compact operation.
+
 Long prompts can come from stdin:
 
 ```bash

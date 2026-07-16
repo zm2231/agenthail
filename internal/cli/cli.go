@@ -122,7 +122,7 @@ Session commands:
   reply <target> [--json]       Fetch last assistant reply
   last <target> [count] [--full] [--json]  Show last N exchanges (full text with --full)
   goal <target> [text|clear]    Set or clear a goal
-  compact <target>              Compress context
+  compact <target>              Compress context (queues for active Claude sessions)
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
   steer <target> "message"      Inject guidance into the running turn
@@ -975,10 +975,18 @@ func (a *App) cmdCompact(args []string) error {
 	if !surf.Capabilities().Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
 	}
-	if err := surf.Compact(ctx, sess); err != nil {
+	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("compacted %s:%s\n", surf.Name(), sess.Name)
+	if receipt.Disposition == delivery.DispositionQueued {
+		if _, ok := daemon.IsRunning(); !ok {
+			fmt.Fprintln(os.Stderr, "warning: daemon is not running; compact will not run until you start it (agenthail daemon start)")
+		}
+		fmt.Printf("target is active; compact queued for %s and will run when idle\n", a.resolveDisplay(sess.ID))
+		return nil
+	}
+	fmt.Printf("compact requested for %s\n", a.resolveDisplay(sess.ID))
 	return nil
 }
 
