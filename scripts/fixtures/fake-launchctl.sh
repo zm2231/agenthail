@@ -6,9 +6,16 @@ PIDFILE="$HOME/.agenthail/daemon.pid"
 
 case "${1:-}" in
 	print)
-		test -f "$STATE"
+		case "${2:-}" in
+			*com.agenthail.daemon*) test -f "$STATE" ;;
+			*) exit 1 ;;
+		esac
 		;;
 	bootout)
+		case "${*: -1}" in
+			*com.agenthail.daemon*) ;;
+			*) exit 0 ;;
+		esac
 		if [ -f "$STATE" ] && [ -f "$PIDFILE" ]; then
 			pid="$(cat "$PIDFILE")"
 			kill -TERM "$pid" >/dev/null 2>&1 || true
@@ -24,6 +31,7 @@ case "${1:-}" in
 		program="$(plutil -extract ProgramArguments.0 raw -o - "$plist")"
 		mkdir -p "$HOME/.agenthail"
 		"$program" daemon-run >>"$HOME/.agenthail/fake-launchd.log" 2>&1 &
+		echo "$!" >"$HOME/.fake-agenthail-launchd-last-pid"
 		touch "$STATE"
 		;;
 	kickstart)

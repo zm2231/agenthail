@@ -53,7 +53,7 @@ func runSidecar(t *testing.T, pythonPath string, input string, extraEnv ...strin
 	t.Helper()
 	cmd := exec.Command("python3", "sidecar.py")
 	cmd.Stdin = strings.NewReader(input)
-	cmd.Env = append(os.Environ(), append([]string{"PYTHONPATH=" + pythonPath}, extraEnv...)...)
+	cmd.Env = append(os.Environ(), append([]string{"PYTHONPATH=" + pythonPath, "AGENTHAIL_COOKIE_BRIDGE=", "AGENTHAIL_DEBUG="}, extraEnv...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sidecar failed: %v: %s", err, output)

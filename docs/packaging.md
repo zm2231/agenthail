@@ -18,11 +18,11 @@ The build verifies the runtime archive hashes before extraction. `THIRD_PARTY_NO
 | Path | Purpose |
 |---|---|
 | `/Library/Application Support/Agenthail` | CLI binary, bundled runtimes, sidecars, skills, licenses |
-| `/Applications/Agenthail.app` | Native menu bar companion and notifications |
+| `/Applications/Agenthail.app` | Native Mac app, menu bar controls, and notifications |
 | `/usr/local/bin/agenthail` | Launcher that binds the bundled runtime explicitly |
 | `/usr/local/bin/agenthail-uninstall` | Complete package removal command |
 
-The installer migrates an existing Homebrew Agenthail installation before activating the package. It preserves `~/.agenthail` and relinks only Agenthail-managed skill symlinks. The postinstall script installs the per-user launchd daemon, registers the companion login item, and opens the companion for the logged-in console user. A headless or MDM install leaves activation to `agenthail daemon install` under the intended user account.
+The installer migrates an existing Homebrew Agenthail installation before activating the package. It preserves `~/.agenthail` and relinks only Agenthail-managed skill symlinks. The postinstall script installs the per-user launchd daemon, registers the Mac app login item, and opens the app for the logged-in console user. A headless or MDM install leaves activation to `agenthail daemon install` under the intended user account.
 
 ## Build and verification
 
@@ -44,14 +44,15 @@ The release workflow expects these repository secrets:
 - `APPLE_NOTARY_KEY_BASE64`
 - `APPLE_NOTARY_KEY_ID`
 - `APPLE_NOTARY_ISSUER_ID`
+- `CLOUDFLARE_API_TOKEN`
 
-Export the Developer ID Application and Developer ID Installer identities as separate `.p12` files using the same password. Store each file as base64 in its matching secret and store their shared export password in `APPLE_DEVELOPER_ID_P12_PASSWORD`.
+Export the Developer ID Application and Developer ID Installer identities as separate `.p12` files using the same password. Store each file as base64 in its matching secret and store their shared export password in `APPLE_DEVELOPER_ID_P12_PASSWORD`. The App Store Connect key used for notarization must be a team key with provisioning and upload access because the iPhone archive uses the same `APPLE_NOTARY_KEY_*` secrets for automatic signing and TestFlight delivery.
 
 The `.pkg` verifier expands the real artifact, checks signatures and expected files, runs the embedded CLI and both runtimes with a restricted `PATH`, rejects Homebrew-linked Mach-O files, and rejects AppleDouble metadata.
 
-The release runner then installs the real package, verifies the supervised daemon, dashboard, skills, and doctor output, installs the same package again to exercise upgrade and daemon replacement, and runs the packaged uninstaller. Publication does not run until that lifecycle passes.
+The release runner then installs the real package, verifies the supervised daemon, dashboard, skills, and doctor output, installs the same package again to exercise upgrade and daemon replacement, and runs the packaged uninstaller. It also validates the iPhone archive and push relay. Only the final publication job uploads the validated iPhone build, deploys the relay, and makes the draft GitHub release public.
 
-Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, pins the Developer ID Installer team to `Q5Y75DVV4M`, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and companion app together.
+Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, pins the Developer ID Installer team to `Q5Y75DVV4M`, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and Mac app together.
 
 ## Uninstall
 

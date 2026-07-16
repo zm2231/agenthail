@@ -33,7 +33,9 @@ Agenthail currently supports Apple silicon Macs. Download the latest `Agenthail-
 agenthail doctor
 ```
 
-The signed and notarized package includes the CLI, native menu bar app, local sidecars, pinned runtimes, and operations skill. It needs no Homebrew, language runtime, or developer tools on the target Mac. It keeps the daemon running across logins and opens the companion for dashboard access, daemon status, and native completion notifications.
+The signed and notarized package includes the CLI, native Mac app, local sidecars, pinned runtimes, and operations skill. It needs no Homebrew, language runtime, or developer tools on the target Mac. It keeps the daemon running across logins and opens the app for conversations, operations, daemon status, and native completion notifications.
+
+The native iPhone companion connects directly to your Mac over Tailscale. Pair it from **Agenthail → Operations → Pair an iPhone**. It has separate Today, Conversations, and Settings screens, supports the same safe send, steer, stop, compact, and model controls as the Mac app, and opens the right conversation when you tap a completion notification. See [Native apps and device pairing](docs/native-apps.md) for setup and compatibility details.
 
 Homebrew remains available as an alternative:
 
@@ -63,7 +65,7 @@ cd agenthail
 ./install.sh
 ```
 
-The source installer puts Agenthail under `~/.local/share/agenthail`, selects a standard command directory for the wrapper, links the operations skill, opens the companion, and restarts an existing Agenthail daemon on upgrades. Use `./install.sh --no-skill` to skip skill links.
+The source installer puts Agenthail under `~/.local/share/agenthail`, selects a standard command directory for the wrapper, links the operations skill, opens the Mac app, and restarts an existing Agenthail daemon on upgrades. Use `./install.sh --no-skill` to skip skill links.
 
 ## Surfaces
 
@@ -157,7 +159,7 @@ The other half is you being able to reach them, especially when you are not at t
 agenthail dashboard enable
 ```
 
-The dashboard is one live view of every agent and its status. Check in, see how much context a Claude or Codex conversation is using, steer a turn, queue what comes next, or pass one agent's result to another. It binds to `127.0.0.1:7412` behind a per-install access token, and nothing listens until you enable it.
+The dashboard is one live view of every agent and its status. Check in, see how much context a Claude or Codex conversation is using, steer a turn, queue what comes next, or pass one agent's result to another. Package and source installers enable its authenticated `127.0.0.1:7412` listener automatically. A manual binary setup can enable it with the command above.
 
 Then walk away. The daemon keeps the handoffs moving and holds the next instructions for whichever agent is still busy. The dashboard stays available for checking progress and steering work.
 
@@ -200,7 +202,7 @@ agenthail queue rm 12
 agenthail queue clear @writer
 ```
 
-Nothing here leaves your machine. The trail is bounded on purpose (the newest 2000 events, each field capped at 16 KiB and marked `[truncated]` past that), so it records what the daemon decided without turning into a second copy of every transcript. Writing history is treated as observability, never as delivery, so a problem recording an event cannot fail a message that actually went out.
+The trail never leaves your machine. It is bounded on purpose (the newest 2000 events, each field capped at 16 KiB and marked `[truncated]` past that), so it records what the daemon decided without turning into a second copy of every transcript. Writing history is treated as observability, never as delivery, so a problem recording an event cannot fail a message that actually went out.
 
 ## Finding your sessions
 
@@ -299,7 +301,7 @@ Replies are bound to a new completed turn, which is why `--reply` cannot hand yo
 
 agenthail reads browser cookies and runs a local HTTP server, so it is worth being specific. [SECURITY.md](SECURITY.md) has the full threat model.
 
-Short version: everything stays on your machine. Nothing listens until you run `agenthail dashboard enable`, and when you do, it binds to loopback behind a per-install token and rejects cross-origin actions. The sidecar reads fresh Chrome cookies without printing them, and if the cookie bridge fails the request stops there instead of falling back to something weaker. There is no agenthail server, no telemetry, and no account.
+Short version: your agent sessions, transcripts, browser credentials, queue, and audit trail stay on your machine. The signed package and source installer enable the dashboard on loopback so the native app is ready immediately; a manual binary setup can enable it with `agenthail dashboard enable`. It stays behind a per-install token and rejects cross-origin actions. Tailscale access remains off until you enable it in Operations. The sidecar reads fresh Chrome cookies without printing them, and if the cookie bridge fails the request stops there instead of falling back to something weaker. There is no Agenthail account or telemetry. If you pair the iPhone app and enable notifications, the daemon sends a bounded notification title, completion status, session ID, and event type through Agenthail's push relay to Apple. It never sends a transcript or browser credential. [SECURITY.md](SECURITY.md) documents that optional hosted boundary.
 
 ## Configuration
 

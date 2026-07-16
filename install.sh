@@ -42,8 +42,10 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESTART_DAEMON=0
 REINSTALL_SERVICE=0
 RUNTIME_STOPPED=0
+SERVICE_INSTALLED=0
 ACTIVATED=0
 INSTALL_SUCCEEDED=0
+FRESH_INSTALL=0
 SERVICE_PLIST="$HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 LEGACY_MENUBAR_PLIST="$HOME/Library/LaunchAgents/com.agenthail.menubar.plist"
 PARENT_DIR="$(dirname "$DATA_DIR")"
@@ -90,11 +92,16 @@ fi
 EXISTING_WRAPPER=""
 if [ "${#OWNED_WRAPPERS[@]}" -gt 0 ]; then
 	EXISTING_WRAPPER="${OWNED_WRAPPERS[0]}"
+elif [ ! -e "$DATA_DIR/agenthail" ]; then
+	FRESH_INSTALL=1
 fi
 cleanup() {
 	exit_code=$?
 	rm -rf "$STAGE_DIR" "$NEXT_DIR"
 	if [ "$INSTALL_SUCCEEDED" -ne 1 ]; then
+		if [ "$SERVICE_INSTALLED" -eq 1 ] && [ -x "$TARGET_WRAPPER" ]; then
+			"$TARGET_WRAPPER" daemon uninstall >/dev/null 2>&1 || true
+		fi
 		if [ "$ACTIVATED" -eq 1 ]; then
 			rm -rf "$DATA_DIR"
 			if [ -e "$PREVIOUS_DIR" ]; then
@@ -297,6 +304,15 @@ export PYTHONPATH=$PYDEPS_SHELL:\${PYTHONPATH:-}
 exec $DATA_BINARY_SHELL "\$@"
 EOF
 chmod +x "$INSTALL_DIR/agenthail"
+
+if [ ! -f "$HOME/.agenthail/dashboard.json" ]; then
+	"$INSTALL_DIR/agenthail" dashboard enable --no-open
+fi
+if [ "$FRESH_INSTALL" -eq 1 ]; then
+	echo "agenthail: installing supervised daemon"
+	SERVICE_INSTALLED=1
+	"$INSTALL_DIR/agenthail" daemon install
+fi
 
 if [ "${AGENTHAIL_INSTALL_TEST_FAIL_AFTER_ACTIVATION:-0}" = "1" ]; then
 	echo "error: injected post-activation failure" >&2

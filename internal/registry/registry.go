@@ -193,6 +193,41 @@ CREATE TABLE IF NOT EXISTS attention_items (
 	resolution TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS attention_items_open ON attention_items(resolved_at, created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS device_pairings (
+	id TEXT PRIMARY KEY,
+	secret_hash TEXT NOT NULL UNIQUE,
+	requested_name TEXT NOT NULL DEFAULT '',
+	scopes TEXT NOT NULL,
+	expires_at TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS device_pairings_expires ON device_pairings(expires_at);
+CREATE TABLE IF NOT EXISTS paired_devices (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	token_hash TEXT NOT NULL UNIQUE,
+	scopes TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	last_seen_at TEXT NOT NULL DEFAULT '',
+	revoked_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS paired_devices_active ON paired_devices(revoked_at, created_at DESC);
+CREATE TABLE IF NOT EXISTS device_push_targets (
+	device_id TEXT PRIMARY KEY REFERENCES paired_devices(id) ON DELETE CASCADE,
+	installation_id TEXT NOT NULL,
+	credential TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS daemon_events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	event_type TEXT NOT NULL,
+	entity_id TEXT NOT NULL DEFAULT '',
+	payload BLOB NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DESC, id DESC);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {

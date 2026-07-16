@@ -50,6 +50,27 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	}
 }
 
+func TestSessionTranscriptIsBoundedFromNewestExchange(t *testing.T) {
+	exchanges := make([]surface.Exchange, 40)
+	for index := range exchanges {
+		exchanges[index] = surface.Exchange{User: strings.Repeat("\x01", 1<<20), Assistant: strings.Repeat("answer", 1<<18), Timestamp: time.Unix(int64(index), 0)}
+	}
+	bounded, metadata := truncateSessionExchanges(exchanges)
+	if !metadata.Truncated || len(bounded) >= len(exchanges) {
+		t.Fatalf("metadata=%+v exchanges=%d", metadata, len(bounded))
+	}
+	body, err := json.Marshal(map[string]any{"exchanges": bounded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) > sessionTranscriptJSONBudget+(32<<10) {
+		t.Fatalf("encoded transcript response is %d bytes", len(body))
+	}
+	if bounded[len(bounded)-1].Timestamp != exchanges[len(exchanges)-1].Timestamp {
+		t.Fatal("newest exchange was not preserved")
+	}
+}
+
 func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -728,6 +749,27 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	daemon.dashboardActionHandler(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "1 failed") {
 		t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
+	}
+}
+
+func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
+	d, registry, _, from, _ := daemonFixture(t)
+	if _, err := registry.CreateChannel("reviewers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.AddToChannel("reviewers", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Channels) != 1 || len(state.Channels[0].Members) != 1 || len(state.Channels[0].MemberDetails) != 1 {
+		t.Fatalf("channels=%+v", state.Channels)
+	}
+	member := state.Channels[0].MemberDetails[0]
+	if member.ID != from.ID || member.Display != state.Channels[0].Members[0] {
+		t.Fatalf("member=%+v display=%q", member, state.Channels[0].Members[0])
 	}
 }
 

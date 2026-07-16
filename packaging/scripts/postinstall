@@ -14,6 +14,9 @@ run_user() {
 }
 
 run_user /usr/local/bin/agenthail daemon install
+if [ ! -f "$home/.agenthail/dashboard.json" ]; then
+	run_user /usr/local/bin/agenthail dashboard enable --no-open
+fi
 run_user /Applications/Agenthail.app/Contents/MacOS/Agenthail service enable || true
 run_user /usr/bin/open -g -j -a /Applications/Agenthail.app || true
 

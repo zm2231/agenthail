@@ -3,9 +3,12 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -199,6 +202,71 @@ func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {
 	daemon.observeSession(context.Background(), fake, &from)
 	if len(fake.sent) != 0 || r.QueueCount("to") != 1 {
 		t.Fatalf("duplicate: sent=%v pending=%d", fake.sent, r.QueueCount("to"))
+	}
+}
+
+func TestObservationPublishesOnlyWhenRuntimeStateChanges(t *testing.T) {
+	d, _, fake, from, _ := daemonFixture(t)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}
+	d.observeSession(context.Background(), fake, &from)
+	firstCount := len(d.events.history)
+	if firstCount == 0 {
+		t.Fatal("baseline observation did not publish")
+	}
+	d.observeSession(context.Background(), fake, &from)
+	if len(d.events.history) != firstCount {
+		t.Fatalf("unchanged observation published %d additional event(s)", len(d.events.history)-firstCount)
+	}
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-2", CompletedTurnID: "turn-1"}
+	d.observeSession(context.Background(), fake, &from)
+	if len(d.events.history) != firstCount+1 {
+		t.Fatalf("changed observation events=%d want=%d", len(d.events.history), firstCount+1)
+	}
+}
+
+func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, fake, from, _ := daemonFixture(t)
+	if err := r.SetAlias("private-project-title", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	pairing, err := r.CreateDevicePairing("Phone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveDevicePushTarget(device.ID, "installation", "credential"); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan map[string]string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var payload map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		received <- payload
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}}
+	d.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-2", Reply: &surface.ReplyResult{Done: true}}
+	d.observeSession(context.Background(), fake, &from)
+	select {
+	case payload := <-received:
+		if payload["message"] != "An agent finished" || strings.Contains(payload["message"], "private-project-title") {
+			t.Fatalf("payload=%+v", payload)
+		}
+		if payload["sessionId"] != from.ID {
+			t.Fatalf("sessionId=%q want=%q", payload["sessionId"], from.ID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("mobile completion notification was not sent")
 	}
 }
 

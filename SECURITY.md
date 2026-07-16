@@ -10,7 +10,9 @@ agenthail is pre-1.0 and moves quickly. Only the latest commit on `main` is supp
 
 ## What agenthail is
 
-A local daemon and CLI. There is no agenthail server, no hosted component, no telemetry, and no account. Nothing about your sessions, prompts, or replies is transmitted anywhere except to the agent surfaces you are already using, over the connections they already use.
+A local daemon, CLI, and native Mac app. Your sessions, transcripts, prompts, replies, browser credentials, queue, and audit trail stay on your Mac except when Agenthail sends a message to the agent surface you chose. There is no Agenthail account or telemetry.
+
+The optional iPhone notification path uses a small hosted relay because Apple Push Notification service does not accept delivery directly from a Mac daemon. When a paired phone grants notification permission, the relay stores its opaque APNs device token, APNs environment, and a hash of a random per-installation capability. For a notification, the daemon sends that capability with a bounded title, completion status, session ID, and event type. The relay forwards the payload to Apple and does not persist it. It never receives a transcript, prompt, reply, browser cookie, dashboard token, device bearer token, or Tailscale credential. Disabling notifications or revoking the paired device stops the daemon from sending to that installation.
 
 State lives in `~/.agenthail`: a SQLite registry, plus the daemon lock, PID, and log. Delivery history is bounded and records what the daemon decided (queued, sent, retried, failed) without copying whole transcripts.
 
@@ -20,7 +22,7 @@ State lives in `~/.agenthail`: a SQLite registry, plus the daemon lock, PID, and
 
 Anyone who can already read your home directory can already read these cookies from Chrome directly. agenthail does not widen that boundary, but it does not narrow it either.
 
-**The dashboard.** Off until you run `agenthail dashboard enable`; until then, nothing listens.
+**The dashboard.** The signed package and source installer enable the dashboard on loopback so the native app can connect immediately. A manual binary setup remains off until `agenthail dashboard enable`. The listener is local-only unless you explicitly enable Tailscale access in Operations.
 
 When enabled, it is constrained in four ways:
 
@@ -36,7 +38,11 @@ When you open the phone link, the query-string token is accepted only for the bo
 
 Tailscale Funnel exposes a node to the public internet. agenthail refuses to enable remote access while Funnel is on its port, and reports an error rather than proceeding (`internal/daemon/remote_access.go`). It never turns Funnel on.
 
-The generated phone URL and its QR code **contain the dashboard token**. Treat them as credentials. Rotating the local dashboard token revokes every saved device, including the one-year trusted-device cookie.
+The browser phone URL and its QR code **contain the dashboard token**. Treat them as credentials. The native iPhone pairing QR uses a separate single-use secret instead. Rotating the local dashboard token revokes browser access and the one-year trusted-device cookie, but does not revoke native paired devices.
+
+**Native device pairing.** The native iPhone app does not use the dashboard cookie. The Mac creates a random, single-use pairing secret that expires after five minutes. Completing the pairing exchanges it for a random bearer token stored as a hash on the Mac and in the iPhone Keychain. Device tokens are scoped; the iPhone receives read and control access, not settings access. Revoking a device disables that token immediately. The app talks directly to the daemon through the existing tailnet-only HTTPS route.
+
+**Push notifications.** Push is off until a paired iPhone grants Apple notification permission. Registration requires a fresh, single-use challenge and a valid Apple App Attest statement from the signed iPhone app. The relay capability is separate from the daemon bearer token and only authorizes notification delivery to one APNs installation. Agenthail stores the capability on the Mac and in the iPhone Keychain. The hosted relay stores only its hash. Cloudflare handles the relay request and Apple handles final delivery, so both are outside the local trust boundary. Notification previews can appear on a locked device according to the user's iOS settings, so Agenthail sends only generic completion or failure status and never includes reply text.
 
 **The Codex bridge.** `agenthail launch codex` exposes Chromium's renderer debugger on loopback only, and asks the renderer to use Codex Desktop's existing app-server connection. It does not write to the app-server child process and does not launch Codex with Node's `--inspect` flag. Any process running as your user can reach a loopback debugging port, which is the same exposure as any Chromium instance launched with remote debugging.
 

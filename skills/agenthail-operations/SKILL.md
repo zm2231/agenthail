@@ -20,7 +20,8 @@ agenthail list --json
 
 The primary install is the signed `Agenthail-*-arm64.pkg` from the GitHub
 release. It includes its own Python and Node runtimes, installs the launchd
-daemon and companion, and does not require Homebrew or developer tools.
+daemon and native Mac app, enables the authenticated loopback dashboard, and
+does not require Homebrew or developer tools.
 Homebrew remains an alternative with `brew install zm2231/tap/agenthail`
 followed by `brew services start agenthail`.
 
@@ -186,7 +187,8 @@ AgentHail has four distinct completion behaviors:
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
 3. A relay is a persistent agent-to-agent subscription to completed turns.
-4. Daemon notifications alert the human through the AgentHail macOS app.
+4. Daemon notifications alert the human through the AgentHail Mac app and,
+   when paired, the optional iPhone app.
 
 Persistent agent-to-agent subscription:
 
@@ -212,8 +214,9 @@ agenthail daemon notify settings
 agenthail daemon notify off
 ```
 
-Notifications require a supporting AgentHail build, the macOS companion app,
-and System Settings authorization. They are not agent-to-agent relays.
+Mac notifications require System Settings authorization. iPhone notifications
+require pairing the phone from Operations and allowing notifications on iOS.
+They are not agent-to-agent relays.
 
 There is no generic CLI callback that subscribes an arbitrary Photon, Slack, or
 webhook conversation to future queued completions. Do not promise automatic
@@ -221,7 +224,7 @@ delivery back to the current messaging conversation unless the host application
 implements that callback itself.
 
 When a user says "subscribe," determine whether they mean a one-turn reply, a
-live stream, a persistent relay to another agent, or a human macOS notification.
+live stream, a persistent relay to another agent, or a human notification.
 
 ## Durable Queue And History
 
@@ -286,9 +289,11 @@ agenthail dashboard remote status
 agenthail dashboard remote off
 ```
 
-The local dashboard binds to loopback behind a per-install token. Remote access
-uses a private Tailscale Serve route. Its authenticated URL and QR code contain
-the dashboard token. Share them only when the user explicitly requests access.
+Package installs enable the local dashboard on loopback behind a per-install
+token. Manual and source installs use `dashboard enable`. Remote access uses a
+private Tailscale Serve route. Pair the native iPhone app from Operations; the
+browser-access QR is separate and contains the dashboard token. Share browser
+access only when the user explicitly requests it.
 
 ## Starting And Launching Surfaces
 

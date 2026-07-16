@@ -75,7 +75,16 @@ cp "$MENU_ICON_2X_SOURCE" "$OUTPUT/Contents/Resources/AgenthailMenuBarIcon@2x.pn
 
 cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 codesign --force --options runtime --sign "$IDENTITY" "$OUTPUT/Contents/Resources/agenthail"
-/usr/bin/swiftc -parse-as-library -O -target "${ARCH}-apple-macos13.0" "$ROOT/native/AgenthailApp.swift" -o "$OUTPUT/Contents/MacOS/Agenthail"
+/usr/bin/swiftc -parse-as-library -O -target "${ARCH}-apple-macos13.0" \
+	"$ROOT/native/AgenthailApp.swift" \
+	"$ROOT/native/AgenthailModels.swift" \
+	"$ROOT/native/AgenthailAPI.swift" \
+	"$ROOT/native/SessionSelection.swift" \
+	"$ROOT/native/EventRetryBackoff.swift" \
+	"$ROOT/native/OperationsRefreshPolicy.swift" \
+	"$ROOT/native/AgenthailModel.swift" \
+	"$ROOT/native/AgenthailViews.swift" \
+	-o "$OUTPUT/Contents/MacOS/Agenthail"
 codesign --force --deep --options runtime --sign "$IDENTITY" "$OUTPUT"
 codesign --verify --deep --strict --verbose=2 "$OUTPUT"
 echo "$OUTPUT"

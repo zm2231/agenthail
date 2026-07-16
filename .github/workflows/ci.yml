@@ -22,12 +22,46 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: push-relay/package-lock.json
       - name: Build
         run: go build ./...
       - name: Vet
         run: go vet ./...
       - name: Race tests
         run: go test ./... -race -count=1
+      - name: Push relay tests
+        working-directory: push-relay
+        run: |
+          npm ci --ignore-scripts
+          npm test
+      - name: Verify generated iOS project
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          (cd native && xcodegen generate --spec project.yml)
+          git diff --exit-code -- native/Agenthail.xcodeproj native/iOS/Info.plist
+      - name: iOS simulator tests
+        run: |
+          derived="$RUNNER_TEMP/ios-derived"
+          runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
+          device="$(xcrun simctl list devicetypes --json | jq -r '.devicetypes | map(select(.name | startswith("iPhone"))) | first | .identifier')"
+          udid="$(xcrun simctl create Agenthail-CI "$device" "$runtime")"
+          trap 'xcrun simctl delete "$udid"' EXIT
+          xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived"
+          plist="$derived/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
+          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
+          test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
+      - name: Native helper tests
+        run: |
+          swiftc -parse-as-library native/SessionSelection.swift native/tests/session_selection_test.swift -o "$RUNNER_TEMP/session-selection-test"
+          "$RUNNER_TEMP/session-selection-test"
+          swiftc -parse-as-library native/EventRetryBackoff.swift native/tests/event_retry_backoff_test.swift -o "$RUNNER_TEMP/event-retry-backoff-test"
+          "$RUNNER_TEMP/event-retry-backoff-test"
+          swiftc -parse-as-library native/OperationsRefreshPolicy.swift native/tests/operations_refresh_policy_test.swift -o "$RUNNER_TEMP/operations-refresh-policy-test"
+          "$RUNNER_TEMP/operations-refresh-policy-test"
       - name: Installer lint
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n

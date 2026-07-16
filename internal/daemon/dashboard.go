@@ -39,9 +39,11 @@ var dashboardLogo []byte
 var dashboardFavicon []byte
 
 const (
-	dashboardStateCacheTTL = 30 * time.Second
-	dashboardRefreshBudget = 18 * time.Second
-	dashboardCookieMaxAge  = 365 * 24 * 60 * 60
+	dashboardStateCacheTTL      = 30 * time.Second
+	dashboardRefreshBudget      = 18 * time.Second
+	dashboardCookieMaxAge       = 365 * 24 * 60 * 60
+	sessionTranscriptJSONBudget = 512 << 10
+	sessionTranscriptFieldLimit = 64 << 10
 )
 
 type dashboardServer struct {
@@ -84,6 +86,7 @@ type dashboardSession struct {
 
 type dashboardState struct {
 	UpdatedAt        time.Time            `json:"updatedAt"`
+	EventCursor      uint64               `json:"eventCursor"`
 	Daemon           map[string]any       `json:"daemon"`
 	Surfaces         []dashboardSurface   `json:"surfaces"`
 	Sessions         []dashboardSession   `json:"sessions"`
@@ -119,8 +122,14 @@ type dashboardQueue struct {
 }
 
 type dashboardChannel struct {
-	Name    string   `json:"name"`
-	Members []string `json:"members"`
+	Name          string                   `json:"name"`
+	Members       []string                 `json:"members"`
+	MemberDetails []dashboardChannelMember `json:"memberDetails"`
+}
+
+type dashboardChannelMember struct {
+	ID      string `json:"id"`
+	Display string `json:"display"`
 }
 
 type dashboardRelay struct {
@@ -162,6 +171,8 @@ func (d *Daemon) startDashboard() (*dashboardServer, error) {
 	dashboard.server = &http.Server{
 		Handler:           d.dashboardHandler(dashboard),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    32 << 10,
 		BaseContext:       func(net.Listener) context.Context { return serverCtx },
 	}
 	go func() {
@@ -196,6 +207,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/action", dashboard.guard(d.dashboardActionHandler))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
+	d.registerAPIV1(mux, dashboard)
 	return d.dashboardHeaders(mux)
 }
 
@@ -230,13 +242,20 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.Method == http.MethodGet {
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "remoteAccess": RemoteAccessStatusForConfig(config), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"dashboard": config, "remoteAccess": RemoteAccessStatusForConfig(config), "notifications": GetNotificationStatus(), "daemon": map[string]any{"pid": os.Getpid(), "running": true}})
 		return
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	mutation := &mutationResponseWriter{ResponseWriter: w}
+	w = mutation
+	defer func() {
+		if mutation.succeeded() {
+			d.publishEvent("settings.updated", "", map[string]string{"source": "dashboard"})
+		}
+	}()
 	var request struct {
 		Action           string `json:"action"`
 		CodexRecentHours int    `json:"codexRecentHours"`
@@ -253,6 +272,18 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	case "dashboard-config":
 		config.CodexRecentHours = request.CodexRecentHours
 		err = SaveDashboardConfig(config)
+	case "notifications-enable":
+		_, err = EnableNotifications()
+	case "notifications-disable":
+		err = DisableNotifications()
+	case "notifications-settings":
+		err = OpenNotificationSettings()
+	case "notifications-test":
+		if !GetNotificationStatus().Enabled {
+			err = fmt.Errorf("desktop notifications are not enabled")
+		} else {
+			err = Notify("Agenthail", "Notifications are working")
+		}
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)
 		return
@@ -461,6 +492,10 @@ func (d *Daemon) dashboardStateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
+	eventCursor := uint64(0)
+	if d.events != nil {
+		eventCursor = d.events.cursor()
+	}
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("load dashboard config: %w", err)
@@ -490,16 +525,19 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
+		memberDetails := make([]dashboardChannelMember, 0, len(channel.Members))
 		for _, member := range channel.Members {
-			members = append(members, d.resolveDisplay(member))
+			display := d.resolveDisplay(member)
+			members = append(members, display)
+			memberDetails = append(memberDetails, dashboardChannelMember{ID: member, Display: display})
 		}
-		state.Channels = append(state.Channels, dashboardChannel{Name: channel.Name, Members: members})
+		state.Channels = append(state.Channels, dashboardChannel{Name: channel.Name, Members: members, MemberDetails: memberDetails})
 	}
 	for _, route := range routes {
 		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern})
@@ -666,6 +704,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	mutation := &mutationResponseWriter{ResponseWriter: w}
+	w = mutation
+	defer func() {
+		if mutation.succeeded() {
+			d.publishEvent("state.changed", "", map[string]string{"source": "action"})
+		}
+	}()
 	defer r.Body.Close()
 	var request struct {
 		Action    string `json:"action"`
@@ -1136,9 +1181,10 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("load conversation: %s", err), http.StatusBadGateway)
 		return
 	}
+	exchanges, transcript := truncateSessionExchanges(exchanges)
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	capabilities, readOnly, readOnlyReason := dashboardCapabilities(*session, adapter.Capabilities())
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason}
+	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		if usage, usageErr := provider.ContextUsage(ctx, session); usageErr == nil && usage != nil {
 			response["context"] = usage
@@ -1160,6 +1206,80 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeDashboardJSON(w, http.StatusOK, response)
+}
+
+type sessionTranscriptMetadata struct {
+	Truncated         bool
+	OriginalBytes     int
+	ReturnedBytes     int
+	OriginalExchanges int
+}
+
+func truncateSessionExchanges(exchanges []surface.Exchange) ([]surface.Exchange, sessionTranscriptMetadata) {
+	metadata := sessionTranscriptMetadata{OriginalExchanges: len(exchanges)}
+	for _, exchange := range exchanges {
+		metadata.OriginalBytes += len(exchange.User) + len(exchange.Assistant)
+	}
+	remaining := sessionTranscriptJSONBudget
+	result := make([]surface.Exchange, 0, len(exchanges))
+	for index := len(exchanges) - 1; index >= 0 && remaining > 0; index-- {
+		exchange := exchanges[index]
+		userBudget := min(sessionTranscriptFieldLimit, remaining)
+		if exchange.User != "" && exchange.Assistant != "" {
+			userBudget = min(userBudget, remaining/2)
+		}
+		user, userEncoded, userTruncated := truncateJSONText(exchange.User, userBudget)
+		remaining -= userEncoded
+		assistant, assistantEncoded, assistantTruncated := truncateJSONText(exchange.Assistant, min(sessionTranscriptFieldLimit, remaining))
+		remaining -= assistantEncoded
+		if user == "" && assistant == "" && (exchange.User != "" || exchange.Assistant != "") {
+			metadata.Truncated = true
+			break
+		}
+		exchange.User = user
+		exchange.Assistant = assistant
+		metadata.ReturnedBytes += len(user) + len(assistant)
+		metadata.Truncated = metadata.Truncated || userTruncated || assistantTruncated
+		result = append(result, exchange)
+	}
+	for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
+		result[left], result[right] = result[right], result[left]
+	}
+	metadata.Truncated = metadata.Truncated || len(result) < len(exchanges)
+	return result, metadata
+}
+
+func truncateJSONText(value string, budget int) (string, int, bool) {
+	if value == "" || budget <= 0 {
+		return "", 0, value != ""
+	}
+	candidate := value
+	truncated := false
+	if len(candidate) > budget {
+		candidate = validUTF8Prefix(candidate, budget)
+		truncated = true
+	}
+	encoded, _ := json.Marshal(candidate)
+	encodedBytes := max(0, len(encoded)-2)
+	if encodedBytes <= budget {
+		return candidate, encodedBytes, truncated
+	}
+	candidate = validUTF8Prefix(candidate, budget/6)
+	encoded, _ = json.Marshal(candidate)
+	return candidate, max(0, len(encoded)-2), true
+}
+
+func validUTF8Prefix(value string, limit int) string {
+	if limit >= len(value) {
+		return value
+	}
+	if limit <= 0 {
+		return ""
+	}
+	for limit > 0 && (value[limit]&0xc0) == 0x80 {
+		limit--
+	}
+	return value[:limit]
 }
 
 func writeDashboardJSON(w http.ResponseWriter, status int, value any) {

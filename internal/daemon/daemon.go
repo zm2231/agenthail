@@ -26,6 +26,7 @@ type Daemon struct {
 	log           *log.Logger
 	errorMu       sync.Mutex
 	observeErrors map[string]observedError
+	events        *eventHub
 }
 
 type observedError struct {
@@ -53,6 +54,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		Surfaces:      surfaces,
 		log:           log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors: map[string]observedError{},
+		events:        newEventHub(reg),
 	}
 }
 

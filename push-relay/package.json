@@ -1,0 +1,17 @@
+{
+  "name": "agenthail-push-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.111.0"
+  },
+  "dependencies": {
+    "asn1js": "^3.0.6",
+    "cbor": "^9.0.2",
+    "pkijs": "^3.3.3"
+  }
+}

@@ -1,0 +1,87 @@
+name: Agenthail
+options:
+  bundleIdPrefix: com.agenthail
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: Q5Y75DVV4M
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  AgenthailIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: AgenthailModels.swift
+      - path: AgenthailAPI.swift
+      - path: SessionSelection.swift
+      - path: EventRetryBackoff.swift
+      - path: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agenthail.ios
+        PRODUCT_NAME: Agenthail
+        INFOPLIST_KEY_CFBundleDisplayName: Agenthail
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        CODE_SIGN_ENTITLEMENTS: iOS/AgenthailIOS.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          AGENTHAIL_APNS_ENVIRONMENT: sandbox
+          APNS_ENVIRONMENT: development
+          APP_ATTEST_ENVIRONMENT: development
+        Release:
+          AGENTHAIL_APNS_ENVIRONMENT: production
+          APNS_ENVIRONMENT: production
+          APP_ATTEST_ENVIRONMENT: production
+    info:
+      path: iOS/Info.plist
+      properties:
+        AgenthailAPNSEnvironment: $(AGENTHAIL_APNS_ENVIRONMENT)
+        NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your Mac.
+        UIBackgroundModes:
+          - remote-notification
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.agenthail.pairing
+            CFBundleURLSchemes:
+              - agenthail
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+  AgenthailIOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: iOSTests
+    dependencies:
+      - target: AgenthailIOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agenthail.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Agenthail.app/Agenthail
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  AgenthailIOS:
+    build:
+      targets:
+        AgenthailIOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenthailIOSTests
+    archive:
+      config: Release

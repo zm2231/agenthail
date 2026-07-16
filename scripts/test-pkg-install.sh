@@ -22,8 +22,8 @@ if ! /usr/local/bin/agenthail daemon status >/dev/null 2>&1; then
 	/usr/local/bin/agenthail daemon install
 fi
 /usr/local/bin/agenthail daemon status
-/usr/local/bin/agenthail dashboard enable --no-open
 /usr/local/bin/agenthail dashboard status
+test "$(jq -r .enabled "$HOME/.agenthail/dashboard.json")" = "true"
 doctor_json="$(/usr/local/bin/agenthail doctor --json || true)"
 jq -e '.surfaces | length == 3' <<<"$doctor_json" >/dev/null
 jq -e 'all(.surfaces[]; ((.error // "") | test("curl_cffi|python.*not found|node.*not found|sweet-cookie"; "i") | not))' <<<"$doctor_json" >/dev/null

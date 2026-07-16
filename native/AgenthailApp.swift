@@ -215,12 +215,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction {
-            AgenthailProcess.run(["dashboard"])
+            await MainActor.run {
+                let application = NSApplication.shared
+                application.activate(ignoringOtherApps: true)
+                if let window = application.windows.first(where: { $0.canBecomeMain }) {
+                    window.makeKeyAndOrderFront(nil)
+                    return
+                }
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
+            }
         }
     }
 }
 
-private enum AgenthailProcess {
+enum AgenthailProcess {
     static func run(_ arguments: [String]) {
         let process = configuredProcess(arguments)
         process.standardOutput = FileHandle.nullDevice
@@ -284,49 +294,6 @@ private enum AgenthailProcess {
     }
 }
 
-@MainActor
-private final class MenuModel: ObservableObject {
-    @Published var daemonRunning = false
-    @Published var notificationsEnabled = false
-    @Published var notificationsDenied = false
-    private var timer: AnyCancellable?
-
-    init() {
-        refresh()
-        timer = Timer.publish(every: 20, on: .main, in: .common).autoconnect().sink { [weak self] _ in
-            self?.refresh()
-        }
-    }
-
-    var daemonLabel: String { daemonRunning ? "Daemon running" : "Daemon unavailable" }
-
-    func refresh() {
-        DispatchQueue.global(qos: .utility).async {
-            let daemon = AgenthailProcess.output(["daemon", "status"])
-            let notifications = AgenthailProcess.output(["daemon", "notify", "status"])
-            DispatchQueue.main.async {
-                self.daemonRunning = daemon.0 == 0 && daemon.1.contains("running")
-                self.notificationsEnabled = notifications.0 == 0 && notifications.1.contains("enabled")
-                self.notificationsDenied = notifications.1.contains("denied")
-            }
-        }
-    }
-
-    func setNotifications(_ enabled: Bool) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = AgenthailProcess.output(["daemon", "notify", enabled ? "on" : "off"])
-            DispatchQueue.main.async { self.refresh() }
-        }
-    }
-
-    func restartDaemon() {
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = AgenthailProcess.output(["daemon", "restart"])
-            DispatchQueue.main.async { self.refresh() }
-        }
-    }
-}
-
 private enum MenuBarArtwork {
     static let image: NSImage? = {
         let bundle = Bundle.main
@@ -345,32 +312,67 @@ private enum MenuBarArtwork {
     }()
 }
 
-private struct AgenthailMenuBarApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = MenuModel()
+private struct AgenthailMenuContent: View {
+    @ObservedObject var model: AgenthailModel
+    @Environment(\.openWindow) private var openWindow
 
-    var body: some Scene {
-        MenuBarExtra {
-            Button(model.daemonLabel) {}
-                .disabled(true)
-            Button("Open Dashboard") { AgenthailProcess.run(["dashboard"]) }
-                .keyboardShortcut("o")
-            Divider()
-            Toggle("Notifications", isOn: Binding(
-                get: { model.notificationsEnabled },
-                set: { model.setNotifications($0) }
-            ))
-            if model.notificationsDenied {
-                Button("Open Notification Settings") { _ = NativeCommand.run(["settings"]) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                AgenthailMark(size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("agenthail").font(.headline)
+                    Text(model.isConnected ? "Connected" : "Daemon unavailable").font(.caption).foregroundStyle(.secondary)
+                }
             }
             Divider()
+            HStack {
+                Label("Working", systemImage: "bolt.fill")
+                Spacer()
+                Text(model.workingSessions.count.formatted()).monospacedDigit()
+            }
+            HStack {
+                Label("Needs attention", systemImage: "exclamationmark.circle")
+                Spacer()
+                Text((model.snapshot?.attention.count ?? 0).formatted()).monospacedDigit()
+            }
+            HStack {
+                Label("Queued", systemImage: "tray.full")
+                Spacer()
+                Text((model.snapshot?.queue.count ?? 0).formatted()).monospacedDigit()
+            }
+            Divider()
+            Button("Open Agenthail") {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                openWindow(id: "main")
+            }
+            .keyboardShortcut("o")
             Button("Restart Daemon") { model.restartDaemon() }
             Button("Open Login Item Settings") { _ = NativeCommand.run(["service", "settings"]) }
             Divider()
             Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q")
+        }
+        .padding(14)
+        .frame(width: 260)
+    }
+}
+
+private struct AgenthailMenuBarApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var model = AgenthailModel()
+
+    var body: some Scene {
+        WindowGroup("Agenthail", id: "main") {
+            AgenthailRootView(model: model)
+                .frame(minWidth: 820, minHeight: 560)
+        }
+        .defaultSize(width: 1180, height: 760)
+
+        MenuBarExtra {
+            AgenthailMenuContent(model: model)
         } label: {
-            if model.daemonRunning, let image = MenuBarArtwork.image {
+            if model.isConnected, let image = MenuBarArtwork.image {
                 Image(nsImage: image)
                     .accessibilityLabel("Agenthail")
             } else {
@@ -378,7 +380,7 @@ private struct AgenthailMenuBarApp: App {
                     .accessibilityLabel("Agenthail unavailable")
             }
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
     }
 }
 

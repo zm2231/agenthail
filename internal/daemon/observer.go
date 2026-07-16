@@ -65,7 +65,8 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
-	notificationMessage := ""
+	desktopNotificationMessage := ""
+	mobileNotificationMessage := ""
 	if found && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID {
 		text := ""
 		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
@@ -75,9 +76,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
 		if observation.Reply != nil && observation.Reply.Done {
-			notificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
+			mobileNotificationMessage = "An agent finished"
 			if observation.Reply.Error != "" {
-				notificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+				desktopNotificationMessage = fmt.Sprintf("%s failed", d.resolveDisplay(session.ID))
+				mobileNotificationMessage = "An agent failed"
 			}
 		}
 	}
@@ -85,15 +88,29 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
-	if notificationMessage != "" {
-		go func(message string) {
-			if err := Notify("Agenthail", message); err != nil {
+	changed := !found || previous.LastStatus != observation.Status || previous.ActiveTurnID != observation.ActiveTurnID || previous.CompletedTurnID != observation.CompletedTurnID
+	if changed {
+		d.publishEvent("session.updated", session.ID, map[string]any{"status": observation.Status, "activeTurnId": observation.ActiveTurnID, "completedTurnId": observation.CompletedTurnID})
+	}
+	if found && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID {
+		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
+	}
+	if desktopNotificationMessage != "" {
+		go func(desktopMessage, mobileMessage, sessionID string) {
+			if err := Notify("Agenthail", desktopMessage); err != nil {
 				d.log.Printf("desktop notification: %s", err)
 			}
-		}(notificationMessage)
+			notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			d.notifyPairedDevices(notificationCtx, "Agenthail", mobileMessage, sessionID, "turn.completed")
+		}(desktopNotificationMessage, mobileNotificationMessage, session.ID)
 	}
 	if observation.Status == surface.StatusIdle && observation.ActiveTurnID == "" {
+		queued := d.Registry.QueueCount(session.ID)
 		d.drainMessageQueue(ctx, adapter, session)
+		if queued > 0 {
+			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
+		}
 	}
 }
 
