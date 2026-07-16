@@ -313,8 +313,15 @@ jobs:
           ./node_modules/.bin/wrangler deploy --var "RELAY_VERSION:${RELEASE_VERSION}"
       - name: Verify relay compatibility
         run: |
-          health="$(curl --fail --retry 8 --retry-all-errors --retry-delay 3 https://agenthail-push.merchantzains.workers.dev/health)"
-          jq -e --arg version "$RELEASE_VERSION" '.ok == true and .protocol == 2 and .version == $version and .appAttest.required == true and .appAttest.configured == true and .apns.configured == true and .rateLimits.configured == true and (.capabilities | index("app-attest"))' <<<"$health"
+          for attempt in {1..12}; do
+            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --retry-delay 2 "https://agenthail-push.merchantzains.workers.dev/health?release=${RELEASE_VERSION}&attempt=${attempt}")"
+            if jq -e --arg version "$RELEASE_VERSION" '.ok == true and .protocol == 2 and .version == $version and .appAttest.required == true and .appAttest.configured == true and .apns.configured == true and .rateLimits.configured == true and (.capabilities | index("app-attest"))' <<<"$health"; then
+              exit 0
+            fi
+            printf 'Relay compatibility attempt %s of 12 did not observe %s: %s\n' "$attempt" "$RELEASE_VERSION" "$health"
+            sleep 5
+          done
+          exit 1
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
