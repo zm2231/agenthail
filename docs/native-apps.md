@@ -12,7 +12,7 @@ The package installer upgrades the app, CLI, daemon, sidecars, and skills togeth
 
 The iPhone app requires Tailscale on both devices and does not expose the Mac to the public internet.
 
-Production builds are archived, App Store signed, validated, and uploaded to TestFlight by the iOS job in `.github/workflows/release.yml`. The workflow uses automatic signing with an App Store Connect API key that can manage provisioning and upload builds. The `com.agenthail.ios` app record must exist in App Store Connect before the first upload.
+Production builds are archived, App Store signed, validated, uploaded to TestFlight, and held until Apple reports the exact build as valid by `.github/workflows/release.yml`. The workflow uses automatic signing with an App Store Connect API key that can manage provisioning and upload builds. The `com.agenthail.ios` app record must exist in App Store Connect before the first upload.
 
 1. Open Agenthail on the Mac.
 2. Open Operations and enable Private phone access.
@@ -30,7 +30,7 @@ The Mac daemon triggers notifications when a newly observed turn completes or fa
 
 Production deployment requires an Apple Push Notification authentication key created in the Apple Developer portal for the Agenthail team. An App Store Connect API key cannot sign APNs requests. The Worker expects `APNS_KEY_P8`, `APNS_KEY_ID`, `APPLE_TEAM_ID`, and `APNS_TOPIC` secrets. `APNS_TOPIC` must match the iOS bundle ID.
 
-The release workflow builds and validates the Mac package, iPhone archive, and relay before publication. Its final job creates a draft GitHub release, uploads the validated iPhone build, deploys and checks the matching relay, and only then makes the GitHub release public. `/health` reports the deployed relay version, protocol, and capabilities. If a relay deployment is unhealthy, redeploy the last known-good tag from `push-relay` and verify `/health` before retrying the native release.
+The release workflow builds and validates the Mac package, iPhone archive, and relay before publication. Its final job creates a draft GitHub release, uploads the validated iPhone build, waits for TestFlight to report that exact version and build number as valid, deploys and checks the matching relay, and only then makes the GitHub release public. `/health` reports the deployed relay version, protocol, and capabilities. If a relay deployment is unhealthy, redeploy the last known-good tag from `push-relay` and verify `/health` before retrying the native release.
 
 ## Protocol compatibility
 
