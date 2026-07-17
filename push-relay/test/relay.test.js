@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import worker, { AppAttestChallenge, issueChallenge, register, revoke, send, verifyAppAttestation } from "../src/index.js"
+import worker, { AppAttestChallenge, checkRegistration, issueChallenge, register, revoke, send, verifyAppAttestation } from "../src/index.js"
 
 const productionAttestation = JSON.parse(readFileSync(new URL("fixtures/app-attest-production.json", import.meta.url), "utf8"))
 
@@ -106,6 +106,28 @@ test("registration issues a scoped capability and supports revocation", async ()
   assert.equal(env.PUSH_DEVICES.values.size, 0)
 })
 
+test("registration checks reject stale credentials", async () => {
+  const env = environment()
+  const registered = await register(request("POST", await registrationBody(env)), env, acceptAttestation)
+  const registration = await registered.json()
+  const makeCheck = () => new Request("https://push.test/v1/register/check", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(registration)
+  })
+  const valid = await worker.fetch(makeCheck(), env)
+  assert.equal(valid.status, 200)
+  await revoke(request("DELETE", registration), env)
+  const stale = await worker.fetch(makeCheck(), env)
+  assert.equal(stale.status, 401)
+})
+
+test("registration checks are rate limited", async () => {
+  const env = environment({ REGISTER_RATE_LIMITER: new MemoryLimiter(0) })
+  const response = await checkRegistration(request("POST", { installationId: "missing", credential: "missing" }), env)
+  assert.equal(response.status, 429)
+})
+
 test("send rejects unknown capabilities before APNs", async () => {
   const env = environment()
   const response = await send(request("POST", { installationId: "missing", credential: "missing", title: "Agenthail", message: "Done" }), env)
@@ -136,9 +158,16 @@ test("registration rejects oversized chunked JSON bodies", async () => {
   const response = await register(new Request("https://push.test/v1/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ deviceToken: "ab".repeat(32), padding: "x".repeat(9000) })
+    body: JSON.stringify({ deviceToken: "ab".repeat(32), padding: "x".repeat(25000) })
   }), env, acceptAttestation)
   assert.equal(response.status, 400)
+})
+
+test("registration accepts production-sized attestation envelopes", async () => {
+  const env = environment()
+  const body = await registrationBody(env, { attestation: Buffer.alloc(7000, 1).toString("base64") })
+  const response = await register(request("POST", body), env, acceptAttestation)
+  assert.equal(response.status, 201)
 })
 
 test("send cancels oversized streams without a content length", async () => {
@@ -206,6 +235,7 @@ test("health reports the relay protocol and capabilities", async () => {
   assert.equal(health.protocol, 2)
   assert.ok(health.capabilities.includes("rate-limit"))
   assert.ok(health.capabilities.includes("app-attest"))
+  assert.ok(health.capabilities.includes("registration-check"))
   assert.equal(health.ok, false)
   assert.deepEqual(health.appAttest, { required: true, configured: false })
   assert.deepEqual(health.apns, { configured: false })

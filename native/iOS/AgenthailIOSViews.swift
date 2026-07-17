@@ -352,6 +352,8 @@ struct SettingsView: View {
                     Button("Turn off notifications", role: .destructive) { model.turnOffNotifications() }
                 } else if model.notificationStatus == "Not allowed" {
                     Button("Open iOS Settings") { model.openNotificationSettings() }
+                } else if model.notificationStatus == "Setup failed" {
+                    Button("Retry notification setup") { model.requestNotifications() }
                 } else {
                     Button("Enable notifications") { model.requestNotifications() }
                 }

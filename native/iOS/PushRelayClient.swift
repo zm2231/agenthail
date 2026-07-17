@@ -51,6 +51,10 @@ final class PushRelayClient: Sendable {
         let _: PushRelayOK = try await request("/v1/register", method: "DELETE", body: ["installationId": registration.installationId, "credential": registration.credential])
     }
 
+    func validate(_ registration: PushRegistration) async throws {
+        let _: PushRelayOK = try await request("/v1/register/check", method: "POST", body: ["installationId": registration.installationId, "credential": registration.credential])
+    }
+
     private func request<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body) async throws -> T {
         var request = URLRequest(url: URL(string: path, relativeTo: baseURL)!)
         request.httpMethod = method

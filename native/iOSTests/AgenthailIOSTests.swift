@@ -87,6 +87,15 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertTrue(PushRegistration(installationId: "legacy", credential: "secret", expiresAt: nil).needsRenewal)
     }
 
+    func testPushRelayChecksStoredCredential() async throws {
+        ReplacementURLProtocol.recorder.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReplacementURLProtocol.self]
+        let relay = PushRelayClient(baseURL: URL(string: "https://relay.example")!, session: URLSession(configuration: configuration))
+        try await relay.validate(PushRegistration(installationId: "installation", credential: "credential", expiresAt: Int64.max))
+        XCTAssertTrue(ReplacementURLProtocol.recorder.snapshot().contains("POST relay.example/v1/register/check"))
+    }
+
     @MainActor
     func testForgetThisMacClearsLocalPairingWhileOffline() throws {
         KeychainStore.removeAll()

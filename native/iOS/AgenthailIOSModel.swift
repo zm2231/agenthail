@@ -300,15 +300,20 @@ final class AgenthailIOSModel: ObservableObject {
         notificationStatus = "Enabling"
         Task {
             do {
-                let relay = PushRelayClient(baseURL: pushRelayURL)
+                let relay = PushRelayClient(baseURL: pushRelayURL, session: networkSession)
                 if let registration = storedPushRegistration(),
                    !registration.needsRenewal,
                    KeychainStore.get("pushDeviceToken") == deviceToken,
                    KeychainStore.get("pushEnvironment") == PushRelayClient.environment,
                    KeychainStore.get("pushEndpoint") == endpoint?.absoluteString {
-                    try await api.configurePush(installationID: registration.installationId, credential: registration.credential)
-                    notificationStatus = "Enabled"
-                    return
+                    do {
+                        try await relay.validate(registration)
+                        try await api.configurePush(installationID: registration.installationId, credential: registration.credential)
+                        notificationStatus = "Enabled"
+                        return
+                    } catch AgenthailAPIError.request(let status, _) where status == 401 {
+                        clearStoredPushRegistration()
+                    }
                 }
                 if let previous = storedPushRegistration() { try? await relay.revoke(previous) }
                 let registration = try await relay.register(deviceToken: deviceToken)

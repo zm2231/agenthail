@@ -9,6 +9,9 @@ const decoder = new TextDecoder()
 let cachedProviderToken = null
 const registrationTTLSeconds = 90 * 24 * 60 * 60
 const challengeTTLMilliseconds = 5 * 60 * 1000
+const defaultRequestBodyLimit = 8192
+const registrationRequestBodyLimit = 24576
+const appAttestationLimitBytes = 16384
 const appAttestNonceOID = "1.2.840.113635.100.8.2"
 const appAttestRoot = new X509Certificate("-----BEGIN CERTIFICATE-----\nMIICITCCAaegAwIBAgIQC/O+DvHN0uD7jG5yH2IXmDAKBggqhkjOPQQDAzBSMSYwJAYDVQQDDB1BcHBsZSBBcHAgQXR0ZXN0YXRpb24gUm9vdCBDQTETMBEGA1UECgwKQXBwbGUgSW5jLjETMBEGA1UECAwKQ2FsaWZvcm5pYTAeFw0yMDAzMTgxODMyNTNaFw00NTAzMTUwMDAwMDBaMFIxJjAkBgNVBAMMHUFwcGxlIEFwcCBBdHRlc3RhdGlvbiBSb290IENBMRMwEQYDVQQKDApBcHBsZSBJbmMuMRMwEQYDVQQIDApDYWxpZm9ybmlhMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAERTHhmLW07ATaFQIEVwTtT4dyctdhNbJhFs/Ii2FdCgAHGbpphY3+d8qjuDngIN3WVhQUBHAoMeQ/cLiP1sOUtgjqK9auYen1mMEvRq9Sk3Jm5X8U62H+xTD3FE9TgS41o0IwQDAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBSskRBTM72+aEH/pwyp5frq5eWKoTAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwMDaAAwZQIwQgFGnByvsiVbpTKwSga0kP0e8EeDS4+sQmTvb7vn53O5+FRXgeLhpJ06ysC5PrOyAjEAp5U4xDgEgllF7En3VcE3iexZZtKeYnpqtijVoyFraWVIyd/dganmrduC1bmTBGwD\n-----END CERTIFICATE-----")
 
@@ -21,13 +24,16 @@ export default {
         const apnsConfigured = Boolean(env.APNS_KEY_P8 && env.APNS_KEY_ID && env.APPLE_TEAM_ID && env.APNS_TOPIC)
         const rateLimitsConfigured = Boolean(env.REGISTER_RATE_LIMITER && env.SEND_RATE_LIMITER)
         const configured = appAttestConfigured && apnsConfigured && rateLimitsConfigured
-        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "expiring-registration", "rate-limit"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
+        return json({ ok: configured, service: "agenthail-push", version: env.RELAY_VERSION || "dev", protocol: 2, capabilities: ["apns", "app-attest", "credential-auth", "registration-check", "expiring-registration", "rate-limit"], appAttest: { required: true, configured: appAttestConfigured }, apns: { configured: apnsConfigured }, rateLimits: { configured: rateLimitsConfigured } })
       }
       if (request.method === "POST" && url.pathname === "/v1/attest/challenge") {
         return await issueChallenge(request, env)
       }
       if (request.method === "POST" && url.pathname === "/v1/register") {
         return await register(request, env)
+      }
+      if (request.method === "POST" && url.pathname === "/v1/register/check") {
+        return await checkRegistration(request, env)
       }
       if (request.method === "POST" && url.pathname === "/v1/send") {
         return await send(request, env)
@@ -48,7 +54,7 @@ export async function register(request, env, verifier = verifyAppAttestation) {
   if (!await allowRequest(env.REGISTER_RATE_LIMITER, `register:${clientAddress}`)) {
     return json({ error: "rate_limited" }, 429)
   }
-  const body = await readJSON(request)
+  const body = await readJSON(request, registrationRequestBodyLimit)
   const token = clean(body?.deviceToken, 256)
   const environment = body?.environment === "sandbox" ? "sandbox" : "production"
   if (!/^[a-fA-F0-9]{64,256}$/.test(token)) {
@@ -60,8 +66,8 @@ export async function register(request, env, verifier = verifyAppAttestation) {
   if (!teamIdentifier || !bundleIdentifier) return json({ error: "app_attest_configuration_unavailable" }, 503)
   const challengeId = boundedString(body?.challengeId, 80)
   const keyId = boundedString(body?.keyId, 128)
-  const attestation = boundedString(body?.attestation, 7800)
-  if (!isUUID(challengeId) || !isBase64(keyId, 32) || !isBase64(attestation, 1, 5800)) {
+  const attestation = boundedString(body?.attestation, Math.ceil(appAttestationLimitBytes / 3) * 4)
+  if (!isUUID(challengeId) || !isBase64(keyId, 32) || !isBase64(attestation, 1, appAttestationLimitBytes)) {
     return json({ error: "invalid_app_attestation" }, 400)
   }
   const challengeStub = env.APP_ATTEST_CHALLENGES.getByName(challengeId)
@@ -222,6 +228,22 @@ export async function send(request, env) {
   return json({ error: "apns_rejected", status: response.status, reason: clean(reason, 300) }, 502)
 }
 
+export async function checkRegistration(request, env) {
+  const clientAddress = clean(request.headers.get("cf-connecting-ip"), 64) || "unknown"
+  if (!env.REGISTER_RATE_LIMITER) return json({ error: "rate_limiter_unavailable" }, 503)
+  if (!await allowRequest(env.REGISTER_RATE_LIMITER, `check:${clientAddress}`)) {
+    return json({ error: "rate_limited" }, 429)
+  }
+  const body = await readJSON(request)
+  const id = clean(body?.installationId, 160)
+  const credential = clean(body?.credential, 256)
+  const stored = id ? await env.PUSH_DEVICES.get(`device:${id}`, "json") : null
+  if (!stored || !stored.attestedAt || !stored.appAttestKeyHash || !timingSafeEqual(stored.credentialHash, await sha256(credential))) {
+    return json({ error: "unauthorized" }, 401)
+  }
+  return json({ ok: true })
+}
+
 export async function revoke(request, env) {
   const body = await readJSON(request)
   const id = clean(body?.installationId, 160)
@@ -252,10 +274,10 @@ async function apnsProviderToken(env) {
   return value
 }
 
-async function readJSON(request) {
+async function readJSON(request, limit = defaultRequestBodyLimit) {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return null
   const lengthHeader = request.headers.get("content-length")
-  if (lengthHeader && (!/^\d+$/.test(lengthHeader) || Number(lengthHeader) > 8192)) return null
+  if (lengthHeader && (!/^\d+$/.test(lengthHeader) || Number(lengthHeader) > limit)) return null
   if (!request.body) return null
   const reader = request.body.getReader()
   const chunks = []
@@ -265,7 +287,7 @@ async function readJSON(request) {
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > 8192) {
+      if (size > limit) {
         await reader.cancel()
         return null
       }
