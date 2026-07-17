@@ -212,6 +212,7 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "")
 	t.Setenv("XPC_SERVICE_NAME", "")
 	status := NewCodex("").RuntimeStatus(context.Background())
 	if !status.Reachable || status.Durable || status.Backend != "pid" {

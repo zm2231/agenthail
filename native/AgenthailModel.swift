@@ -21,6 +21,7 @@ final class AgenthailModel: ObservableObject {
     @Published var composer = ""
 
     private var api: AgenthailAPI?
+    private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
@@ -35,30 +36,42 @@ final class AgenthailModel: ObservableObject {
     }
 
     deinit {
+        connectionTask?.cancel()
         eventTask?.cancel()
         refreshTask?.cancel()
     }
 
     func connect(startDaemonIfNeeded: Bool = true) {
         eventTask?.cancel()
-        Task {
-            do {
-                let api = try AgenthailAPI()
-                _ = try await api.version()
-                self.api = api
-                connectionError = nil
-                lastEventID = 0
-                guard await refresh(fresh: true) else { return }
-                startEvents()
-            } catch {
-                if startDaemonIfNeeded {
-                    AgenthailProcess.run(["daemon", "start"])
-                    try? await Task.sleep(for: .seconds(1))
-                    connect(startDaemonIfNeeded: false)
+        connectionTask?.cancel()
+        connectionTask = Task {
+            let backoff = EventRetryBackoff()
+            var shouldStartDaemon = startDaemonIfNeeded
+            while !Task.isCancelled {
+                do {
+                    let api = try AgenthailAPI()
+                    _ = try await api.version()
+                    self.api = api
+                    connectionError = nil
+                    lastEventID = 0
+                    guard await refresh(fresh: true) else {
+                        throw AgenthailAPIError.unavailable(connectionError ?? "Agenthail could not connect.")
+                    }
+                    startEvents()
                     return
+                } catch {
+                    connectionError = error.localizedDescription
+                    snapshot = nil
+                    if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
+                        return
+                    }
                 }
-                connectionError = error.localizedDescription
-                snapshot = nil
+                if shouldStartDaemon {
+                    AgenthailProcess.run(["daemon", "start"])
+                    shouldStartDaemon = false
+                }
+                let delay = backoff.nextDelay()
+                try? await Task.sleep(for: .seconds(delay))
             }
         }
     }
