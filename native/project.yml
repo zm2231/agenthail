@@ -7,7 +7,7 @@ settings:
   base:
     DEVELOPMENT_TEAM: Q5Y75DVV4M
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.2.1"
+    MARKETING_VERSION: "0.2.2"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   AgenthailIOS:
