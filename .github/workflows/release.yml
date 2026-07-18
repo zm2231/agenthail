@@ -27,6 +27,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: push-relay/package-lock.json
+      - name: Validate APNs provider credentials
+        env:
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_KEY_P8: ${{ secrets.APNS_KEY_P8 }}
+          APNS_TOPIC: com.agenthail.ios
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node push-relay/scripts/verify-apns-credentials.mjs
       - name: Install locked relay dependencies
         working-directory: push-relay
         run: npm ci --ignore-scripts
@@ -306,10 +313,18 @@ jobs:
       - name: Deploy validated relay
         working-directory: push-relay
         env:
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_KEY_P8: ${{ secrets.APNS_KEY_P8 }}
+          APNS_TOPIC: com.agenthail.ios
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
+          : "${APNS_KEY_ID:?missing APNS_KEY_ID}"
+          : "${APNS_KEY_P8:?missing APNS_KEY_P8}"
+          : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID}"
           : "${CLOUDFLARE_API_TOKEN:?missing CLOUDFLARE_API_TOKEN}"
           npm ci --ignore-scripts
+          jq -n --arg key "$APNS_KEY_P8" --arg id "$APNS_KEY_ID" --arg team "$APPLE_TEAM_ID" --arg topic "$APNS_TOPIC" '{APNS_KEY_P8:$key,APNS_KEY_ID:$id,APPLE_TEAM_ID:$team,APNS_TOPIC:$topic}' | ./node_modules/.bin/wrangler secret bulk
           ./node_modules/.bin/wrangler deploy --var "RELAY_VERSION:${RELEASE_VERSION}"
       - name: Verify relay compatibility
         run: |
