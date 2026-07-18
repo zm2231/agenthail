@@ -322,7 +322,7 @@ private struct AgenthailMenuContent: View {
                 AgenthailMark(size: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("agenthail").font(.headline)
-                    Text(model.isConnected ? "Connected" : "Daemon unavailable").font(.caption).foregroundStyle(.secondary)
+                    Text(model.isConnected ? "Connected" : "Not connected").font(.caption).foregroundStyle(.secondary)
                 }
             }
             Divider()
@@ -347,7 +347,7 @@ private struct AgenthailMenuContent: View {
                 openWindow(id: "main")
             }
             .keyboardShortcut("o")
-            Button("Restart Daemon") { model.restartDaemon() }
+            Button("Restart Agenthail") { model.restartDaemon() }
             Button("Open Login Item Settings") { _ = NativeCommand.run(["service", "settings"]) }
             Divider()
             Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }

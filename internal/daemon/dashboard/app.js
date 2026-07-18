@@ -302,7 +302,7 @@ function syncComposerAction() {
 }
 function friendlyError(error) {
   return /failed to fetch|networkerror/i.test(String(error))
-    ? "Agenthail is not connected. Run agenthail daemon start, then refresh this page."
+    ? "Agenthail is not connected. Restart it from the menu bar, then refresh this page."
     : String(error);
 }
 function toast(message) {
@@ -841,7 +841,7 @@ async function load(fresh = false) {
     $("#daemon-status").textContent = "Not connected";
     $("#daemon-presence").className = "daemon-presence offline";
     $("#daemon-detail").textContent =
-      "Run agenthail daemon start, then refresh";
+      "Restart Agenthail from the menu bar, then refresh";
     $("#surface-cards").innerHTML =
       `<div class="empty-state compact">${escape(message)}</div>`;
     $("#recent-activity").innerHTML = "";
