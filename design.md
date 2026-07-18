@@ -1,4 +1,6 @@
-# Agenthail dashboard design
+# Maintainer design reference
+
+This document records the dashboard's design direction and implementation rules for contributors.
 
 ## Product intent
 

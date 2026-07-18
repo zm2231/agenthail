@@ -1,4 +1,6 @@
-# Codex protocol decisions
+# Maintainer note: Codex integration decisions
+
+This document records implementation boundaries for contributors. Normal use does not require it.
 
 Agenthail implements Codex protocol methods only when they support a user-facing workflow and can be verified across the full path.
 

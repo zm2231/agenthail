@@ -31,6 +31,8 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+      - name: Public copy check
+        run: scripts/check-public-copy.sh
       - name: Race tests
         run: go test ./... -race -count=1
       - name: Push relay tests

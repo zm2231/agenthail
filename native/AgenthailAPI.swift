@@ -10,7 +10,7 @@ enum AgenthailAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable(let detail): return detail
-        case .incompatible(let version): return "This Agenthail daemon uses protocol \(version). Update Agenthail to continue."
+        case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
         case .streamClosed: return "The Agenthail event stream disconnected."
@@ -43,7 +43,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let tokenURL = home.appendingPathComponent(".agenthail/dashboard.token")
         let configURL = home.appendingPathComponent(".agenthail/dashboard.json")
         guard let token = try? String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
-            throw AgenthailAPIError.unavailable("The Agenthail daemon has not created its access token yet.")
+            throw AgenthailAPIError.unavailable("Agenthail is still starting. Try again in a moment.")
         }
         var listen = "127.0.0.1:7412"
         if let data = try? Data(contentsOf: configURL),

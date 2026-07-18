@@ -1,4 +1,8 @@
-# macOS package architecture
+# Maintainer guide: packaging and releases
+
+This document describes the build and release system. Normal installation does not require it.
+
+## macOS package architecture
 
 Agenthail's primary installer is a signed and notarized Apple silicon `.pkg`. The package is self-contained for the target Mac and does not depend on Homebrew, Xcode Command Line Tools, Go, Swift, Node.js, or Python already being installed.
 

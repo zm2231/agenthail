@@ -1,6 +1,6 @@
-# Security
+# Security and privacy details
 
-agenthail sits between your AI agent sessions and reads the browser cookies those sessions authenticate with. That is a lot to ask of you, so this document is specific about what it does, what it protects, and what it does not.
+Agenthail connects to signed-in agent sessions and can move instructions between them. That is a lot to trust it with, so this page is intentionally technical about what it does, what it protects, and what it does not. Normal setup does not require understanding these implementation details.
 
 ## Reporting a vulnerability
 

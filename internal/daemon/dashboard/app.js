@@ -298,11 +298,11 @@ function syncComposerAction() {
     ? hasMessage
       ? "Send queues this for next. Steer now changes the turn in progress."
       : "This agent is working. Stop ends the current turn."
-    : "Delivered through the local daemon.";
+    : "Ready to send.";
 }
 function friendlyError(error) {
   return /failed to fetch|networkerror/i.test(String(error))
-    ? "Agenthail cannot reach its local daemon. Start it with agenthail daemon start, then refresh this page."
+    ? "Agenthail is not connected. Run agenthail daemon start, then refresh this page."
     : String(error);
 }
 function toast(message) {
@@ -410,13 +410,13 @@ function renderOverview() {
       : "",
   ].filter(Boolean);
   $("#daemon-status").textContent = app.state.daemon?.running
-    ? "Running locally"
+    ? "Connected"
     : "Not running";
   $("#daemon-detail").textContent = app.state.daemon?.stale
     ? `Showing cached data. ${app.state.daemon.refreshError || "Surface refresh is temporarily unavailable"}`
     : app.state.daemon?.running
       ? [surfaceStatus, ...activityStatus].join(" · ") || "Nothing needs delivery"
-      : "Start the daemon to deliver work";
+      : "Start Agenthail to deliver work";
   $("#surface-cards").innerHTML =
     surfaces
       .map((surface) => {
@@ -695,7 +695,7 @@ function renderSurfaceHealth() {
           ? "The Codex background service will stop after a restart."
           : rawDetail;
     const runtime = surface.runtime?.name
-      ? `<p><strong>${escape(surface.runtime.name)}</strong> ${escape(surface.runtime.reachable ? surface.runtime.durable ? "is supervised" : "is running without supervision" : "is unavailable")}</p>${surface.runtime.remediation ? `<p>Fix: ${escape(surface.runtime.remediation)}</p>` : ""}`
+      ? `<p><strong>${escape(surface.runtime.name)}</strong> ${escape(surface.runtime.reachable ? surface.runtime.durable ? "stays available in the background" : "is open now but will not restart automatically" : "is not connected")}</p>${surface.runtime.remediation ? `<p>How to fix: ${escape(surface.runtime.remediation)}</p>` : ""}`
       : "";
     const repair = surface.repairAction
       ? `<button class="soft-button" data-surface-repair="${escape(surface.repairAction)}" type="button">${escape(surface.repairLabel || "Repair")}</button>`
@@ -732,7 +732,7 @@ function renderAudit() {
     const route = entry.source ? `${escape(entry.source)} <span class="route-arrow">→</span> ${escape(target)}` : escape(target);
     const content = entry.error || entry.message || entry.result || "No message content recorded";
     return `<article class="audit-event"><div class="audit-marker ${entry.error ? "failed" : ""}"></div><div class="audit-event-body"><div class="audit-event-heading"><strong>${escape(auditKindLabel(entry.kind))}</strong><time>${timeAgo(entry.createdAt)}</time></div><div class="audit-route">${route}</div><details><summary>View details</summary><div class="audit-detail${entry.error ? " operation-error" : ""}">${markdown(content)}</div></details></div></article>`;
-  }).join("") || `<div class="empty-card">${audit.loading ? "Loading activity." : audit.loaded ? "No activity matches these filters." : "Open Audit to load daemon activity."}</div>`;
+  }).join("") || `<div class="empty-card">${audit.loading ? "Loading activity." : audit.loaded ? "No activity matches these filters." : "Open Audit to load activity."}</div>`;
   const more = $("#history-more");
   more.hidden = !audit.loaded || !audit.hasMore;
   more.disabled = audit.loading;
@@ -838,7 +838,7 @@ async function load(fresh = false) {
     }
   } catch (error) {
     const message = friendlyError(error);
-    $("#daemon-status").textContent = "Daemon unavailable";
+    $("#daemon-status").textContent = "Not connected";
     $("#daemon-presence").className = "daemon-presence offline";
     $("#daemon-detail").textContent =
       "Run agenthail daemon start, then refresh";
@@ -873,7 +873,7 @@ async function selectSession(id, focus = false) {
   $("#send").disabled = Boolean(session.readOnly);
   $("#message").placeholder = session.readOnly ? "Read only" : `Message ${displayName(session)}`;
   $("#composer-note").textContent =
-    session.readOnly ? session.readOnlyReason : "Delivered through the local daemon. Busy agents are queued safely.";
+    session.readOnly ? session.readOnlyReason : "Ready to send. If this agent is working, the message waits until it is ready.";
   syncComposerAction();
   $("#chat-body").innerHTML =
     '<div class="empty-state">Loading recent messages…</div>';

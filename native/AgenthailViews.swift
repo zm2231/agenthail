@@ -808,7 +808,7 @@ struct RecoveryCard: View {
         HStack {
             Image(systemName: "bolt.horizontal.circle").font(.title2).foregroundStyle(agenthailOrange)
             VStack(alignment: .leading) {
-                Text("The daemon is unavailable").fontWeight(.semibold)
+                Text("Agenthail is not connected").fontWeight(.semibold)
                 Text(model.connectionError ?? "Agenthail could not connect.").foregroundStyle(.secondary)
             }
             Spacer()
@@ -824,7 +824,7 @@ struct ConnectionStatus: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(model.isConnected ? Color.green : agenthailOrange).frame(width: 8, height: 8)
-            Text(model.isConnected ? "Daemon connected" : "Daemon unavailable").font(.caption).foregroundStyle(.secondary)
+            Text(model.isConnected ? "Connected" : "Not connected").font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
     }

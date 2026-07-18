@@ -129,12 +129,12 @@ Session commands:
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
   steer <target> "message"      Inject guidance into the running turn
-  queue <target> "msg"|-        Hold until target is idle, then deliver (daemon required)
-  queue list [--json] [--all]   Inspect pending, inflight, and dead-letter messages
-  queue retry <id>              Retry a dead-letter message
+  queue <target> "msg"|-        Hold until target is ready, then deliver
+  queue list [--json] [--all]   Inspect waiting, sending, and failed messages
+  queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
-  history [target] [count]       Show durable delivery history (default 50)
+  history [target] [count]       Show delivery history (default 50)
 
 Identity:
   identify <target> <name>      Name a session (henceforth @name resolves to it)
@@ -148,20 +148,20 @@ Channels:
   channel list                  List channels + members (shows @alias names)
   channel send <name> "msg"     Broadcast to all members (--from <name>)
 
-Routing (auto-relay):
+Automatic handoffs:
   relay add <from> <to> [regex] Send-to-on-completion rule
   relay list                    Show routing rules
   relay rm <id>                 Remove a rule
 
-Daemon:
-  daemon start                  Start the background daemon (auto-relay + steer)
-  daemon stop                   Stop the daemon
-  daemon restart                Restart manual or supervised daemon
-  daemon status                 Is the daemon running?
+Background service:
+  daemon start                  Start Agenthail in the background
+  daemon stop                   Stop Agenthail in the background
+  daemon restart                Restart Agenthail in the background
+  daemon status                 Check whether Agenthail is running
   daemon notify on|off|status|test|settings
                                 Native macOS completion notifications
-  daemon install                Install/start a supervised macOS launchd service
-  daemon uninstall              Remove the macOS launchd service
+  daemon install                Keep Agenthail running after login and restarts
+  daemon uninstall              Stop Agenthail from starting automatically
 
 Dashboard (optional):
   dashboard enable              Enable the local dashboard and open it
@@ -1438,24 +1438,24 @@ func launchCodex(port string) error {
 	pid := findCodexPID()
 	if pid > 0 {
 		if rendererDebuggerListening(port) {
-			fmt.Printf("Codex already running (pid %d, renderer bridge ready on 127.0.0.1:%s)\n", pid, port)
+			fmt.Println("Codex is already connected to Agenthail")
 			return nil
 		}
 		if nodeDebuggerListening("9229") {
-			fmt.Printf("Codex already running (pid %d); connected through the delayed compatibility bridge on 127.0.0.1:9229\n", pid)
-			fmt.Println("for the safer renderer-only path, quit Codex once and run 'agenthail launch codex'")
+			fmt.Println("Codex is connected using the compatibility path")
+			fmt.Println("To use the preferred connection, quit Codex once and run 'agenthail launch codex'")
 			return nil
 		}
 		if err := syscall.Kill(pid, syscall.SIGUSR1); err != nil {
-			return fmt.Errorf("Codex is already running without a renderer debugger, and compatibility activation failed (pid %d): %w; quit it, then run 'agenthail launch codex'", pid, err)
+			return fmt.Errorf("Codex is open but Agenthail cannot connect to it: %w; quit Codex, then run 'agenthail launch codex'", err)
 		}
 		time.Sleep(1 * time.Second)
 		if nodeDebuggerListening("9229") {
-			fmt.Printf("connected to existing Codex (pid %d) through the delayed compatibility bridge on 127.0.0.1:9229\n", pid)
-			fmt.Println("for the safer renderer-only path, quit Codex once and run 'agenthail launch codex'")
+			fmt.Println("Codex is connected using the compatibility path")
+			fmt.Println("To use the preferred connection, quit Codex once and run 'agenthail launch codex'")
 			return nil
 		}
-		return fmt.Errorf("Codex is already running but neither renderer nor compatibility debugging is available (pid %d); quit it, then run 'agenthail launch codex'", pid)
+		return fmt.Errorf("Codex is open but Agenthail cannot connect to it; quit Codex, then run 'agenthail launch codex'")
 	}
 
 	cmd := exec.Command(exe, codexLaunchArgs(port)...)
@@ -1468,16 +1468,17 @@ func launchCodex(port string) error {
 	}
 	pid = cmd.Process.Pid
 	cmd.Process.Release()
-	fmt.Printf("launched Codex (pid %d), waiting for startup...\n", pid)
+	fmt.Println("Opening Codex and waiting for it to connect")
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if rendererDebuggerListening(port) {
-			fmt.Printf("renderer bridge ready on 127.0.0.1:%s (pid %d)\nrun 'agenthail doctor' to verify\n", port, pid)
+			fmt.Println("Codex is connected to Agenthail")
+			fmt.Println("Run 'agenthail doctor' to check every connection")
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("Codex launched (pid %d) but renderer bridge did not become ready on 127.0.0.1:%s", pid, port)
+	return fmt.Errorf("Codex opened but did not connect to Agenthail; quit Codex, then try 'agenthail launch codex' again")
 }
 
 func codexLaunchArgs(port string) []string {

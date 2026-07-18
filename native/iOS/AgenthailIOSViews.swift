@@ -357,7 +357,7 @@ struct SettingsView: View {
                 } else {
                     Button("Enable notifications") { model.requestNotifications() }
                 }
-                Text("Completion and failure alerts are triggered by your Mac daemon.").font(.footnote).foregroundStyle(.secondary)
+                Text("Your Mac sends an alert when an agent finishes or fails.").font(.footnote).foregroundStyle(.secondary)
             }
             Section {
                 Button("Disconnect this iPhone", role: .destructive) { model.unpair() }
