@@ -241,7 +241,8 @@ struct SessionScreen: View {
                     if let context = detail?.context, context.contextWindow > 0 {
                         VStack(alignment: .leading, spacing: 6) {
                             ProgressView(value: context.fraction).tint(context.fraction > 0.85 ? orange : .green)
-                            Text("\(context.usedTokens.formatted()) / \(context.contextWindow.formatted()) tokens").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(context.compacting ? "Compacting context" : "\(Int(context.fraction * 100))% context · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted()) tokens")
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }
                     }
                     ForEach(detail?.exchanges ?? []) { exchange in
@@ -342,7 +343,7 @@ struct SettingsView: View {
     var body: some View {
         List {
             Section("Connection") {
-                Label(model.connectionError == nil ? "Connected over Tailscale" : "Connection interrupted", systemImage: model.connectionError == nil ? "lock.shield.fill" : "wifi.exclamationmark")
+                Label(connectionLabel, systemImage: connectionIcon)
                 if let error = model.connectionError { Text(error).font(.footnote).foregroundStyle(.secondary) }
                 Button("Reconnect") { model.connect() }
             }
@@ -364,5 +365,17 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+    }
+
+    private var connectionLabel: String {
+        if model.connectionError != nil { return "Connection interrupted" }
+        if model.reconnecting { return "Reconnecting live updates" }
+        return "Connected over Tailscale"
+    }
+
+    private var connectionIcon: String {
+        if model.connectionError != nil { return "wifi.exclamationmark" }
+        if model.reconnecting { return "arrow.triangle.2.circlepath" }
+        return "lock.shield.fill"
     }
 }

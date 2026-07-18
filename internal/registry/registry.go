@@ -61,6 +61,7 @@ func (r *Registry) migrate() error {
 		{"delivery_key", `TEXT NOT NULL DEFAULT ''`},
 		{"model", `TEXT NOT NULL DEFAULT ''`},
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
+		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range columns {
@@ -79,9 +80,16 @@ func (r *Registry) migrate() error {
 	_, err := r.db.Exec(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
+		UPDATE message_queue SET expires_at_ms=(CAST(strftime('%s',queued_at) AS INTEGER)*1000)+3600000
+		WHERE expires_at_ms=0 AND status='pending';
+		DELETE FROM aliases WHERE rowid NOT IN (SELECT MAX(rowid) FROM aliases GROUP BY session_id);
 		CREATE UNIQUE INDEX IF NOT EXISTS message_queue_delivery_key
-		ON message_queue(delivery_key) WHERE delivery_key!='';`)
-	return err
+		ON message_queue(delivery_key) WHERE delivery_key!='';
+		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`)
+	if err != nil {
+		return err
+	}
+	return r.mergeDuplicateClaudeSessions()
 }
 
 func (r *Registry) ensureColumn(table, name, declaration string) error {
@@ -152,6 +160,7 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	last_error TEXT NOT NULL DEFAULT '', available_at_ms INTEGER NOT NULL DEFAULT 0,
 	inflight_at_ms INTEGER NOT NULL DEFAULT 0, delivery_key TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '', relay_hops INTEGER NOT NULL DEFAULT 0,
+	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
@@ -231,7 +240,12 @@ CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DES
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
-	_, err := r.db.Exec(
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(
 		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,updated_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
@@ -241,6 +255,113 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 		   transport=CASE WHEN sessions.surface='codex' AND sessions.transport='managed' THEN sessions.transport ELSE excluded.transport END,
 		   updated_at=datetime('now')`,
 		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport)
+	if err != nil {
+		return err
+	}
+	if s.Surface == surface.KindClaude && s.Transcript != "" {
+		rows, err := tx.Query(`SELECT id FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID)
+		if err != nil {
+			return err
+		}
+		var duplicates []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			duplicates = append(duplicates, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, duplicate := range duplicates {
+			if err := mergeSessionTx(tx, duplicate, s.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Registry) mergeDuplicateClaudeSessions() error {
+	rows, err := r.db.Query(`SELECT transcript FROM sessions WHERE surface=? AND transcript<>'' GROUP BY transcript HAVING COUNT(*)>1`, string(surface.KindClaude))
+	if err != nil {
+		return err
+	}
+	var transcripts []string
+	for rows.Next() {
+		var transcript string
+		if err := rows.Scan(&transcript); err != nil {
+			rows.Close()
+			return err
+		}
+		transcripts = append(transcripts, transcript)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, transcript := range transcripts {
+		ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
+		if err != nil {
+			return err
+		}
+		if len(ids) < 2 {
+			continue
+		}
+		tx, err := r.db.Begin()
+		if err != nil {
+			return err
+		}
+		for _, duplicate := range ids[1:] {
+			if err := mergeSessionTx(tx, duplicate, ids[0]); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
+	if oldID == currentID {
+		return nil
+	}
+	var alias string
+	_ = tx.QueryRow(`SELECT name FROM aliases WHERE session_id IN (?,?) ORDER BY rowid DESC LIMIT 1`, oldID, currentID).Scan(&alias)
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,? FROM channel_members WHERE session_id=?`, currentID, oldID); err != nil {
+		return err
+	}
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`DELETE FROM channel_members WHERE session_id=?`, []any{oldID}},
+		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
+		{`UPDATE routes SET to_session=? WHERE to_session=?`, []any{currentID, oldID}},
+		{`DELETE FROM routes WHERE from_session=to_session`, nil},
+		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
+		{`UPDATE message_queue SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
+		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
+		{`UPDATE delivery_history SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
+		{`UPDATE delivery_history SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
+		{`DELETE FROM session_runtime WHERE session_id=?`, []any{oldID}},
+		{`DELETE FROM aliases WHERE session_id IN (?,?)`, []any{oldID, currentID}},
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement.query, statement.args...); err != nil {
+			return err
+		}
+	}
+	if alias != "" {
+		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, alias, currentID); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID)
 	return err
 }
 
@@ -251,8 +372,7 @@ func (r *Registry) LookupAlias(name string) (string, error) {
 }
 
 func (r *Registry) SetAlias(name, sessionID string) error {
-	_, err := r.db.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, name, sessionID)
-	return err
+	return r.ReplaceAlias(name, sessionID)
 }
 
 func (r *Registry) ReplaceAlias(name, sessionID string) error {
@@ -404,7 +524,8 @@ func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, rel
 }
 
 func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int) (int64, error) {
-	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,relay_hops,status,updated_at) VALUES (?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model, relayHops)
+	expiresAt := time.Now().Add(time.Hour).UnixMilli()
+	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model, relayHops, expiresAt)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -423,13 +544,58 @@ func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey strin
 	return id, nil
 }
 
+func (r *Registry) expireMessages(now time.Time) error {
+	_, err := r.ExpireMessages(now)
+	return err
+}
+
+func (r *Registry) ExpireMessages(now time.Time) (int, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id,session_id,message FROM message_queue WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, now.UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	var expired []HistoryEntry
+	for rows.Next() {
+		var entry HistoryEntry
+		if err := rows.Scan(&entry.QueueID, &entry.SessionID, &entry.Message); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		entry.Kind = "expired"
+		entry.Result = "removed after 1 hour without delivery"
+		expired = append(expired, entry)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`UPDATE message_queue SET status='expired',last_error='message expired after 1 hour',updated_at=datetime('now') WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, now.UnixMilli()); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	for _, entry := range expired {
+		_ = r.RecordHistory(entry)
+	}
+	return len(expired), nil
+}
+
 func (r *Registry) QueueCount(sessionID string) int {
+	_ = r.expireMessages(time.Now())
 	var n int
 	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
 	return n
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
+	if err := r.expireMessages(time.Now()); err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`)
 	if err != nil {
 		return nil, err
@@ -613,6 +779,7 @@ type QueueRow struct {
 	Attempts  int    `json:"attempts"`
 	LastError string `json:"lastError,omitempty"`
 	QueuedAt  string `json:"queuedAt"`
+	ExpiresAt int64  `json:"expiresAt,omitempty"`
 }
 
 type AttentionItem struct {
@@ -629,9 +796,12 @@ type AttentionItem struct {
 const uncertainDeliveryError = "delivery outcome is unknown after daemon interruption; retry explicitly if the target did not receive it"
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
-	query := `SELECT id,session_id,message,model,status,attempts,last_error,queued_at FROM message_queue`
+	if err := r.expireMessages(time.Now()); err != nil {
+		return nil, err
+	}
+	query := `SELECT id,session_id,message,model,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue`
 	if !includeDelivered {
-		query += ` WHERE status NOT IN ('delivered','canceled')`
+		query += ` WHERE status NOT IN ('delivered','canceled','expired')`
 	}
 	query += ` ORDER BY id`
 	rows, err := r.db.Query(query)
@@ -642,7 +812,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	result := make([]QueueRow, 0)
 	for rows.Next() {
 		var row QueueRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -651,8 +821,11 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 }
 
 func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
+	if err := r.expireMessages(time.Now()); err != nil {
+		return nil, err
+	}
 	var row QueueRow
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,status,attempts,last_error,queued_at FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt)
+	err := r.db.QueryRow(`SELECT id,session_id,message,model,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -711,12 +884,12 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,expires_at_ms=?,delivered=0,updated_at=datetime('now') WHERE id=? AND status IN ('dead','expired')`, time.Now().Add(time.Hour).UnixMilli(), id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not dead-lettered", id)
+		return fmt.Errorf("queue item %d is not dead-lettered or expired", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
 	return nil
@@ -773,6 +946,9 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 }
 
 func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	if err := r.expireMessages(now); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -913,6 +1089,11 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	return state, true, nil
 }
 
+func (r *Registry) MarkDeliveryStarted(sessionID, activeTurnID, completedTurnID string) error {
+	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,updated_at=datetime('now')`, sessionID, string(surface.StatusBusy), activeTurnID, completedTurnID)
+	return err
+}
+
 func (r *Registry) SaveRuntimeState(sessionID string, observation surface.TurnObservation) error {
 	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now')`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
 	return err
@@ -938,6 +1119,9 @@ type WatchedSession struct {
 }
 
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
+	if err := r.expireMessages(time.Now()); err != nil {
+		return nil, err
+	}
 	rows, err := r.db.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
@@ -1095,6 +1279,12 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	session.Status = surface.SessionStatus(status)
 	session.HasLocal = hasLocal != 0
 	return &session, nil
+}
+
+func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {
+	var stale bool
+	err := r.db.QueryRow(`SELECT updated_at < datetime(?,'unixepoch') FROM sessions WHERE id=?`, before.Unix(), id).Scan(&stale)
+	return stale, err
 }
 
 func (r *Registry) ReverseAlias(sessionID string) (string, error) {

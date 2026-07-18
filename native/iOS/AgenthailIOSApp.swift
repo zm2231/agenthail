@@ -52,7 +52,7 @@ struct AgenthailIOSApp: App {
                     model.operationError = notification.object as? String ?? "This device could not register for notifications."
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { model.refreshNotificationRegistration() }
+                    if phase == .active { model.resumeConnection() }
                 }
         }
     }

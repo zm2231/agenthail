@@ -8,6 +8,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var selectedDetail: SessionDetail?
     @Published var selectedSessionID: String?
     @Published var connectionError: String?
+    @Published var reconnecting = false
     @Published var operationError: String?
     @Published var pairing = false
     @Published var composer = ""
@@ -129,6 +130,7 @@ final class AgenthailIOSModel: ObservableObject {
         eventTask?.cancel()
         eventRefreshTask?.cancel()
         lastEventID = 0
+        reconnecting = true
         connectionTask = Task {
             do {
                 let version = try await api.version()
@@ -144,7 +146,18 @@ final class AgenthailIOSModel: ObservableObject {
                 startEvents()
                 refreshNotificationRegistration()
             } catch {
+                reconnecting = false
                 connectionError = error.localizedDescription
+            }
+        }
+    }
+
+    func resumeConnection() {
+        refreshNotificationRegistration()
+        guard isPaired else { return }
+        Task {
+            if !(await refresh()) {
+                connect()
             }
         }
     }
@@ -255,6 +268,7 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = nil
         lastEventID = 0
         connectionError = nil
+        reconnecting = false
     }
 
     func requestNotifications() {
@@ -347,7 +361,13 @@ final class AgenthailIOSModel: ObservableObject {
                     )
                 } catch {
                     if Task.isCancelled { return }
-                    connectionError = error.localizedDescription
+                    reconnecting = true
+                    do {
+                        _ = try await api.version()
+                        recordStreamInterruption(probeError: nil)
+                    } catch {
+                        recordStreamInterruption(probeError: error)
+                    }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
                 }
@@ -370,7 +390,13 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func eventStreamConnected() {
+        reconnecting = false
         connectionError = nil
+    }
+
+    func recordStreamInterruption(probeError: Error?) {
+        reconnecting = probeError == nil
+        connectionError = probeError?.localizedDescription
     }
 
     private func storedPushRegistration() -> PushRegistration? {

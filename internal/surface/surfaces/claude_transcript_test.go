@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,26 @@ func writeTranscript(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestClaudeListOmitsDeadBridgeProcesses(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	active := `{"bridgeSessionId":"active","pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
+	stale := `{"bridgeSessionId":"stale","pid":2147483647,"status":"idle"}`
+	if err := os.WriteFile(filepath.Join(dir, "active.json"), []byte(active), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stale.json"), []byte(stale), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewClaude("", home).List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "active" {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
 }
 
 func TestReadClaudeTurnsRequiresEndTurnAndKeepsTurnIdentity(t *testing.T) {
@@ -243,5 +264,17 @@ func TestClaudeCompactionSummaryIsNotAnActiveTurn(t *testing.T) {
 	}
 	if observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" || observation.CompletedTurnID != "m1" {
 		t.Fatalf("observation=%+v", observation)
+	}
+}
+
+func TestClaudeCompactPendingUsesTimestampsAcrossReorderedRecords(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","timestamp":"2026-07-18T08:09:58.695Z","message":{"content":"/compact"}}
+{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-18T08:12:08.605Z","content":"Conversation compacted"}
+{"type":"user","timestamp":"2026-07-18T08:12:08.359Z","message":{"content":"This session is being continued from a previous conversation."}}
+{"type":"user","timestamp":"2026-07-18T08:09:58.696Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
+	pending, err := claudeCompactPending(path)
+	if err != nil || pending {
+		t.Fatalf("pending=%v err=%v", pending, err)
 	}
 }

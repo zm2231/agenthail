@@ -197,7 +197,7 @@ struct ConversationHeader: View {
             if let context = model.detail?.context, context.contextWindow > 0 {
                 HStack(spacing: 10) {
                     ProgressView(value: context.fraction).tint(context.fraction > 0.85 ? agenthailOrange : .accentColor)
-                    Text("\(context.usedTokens.formatted()) / \(context.contextWindow.formatted())")
+                    Text(context.compacting ? "Compacting context" : "\(Int(context.fraction * 100))% · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted())")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }

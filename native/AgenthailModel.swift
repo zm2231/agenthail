@@ -16,6 +16,7 @@ final class AgenthailModel: ObservableObject {
     @Published var auditQuery = ""
     @Published var auditKind = ""
     @Published var connectionError: String?
+    @Published var reconnecting = false
     @Published var operationError: String?
     @Published var loading = false
     @Published var composer = ""
@@ -273,7 +274,14 @@ final class AgenthailModel: ObservableObject {
                     )
                 } catch {
                     if Task.isCancelled { return }
-                    connectionError = error.localizedDescription
+                    reconnecting = true
+                    do {
+                        _ = try await api.version()
+                        connectionError = nil
+                    } catch {
+                        reconnecting = false
+                        connectionError = error.localizedDescription
+                    }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
                 }
@@ -301,6 +309,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func eventStreamConnected() {
+        reconnecting = false
         connectionError = nil
     }
 }

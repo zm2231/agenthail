@@ -62,6 +62,17 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
+	baselineCompletionID := ""
+	if d.Registry != nil {
+		state, found, stateErr := d.Registry.RuntimeState(session.ID)
+		if stateErr != nil {
+			d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Error: stateErr.Error()})
+		} else if found {
+			baselineCompletionID = state.CompletedTurnID
+		} else if observation, observeErr := adapter.Observe(ctx, session); observeErr == nil && observation != nil {
+			baselineCompletionID = observation.CompletedTurnID
+		}
+	}
 	var result *surface.SendResult
 	var err error
 	if options.Model != "" {
@@ -83,6 +94,11 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		return nil, err
 	}
 	if result.Accepted {
+		if d.Registry != nil {
+			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
+				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result.UUID, Error: err.Error()})
+			}
+		}
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID}, nil
 	}

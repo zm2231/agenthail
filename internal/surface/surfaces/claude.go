@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -211,6 +213,12 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		}
 		if pid, ok := m["pid"].(float64); ok {
 			sess.PID = int(pid)
+		}
+		if sess.PID > 0 {
+			err := syscall.Kill(sess.PID, 0)
+			if err != nil && !errors.Is(err, syscall.EPERM) {
+				continue
+			}
 		}
 		if n, ok := m["name"].(string); ok {
 			sess.Name = n

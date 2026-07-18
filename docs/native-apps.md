@@ -34,7 +34,7 @@ Agenthail only offers message controls when it knows a conversation is writable.
 
 ## Notifications
 
-Notifications are optional. Agenthail can tell you when an agent finishes or fails without putting conversation text in the alert. Tapping an alert opens the related conversation.
+Notifications are optional. Agenthail can tell you whether a Claude Code, Codex, or Notion agent finishes or fails without putting the agent name, conversation title, or conversation text in the alert. Tapping an alert opens the related conversation.
 
 Turning notifications off removes that phone's notification registration. You can also forget a Mac from the iPhone app if the Mac is no longer available.
 

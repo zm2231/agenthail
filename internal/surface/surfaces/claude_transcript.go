@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const maxClaudeTranscriptRecordBytes = 32 * 1024 * 1024
@@ -25,11 +26,12 @@ type claudeTurn struct {
 }
 
 type claudeRecord struct {
-	Type    string `json:"type"`
-	UUID    string `json:"uuid"`
-	Subtype string `json:"subtype"`
-	Content string `json:"content"`
-	Message struct {
+	Type      string `json:"type"`
+	UUID      string `json:"uuid"`
+	Subtype   string `json:"subtype"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+	Message   struct {
 		ID         string `json:"id"`
 		Model      string `json:"model"`
 		StopReason string `json:"stop_reason"`
@@ -107,9 +109,10 @@ func claudeCompactPending(path string) (bool, error) {
 	}
 	defer f.Close()
 
-	pending := 0
-	commandMarkers := 0
-	completedWithBoundary := 0
+	var latestCommandAt, latestCompletedAt time.Time
+	pendingWithoutTime := 0
+	markersWithoutTime := 0
+	completedWithoutTime := 0
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
 	for scanner.Scan() {
@@ -117,41 +120,62 @@ func claudeCompactPending(path string) (bool, error) {
 		if json.Unmarshal(scanner.Bytes(), &record) != nil {
 			continue
 		}
+		at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
 		if record.Type == "user" {
 			content := strings.TrimSpace(transcriptText(record.Message.Content))
+			if at.IsZero() {
+				switch {
+				case content == "/compact":
+					pendingWithoutTime++
+				case strings.Contains(content, "<command-name>/compact</command-name>"):
+					markersWithoutTime++
+				case markersWithoutTime > 0 && strings.HasPrefix(content, "<local-command-stdout>"):
+					markersWithoutTime--
+					if completedWithoutTime > 0 {
+						completedWithoutTime--
+					} else if pendingWithoutTime > 0 {
+						pendingWithoutTime--
+					}
+				}
+				continue
+			}
 			switch {
-			case content == "/compact":
-				pending++
-			case strings.Contains(content, "<command-name>/compact</command-name>"):
-				commandMarkers++
-			case commandMarkers > 0 && strings.HasPrefix(content, "<local-command-stdout>"):
-				commandMarkers--
-				if completedWithBoundary > 0 {
-					completedWithBoundary--
-				} else if pending > 0 {
-					pending--
+			case content == "/compact", strings.Contains(content, "<command-name>/compact</command-name>"):
+				if !at.IsZero() && (latestCommandAt.IsZero() || at.After(latestCommandAt)) {
+					latestCommandAt = at
+				}
+			case strings.HasPrefix(content, "<local-command-stdout>"):
+				if !at.IsZero() && (latestCompletedAt.IsZero() || at.After(latestCompletedAt)) {
+					latestCompletedAt = at
 				}
 			}
 			continue
 		}
-		if record.Type == "system" && record.Subtype == "compact_boundary" && pending > 0 {
-			pending--
-			completedWithBoundary++
-			continue
-		}
-		if record.Type == "system" && record.Subtype == "local_command" && commandMarkers > 0 {
-			commandMarkers--
-			if completedWithBoundary > 0 {
-				completedWithBoundary--
-			} else if pending > 0 {
-				pending--
+		if record.Type == "system" && (record.Subtype == "compact_boundary" || record.Subtype == "local_command") {
+			if at.IsZero() {
+				if record.Subtype == "compact_boundary" && pendingWithoutTime > 0 {
+					pendingWithoutTime--
+					completedWithoutTime++
+				} else if record.Subtype == "local_command" && markersWithoutTime > 0 {
+					markersWithoutTime--
+					if completedWithoutTime > 0 {
+						completedWithoutTime--
+					} else if pendingWithoutTime > 0 {
+						pendingWithoutTime--
+					}
+				}
+				continue
+			}
+			if !at.IsZero() && (latestCompletedAt.IsZero() || at.After(latestCompletedAt)) {
+				latestCompletedAt = at
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return false, fmt.Errorf("scan Claude transcript: %w", err)
 	}
-	return pending > 0, nil
+	timestampPending := !latestCommandAt.IsZero() && (latestCompletedAt.IsZero() || latestCommandAt.After(latestCompletedAt))
+	return timestampPending || pendingWithoutTime > 0, nil
 }
 
 func isClaudeInterruptMarker(text string) bool {

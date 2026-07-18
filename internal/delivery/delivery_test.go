@@ -86,6 +86,26 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	}
 }
 
+func TestDispatcherBaselinesFirstAcceptedDelivery(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "s", Surface: surface.KindNotion}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{kind: surface.KindNotion, observe: &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "previous"}, result: &surface.SendResult{UUID: "turn", Accepted: true}}
+	if _, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "next", ""); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err := r.RuntimeState(session.ID)
+	if err != nil || !found || state.ActiveTurnID != "turn" || state.CompletedTurnID != "previous" {
+		t.Fatalf("state=%+v found=%v err=%v", state, found, err)
+	}
+}
+
 func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {

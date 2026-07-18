@@ -12,13 +12,11 @@ import (
 )
 
 type claudeContextState struct {
-	offset                int64
-	usage                 surface.ContextUsage
-	pending               int
-	commandMarkers        int
-	completedWithBoundary int
-	latestCommandAt       time.Time
-	seenBoundaries        map[string]bool
+	offset              int64
+	usage               surface.ContextUsage
+	latestCommandAt     time.Time
+	latestCommandDoneAt time.Time
+	seenBoundaries      map[string]bool
 }
 
 type claudeContextRecord struct {
@@ -92,13 +90,11 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 			content := strings.TrimSpace(transcriptText(record.Message.Content))
 			switch {
 			case content == "/compact" && compactCommandIsNewer(at, state.usage.LastCompactedAt):
-				state.pending++
 				state.rememberCommandTime(at)
 			case strings.Contains(content, "<command-name>/compact</command-name>") && compactCommandIsNewer(at, state.usage.LastCompactedAt):
-				state.commandMarkers++
 				state.rememberCommandTime(at)
-			case state.commandMarkers > 0 && strings.HasPrefix(content, "<local-command-stdout>"):
-				state.completeCompactCommand()
+			case strings.HasPrefix(content, "<local-command-stdout>"):
+				state.rememberCommandCompletion(at)
 			}
 		case record.Type == "system" && record.Subtype == "compact_boundary":
 			key := compactBoundaryKey(record)
@@ -122,13 +118,9 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 					state.usage.OutputTokens = 0
 					state.usage.UpdatedAt = at
 				}
-				if state.pending > 0 && contextEventIsCurrent(at, state.latestCommandAt) {
-					state.pending--
-					state.completedWithBoundary++
-				}
 			}
-		case record.Type == "system" && record.Subtype == "local_command" && state.commandMarkers > 0:
-			state.completeCompactCommand()
+		case record.Type == "system" && record.Subtype == "local_command":
+			state.rememberCommandCompletion(at)
 		}
 		return nil
 	})
@@ -136,7 +128,11 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	if err != nil {
 		return nil, err
 	}
-	state.usage.Compacting = state.pending > 0 || state.commandMarkers > 0
+	completedAt := state.usage.LastCompactedAt
+	if state.latestCommandDoneAt.After(completedAt) {
+		completedAt = state.latestCommandDoneAt
+	}
+	state.usage.Compacting = !state.latestCommandAt.IsZero() && state.latestCommandAt.After(completedAt)
 	if state.usage.ContextWindow == 0 && state.usage.CompactionCount == 0 {
 		return nil, nil
 	}
@@ -161,17 +157,14 @@ func (s *claudeContextState) rememberCommandTime(at time.Time) {
 	}
 }
 
-func compactCommandIsNewer(commandAt, boundaryAt time.Time) bool {
-	return boundaryAt.IsZero() || commandAt.IsZero() || commandAt.After(boundaryAt)
+func (s *claudeContextState) rememberCommandCompletion(at time.Time) {
+	if contextEventIsCurrent(at, s.latestCommandDoneAt) {
+		s.latestCommandDoneAt = at
+	}
 }
 
-func (s *claudeContextState) completeCompactCommand() {
-	s.commandMarkers--
-	if s.completedWithBoundary > 0 {
-		s.completedWithBoundary--
-	} else if s.pending > 0 {
-		s.pending--
-	}
+func compactCommandIsNewer(commandAt, boundaryAt time.Time) bool {
+	return boundaryAt.IsZero() || (!commandAt.IsZero() && commandAt.After(boundaryAt))
 }
 
 func claudeContextWindow(model string) int64 {

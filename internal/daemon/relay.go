@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"syscall"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -29,10 +31,17 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 			continue
 		}
 		target, targetErr := d.Registry.Session(route.ToSession)
-		if targetErr == nil && surface.IsReadOnlySession(target) {
+		if targetErr != nil {
+			d.dropRelay(from.ID, route, completionID, text, "target session no longer exists")
+			continue
+		}
+		if surface.IsReadOnlySession(target) {
 			reason := surface.ReadOnlySessionReason(target)
-			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})
-			d.log.Printf("drop relay %d to %s: %s", route.ID, d.resolveDisplay(route.ToSession), reason)
+			d.dropRelay(from.ID, route, completionID, text, reason)
+			continue
+		}
+		if relayTargetInactive(target) {
+			d.dropRelay(from.ID, route, completionID, text, "target session is no longer active")
 			continue
 		}
 		payloadText := text
@@ -57,6 +66,22 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, QueueID: queueID, CompletionID: completionID, Message: text, Result: "queued"})
 		d.log.Printf("relay %d %s -> %s (queued #%d)", route.ID, d.resolveDisplay(from.ID), d.resolveDisplay(route.ToSession), queueID)
 	}
+}
+
+func (d *Daemon) dropRelay(sourceID string, route registry.RouteRow, completionID, text, reason string) {
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SessionID: route.ToSession, SourceSessionID: sourceID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})
+	d.log.Printf("drop relay %d to %s: %s", route.ID, d.resolveDisplay(route.ToSession), reason)
+}
+
+func relayTargetInactive(session *surface.Session) bool {
+	if session.Status == surface.StatusOffline {
+		return true
+	}
+	if session.Surface != surface.KindClaude || session.PID <= 0 {
+		return false
+	}
+	err := syscall.Kill(session.PID, 0)
+	return err != nil && !errors.Is(err, syscall.EPERM)
 }
 
 func matchPattern(pattern, text string) bool {

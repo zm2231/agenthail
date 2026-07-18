@@ -791,6 +791,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if sent != nil {
 			result = sent.UUID
 		}
+		if result != "" {
+			if runtimeErr := d.Registry.MarkDeliveryStarted(session.ID, result, ""); runtimeErr != nil {
+				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: request.Message, Result: result, Error: runtimeErr.Error()})
+			}
+		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: request.Message, Result: result})
 		writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "session": session, "result": sent})
 		return

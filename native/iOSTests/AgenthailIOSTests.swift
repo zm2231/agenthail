@@ -33,6 +33,18 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(probe.detailID, "B")
     }
 
+    @MainActor
+    func testEventStreamOnlyReportsConfirmedOutage() {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.connectionError = "old"
+        model.recordStreamInterruption(probeError: nil)
+        XCTAssertTrue(model.reconnecting)
+        XCTAssertNil(model.connectionError)
+        model.recordStreamInterruption(probeError: NSError(domain: "network", code: -1, userInfo: [NSLocalizedDescriptionKey: "offline"]))
+        XCTAssertFalse(model.reconnecting)
+        XCTAssertEqual(model.connectionError, "offline")
+    }
+
     func testPairingLinksRequireSecureTailscaleEndpoint() throws {
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=http%3A%2F%2Fmac.tailnet.ts.net%3A7412&secret=12345678901234567890")!))
         XCTAssertThrowsError(try PairingLink(url: URL(string: "agenthail://pair?endpoint=https%3A%2F%2Fattacker.example&secret=12345678901234567890")!))

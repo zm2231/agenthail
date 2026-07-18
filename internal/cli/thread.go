@@ -104,6 +104,11 @@ func (a *App) cmdThread(args []string) error {
 	if deliveryResult != nil {
 		result = deliveryResult.UUID
 	}
+	if result != "" {
+		if err := a.Registry.MarkDeliveryStarted(session.ID, result, ""); err != nil {
+			_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: request.message, Result: result, Error: err.Error()})
+		}
+	}
 	recordThreadCreateHistory(a.Registry, "sent", session, request.message, result, "")
 	if request.jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(output)

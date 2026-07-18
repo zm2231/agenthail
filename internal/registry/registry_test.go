@@ -103,7 +103,7 @@ func TestReplaceAliasKeepsOneNamePerSession(t *testing.T) {
 	if err := r.SetAlias("first", session.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.ReplaceAlias("second", session.ID); err != nil {
+	if err := r.SetAlias("second", session.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.LookupAlias("first"); err == nil {
@@ -115,6 +115,48 @@ func TestReplaceAliasKeepsOneNamePerSession(t *testing.T) {
 	}
 	if alias != "second" {
 		t.Fatalf("alias = %q, want second", alias)
+	}
+}
+
+func TestRegisterSessionMergesResumedClaudeIdentity(t *testing.T) {
+	r := openTestRegistry(t)
+	oldSession := surface.Session{ID: "old", Surface: surface.KindClaude, Transcript: "/tmp/shared.jsonl"}
+	if err := r.RegisterSession(oldSession); err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "source")
+	if err := r.SetAlias("reviewer", oldSession.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute("source", oldSession.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(oldSession.ID, "handoff"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRuntimeState(oldSession.ID, surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "stale"}); err != nil {
+		t.Fatal(err)
+	}
+	resumed := surface.Session{ID: "current", Surface: surface.KindClaude, Transcript: oldSession.Transcript, Status: surface.StatusIdle}
+	if err := r.RegisterSession(resumed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Session(oldSession.ID); err != sql.ErrNoRows {
+		t.Fatalf("old session survived: %v", err)
+	}
+	if resolved, err := r.LookupAlias("reviewer"); err != nil || resolved != resumed.ID {
+		t.Fatalf("alias=%q err=%v", resolved, err)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 1 || routes[0].ToSession != resumed.ID {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].SessionID != resumed.ID {
+		t.Fatalf("queue=%+v err=%v", rows, err)
+	}
+	if _, found, err := r.RuntimeState(resumed.ID); err != nil || found {
+		t.Fatalf("stale runtime transferred: found=%v err=%v", found, err)
 	}
 }
 
@@ -291,6 +333,29 @@ func TestQueueLifecycleAndIdempotency(t *testing.T) {
 	}
 	if count := r.QueueCount("s"); count != 0 {
 		t.Fatalf("pending=%d", count)
+	}
+}
+
+func TestQueuedMessageExpiresAndStopsWatchingSession(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	id, err := r.QueueMessageWithKey("s", "old", "expires")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.ClaimNextMessage("s", time.Now()); err != nil || item != nil {
+		t.Fatalf("expired claim=%+v err=%v", item, err)
+	}
+	row, err := r.QueueItem(id)
+	if err != nil || row.Status != "expired" || !strings.Contains(row.LastError, "1 hour") {
+		t.Fatalf("row=%+v err=%v", row, err)
+	}
+	watched, err := r.WatchedSessions()
+	if err != nil || len(watched) != 0 {
+		t.Fatalf("watched=%+v err=%v", watched, err)
 	}
 }
 

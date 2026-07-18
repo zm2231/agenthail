@@ -81,6 +81,24 @@ func TestClaudeContextUsageIgnoresOlderCommandAfterBoundary(t *testing.T) {
 	}
 }
 
+func TestClaudeContextUsageCompletesCommandMarkerAtBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"cache_creation_input_tokens":20000,"cache_read_input_tokens":129000,"output_tokens":500}}}`,
+		`{"type":"user","timestamp":"2026-07-16T01:01:00Z","message":{"content":"/compact"}}`,
+		`{"type":"user","timestamp":"2026-07-16T01:01:00.001Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`,
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-16T01:01:02Z","compactMetadata":{"preTokens":150000,"postTokens":42000}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Compacting {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
 func TestClaudeContextUsageDeduplicatesReplayedRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "claude.jsonl")
 	writeTestTranscript(t, path,

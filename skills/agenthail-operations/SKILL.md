@@ -114,6 +114,8 @@ agenthail identify list
 agenthail identify rm notes
 ```
 
+Each session has one current alias. Naming the same session again replaces its previous alias.
+
 ## Start New Sessions And Threads
 
 Create a writable Codex thread non-interactively:
@@ -186,7 +188,7 @@ AgentHail has four distinct completion behaviors:
 
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
-3. A relay is a persistent agent-to-agent subscription to completed turns.
+3. A relay is an agent-to-agent subscription to completed turns. Closed Claude Code targets do not receive work, rebind when the same conversation resumes, and remove the rule after one hour without a resume.
 4. Daemon notifications alert the human through the AgentHail Mac app and,
    when paired, the optional iPhone app.
 
@@ -242,7 +244,9 @@ agenthail history @builder 25 --json
 The daemon delivers queued work when a target becomes idle. Queue delivery is
 ordered per session. Known pre-dispatch failures retry with bounded backoff.
 Repeated failures become dead letters. An `unknown` outcome means delivery may
-already have happened; inspect history and the target before retrying.
+already have happened; inspect history and the target before retrying. Pending
+messages expire after one hour. Expired items leave the active queue, appear in
+history, and remain available through `queue list --all`.
 
 ## Channels
 

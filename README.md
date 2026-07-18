@@ -95,6 +95,7 @@ agenthail history @writer 25
 ```
 
 When an agent is already working, Agenthail holds the next message until it is ready. Use `steer` when you want to change the turn that is running now.
+Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
 
 ## Let agents hand work to each other
 
@@ -105,13 +106,15 @@ agenthail identify claude:test-session investigator
 agenthail identify codex:test-session-23 builder
 ```
 
+Naming the same conversation again replaces its previous name.
+
 Then connect them:
 
 ```bash
 agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 ```
 
-When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out.
+When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
 
 For a group that needs the same update:
 
@@ -161,7 +164,7 @@ Your full transcripts remain in the apps that created them. Agenthail keeps only
 
 There is no Agenthail account and no telemetry.
 
-Your conversations and history stay on your Mac. Phone access is private to your Tailscale network. If you enable iPhone notifications, Agenthail sends only a generic completion or failure alert through Apple. It never puts reply text or browser sign-in data in a notification.
+Your conversations and history stay on your Mac. Phone access is private to your Tailscale network. If you enable iPhone notifications, Agenthail sends only the connected app name and a completion or failure status through Apple. It never puts an agent name, conversation title, reply text, or browser sign-in data in a notification.
 
 Read the full [security and privacy model](SECURITY.md).
 
