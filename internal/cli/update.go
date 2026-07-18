@@ -17,16 +17,20 @@ import (
 	"time"
 )
 
-const latestReleaseURL = "https://api.github.com/repos/zm2231/agenthail/releases/latest"
+var (
+	latestReleaseURL        = "https://api.github.com/repos/zm2231/agenthail/releases/latest"
+	expectedInstallerTeamID string
+)
 
 type updateDeps struct {
-	client     *http.Client
-	releaseURL string
-	executable func() (string, error)
-	run        func(string, ...string) error
-	output     func(string, ...string) ([]byte, error)
-	goos       string
-	goarch     string
+	client          *http.Client
+	releaseURL      string
+	installerTeamID string
+	executable      func() (string, error)
+	run             func(string, ...string) error
+	output          func(string, ...string) ([]byte, error)
+	goos            string
+	goarch          string
 }
 
 type releaseAsset struct {
@@ -50,11 +54,12 @@ type updateStatus struct {
 
 func defaultUpdateDeps() *updateDeps {
 	return &updateDeps{
-		client:     &http.Client{Timeout: 30 * time.Second},
-		releaseURL: latestReleaseURL,
-		executable: os.Executable,
-		goos:       runtime.GOOS,
-		goarch:     runtime.GOARCH,
+		client:          &http.Client{Timeout: 30 * time.Second},
+		releaseURL:      latestReleaseURL,
+		installerTeamID: strings.TrimSpace(expectedInstallerTeamID),
+		executable:      os.Executable,
+		goos:            runtime.GOOS,
+		goarch:          runtime.GOARCH,
 		run: func(name string, args ...string) error {
 			command := exec.Command(name, args...)
 			command.Stdin = os.Stdin
@@ -191,6 +196,9 @@ func fetchLatestRelease(deps *updateDeps) (*latestRelease, error) {
 }
 
 func installPackageUpdate(deps *updateDeps, release *latestRelease) error {
+	if deps.installerTeamID == "" {
+		return fmt.Errorf("package updater trust is not configured for this build")
+	}
 	pkgName := "Agenthail-" + release.TagName + "-arm64.pkg"
 	pkgURL := assetURL(release.Assets, pkgName)
 	checksumURL := assetURL(release.Assets, pkgName+".sha256")
@@ -217,8 +225,8 @@ func installPackageUpdate(deps *updateDeps, release *latestRelease) error {
 	if err != nil {
 		return fmt.Errorf("verify package signature: %w", err)
 	}
-	if !strings.Contains(string(signature), "Developer ID Installer:") || !strings.Contains(string(signature), "(Q5Y75DVV4M)") {
-		return fmt.Errorf("package signature is not from Agenthail's Apple developer team")
+	if !strings.Contains(string(signature), "Developer ID Installer:") || !strings.Contains(string(signature), "("+deps.installerTeamID+")") {
+		return fmt.Errorf("package signature is not from the configured Apple developer team")
 	}
 	if err := deps.run("/usr/sbin/spctl", "--assess", "--type", "install", "--verbose=2", pkgPath); err != nil {
 		return fmt.Errorf("verify package notarization: %w", err)

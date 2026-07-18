@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -31,9 +31,11 @@ jobs:
         env:
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_KEY_P8: ${{ secrets.APNS_KEY_P8 }}
-          APNS_TOPIC: com.agenthail.ios
+          APNS_TOPIC: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node push-relay/scripts/verify-apns-credentials.mjs
+        run: |
+          : "${APNS_TOPIC:?missing AGENTHAIL_IOS_BUNDLE_ID repository variable}"
+          node push-relay/scripts/verify-apns-credentials.mjs
       - name: Install locked relay dependencies
         working-directory: push-relay
         run: npm ci --ignore-scripts
@@ -93,8 +95,13 @@ jobs:
         timeout-minutes: 30
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+          AGENTHAIL_INSTALLER_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
+          AGENTHAIL_UPDATE_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: scripts/build-pkg.sh
+        run: |
+          : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
+          scripts/build-pkg.sh
       - name: Verify package artifact
         run: scripts/test-pkg-artifact.sh dist/Agenthail-*.pkg
       - name: Verify clean install, upgrade, and uninstall
@@ -103,8 +110,11 @@ jobs:
         timeout-minutes: 30
         env:
           AGENTHAIL_NOTARY_PROFILE: agenthail-ci
+          AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: scripts/package-release.sh
+        run: |
+          : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
+          scripts/package-release.sh
       - uses: actions/upload-artifact@v4
         with:
           name: agenthail-macos-release
@@ -119,6 +129,9 @@ jobs:
   ios-archive:
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -134,6 +147,8 @@ jobs:
           : "${DISTRIBUTION_P12:?missing APPLE_DISTRIBUTION_P12_BASE64}"
           : "${DISTRIBUTION_P12_PASSWORD:?missing APPLE_DISTRIBUTION_P12_PASSWORD}"
           : "${PROVISIONING_PROFILE:?missing APPLE_IOS_PROVISIONING_PROFILE_BASE64}"
+          : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID}"
+          : "${IOS_BUNDLE_ID:?missing AGENTHAIL_IOS_BUNDLE_ID repository variable}"
           umask 077
           KEYCHAIN_PATH="$RUNNER_TEMP/agenthail-ios-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
@@ -146,22 +161,23 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -d user -s "$KEYCHAIN_PATH"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep 'Apple Distribution: ZAIN SOHAIL MERCHANT (Q5Y75DVV4M)'
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -nE "s/.*\"(Apple Distribution:.*\\(${APPLE_TEAM_ID}\\))\".*/\\1/p" | head -n 1)"
+          test -n "$SIGNING_IDENTITY"
           security cms -D -i "$RUNNER_TEMP/Agenthail.mobileprovision" -o "$RUNNER_TEMP/Agenthail-profile.plist"
           PROFILE_UUID="$(plutil -extract UUID raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
           PROFILE_NAME="$(plutil -extract Name raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
           PROFILE_EXPIRATION="$(plutil -extract ExpirationDate raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")"
           PROFILE_CERT_SHA="$(plutil -extract DeveloperCertificates.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist" | base64 --decode | shasum -a 256 | awk '{print $1}')"
-          SIGNING_CERT_SHA="$(security find-certificate -c 'Apple Distribution: ZAIN SOHAIL MERCHANT (Q5Y75DVV4M)' -p "$KEYCHAIN_PATH" | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')"
-          test "$(plutil -extract TeamIdentifier.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "Q5Y75DVV4M"
-          test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "Q5Y75DVV4M.com.agenthail.ios"
+          SIGNING_CERT_SHA="$(security find-certificate -c "$SIGNING_IDENTITY" -p "$KEYCHAIN_PATH" | openssl x509 -outform DER | shasum -a 256 | awk '{print $1}')"
+          test "$(plutil -extract TeamIdentifier.0 raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "$APPLE_TEAM_ID"
+          test "$(plutil -extract Entitlements.application-identifier raw -o - "$RUNNER_TEMP/Agenthail-profile.plist")" = "$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
           test "$PROFILE_CERT_SHA" = "$SIGNING_CERT_SHA"
           [[ "$PROFILE_EXPIRATION" > "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" ]]
           mkdir -p "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$RUNNER_TEMP/Agenthail.mobileprovision" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
           cp "$RUNNER_TEMP/Agenthail.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
-          test "$PROFILE_NAME" = "iOS Team Store Provisioning Profile: com.agenthail.ios"
+          test -n "$PROFILE_NAME"
       - name: Configure App Store Connect authentication
         env:
           ASC_KEY: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
@@ -189,19 +205,21 @@ jobs:
             -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM=Q5Y75DVV4M \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
             CODE_SIGN_STYLE=Automatic \
             MARKETING_VERSION="${RELEASE_VERSION#v}" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
       - name: Export App Store IPA
         run: |
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
+          : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID}"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
             <key>signingStyle</key><string>automatic</string>
-            <key>teamID</key><string>Q5Y75DVV4M</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
           </dict></plist>
           PLIST
           xcodebuild -exportArchive \
@@ -213,6 +231,7 @@ jobs:
           plist="$RUNNER_TEMP/Agenthail.xcarchive/Products/Applications/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$plist")" = "$IOS_BUNDLE_ID"
           mkdir -p "$RUNNER_TEMP/ipa-inspect"
           unzip -q "$RUNNER_TEMP/export/Agenthail.ipa" -d "$RUNNER_TEMP/ipa-inspect"
           app="$RUNNER_TEMP/ipa-inspect/Payload/Agenthail.app"
@@ -259,6 +278,8 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 55
     env:
+      AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
+      IOS_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
       RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
@@ -309,27 +330,38 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           ASC_BUILD_NUMBER: ${{ github.run_number }}
           ASC_MARKETING_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          ASC_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
         run: node push-relay/scripts/wait-testflight-build.mjs
       - name: Deploy validated relay
         working-directory: push-relay
         env:
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
           APNS_KEY_P8: ${{ secrets.APNS_KEY_P8 }}
-          APNS_TOPIC: com.agenthail.ios
+          APNS_TOPIC: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PUSH_DEVICES_KV_ID: ${{ secrets.CLOUDFLARE_PUSH_DEVICES_KV_ID }}
         run: |
           : "${APNS_KEY_ID:?missing APNS_KEY_ID}"
           : "${APNS_KEY_P8:?missing APNS_KEY_P8}"
+          : "${APNS_TOPIC:?missing AGENTHAIL_IOS_BUNDLE_ID repository variable}"
           : "${APPLE_TEAM_ID:?missing APPLE_TEAM_ID}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?missing CLOUDFLARE_ACCOUNT_ID}"
           : "${CLOUDFLARE_API_TOKEN:?missing CLOUDFLARE_API_TOKEN}"
           npm ci --ignore-scripts
-          jq -n --arg key "$APNS_KEY_P8" --arg id "$APNS_KEY_ID" --arg team "$APPLE_TEAM_ID" --arg topic "$APNS_TOPIC" '{APNS_KEY_P8:$key,APNS_KEY_ID:$id,APPLE_TEAM_ID:$team,APNS_TOPIC:$topic}' | ./node_modules/.bin/wrangler secret bulk
-          ./node_modules/.bin/wrangler deploy --var "RELAY_VERSION:${RELEASE_VERSION}"
+          if [ -z "$CLOUDFLARE_PUSH_DEVICES_KV_ID" ]; then
+            CLOUDFLARE_PUSH_DEVICES_KV_ID="$(node scripts/ensure-kv-namespace.mjs)"
+          fi
+          export CLOUDFLARE_PUSH_DEVICES_KV_ID
+          node scripts/render-wrangler-config.mjs wrangler.toml wrangler.production.toml
+          jq -n --arg key "$APNS_KEY_P8" --arg id "$APNS_KEY_ID" --arg team "$APPLE_TEAM_ID" --arg topic "$APNS_TOPIC" '{APNS_KEY_P8:$key,APNS_KEY_ID:$id,APPLE_TEAM_ID:$team,APNS_TOPIC:$topic}' | ./node_modules/.bin/wrangler secret bulk --config wrangler.production.toml
+          ./node_modules/.bin/wrangler deploy --config wrangler.production.toml --var "RELAY_VERSION:${RELEASE_VERSION}"
       - name: Verify relay compatibility
         run: |
+          : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
           for attempt in {1..12}; do
-            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --retry-delay 2 "https://agenthail-push.merchantzains.workers.dev/health?release=${RELEASE_VERSION}&attempt=${attempt}")"
+            health="$(curl --fail --silent --show-error --retry 2 --retry-all-errors --retry-delay 2 "${AGENTHAIL_PUSH_RELAY_URL}/health?release=${RELEASE_VERSION}&attempt=${attempt}")"
             if jq -e --arg version "$RELEASE_VERSION" '.ok == true and .protocol == 2 and .version == $version and .appAttest.required == true and .appAttest.configured == true and .apns.configured == true and .rateLimits.configured == true and (.capabilities | index("app-attest")) and (.capabilities | index("registration-check"))' <<<"$health"; then
               exit 0
             fi

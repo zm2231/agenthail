@@ -43,6 +43,15 @@ mkdir -p "$payload" "$root/Applications" "$root/usr/local/bin"
 "$ROOT/scripts/build-runtime-bundle.sh" "$payload"
 
 ldflags="-s -w -X main.version=$version -X main.revision=$revision -X main.builtAt=$built_at"
+if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
+	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+fi
+if [ -n "${AGENTHAIL_INSTALLER_TEAM_ID:-}" ]; then
+	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/cli.expectedInstallerTeamID=$AGENTHAIL_INSTALLER_TEAM_ID"
+fi
+if [ -n "${AGENTHAIL_UPDATE_RELEASE_URL:-}" ]; then
+	ldflags="$ldflags -X github.com/zm2231/agenthail/internal/cli.latestReleaseURL=$AGENTHAIL_UPDATE_RELEASE_URL"
+fi
 CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$ldflags" -o "$payload/agenthail" ./cmd/agenthail
 cp sidecar/sidecar.py sidecar/cookie.mjs "$payload/"
 cp -R skills "$payload/"
@@ -66,6 +75,7 @@ fi
 if [ "${AGENTHAIL_ALLOW_UNNOTARIZED:-0}" != "1" ]; then
 	[ "$app_identity" != "-" ] || { echo "error: Developer ID Application identity is required" >&2; exit 1; }
 	[ -n "$installer_identity" ] || { echo "error: Developer ID Installer identity is required" >&2; exit 1; }
+	[[ "${AGENTHAIL_INSTALLER_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]] || { echo "error: AGENTHAIL_INSTALLER_TEAM_ID must be the 10-character installer team ID" >&2; exit 1; }
 	[ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ] || { echo "error: AGENTHAIL_NOTARY_PROFILE is required" >&2; exit 1; }
 fi
 

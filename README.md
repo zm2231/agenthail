@@ -122,7 +122,7 @@ For a group that needs the same update:
 agenthail channel create launch
 agenthail channel add launch @writer
 agenthail channel add launch @builder
-agenthail channel send launch "The release date moved to Friday" --from zain
+agenthail channel send launch "The release date moved to Friday" --from operator
 ```
 
 ## Start work without opening another window
@@ -143,7 +143,9 @@ agenthail send notion:new:launch-notes "Draft the launch notes" --reply
 
 ## Stay connected from your phone
 
-Install Tailscale on your Mac and iPhone, sign both into the same account, then open **Operations** in Agenthail on the Mac.
+The iPhone companion is distributed through TestFlight. [Request an iPhone invite privately](mailto:zainmer@protonmail.com?subject=Agenthail%20iPhone%20TestFlight%20access&body=Please%20invite%20this%20Apple%20Account%20email%3A%20). Publishing the `.ipa` as a normal download would not make it installable on an ordinary iPhone, so TestFlight is the supported path while the app is in beta.
+
+After installing the iPhone app, install Tailscale on your Mac and iPhone, sign both into the same account, then open **Operations** in Agenthail on the Mac.
 
 Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes. Your Mac is not opened to the public internet.
 

@@ -31,6 +31,9 @@ rm -rf "$DIST/.release-stage"
 mkdir -p "$STAGE/sidecar"
 
 LDFLAGS="-s -w -X main.version=$VERSION -X main.revision=$REVISION -X main.builtAt=$BUILT_AT"
+if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
+	LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+fi
 CGO_ENABLED=0 GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" go build -trimpath -ldflags "$LDFLAGS" -o "$STAGE/agenthail" ./cmd/agenthail
 if [ "$GOOS_VALUE" = "darwin" ] && ! command -v codesign >/dev/null 2>&1; then
 	echo "error: macOS release packaging requires codesign" >&2

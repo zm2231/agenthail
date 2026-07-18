@@ -48,15 +48,26 @@ The release workflow expects these repository secrets:
 - `APPLE_NOTARY_KEY_BASE64`
 - `APPLE_NOTARY_KEY_ID`
 - `APPLE_NOTARY_ISSUER_ID`
+- `APPLE_DISTRIBUTION_P12_BASE64`
+- `APPLE_DISTRIBUTION_P12_PASSWORD`
+- `APPLE_IOS_PROVISIONING_PROFILE_BASE64`
+- `APPLE_TEAM_ID`
+- `APNS_KEY_ID`
+- `APNS_KEY_P8`
 - `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+The workflow also requires the non-secret repository variables `AGENTHAIL_PUSH_RELAY_URL` and `AGENTHAIL_IOS_BUNDLE_ID`. The bundle ID must belong to the configured Apple team and is used consistently for signing, APNs, and TestFlight. The relay URL is injected into official Mac packages and used for the post-deploy health check. Source installs can embed the same value by running `AGENTHAIL_PUSH_RELAY_URL=https://push.example.com ./install.sh`. Package builds inject `APPLE_TEAM_ID` as the updater's immutable installer trust anchor and derive the release feed from the current GitHub repository. Fork maintainers can reproduce that locally without editing source by setting `AGENTHAIL_INSTALLER_TEAM_ID` and `AGENTHAIL_UPDATE_RELEASE_URL` when they run `scripts/build-pkg.sh`.
+
+`CLOUDFLARE_PUSH_DEVICES_KV_ID` is optional. When present, the workflow preserves that namespace. On a clean account, the workflow finds or creates the deterministic `agenthail-push-devices` namespace and reuses it on later releases.
 
 Export the Developer ID Application and Developer ID Installer identities as separate `.p12` files using the same password. Store each file as base64 in its matching secret and store their shared export password in `APPLE_DEVELOPER_ID_P12_PASSWORD`. The App Store Connect key used for notarization must be a team key with provisioning and upload access because the iPhone archive uses the same `APPLE_NOTARY_KEY_*` secrets for automatic signing and TestFlight delivery.
 
 The `.pkg` verifier expands the real artifact, checks signatures and expected files, runs the embedded CLI and both runtimes with a restricted `PATH`, rejects Homebrew-linked Mach-O files, and rejects AppleDouble metadata.
 
-The release runner then installs the real package, verifies the supervised daemon, dashboard, skills, and doctor output, installs the same package again to exercise upgrade and daemon replacement, and runs the packaged uninstaller. It also validates the iPhone archive and push relay. Only the final publication job uploads the validated iPhone build, deploys the relay, and makes the draft GitHub release public.
+The release runner then installs the real package, verifies the supervised daemon, dashboard, skills, and doctor output, installs the same package again to exercise upgrade and daemon replacement, and runs the packaged uninstaller. It also validates the iPhone archive and push relay. Only the final publication job uploads the validated iPhone build to TestFlight, deploys the relay, and makes the draft GitHub release public. The IPA is deliberately not attached to GitHub Releases because ordinary iPhones cannot install an App Store distribution IPA directly.
 
-Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, pins the Developer ID Installer team to `Q5Y75DVV4M`, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and Mac app together.
+Installed package users can run `agenthail update --check` to inspect the latest GitHub release and `agenthail update` to install it. The updater requires the matching package and checksum assets, verifies the checksum, checks the package against the Apple team embedded by the release build, requires a successful macOS notarization assessment, and then hands the package to `/usr/sbin/installer` through `sudo`. Builds without an embedded installer team fail closed instead of trusting an arbitrary package. The package scripts preserve user data and replace the daemon, sidecars, operations skill, and Mac app together.
 
 ## Uninstall
 

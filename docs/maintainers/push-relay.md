@@ -27,6 +27,10 @@ Relay credentials expire after 90 days. Existing credentials without an App Atte
 
 Run `npm test` from `push-relay`.
 
+The tracked Wrangler configuration contains no account or resource IDs. The release workflow finds or creates a KV namespace named `agenthail-push-devices` when no namespace ID is configured, then renders it into the ignored production configuration. Set the Cloudflare account credentials and APNs secrets before using the relay.
+
+Production CI preserves the existing device namespace by exact title or by the optional `CLOUDFLARE_PUSH_DEVICES_KV_ID` secret. The release workflow renders an ignored `wrangler.production.toml` beside the portable configuration. This prevents an upgrade from silently creating an empty namespace and disconnecting paired phones.
+
 The release workflow probes Apple with the configured APNs identity before deploying. A valid identity returns `BadDeviceToken` for the probe's deliberately invalid device token. Authentication, topic, or key errors stop the release.
 
 After the probe passes, the workflow uploads the validated iPhone build, waits for TestFlight to accept the exact version and build, syncs the APNs identity to Cloudflare, deploys the locked Worker version, verifies `/health`, and publishes the GitHub release.

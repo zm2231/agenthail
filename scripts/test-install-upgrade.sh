@@ -23,6 +23,11 @@ SKILL_DATA="$SKILL_HOME/share/agenthail"
 FAILED_HOME="$TMP/failed fresh home"
 FAILED_BIN="$FAILED_HOME/bin"
 FAILED_DATA="$FAILED_HOME/data"
+SOURCE_HOME="$TMP/source home"
+SOURCE_BIN="$SOURCE_HOME/bin"
+SOURCE_DATA="$SOURCE_HOME/data"
+SOURCE_GOCACHE="$(go env GOCACHE)"
+SOURCE_GOMODCACHE="$(go env GOMODCACHE)"
 
 cleanup() {
 	if [ -x "$NEW_BIN/agenthail" ]; then
@@ -38,6 +43,9 @@ cleanup() {
 	fi
 	if [ -x "$SUPERVISED_BIN/agenthail" ]; then
 		HOME="$SUPERVISED_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$SUPERVISED_BIN/agenthail" daemon uninstall >/dev/null 2>&1 || true
+	fi
+	if [ -x "$SOURCE_BIN/agenthail" ]; then
+		HOME="$SOURCE_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" "$SOURCE_BIN/agenthail" daemon uninstall >/dev/null 2>&1 || true
 	fi
 	chmod -R u+w "$TMP" 2>/dev/null || true
 	rm -rf "$TMP"
@@ -86,6 +94,25 @@ install_once() {
 	AGENTHAIL_INSTALL_DIR="$install_dir" \
 	AGENTHAIL_DATA_DIR="$data_dir" \
 	"$ROOT/install.sh" "$@"
+}
+
+install_from_source() {
+	local port
+	port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+	mkdir -p "$SOURCE_HOME/.agenthail"
+	printf '{"enabled":true,"listen":"127.0.0.1:%s","codexRecentHours":5}\n' "$port" > "$SOURCE_HOME/.agenthail/dashboard.json"
+	HOME="$SOURCE_HOME" \
+	PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
+	AGENTHAIL_PYTHON="$PYTHON_BIN" \
+	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
+	AGENTHAIL_PUSH_RELAY_URL="https://relay.example.test" \
+	AGENTHAIL_SKIP_MAC_APP_LAUNCH=1 \
+	AGENTHAIL_INSTALL_DIR="$SOURCE_BIN" \
+	AGENTHAIL_DATA_DIR="$SOURCE_DATA" \
+	GOCACHE="$SOURCE_GOCACHE" \
+	GOMODCACHE="$SOURCE_GOMODCACHE" \
+	GOTOOLCHAIN=local \
+	"$ROOT/install.sh"
 }
 
 export AGENTHAIL_INSTALL_TEST_FAIL_AFTER_ACTIVATION=1
@@ -205,8 +232,13 @@ SUPERVISED_PLIST="$SUPERVISED_HOME/Library/LaunchAgents/com.agenthail.daemon.pli
 test "$(plutil -extract ProgramArguments.0 raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/agenthail"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVISED_PLIST")" = "$PYTHON_BIN"
 
+install_from_source >"$TMP/source-install.log"
+strings "$SOURCE_DATA/agenthail" | grep -F 'https://relay.example.test' >/dev/null
+HOME="$SOURCE_HOME" PATH="$FAKE_BIN:$SOURCE_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail daemon status >/dev/null
+
 echo "legacy wrapper migration: OK"
 echo "fresh install rollback: OK"
 echo "custom wrapper upgrade: OK"
 echo "post-activation rollback: OK"
 echo "wrapper collision safety: OK"
+echo "source relay configuration: OK"

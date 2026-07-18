@@ -22,7 +22,11 @@ fi
 if [ -z "$CLI_SOURCE" ]; then
 	CLI_SOURCE="$(mktemp -d)/agenthail"
 	trap 'rm -rf "$(dirname "$CLI_SOURCE")"' EXIT
-	(cd "$ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -o "$CLI_SOURCE" ./cmd/agenthail)
+	LDFLAGS=""
+	if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
+		LDFLAGS="-X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+	fi
+	(cd "$ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" go build -trimpath -ldflags "$LDFLAGS" -o "$CLI_SOURCE" ./cmd/agenthail)
 fi
 if [ ! -x "$CLI_SOURCE" ]; then
 	echo "error: Agenthail CLI is unavailable at $CLI_SOURCE" >&2

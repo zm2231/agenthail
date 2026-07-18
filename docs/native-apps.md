@@ -18,6 +18,8 @@ Agenthail updates the app, command line tool, and background service together. I
 
 The iPhone app reaches your Mac privately through Tailscale. It does not make your Mac public on the internet.
 
+[Request TestFlight access privately](mailto:zainmer@protonmail.com?subject=Agenthail%20iPhone%20TestFlight%20access&body=Please%20invite%20this%20Apple%20Account%20email%3A%20). An App Store distribution `.ipa` cannot be installed directly on an ordinary iPhone, so GitHub release downloads are not used for the companion app.
+
 To connect it:
 
 1. Install Tailscale on your Mac and iPhone and sign into the same account.

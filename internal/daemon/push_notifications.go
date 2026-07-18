@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 )
 
-const bundledPushRelayURL = "https://agenthail-push.merchantzains.workers.dev"
+var bundledPushRelayURL string
 
 var pushHTTPClient = &http.Client{Timeout: 12 * time.Second}
 
@@ -33,7 +33,7 @@ func PushRelayURL() string {
 	if value := strings.TrimSpace(os.Getenv("AGENTHAIL_PUSH_RELAY_URL")); value != "" {
 		return strings.TrimRight(value, "/")
 	}
-	return bundledPushRelayURL
+	return strings.TrimRight(strings.TrimSpace(bundledPushRelayURL), "/")
 }
 
 func (d *Daemon) notifyPairedDevices(ctx context.Context, title, message, sessionID, eventType string) {
@@ -98,6 +98,10 @@ func isTerminalPushRelayError(err error) bool {
 }
 
 func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, title, message, sessionID, eventType string) error {
+	relayURL := PushRelayURL()
+	if relayURL == "" {
+		return errors.New("push relay is not configured")
+	}
 	payload, err := json.Marshal(map[string]string{
 		"installationId": target.InstallationID,
 		"credential":     target.Credential,
@@ -109,7 +113,7 @@ func sendDevicePush(ctx context.Context, target registry.DevicePushTarget, title
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, PushRelayURL()+"/v1/send", bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+"/v1/send", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

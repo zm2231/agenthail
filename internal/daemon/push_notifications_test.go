@@ -36,6 +36,31 @@ func TestSendDevicePushUsesBoundedCapabilityPayload(t *testing.T) {
 	}
 }
 
+func TestSendDevicePushFailsWhenRelayIsNotConfigured(t *testing.T) {
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", "")
+	previous := bundledPushRelayURL
+	bundledPushRelayURL = ""
+	t.Cleanup(func() { bundledPushRelayURL = previous })
+	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
+	if err := sendDevicePush(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn.completed"); err == nil || err.Error() != "push relay is not configured" {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestPushRelayURLUsesBuildDefaultAndEnvironmentOverride(t *testing.T) {
+	previous := bundledPushRelayURL
+	bundledPushRelayURL = "https://packaged.example.test/"
+	t.Cleanup(func() { bundledPushRelayURL = previous })
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", "")
+	if got := PushRelayURL(); got != "https://packaged.example.test" {
+		t.Fatalf("packaged URL=%q", got)
+	}
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", "https://self-hosted.example.test/")
+	if got := PushRelayURL(); got != "https://self-hosted.example.test" {
+		t.Fatalf("override URL=%q", got)
+	}
+}
+
 func TestSendDevicePushRetriesTransientFailures(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

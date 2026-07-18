@@ -43,16 +43,17 @@ func updateFixture(t *testing.T, current string, checksum string) (*App, *[]reco
 	t.Cleanup(server.Close)
 	commands := []recordedCommand{}
 	deps := &updateDeps{
-		client:     server.Client(),
-		releaseURL: server.URL + "/latest",
-		executable: func() (string, error) { return "/Library/Application Support/Agenthail/agenthail", nil },
+		client:          server.Client(),
+		releaseURL:      server.URL + "/latest",
+		installerTeamID: "Q5Y75DVV4M",
+		executable:      func() (string, error) { return "/Library/Application Support/Agenthail/agenthail", nil },
 		run: func(name string, args ...string) error {
 			commands = append(commands, recordedCommand{name: name, args: append([]string(nil), args...)})
 			return nil
 		},
 		output: func(name string, args ...string) ([]byte, error) {
 			commands = append(commands, recordedCommand{name: name, args: append([]string(nil), args...)})
-			return []byte("Developer ID Installer: ZAIN SOHAIL MERCHANT (Q5Y75DVV4M)"), nil
+			return []byte("Developer ID Installer: Agenthail Release (Q5Y75DVV4M)"), nil
 		},
 		goos:   "darwin",
 		goarch: "arm64",
@@ -62,6 +63,21 @@ func updateFixture(t *testing.T, current string, checksum string) (*App, *[]reco
 
 func serverURL(r *http.Request) string {
 	return "http://" + r.Host
+}
+
+func TestDefaultUpdateDepsUsesEmbeddedReleaseTrust(t *testing.T) {
+	previousURL := latestReleaseURL
+	previousTeam := expectedInstallerTeamID
+	latestReleaseURL = "https://api.example.test/releases/latest"
+	expectedInstallerTeamID = " AAAAAAAAAA "
+	t.Cleanup(func() {
+		latestReleaseURL = previousURL
+		expectedInstallerTeamID = previousTeam
+	})
+	deps := defaultUpdateDeps()
+	if deps.releaseURL != latestReleaseURL || deps.installerTeamID != "AAAAAAAAAA" {
+		t.Fatalf("releaseURL=%q installerTeamID=%q", deps.releaseURL, deps.installerTeamID)
+	}
 }
 
 func TestUpdateCheckReportsAvailableWithoutDownloading(t *testing.T) {
@@ -121,11 +137,23 @@ func TestUpdateRejectsPackageFromAnotherDeveloper(t *testing.T) {
 		return []byte("Developer ID Installer: OTHER DEVELOPER (AAAAAAAAAA)"), nil
 	}
 	err := app.Run([]string{"update"})
-	if err == nil || !strings.Contains(err.Error(), "not from Agenthail") {
+	if err == nil || !strings.Contains(err.Error(), "not from the configured Apple developer team") {
 		t.Fatalf("err=%v", err)
 	}
 	if len(*commands) != 1 || (*commands)[0].name != "/usr/sbin/pkgutil" {
 		t.Fatalf("commands=%v", *commands)
+	}
+}
+
+func TestUpdateRejectsPackageWhenInstallerTrustIsUnconfigured(t *testing.T) {
+	app, commands, downloads := updateFixture(t, "v0.1.7", "")
+	app.update.installerTeamID = ""
+	err := app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "updater trust is not configured") {
+		t.Fatalf("err=%v", err)
+	}
+	if *downloads != 0 || len(*commands) != 0 {
+		t.Fatalf("downloads=%d commands=%v", *downloads, *commands)
 	}
 }
 

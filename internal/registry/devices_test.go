@@ -9,7 +9,7 @@ import (
 
 func TestDevicePairingIsScopedSingleUseAndRevocable(t *testing.T) {
 	r := openTestRegistry(t)
-	pairing, err := r.CreateDevicePairing("Zain's iPhone", []string{"control", "read"}, time.Minute)
+	pairing, err := r.CreateDevicePairing("Test iPhone", []string{"control", "read"}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +17,7 @@ func TestDevicePairingIsScopedSingleUseAndRevocable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if device.Name != "Zain's iPhone" || strings.Join(device.Scopes, ",") != "control,read" || !strings.HasPrefix(token, deviceTokenPrefix) {
+	if device.Name != "Test iPhone" || strings.Join(device.Scopes, ",") != "control,read" || !strings.HasPrefix(token, deviceTokenPrefix) {
 		t.Fatalf("device=%+v token=%q", device, token)
 	}
 	if _, _, err := r.CompleteDevicePairing(pairing.Secret, "Again"); !errors.Is(err, ErrPairingInvalid) {

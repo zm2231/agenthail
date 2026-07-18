@@ -40,6 +40,17 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm test
+          npm run deploy:dry-run
+      - name: Verify configurable release build
+        run: |
+          binary="$RUNNER_TEMP/agenthail-relay-config"
+          relay="https://push.example.test"
+          release_api="https://api.github.com/repos/example/agenthail/releases/latest"
+          team="AAAAAAAAAA"
+          go build -trimpath -ldflags "-X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$relay -X github.com/zm2231/agenthail/internal/cli.latestReleaseURL=$release_api -X github.com/zm2231/agenthail/internal/cli.expectedInstallerTeamID=$team" -o "$binary" ./cmd/agenthail
+          strings "$binary" | grep -F "$relay" >/dev/null
+          strings "$binary" | grep -F "$release_api" >/dev/null
+          strings "$binary" | grep -F "$team" >/dev/null
       - name: Verify generated iOS project
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
@@ -103,6 +114,8 @@ jobs:
       - name: Build package
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
+          AGENTHAIL_INSTALLER_TEAM_ID: AAAAAAAAAA
+          AGENTHAIL_UPDATE_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
           AGENTHAIL_VERSION: v0.0.0-ci
         run: scripts/build-pkg.sh
       - name: Verify package artifact

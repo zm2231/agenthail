@@ -178,8 +178,12 @@ elif [ -d "$REPO_DIR/cmd/agenthail" ]; then
 		fi
 		BUILD_AT="$(date -u -r "$(git -C "$REPO_DIR" show -s --format=%ct HEAD)" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
 	fi
+	BUILD_LDFLAGS="-s -w -X main.version=$BUILD_VERSION -X main.revision=$BUILD_REVISION -X main.builtAt=$BUILD_AT"
+	if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
+		BUILD_LDFLAGS="$BUILD_LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
+	fi
 	go build -trimpath \
-		-ldflags="-s -w -X main.version=$BUILD_VERSION -X main.revision=$BUILD_REVISION -X main.builtAt=$BUILD_AT" \
+		-ldflags="$BUILD_LDFLAGS" \
 		-o "$STAGE_DIR/agenthail" ./cmd/agenthail
 elif [ -x "$REPO_DIR/agenthail" ]; then
 	cp "$REPO_DIR/agenthail" "$STAGE_DIR/agenthail"
