@@ -10,7 +10,7 @@ rm -rf "$tmp/native/Agenthail.xcodeproj"
 xcodegen generate --quiet --spec "$tmp/native/project.yml" --project "$tmp/native" --project-root "$tmp/native"
 
 normalize() {
-  sed -E '/^[[:space:]]*(compatibilityVersion|productRefGroup) = /d' "$1"
+  sed -E '/^[[:space:]]*(compatibilityVersion|productRefGroup) = /d' "$1" | perl -0pe 's/\n\s*TargetAttributes = \{\n\s*\};(?=\n)//g'
 }
 
 diff -u <(normalize "$repo/native/Agenthail.xcodeproj/project.pbxproj") <(normalize "$tmp/native/Agenthail.xcodeproj/project.pbxproj")

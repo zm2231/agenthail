@@ -27,6 +27,7 @@ SOURCE_HOME="$TMP/source home"
 SOURCE_BIN="$SOURCE_HOME/bin"
 SOURCE_DATA="$SOURCE_HOME/data"
 SOURCE_GOCACHE="$(go env GOCACHE)"
+SOURCE_GO_BIN="$(dirname "$(command -v go)")"
 SOURCE_GOMODCACHE="$(go env GOMODCACHE)"
 
 cleanup() {
@@ -86,7 +87,7 @@ install_once() {
 		printf '{"enabled":true,"listen":"127.0.0.1:%s","codexRecentHours":5}\n' "$port" > "$home/.agenthail/dashboard.json"
 	fi
 	HOME="$home" \
-	PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
+	PATH="$SOURCE_GO_BIN:$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
 	AGENTHAIL_PREBUILT_BINARY="$TMP/agenthail" \
 	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
