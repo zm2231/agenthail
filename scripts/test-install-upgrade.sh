@@ -103,7 +103,7 @@ install_from_source() {
 	mkdir -p "$SOURCE_HOME/.agenthail"
 	printf '{"enabled":true,"listen":"127.0.0.1:%s","codexRecentHours":5}\n' "$port" > "$SOURCE_HOME/.agenthail/dashboard.json"
 	HOME="$SOURCE_HOME" \
-	PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
+	PATH="$SOURCE_GO_BIN:$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
 	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
 	AGENTHAIL_PUSH_RELAY_URL="https://relay.example.test" \
