@@ -17,7 +17,7 @@ struct AgenthailRootView: View {
                 .padding(.horizontal, 14)
                 ForEach(AppSection.allCases) { section in
                     Button {
-                        model.section = section
+                        model.showSection(section)
                     } label: {
                         Label(section.rawValue, systemImage: section.symbol)
                             .frame(maxWidth: .infinity, alignment: .leading)

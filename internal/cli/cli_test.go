@@ -345,6 +345,35 @@ func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 	}
 }
 
+func TestRegisteredTargetRefreshesResolvedMetadata(t *testing.T) {
+	oldLastActive := time.Now().Add(-time.Hour)
+	liveLastActive := time.Now().Truncate(time.Millisecond)
+	stale := surface.Session{ID: "registered", Surface: surface.KindClaude, Name: "worker", Status: surface.StatusIdle, LastActive: oldLastActive}
+	live := stale
+	live.Status = surface.StatusBusy
+	live.LastActive = liveLastActive
+	fake := &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{live.ID: live}}
+	app, r := cliFixture(t, fake)
+	if err := r.RegisterSession(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("worker", stale.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, _, err := app.resolveTarget(context.Background(), "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := r.Session(stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Status != surface.StatusBusy || registered.Status != surface.StatusBusy || !registered.LastActive.Equal(liveLastActive) {
+		t.Fatalf("resolved=%+v registered=%+v", resolved, registered)
+	}
+}
+
 func TestCompactQueuesWorkingClaudeSession(t *testing.T) {
 	session := surface.Session{ID: "busy", Surface: surface.KindClaude, Name: "busy", Status: surface.StatusBusy}
 	fake := &cliSurface{

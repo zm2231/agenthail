@@ -32,7 +32,8 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		}
 		d.clearObserveError(key)
 	}
-	if removed := d.refreshAndPruneInactiveClaudeRoutes(ctx, time.Now().Add(-time.Hour)); removed > 0 {
+	removed, claudeRefreshed := d.refreshAndPruneInactiveClaudeRoutes(ctx, time.Now().Add(-time.Hour))
+	if removed > 0 {
 		d.publishEvent("state.changed", "", map[string]any{"source": "relay-removed", "count": removed})
 	}
 	watched, err := d.Registry.WatchedSessions()
@@ -41,6 +42,9 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		return
 	}
 	for _, watchedSession := range watched {
+		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed {
+			continue
+		}
 		adapter := d.surfaceForKind(watchedSession.Surface)
 		if adapter == nil {
 			d.log.Printf("no adapter for watched session %s (%s)", truncate(watchedSession.ID, 16), watchedSession.Surface)
@@ -58,11 +62,12 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	}
 }
 
-func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff time.Time) int {
+func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff time.Time) (int, bool) {
 	routes, err := d.Registry.ListRoutes()
-	if err != nil || len(routes) == 0 {
-		return 0
+	if err != nil {
+		return 0, false
 	}
+	refreshed := false
 	for _, adapter := range d.Surfaces {
 		if adapter.Name() != surface.KindClaude {
 			continue
@@ -72,18 +77,22 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 		cancel()
 		if listErr != nil {
 			d.logObserveError("claude:routes", listErr)
-			return 0
+			return 0, false
 		}
 		for _, session := range sessions {
 			if registerErr := d.Registry.RegisterSession(session); registerErr != nil {
 				d.log.Printf("register active Claude session: %s", registerErr)
-				return 0
+				return 0, false
 			}
 		}
+		refreshed = true
+	}
+	if len(routes) == 0 {
+		return 0, refreshed
 	}
 	routes, err = d.Registry.ListRoutes()
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	removed := 0
 	for _, route := range routes {
@@ -109,7 +118,7 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-removed", SessionID: route.ToSession, SourceSessionID: route.FromSession, RouteID: route.ID, Error: "Claude Code session did not resume within 1 hour: " + stale})
 		removed++
 	}
-	return removed
+	return removed, refreshed
 }
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {

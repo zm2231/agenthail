@@ -69,8 +69,15 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
-	for _, column := range []string{"source", "transport"} {
-		if err := r.ensureColumn("sessions", column, `TEXT NOT NULL DEFAULT ''`); err != nil {
+	for _, column := range []struct {
+		name string
+		decl string
+	}{
+		{"source", `TEXT NOT NULL DEFAULT ''`},
+		{"transport", `TEXT NOT NULL DEFAULT ''`},
+		{"last_active_ms", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
 			return err
 		}
 	}
@@ -127,6 +134,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
 	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
+	last_active_ms INTEGER NOT NULL DEFAULT 0,
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -240,21 +248,26 @@ CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DES
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
+	lastActiveMS := int64(0)
+	if !s.LastActive.IsZero() {
+		lastActiveMS = s.LastActive.UnixMilli()
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	_, err = tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
 		   source=CASE WHEN sessions.surface='codex' AND sessions.transport='managed' THEN sessions.source ELSE excluded.source END,
 		   transport=CASE WHEN sessions.surface='codex' AND sessions.transport='managed' THEN sessions.transport ELSE excluded.transport END,
+		   last_active_ms=excluded.last_active_ms,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, lastActiveMS)
 	if err != nil {
 		return err
 	}
@@ -1269,8 +1282,9 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var session surface.Session
 	var kind, status string
 	var hasLocal int
-	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport FROM sessions WHERE id = ?`, id).Scan(
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport,
+	var lastActiveMS int64
+	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions WHERE id = ?`, id).Scan(
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS,
 	)
 	if err != nil {
 		return nil, err
@@ -1278,6 +1292,9 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	session.Surface = surface.SurfaceKind(kind)
 	session.Status = surface.SessionStatus(status)
 	session.HasLocal = hasLocal != 0
+	if lastActiveMS > 0 {
+		session.LastActive = time.UnixMilli(lastActiveMS)
+	}
 	return &session, nil
 }
 

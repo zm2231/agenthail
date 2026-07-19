@@ -89,7 +89,7 @@ final class AgenthailModel: ObservableObject {
             if selectedSessionID == nil {
                 selectedSessionID = currentSessions.first?.id
             }
-            if let selectedSessionID {
+            if section == .conversations, let selectedSessionID {
                 await loadSession(selectedSessionID)
             }
         } catch {
@@ -106,6 +106,12 @@ final class AgenthailModel: ObservableObject {
         detail = nil
         section = .conversations
         Task { await loadSession(id) }
+    }
+
+    func showSection(_ next: AppSection) {
+        section = next
+        guard next == .conversations, let selectedSessionID else { return }
+        Task { await loadSession(selectedSessionID) }
     }
 
     func loadSession(_ id: String) async {

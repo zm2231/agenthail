@@ -574,6 +574,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				if resolveErr != nil {
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
+				if err := a.Registry.RegisterSession(*session); err != nil {
+					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+				}
 				return session, adapter, nil
 			}
 		} else if !errors.Is(err, sql.ErrNoRows) {
@@ -708,7 +711,7 @@ func (a *App) cmdSend(args []string) error {
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(receipt)
 		} else {
-			fmt.Printf("target is active; queued for %s and will deliver when idle (use 'agenthail steer %s \"message\"' to affect the current turn)\n", a.resolveDisplay(sess.ID), target)
+			fmt.Printf("target is active; queued for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", a.resolveDisplay(sess.ID), target)
 		}
 		return nil
 	}
@@ -989,7 +992,7 @@ func (a *App) cmdCompact(args []string) error {
 		if _, ok := daemon.IsRunning(); !ok {
 			fmt.Fprintln(os.Stderr, "warning: daemon is not running; compact will not run until you start it (agenthail daemon start)")
 		}
-		fmt.Printf("target is active; compact queued for %s and will run when idle\n", a.resolveDisplay(sess.ID))
+		fmt.Printf("target is active; compact queued for %s and will run when the current turn finishes\n", a.resolveDisplay(sess.ID))
 		return nil
 	}
 	fmt.Printf("compact requested for %s\n", a.resolveDisplay(sess.ID))

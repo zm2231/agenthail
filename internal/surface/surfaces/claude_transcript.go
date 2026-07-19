@@ -21,6 +21,7 @@ type claudeTurn struct {
 	User        string
 	Assistant   string
 	Model       string
+	TerminalAt  time.Time
 	Done        bool
 	Interrupted bool
 }
@@ -93,13 +94,30 @@ func readClaudeTurns(path string) ([]claudeTurn, error) {
 				}
 			}
 			turn.Done = record.Message.StopReason == "end_turn"
-			turn.Interrupted = record.Message.StopReason == "stop_sequence" || record.Message.StopReason == "refusal"
+			turn.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
+			if turn.Done || turn.Interrupted {
+				turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+			}
+		case "system":
+			if record.Subtype == "turn_duration" && len(turns) > 0 {
+				turns[len(turns)-1].Done = true
+				turns[len(turns)-1].TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan Claude transcript: %w", err)
 	}
 	return turns, nil
+}
+
+func claudeTerminalInterruption(reason string) bool {
+	switch reason {
+	case "stop_sequence", "refusal", "max_tokens", "model_context_window_exceeded":
+		return true
+	default:
+		return false
+	}
 }
 
 func claudeCompactPending(path string) (bool, error) {

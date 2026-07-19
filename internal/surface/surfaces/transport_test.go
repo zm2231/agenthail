@@ -59,6 +59,45 @@ func TestClaudePostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 	}
 }
 
+func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
+	original := claudeSendRequest
+	t.Cleanup(func() { claudeSendRequest = original })
+	calls := 0
+	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		calls++
+		return 200, `{}`, nil
+	}
+	claude := NewClaude("Default", t.TempDir())
+	recent := writeTranscript(t, `
+{"type":"user","uuid":"u0","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
+{"type":"assistant","uuid":"a0","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"previous answer"}]}}`)
+	newActivity := time.Date(2026, 7, 19, 1, 5, 0, 0, time.UTC)
+	result, err := claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusBusy, Transcript: recent, LastActive: newActivity}, "racing")
+	if err != nil || result.Accepted || calls != 0 {
+		t.Fatalf("recent result=%+v calls=%d err=%v", result, calls, err)
+	}
+
+	completed := writeTranscript(t, `
+{"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	writeJitter := time.Date(2026, 7, 19, 1, 0, 1, 9_000_000, time.UTC)
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusBusy, Transcript: completed, LastActive: writeJitter}, "next")
+	if err != nil || !result.Accepted || calls != 1 {
+		t.Fatalf("completed result=%+v calls=%d err=%v", result, calls, err)
+	}
+
+	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusIdle, Transcript: active}, "too soon")
+	if err != nil || result.Accepted || calls != 1 {
+		t.Fatalf("active result=%+v calls=%d err=%v", result, calls, err)
+	}
+
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusIdle}, "unproven")
+	if err != nil || result.Accepted || calls != 1 {
+		t.Fatalf("missing transcript result=%+v calls=%d err=%v", result, calls, err)
+	}
+}
+
 func TestClaudeCompactPostsRemoteSlashCommandWithoutTranscriptConfirmation(t *testing.T) {
 	original := claudeSendRequest
 	t.Cleanup(func() { claudeSendRequest = original })

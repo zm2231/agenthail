@@ -162,7 +162,7 @@ func TestRegisterSessionMergesResumedClaudeIdentity(t *testing.T) {
 
 func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	r := openTestRegistry(t)
-	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop"}
+	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1784424580603)}
 	if err := r.RegisterSession(want); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal || got.Source != want.Source || got.Transport != want.Transport {
+	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal || got.Source != want.Source || got.Transport != want.Transport || !got.LastActive.Equal(want.LastActive) {
 		t.Fatalf("session=%+v want=%+v", got, want)
 	}
 }

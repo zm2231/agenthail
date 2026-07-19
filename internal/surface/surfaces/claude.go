@@ -290,6 +290,9 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	}
 	observation := &surface.TurnObservation{Status: claudeStatus(sess.Status)}
 	if path == "" || !fileExists(path) {
+		if observation.Status != surface.StatusOffline {
+			observation.Status = surface.StatusUnknown
+		}
 		return observation, nil
 	}
 	turns, err := readClaudeTurns(path)
@@ -301,20 +304,24 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 		return nil, err
 	}
 	if len(turns) == 0 {
-		if compactPending && observation.Status != surface.StatusOffline && observation.Status != surface.StatusUnknown {
+		transcriptCanSetReady := observation.Status != surface.StatusOffline || claudeProcessAlive(sess.PID)
+		if compactPending && transcriptCanSetReady {
 			observation.Status = surface.StatusBusy
 			observation.ActiveTurnID = "compact"
+		} else if observation.Status != surface.StatusBusy && observation.Status != surface.StatusOffline {
+			observation.Status = surface.StatusUnknown
 		}
 		return observation, nil
 	}
 	last := turns[len(turns)-1]
-	if !last.Done && !last.Interrupted {
+	transcriptCanSetReady := observation.Status != surface.StatusOffline || claudeProcessAlive(sess.PID)
+	if !last.Done && !last.Interrupted && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = last.UserID
-	} else if observation.Status == surface.StatusBusy {
+	} else if (last.Done || last.Interrupted) && transcriptCanSetReady && !claudeBridgeActivityAfterTerminal(sess, last) {
 		observation.Status = surface.StatusIdle
 	}
-	if compactPending && observation.Status != surface.StatusOffline && observation.Status != surface.StatusUnknown {
+	if compactPending && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = "compact"
 	}
@@ -331,10 +338,32 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
-	if claudeStatus(sess.Status) == surface.StatusBusy {
+	observation, err := c.Observe(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
 	return c.postMessage(ctx, sess, message)
+}
+
+func claudeProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func claudeBridgeActivityAfterTerminal(sess *surface.Session, turn claudeTurn) bool {
+	if claudeStatus(sess.Status) != surface.StatusBusy || sess.LastActive.IsZero() {
+		return false
+	}
+	if turn.TerminalAt.IsZero() {
+		return true
+	}
+	return sess.LastActive.After(turn.TerminalAt.Add(100 * time.Millisecond))
 }
 
 var claudeSendRequest = sidecarRequestWithCookies

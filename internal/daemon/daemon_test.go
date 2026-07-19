@@ -48,6 +48,26 @@ type runtimeDaemonSurface struct {
 	ensureErr   error
 }
 
+type refreshAwareClaudeSurface struct {
+	*daemonSurface
+	liveLastActive time.Time
+}
+
+type failingClaudeListSurface struct {
+	*daemonSurface
+}
+
+func (f *failingClaudeListSurface) List(context.Context) ([]surface.Session, error) {
+	return nil, errors.New("Claude session metadata unavailable")
+}
+
+func (f *refreshAwareClaudeSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	if session.Status == surface.StatusBusy && session.LastActive.Equal(f.liveLastActive) {
+		return &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "live"}, nil
+	}
+	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
+}
+
 type healthDaemonSurface struct {
 	*daemonSurface
 	healthErr error
@@ -358,7 +378,7 @@ func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
 	current := surface.Session{ID: "current", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: os.Getpid(), Transcript: old.Transcript}
 	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{current.ID: current}}
 	d.Surfaces = append(d.Surfaces, claude)
-	d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour))
+	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour))
 	routes, err := r.ListRoutes()
 	if err != nil || len(routes) != 1 || routes[0].ToSession != current.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
@@ -389,7 +409,7 @@ func TestInactiveClaudeRouteIsRemovedAfterGracePeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Surfaces = append(d.Surfaces, &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}})
-	d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour))
+	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour))
 	routes, err := r.ListRoutes()
 	if err != nil || len(routes) != 2 || routes[0].ToSession == closed.ID || routes[1].ToSession == closed.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
@@ -517,6 +537,57 @@ func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 
 	if r.QueueCount(to.ID) != 0 || len(fake.sent) != 1 || fake.sent[0] != "deliver after idle" {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
+	}
+}
+
+func TestScanRefreshesClaudeMetadataWithoutRoutesBeforeQueueDrain(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	oldLastActive := time.Now().Add(-time.Hour)
+	liveLastActive := time.Now().Truncate(time.Millisecond)
+	stale := surface.Session{ID: "claude-queued", Surface: surface.KindClaude, Status: surface.StatusIdle, LastActive: oldLastActive}
+	live := stale
+	live.Status = surface.StatusBusy
+	live.LastActive = liveLastActive
+	if err := r.RegisterSession(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(stale.ID, "wait for completion"); err != nil {
+		t.Fatal(err)
+	}
+	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{live.ID: live}, accepted: true}
+	claude := &refreshAwareClaudeSurface{daemonSurface: base, liveLastActive: liveLastActive}
+	d.Surfaces = []surface.Surface{claude}
+
+	d.scanAndRelay(context.Background())
+
+	registered, err := r.Session(stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.Status != surface.StatusBusy || !registered.LastActive.Equal(liveLastActive) {
+		t.Fatalf("registered=%+v", registered)
+	}
+	if r.QueueCount(stale.ID) != 1 || len(base.sent) != 0 {
+		t.Fatalf("pending=%d sent=%v", r.QueueCount(stale.ID), base.sent)
+	}
+}
+
+func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "claude-stale", Surface: surface.KindClaude, Status: surface.StatusIdle, LastActive: time.Now().Add(-time.Hour)}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(session.ID, "wait for a safe refresh"); err != nil {
+		t.Fatal(err)
+	}
+	base := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.StatusIdle}}, accepted: true}
+	d.Surfaces = []surface.Surface{&failingClaudeListSurface{daemonSurface: base}}
+
+	d.scanAndRelay(context.Background())
+
+	if r.QueueCount(session.ID) != 1 || len(base.sent) != 0 {
+		t.Fatalf("pending=%d sent=%v", r.QueueCount(session.ID), base.sent)
 	}
 }
 
