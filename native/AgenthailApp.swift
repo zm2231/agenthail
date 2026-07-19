@@ -370,7 +370,7 @@ private struct AgenthailMenuBarApp: App {
     var body: some Scene {
         WindowGroup("Agenthail", id: "main") {
             AgenthailRootView(model: model)
-                .frame(minWidth: 820, minHeight: 560)
+                .frame(minWidth: 720, minHeight: 520)
         }
         .defaultSize(width: 1180, height: 760)
 

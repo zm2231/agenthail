@@ -42,6 +42,31 @@ func TestClaudeListOmitsDeadBridgeProcesses(t *testing.T) {
 	}
 }
 
+func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	sessionsDir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	bridge := `{"bridgeSessionId":"bridge","sessionId":"local","cwd":` + fmt.Sprintf("%q", cwd) + `,"pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
+	if err := os.WriteFile(filepath.Join(sessionsDir, "bridge.json"), []byte(bridge), 0600); err != nil {
+		t.Fatal(err)
+	}
+	transcriptDir := projectDir(cwd)
+	if err := os.MkdirAll(transcriptDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(transcriptDir) })
+	if err := os.WriteFile(filepath.Join(transcriptDir, "local.jsonl"), []byte("{\"type\":\"user\",\"uuid\":\"running\",\"message\":{\"content\":\"work\"}}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewClaude("", home).List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].Status != surface.StatusBusy {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+}
+
 func TestReadClaudeTurnsRequiresEndTurnAndKeepsTurnIdentity(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
@@ -344,6 +369,17 @@ func TestClaudeCompactPendingUsesTimestampsAcrossReorderedRecords(t *testing.T) 
 {"type":"system","subtype":"compact_boundary","timestamp":"2026-07-18T08:12:08.605Z","content":"Conversation compacted"}
 {"type":"user","timestamp":"2026-07-18T08:12:08.359Z","message":{"content":"This session is being continued from a previous conversation."}}
 {"type":"user","timestamp":"2026-07-18T08:09:58.696Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
+	pending, err := claudeCompactPending(path)
+	if err != nil || pending {
+		t.Fatalf("pending=%v err=%v", pending, err)
+	}
+}
+
+func TestClaudeCompactFollowedByCompletedTurnIsNotPending(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","timestamp":"2026-07-19T07:30:52.908Z","message":{"content":"/compact"}}
+{"type":"assistant","timestamp":"2026-07-19T07:43:04.867Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T07:43:04.906Z"}`)
 	pending, err := claudeCompactPending(path)
 	if err != nil || pending {
 		t.Fatalf("pending=%v err=%v", pending, err)

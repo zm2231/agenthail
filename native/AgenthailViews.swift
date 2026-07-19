@@ -68,31 +68,45 @@ struct OverviewView: View {
                 if !model.isConnected {
                     RecoveryCard(model: model)
                 }
-                HStack(alignment: .top, spacing: 38) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        SectionHeader(eyebrow: "WORKING NOW", title: "Current conversations")
-                        if model.currentSessions.isEmpty {
-                            EmptyState(title: "Nothing is running", detail: "Open Claude Code or use Codex and active work will appear here.")
-                        } else {
-                            ForEach(model.currentSessions) { session in
-                                SessionRow(session: session) { model.selectSession(session.id) }
-                            }
-                        }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 38) {
+                        currentConversations
+                        surfaces
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    VStack(alignment: .leading, spacing: 14) {
-                        SectionHeader(eyebrow: "CONNECTIONS", title: "Your surfaces")
-                        ForEach(model.snapshot?.surfaces ?? []) { surface in
-                            SurfaceRow(surface: surface, sessions: model.snapshot?.sessions ?? [], queue: model.snapshot?.queue ?? [])
-                        }
+                    VStack(alignment: .leading, spacing: 34) {
+                        currentConversations
+                        surfaces
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 AttentionSection(model: model)
             }
             .padding(38)
             .frame(maxWidth: 1500, alignment: .leading)
         }
+    }
+
+    private var currentConversations: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(eyebrow: "WORKING NOW", title: "Current conversations")
+            if model.currentSessions.isEmpty {
+                EmptyState(title: "Nothing is running", detail: "Open Claude Code or use Codex and active work will appear here.")
+            } else {
+                ForEach(model.currentSessions) { session in
+                    SessionRow(session: session) { model.selectSession(session.id) }
+                }
+            }
+        }
+        .frame(minWidth: 320, maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var surfaces: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(eyebrow: "CONNECTIONS", title: "Your surfaces")
+            ForEach(model.snapshot?.surfaces ?? []) { surface in
+                SurfaceRow(surface: surface, sessions: model.snapshot?.sessions ?? [], queue: model.snapshot?.queue ?? [])
+            }
+        }
+        .frame(minWidth: 360, maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -108,33 +122,57 @@ struct ConversationsView: View {
     }
 
     var body: some View {
-        HSplitView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("Conversations").font(.title2.weight(.bold))
-                    Spacer()
-                    Text("\(sessions.count)").foregroundStyle(.secondary)
+        GeometryReader { geometry in
+            if geometry.size.width >= 820 {
+                HSplitView {
+                    conversationList
+                    ConversationDetailView(model: model)
+                        .frame(minWidth: 440)
                 }
-                Picker("Conversation scope", selection: $history) {
-                    Text("Current").tag(false)
-                    Text("History").tag(true)
-                }
-                .pickerStyle(.segmented)
-                TextField("Find a conversation", text: $search)
-                    .textFieldStyle(.roundedBorder)
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(sessions) { session in
-                            SessionRow(session: session, selected: session.id == model.selectedSessionID) { model.selectSession(session.id) }
+            } else if model.conversationListVisible {
+                conversationList
+            } else {
+                VStack(spacing: 0) {
+                    HStack {
+                        Button { model.showConversationList() } label: {
+                            Label("Conversations", systemImage: "chevron.left")
                         }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    Divider()
+                    ConversationDetailView(model: model)
+                }
+            }
+        }
+    }
+
+    private var conversationList: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Conversations").font(.title2.weight(.bold))
+                Spacer()
+                Text("\(sessions.count)").foregroundStyle(.secondary)
+            }
+            Picker("Conversation scope", selection: $history) {
+                Text("Current").tag(false)
+                Text("History").tag(true)
+            }
+            .pickerStyle(.segmented)
+            TextField("Find a conversation", text: $search)
+                .textFieldStyle(.roundedBorder)
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(sessions) { session in
+                        SessionRow(session: session, selected: session.id == model.selectedSessionID) { model.selectSession(session.id) }
                     }
                 }
             }
-            .padding(20)
-            .frame(minWidth: 270, idealWidth: 310, maxWidth: 370)
-            ConversationDetailView(model: model)
-                .frame(minWidth: 520)
         }
+        .padding(20)
+        .frame(minWidth: 250, idealWidth: 310, maxWidth: 370)
     }
 }
 
@@ -364,7 +402,7 @@ struct OperationsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 34) {
                 PageHeader(eyebrow: "OPERATIONS", title: "Manage Agenthail", subtitle: "Delivery, devices, and automation")
-                HStack(alignment: .top, spacing: 24) {
+                ResponsivePair {
                     OperationsCard(title: "Waiting to go out", symbol: "tray.full") {
                         if (model.snapshot?.queue ?? []).isEmpty {
                             Text("No messages are waiting.").foregroundStyle(.secondary)
@@ -390,6 +428,7 @@ struct OperationsView: View {
                             }
                         }
                     }
+                } trailing: {
                     OperationsCard(title: "Connected devices", symbol: "iphone.and.arrow.forward") {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
@@ -430,7 +469,7 @@ struct OperationsView: View {
                         }
                     }
                 }
-                HStack(alignment: .top, spacing: 24) {
+                ResponsivePair {
                     OperationsCard(title: "Automatic handoffs", symbol: "arrow.triangle.branch") {
                         Picker("From", selection: $relayFrom) {
                             Text("Choose a source").tag("")
@@ -468,6 +507,7 @@ struct OperationsView: View {
                             }
                         }
                     }
+                } trailing: {
                     OperationsCard(title: "Desktop notifications", symbol: "bell.badge") {
                         let status = model.settings?.notifications
                         HStack {
@@ -491,7 +531,7 @@ struct OperationsView: View {
                         }
                     }
                 }
-                HStack(alignment: .top, spacing: 24) {
+                ResponsivePair {
                     OperationsCard(title: "Shared handoffs", symbol: "person.3") {
                         HStack {
                             TextField("Channel name", text: $channelName)
@@ -545,6 +585,7 @@ struct OperationsView: View {
                             .disabled(selectedChannel.isEmpty || channelMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
+                } trailing: {
                     AuditCard(model: model)
                 }
             }
@@ -560,6 +601,29 @@ struct OperationsView: View {
         if status.enabled { return "Agent completions can appear in Notification Center" }
         if status.authorization == "denied" { return "Blocked in System Settings" }
         return "Enable alerts when an agent finishes"
+    }
+}
+
+struct ResponsivePair<Leading: View, Trailing: View>: View {
+    @ViewBuilder let leading: Leading
+    @ViewBuilder let trailing: Trailing
+
+    init(@ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+        self.leading = leading()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 24) {
+                leading.frame(minWidth: 340)
+                trailing.frame(minWidth: 340)
+            }
+            VStack(alignment: .leading, spacing: 24) {
+                leading
+                trailing
+            }
+        }
     }
 }
 

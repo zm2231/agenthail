@@ -139,6 +139,11 @@ func claudeCompactPending(path string) (bool, error) {
 			continue
 		}
 		at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
+		if record.Type == "assistant" && (record.Message.StopReason == "end_turn" || claudeTerminalInterruption(record.Message.StopReason)) && !at.IsZero() {
+			if latestCompletedAt.IsZero() || at.After(latestCompletedAt) {
+				latestCompletedAt = at
+			}
+		}
 		if record.Type == "user" {
 			content := strings.TrimSpace(transcriptText(record.Message.Content))
 			if at.IsZero() {
@@ -169,7 +174,7 @@ func claudeCompactPending(path string) (bool, error) {
 			}
 			continue
 		}
-		if record.Type == "system" && (record.Subtype == "compact_boundary" || record.Subtype == "local_command") {
+		if record.Type == "system" && (record.Subtype == "compact_boundary" || record.Subtype == "local_command" || record.Subtype == "turn_duration") {
 			if at.IsZero() {
 				if record.Subtype == "compact_boundary" && pendingWithoutTime > 0 {
 					pendingWithoutTime--

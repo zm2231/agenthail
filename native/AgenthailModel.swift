@@ -20,11 +20,13 @@ final class AgenthailModel: ObservableObject {
     @Published var operationError: String?
     @Published var loading = false
     @Published var composer = ""
+    @Published var conversationListVisible = true
 
     private var api: AgenthailAPI?
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var statusRefreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
@@ -40,11 +42,13 @@ final class AgenthailModel: ObservableObject {
         connectionTask?.cancel()
         eventTask?.cancel()
         refreshTask?.cancel()
+        statusRefreshTask?.cancel()
     }
 
     func connect(startDaemonIfNeeded: Bool = true) {
         eventTask?.cancel()
         connectionTask?.cancel()
+        statusRefreshTask?.cancel()
         connectionTask = Task {
             let backoff = EventRetryBackoff()
             var shouldStartDaemon = startDaemonIfNeeded
@@ -59,6 +63,7 @@ final class AgenthailModel: ObservableObject {
                         throw AgenthailAPIError.unavailable(connectionError ?? "Agenthail could not connect.")
                     }
                     startEvents()
+                    startStatusRefresh()
                     return
                 } catch {
                     connectionError = error.localizedDescription
@@ -78,7 +83,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     @discardableResult
-    func refresh(fresh: Bool = false) async -> Bool {
+    func refresh(fresh: Bool = false, reloadDetail: Bool = true) async -> Bool {
         guard let api else { return false }
         loading = snapshot == nil
         do {
@@ -89,7 +94,7 @@ final class AgenthailModel: ObservableObject {
             if selectedSessionID == nil {
                 selectedSessionID = currentSessions.first?.id
             }
-            if section == .conversations, let selectedSessionID {
+            if reloadDetail, section == .conversations, let selectedSessionID {
                 await loadSession(selectedSessionID)
             }
         } catch {
@@ -105,13 +110,19 @@ final class AgenthailModel: ObservableObject {
         selectedSessionID = id
         detail = nil
         section = .conversations
+        conversationListVisible = false
         Task { await loadSession(id) }
     }
 
     func showSection(_ next: AppSection) {
         section = next
+        if next == .conversations { conversationListVisible = true }
         guard next == .conversations, let selectedSessionID else { return }
         Task { await loadSession(selectedSessionID) }
+    }
+
+    func showConversationList() {
+        conversationListVisible = true
     }
 
     func loadSession(_ id: String) async {
@@ -298,6 +309,17 @@ final class AgenthailModel: ObservableObject {
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
                 }
+            }
+        }
+    }
+
+    private func startStatusRefresh() {
+        statusRefreshTask?.cancel()
+        statusRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                if Task.isCancelled { return }
+                _ = await refresh(reloadDetail: false)
             }
         }
     }

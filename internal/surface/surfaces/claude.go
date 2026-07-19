@@ -232,6 +232,11 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		if sess.Name == "" {
 			sess.Name = c.firstUserMessage(sess.Transcript)
 		}
+		if sess.HasLocal {
+			if observation, observeErr := c.Observe(ctx, &sess); observeErr == nil && observation.Status != surface.StatusUnknown {
+				sess.Status = observation.Status
+			}
+		}
 		out = append(out, sess)
 	}
 	return out, nil
