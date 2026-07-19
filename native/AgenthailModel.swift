@@ -305,7 +305,7 @@ final class AgenthailModel: ObservableObject {
         refreshTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
             if Task.isCancelled { return }
-            _ = await refresh(fresh: true)
+            _ = await refresh()
             if OperationsRefreshPolicy.reloadOperations(for: event.type) {
                 await loadOperations()
             } else if section == .operations && OperationsRefreshPolicy.reloadAudit(for: event.type) {

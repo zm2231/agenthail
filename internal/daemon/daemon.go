@@ -26,12 +26,20 @@ type Daemon struct {
 	log           *log.Logger
 	errorMu       sync.Mutex
 	observeErrors map[string]observedError
+	retryMu       sync.Mutex
+	observeRetry  map[string]observeRetry
 	events        *eventHub
+	dashboard     *dashboardServer
 }
 
 type observedError struct {
 	message string
 	at      time.Time
+}
+
+type observeRetry struct {
+	failures int
+	retryAt  time.Time
 }
 
 func (d *Daemon) resolveDisplay(sessionID string) string {
@@ -54,8 +62,49 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		Surfaces:      surfaces,
 		log:           log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors: map[string]observedError{},
+		observeRetry:  map[string]observeRetry{},
 		events:        newEventHub(reg),
 	}
+}
+
+func (d *Daemon) observationAllowed(sessionID string) bool {
+	d.retryMu.Lock()
+	defer d.retryMu.Unlock()
+	retry, found := d.observeRetry[sessionID]
+	return !found || !time.Now().Before(retry.retryAt)
+}
+
+func (d *Daemon) recordObservationFailure(sessionID string) {
+	d.retryMu.Lock()
+	retry := d.observeRetry[sessionID]
+	retry.failures++
+	delay := 5 * time.Second * time.Duration(1<<min(retry.failures-1, 4))
+	if delay > time.Minute {
+		delay = time.Minute
+	}
+	retry.retryAt = time.Now().Add(delay)
+	d.observeRetry[sessionID] = retry
+	d.retryMu.Unlock()
+}
+
+func (d *Daemon) clearObservationFailure(sessionID string) {
+	d.retryMu.Lock()
+	delete(d.observeRetry, sessionID)
+	d.retryMu.Unlock()
+}
+
+func (d *Daemon) pruneObservationFailures(watched []registry.WatchedSession) {
+	active := make(map[string]struct{}, len(watched))
+	for _, session := range watched {
+		active[session.ID] = struct{}{}
+	}
+	d.retryMu.Lock()
+	for sessionID := range d.observeRetry {
+		if _, found := active[sessionID]; !found {
+			delete(d.observeRetry, sessionID)
+		}
+	}
+	d.retryMu.Unlock()
 }
 
 func (d *Daemon) logObserveError(sessionID string, err error) {

@@ -106,11 +106,29 @@ func (a *App) daemonStatus() error {
 		return fmt.Errorf("daemon is not running (start it with 'agenthail daemon start')")
 	}
 	fmt.Printf("daemon: running (pid %d)\n", pid)
-	logPath := daemon.LogFilePath()
+	logPath := daemonStatusLogPath()
 	if info, err := os.Stat(logPath); err == nil {
 		fmt.Printf("log: %s (%s)\n", logPath, humanSize(info.Size()))
 	}
 	return nil
+}
+
+func daemonStatusLogPath() string {
+	if configured := strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_LOG")); configured != "" {
+		return configured
+	}
+	executable, err := os.Executable()
+	if err == nil {
+		return daemonLogPathForExecutable(executable)
+	}
+	return daemon.LogFilePath()
+}
+
+func daemonLogPathForExecutable(executable string) string {
+	if marker := strings.Index(executable, "/Cellar/agenthail/"); marker > 0 {
+		return filepath.Join(executable[:marker], "var", "log", "agenthail.log")
+	}
+	return daemon.LogFilePath()
 }
 
 func (a *App) daemonRun() error {
@@ -254,7 +272,7 @@ func waitForDashboard(listen string, timeout time.Duration) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemon.LogFilePath())
+	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemonStatusLogPath())
 }
 
 func daemonServicePath() string {

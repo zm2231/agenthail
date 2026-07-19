@@ -132,22 +132,33 @@ final class AgenthailIOSModel: ObservableObject {
         lastEventID = 0
         reconnecting = true
         connectionTask = Task {
-            do {
-                let version = try await api.version()
-                guard !Task.isCancelled else { return }
-                if let value = version.pushRelayUrl, let url = URL(string: value) {
-                    pushRelayURL = url
-                    try? KeychainStore.set(value, account: "pushRelayURL")
-                } else if let value = KeychainStore.get("pushRelayURL") {
-                    pushRelayURL = URL(string: value)
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled {
+                do {
+                    let version = try await api.version()
+                    guard !Task.isCancelled else { return }
+                    if let value = version.pushRelayUrl, let url = URL(string: value) {
+                        pushRelayURL = url
+                        try? KeychainStore.set(value, account: "pushRelayURL")
+                    } else if let value = KeychainStore.get("pushRelayURL") {
+                        pushRelayURL = URL(string: value)
+                    }
+                    if await refresh(fresh: true) {
+                        guard !Task.isCancelled else { return }
+                        startEvents()
+                        refreshNotificationRegistration()
+                        return
+                    }
+                } catch {
+                    connectionError = error.localizedDescription
+                    if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
+                        reconnecting = false
+                        return
+                    }
                 }
-                guard await refresh(fresh: true) else { return }
-                guard !Task.isCancelled else { return }
-                startEvents()
-                refreshNotificationRegistration()
-            } catch {
-                reconnecting = false
-                connectionError = error.localizedDescription
+                reconnecting = true
+                let delay = backoff.nextDelay()
+                try? await Task.sleep(for: .seconds(delay))
             }
         }
     }
@@ -155,11 +166,7 @@ final class AgenthailIOSModel: ObservableObject {
     func resumeConnection() {
         refreshNotificationRegistration()
         guard isPaired else { return }
-        Task {
-            if !(await refresh()) {
-                connect()
-            }
-        }
+        connect()
     }
 
     @discardableResult
@@ -346,6 +353,7 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     private func startEvents() {
+        eventTask?.cancel()
         guard let api else { return }
         eventTask = Task {
             let backoff = EventRetryBackoff()
@@ -382,7 +390,7 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, let self else { return }
-            await self.refresh(fresh: true)
+            await self.refresh()
             if let selectedID, sessionLoadIsCurrent(selectedID, selectedID: self.selectedSessionID) {
                 await self.refreshSession(selectedID)
             }

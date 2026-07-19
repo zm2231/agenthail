@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
@@ -47,13 +48,19 @@ const (
 )
 
 type dashboardServer struct {
-	server  *http.Server
-	cancel  context.CancelFunc
-	listen  string
-	token   string
-	stateMu sync.Mutex
-	stateAt time.Time
-	state   dashboardState
+	server        *http.Server
+	cancel        context.CancelFunc
+	listen        string
+	token         string
+	stateMu       sync.Mutex
+	stateAt       time.Time
+	stateVersion  atomic.Uint64
+	cachedVersion uint64
+	state         dashboardState
+}
+
+func (d *dashboardServer) invalidate() {
+	d.stateVersion.Add(1)
 }
 
 type dashboardSurface struct {
@@ -192,6 +199,7 @@ func (d *dashboardServer) shutdown() error {
 }
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
+	d.dashboard = dashboard
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboard.page)
 	mux.HandleFunc("/app.js", dashboard.asset("application/javascript; charset=utf-8", dashboardJS))
@@ -381,7 +389,8 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 	}
 	dashboard.stateMu.Lock()
 	defer dashboard.stateMu.Unlock()
-	if r.URL.Query().Get("fresh") != "1" && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+	version := dashboard.stateVersion.Load()
+	if r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		writeDashboardJSON(w, http.StatusOK, dashboard.state)
 		return
 	}
@@ -402,6 +411,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 	}
 	dashboard.state = state
 	dashboard.stateAt = time.Now()
+	dashboard.cachedVersion = version
 	writeDashboardJSON(w, http.StatusOK, state)
 }
 

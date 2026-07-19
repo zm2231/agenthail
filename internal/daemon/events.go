@@ -136,9 +136,13 @@ func (h *eventHub) cursor() uint64 {
 }
 
 func (d *Daemon) publishEvent(eventType, entityID string, value any) {
+	if d.dashboard != nil {
+		d.dashboard.invalidate()
+	}
 	if d.events != nil {
 		if _, err := d.events.publish(eventType, entityID, value); err != nil {
 			d.log.Printf("publish %s: %s", eventType, err)
+			return
 		}
 	}
 }

@@ -9,6 +9,19 @@ import (
 	"github.com/zm2231/agenthail/internal/daemon"
 )
 
+func TestDaemonLogPathMatchesInstallChannel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if got := daemonLogPathForExecutable("/opt/homebrew/Cellar/agenthail/0.2.8/libexec/agenthail"); got != "/opt/homebrew/var/log/agenthail.log" {
+		t.Fatalf("Homebrew log path=%q", got)
+	}
+	if got := daemonLogPathForExecutable("/usr/local/Cellar/agenthail/0.2.8/libexec/agenthail"); got != "/usr/local/var/log/agenthail.log" {
+		t.Fatalf("Intel Homebrew log path=%q", got)
+	}
+	if got := daemonLogPathForExecutable("/usr/local/bin/agenthail"); got != daemon.LogFilePath() {
+		t.Fatalf("package log path=%q", got)
+	}
+}
+
 func TestDashboardConfigCommandSetsCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := &App{}

@@ -34,6 +34,7 @@ type daemonSurface struct {
 	sendErr      error
 	turnID       string
 	observeErr   error
+	observeCalls atomic.Int32
 	startOptions []surface.SessionStartOptions
 	startErr     error
 	caps         surface.Capabilities
@@ -110,10 +111,49 @@ func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session,
 	return &session, nil
 }
 func (f *daemonSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	f.observeCalls.Add(1)
 	if f.observeErr != nil {
 		return nil, f.observeErr
 	}
 	return f.observations[session.ID], nil
+}
+
+func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
+	d, registry, fake, from, to := daemonFixture(t)
+	to.Status = surface.StatusOffline
+	if err := registry.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	fake.observeErr = errors.New("renderer bridge unavailable")
+	d.scanAndRelay(context.Background())
+	d.scanAndRelay(context.Background())
+	if got := fake.observeCalls.Load(); got != 1 {
+		t.Fatalf("observation calls=%d, want one during backoff", got)
+	}
+	if err := registry.QueueMessage(from.ID, "deliver after recovery"); err != nil {
+		t.Fatal(err)
+	}
+	d.scanAndRelay(context.Background())
+	if got := fake.observeCalls.Load(); got != 2 {
+		t.Fatalf("observation calls=%d, queued work must bypass backoff", got)
+	}
+	d.retryMu.Lock()
+	retry := d.observeRetry[from.ID]
+	retry.retryAt = time.Now().Add(-time.Millisecond)
+	d.observeRetry[from.ID] = retry
+	d.retryMu.Unlock()
+	fake.observeErr = nil
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	d.scanAndRelay(context.Background())
+	if got := fake.observeCalls.Load(); got != 3 {
+		t.Fatalf("observation calls=%d, want recovery attempt", got)
+	}
+	if _, found := d.observeRetry[from.ID]; found {
+		t.Fatal("successful observation did not clear backoff")
+	}
 }
 func (f *daemonSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {

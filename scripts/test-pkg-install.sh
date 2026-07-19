@@ -13,6 +13,12 @@ test -x /usr/local/bin/agenthail-uninstall
 test -x "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test -x "/Library/Application Support/Agenthail/runtime/node/bin/node"
 test -x /Applications/Agenthail.app/Contents/MacOS/Agenthail
+for _ in {1..30}; do
+	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
+	[ "$menu_count" = 1 ] && break
+	sleep 1
+done
+test "$menu_count" = 1
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
 /usr/local/bin/agenthail help | grep -q 'thread create codex'
 /usr/local/bin/agenthail help | grep -q 'update \[--check\]'
@@ -34,6 +40,8 @@ first_pid="$(cat "$HOME/.agenthail/daemon.pid")"
 
 sudo installer -pkg "$pkg" -target /
 /usr/local/bin/agenthail daemon status
+sleep 2
+test "$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')" = 1
 second_pid="$(cat "$HOME/.agenthail/daemon.pid")"
 test "$first_pid" != "$second_pid"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"

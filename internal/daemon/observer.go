@@ -41,6 +41,12 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		d.log.Printf("scan watched sessions: %s", err)
 		return
 	}
+	queueCounts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("scan queue counts: %s", err)
+		return
+	}
+	d.pruneObservationFailures(watched)
 	for _, watchedSession := range watched {
 		if watchedSession.Surface == surface.KindClaude && !claudeRefreshed {
 			continue
@@ -56,6 +62,9 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			continue
 		}
 		if relayTargetInactive(session) {
+			continue
+		}
+		if queueCounts[session.ID] == 0 && !d.observationAllowed(session.ID) {
 			continue
 		}
 		d.observeSession(ctx, adapter, session)
@@ -126,9 +135,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	observation, err := adapter.Observe(operationCtx, session)
 	cancel()
 	if err != nil {
+		d.recordObservationFailure(session.ID)
 		d.logObserveError(session.ID, err)
 		return
 	}
+	d.clearObservationFailure(session.ID)
 	d.clearObserveError(session.ID)
 	if observation == nil {
 		d.log.Printf("observe %s: empty observation", d.resolveDisplay(session.ID))

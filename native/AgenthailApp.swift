@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 import ServiceManagement
 import SwiftUI
 import UserNotifications
@@ -317,44 +318,22 @@ private struct AgenthailMenuContent: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                AgenthailMark(size: 34)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("agenthail").font(.headline)
-                    Text(model.isConnected ? "Connected" : "Not connected").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Divider()
-            HStack {
-                Label("Working", systemImage: "bolt.fill")
-                Spacer()
-                Text(model.workingSessions.count.formatted()).monospacedDigit()
-            }
-            HStack {
-                Label("Needs attention", systemImage: "exclamationmark.circle")
-                Spacer()
-                Text((model.snapshot?.attention.count ?? 0).formatted()).monospacedDigit()
-            }
-            HStack {
-                Label("Queued", systemImage: "tray.full")
-                Spacer()
-                Text((model.snapshot?.queue.count ?? 0).formatted()).monospacedDigit()
-            }
-            Divider()
-            Button("Open Agenthail") {
-                NSApplication.shared.activate(ignoringOtherApps: true)
-                openWindow(id: "main")
-            }
-            .keyboardShortcut("o")
-            Button("Restart Agenthail") { model.restartDaemon() }
-            Button("Open Login Item Settings") { _ = NativeCommand.run(["service", "settings"]) }
-            Divider()
-            Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
+        Label(model.isConnected ? "Connected" : "Not connected", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        Divider()
+        Text("Working: \(model.workingSessions.count.formatted())")
+        Text("Needs attention: \((model.snapshot?.attention.count ?? 0).formatted())")
+        Text("Queued: \((model.snapshot?.queue.count ?? 0).formatted())")
+        Divider()
+        Button("Open Agenthail") {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            openWindow(id: "main")
         }
-        .padding(14)
-        .frame(width: 260)
+        .keyboardShortcut("o")
+        Button("Restart Agenthail") { model.restartDaemon() }
+        Button("Open Login Item Settings") { _ = NativeCommand.run(["service", "settings"]) }
+        Divider()
+        Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }
+            .keyboardShortcut("q")
     }
 }
 
@@ -380,7 +359,34 @@ private struct AgenthailMenuBarApp: App {
                     .accessibilityLabel("Agenthail unavailable")
             }
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
+    }
+}
+
+private final class AgenthailInstanceLock {
+    private let descriptor: Int32
+
+    init?() {
+        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agenthail", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let path = directory.appendingPathComponent("menu-app.lock").path
+        let descriptor = Darwin.open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { return nil }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            Darwin.close(descriptor)
+            return nil
+        }
+        self.descriptor = descriptor
+        ftruncate(descriptor, 0)
+        let value = "\(getpid())\n"
+        value.withCString { pointer in
+            _ = Darwin.write(descriptor, pointer, strlen(pointer))
+        }
+    }
+
+    deinit {
+        flock(descriptor, LOCK_UN)
+        Darwin.close(descriptor)
     }
 }
 
@@ -391,6 +397,14 @@ private enum AgenthailMain {
         if !arguments.isEmpty {
             exit(NativeCommand.run(arguments))
         }
-        AgenthailMenuBarApp.main()
+        guard let instanceLock = AgenthailInstanceLock() else {
+            NSRunningApplication.runningApplications(withBundleIdentifier: "com.agenthail.app")
+                .first { $0.processIdentifier != getpid() }?
+                .activate(options: [.activateIgnoringOtherApps])
+            return
+        }
+        withExtendedLifetime(instanceLock) {
+            AgenthailMenuBarApp.main()
+        }
     }
 }

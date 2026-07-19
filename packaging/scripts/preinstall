@@ -6,6 +6,11 @@ if [ -n "$user" ] && [ "$user" != "root" ] && [ "$user" != "loginwindow" ]; then
 	uid="$(id -u "$user")"
 	home="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
 	if [ -x /opt/homebrew/bin/brew ] && launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew list --versions agenthail >/dev/null 2>&1; then
+		brew_prefix="$(launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew --prefix agenthail 2>/dev/null || true)"
+		if [ -x "$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail" ]; then
+			launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" "$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail" service disable >/dev/null 2>&1 || true
+			launchctl asuser "$uid" /usr/bin/sudo -u "$user" /usr/bin/pkill -f "^$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail$" >/dev/null 2>&1 || true
+		fi
 		launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew services stop agenthail >/dev/null 2>&1 || true
 		launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew uninstall agenthail
 	fi

@@ -24,6 +24,46 @@ func openTestRegistry(t *testing.T) *Registry {
 	return r
 }
 
+func TestOpenUsesWALAndAllowsReadsDuringAWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	register(t, first, "session")
+	var mode string
+	if err := first.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || !strings.EqualFold(mode, "wal") {
+		t.Fatalf("journal mode=%q err=%v", mode, err)
+	}
+	tx, err := first.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE sessions SET name='held' WHERE id='session'`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := second.GetSession("session")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("read blocked behind an external writer")
+	}
+}
+
 func register(t *testing.T, r *Registry, ids ...string) {
 	t.Helper()
 	for _, id := range ids {

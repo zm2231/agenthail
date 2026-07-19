@@ -789,6 +789,53 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	if got := fake.listCalls.Load(); got != 1 {
 		t.Fatalf("surface list called %d times, want one cached discovery", got)
 	}
+	d.publishEvent("session.updated", "from", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("state after event status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got := fake.listCalls.Load(); got != 2 {
+		t.Fatalf("surface list called %d times, want event invalidation", got)
+	}
+}
+
+func TestDashboardRefreshDoesNotBlockEventPublication(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	dashboard := &dashboardServer{token: "secret"}
+	d.dashboardHandler(dashboard)
+	dashboard.stateMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		d.publishEvent("session.updated", "from", nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		dashboard.stateMu.Unlock()
+		t.Fatal("dashboard refresh blocked event publication")
+	}
+	dashboard.stateMu.Unlock()
+}
+
+func TestDashboardEventInvalidatesCacheWhenPersistenceFails(t *testing.T) {
+	registry, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := New(registry, nil)
+	dashboard := &dashboardServer{token: "secret"}
+	d.dashboardHandler(dashboard)
+	if err := registry.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d.publishEvent("session.updated", "from", nil)
+	if got := dashboard.stateVersion.Load(); got != 1 {
+		t.Fatalf("state version=%d, want invalidation despite persistence failure", got)
+	}
 }
 
 func TestDashboardHistoryIsAuthorizedAndPaginated(t *testing.T) {
