@@ -39,11 +39,15 @@ cp "$ROOT/scripts/fixtures/legacy-agenthail.sh" "$legacy_app/Contents/MacOS/Agen
 chmod +x "$legacy_app/Contents/MacOS/Agenthail"
 legacy_marker="$HOME/.agenthail/legacy-fixture-started"
 rm -f "$legacy_marker"
-open -g -j "$legacy_app"
+open -g -j -n "$legacy_app"
 for _ in {1..30}; do
 	[ -f "$legacy_marker" ] && break
 	sleep 1
 done
+if [ ! -f "$legacy_marker" ]; then
+	lsappinfo list | grep -i agenthail || true
+	ps -axo pid=,command= | grep 'AgenthailLegacy.app' || true
+fi
 test -f "$legacy_marker"
 for _ in {1..30}; do
 	legacy_count="$({ pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
