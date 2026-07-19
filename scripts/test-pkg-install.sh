@@ -42,6 +42,14 @@ if [ "$menu_count" != 1 ]; then
 	ps -axo pid=,command= | grep 'Agenthail.app/Contents/MacOS/Agenthail' || true
 fi
 test "$menu_count" = 1
+menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"
+kill -TERM "$menu_pid"
+for _ in {1..30}; do
+	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
+	[ "$menu_count" = 0 ] && break
+	sleep 1
+done
+test "$menu_count" = 0
 legacy_app="$TMPDIR/AgenthailLegacy.app"
 mkdir -p "$legacy_app/Contents/MacOS"
 cp /Applications/Agenthail.app/Contents/Info.plist "$legacy_app/Contents/Info.plist"
@@ -57,12 +65,22 @@ if [ ! -f "$legacy_marker" ]; then
 	ps -axo pid=,command= | grep 'AgenthailLegacy.app' || true
 fi
 test -f "$legacy_marker"
+legacy_count="$({ pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
+test "$legacy_count" = 1
+legacy_pid="$(pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$")"
+/Applications/Agenthail.app/Contents/MacOS/Agenthail >"$TMPDIR/agenthail-pkg-menu.log" 2>&1 &
 for _ in {1..30}; do
 	legacy_count="$({ pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
-	[ "$legacy_count" = 0 ] && break
+	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
+	[ "$legacy_count" = 0 ] && [ "$menu_count" = 1 ] && break
 	sleep 1
 done
 test "$legacy_count" = 0
+test "$menu_count" = 1
+if kill -0 "$legacy_pid" 2>/dev/null; then
+	echo "error: same-bundle duplicate remained alive after Agenthail launched" >&2
+	exit 1
+fi
 rm -f "$legacy_marker"
 unrelated_app="$TMPDIR/AgenthailUnrelated.app"
 mkdir -p "$unrelated_app/Contents/MacOS"
