@@ -14,11 +14,23 @@ test -x /usr/local/bin/agenthail-uninstall
 test -x "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test -x "/Library/Application Support/Agenthail/runtime/node/bin/node"
 test -x /Applications/Agenthail.app/Contents/MacOS/Agenthail
+for _ in {1..5}; do
+	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
+	[ "$menu_count" = 1 ] && break
+	sleep 1
+done
+if [ "$menu_count" = 0 ]; then
+	/Applications/Agenthail.app/Contents/MacOS/Agenthail >"$TMPDIR/agenthail-pkg-menu.log" 2>&1 &
+fi
 for _ in {1..30}; do
 	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
 	[ "$menu_count" = 1 ] && break
 	sleep 1
 done
+if [ "$menu_count" != 1 ]; then
+	cat "$TMPDIR/agenthail-pkg-menu.log" 2>/dev/null || true
+	ps -axo pid=,command= | grep 'Agenthail.app/Contents/MacOS/Agenthail' || true
+fi
 test "$menu_count" = 1
 legacy_app="$TMPDIR/AgenthailLegacy.app"
 mkdir -p "$legacy_app/Contents/MacOS"
