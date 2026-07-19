@@ -48,8 +48,8 @@ The release workflow expects these repository secrets:
 - `APPLE_NOTARY_KEY_BASE64`
 - `APPLE_NOTARY_KEY_ID`
 - `APPLE_NOTARY_ISSUER_ID`
-- `APPLE_DISTRIBUTION_P12_BASE64`
-- `APPLE_DISTRIBUTION_P12_PASSWORD`
+- `APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64`
+- `APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD`
 - `APPLE_IOS_PROVISIONING_PROFILE_BASE64`
 - `APPLE_TEAM_ID`
 - `APNS_KEY_ID`
@@ -61,7 +61,7 @@ The workflow also requires the non-secret repository variables `AGENTHAIL_PUSH_R
 
 `CLOUDFLARE_PUSH_DEVICES_KV_ID` is optional. When present, the workflow preserves that namespace. On a clean account, the workflow finds or creates the deterministic `agenthail-push-devices` namespace and reuses it on later releases.
 
-Export the Developer ID Application and Developer ID Installer identities as separate `.p12` files using the same password. Store each file as base64 in its matching secret and store their shared export password in `APPLE_DEVELOPER_ID_P12_PASSWORD`. The App Store Connect key used for notarization must be a team key with provisioning and upload access because the iPhone archive uses the same `APPLE_NOTARY_KEY_*` secrets for automatic signing and TestFlight delivery.
+Export the Developer ID Application and Developer ID Installer identities as separate `.p12` files using the same password. Store each file as base64 in its matching secret and store their shared export password in `APPLE_DEVELOPER_ID_P12_PASSWORD`. Export the Apple Development and Apple Distribution identities together as one `.p12`, then store it and its password in `APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64` and `APPLE_IOS_SIGNING_IDENTITIES_P12_PASSWORD`. The App Store Connect key used for notarization must be a team key with provisioning and upload access because the iPhone archive uses the same `APPLE_NOTARY_KEY_*` secrets for automatic signing and TestFlight delivery.
 
 The `.pkg` verifier expands the real artifact, checks signatures and expected files, runs the embedded CLI and both runtimes with a restricted `PATH`, rejects Homebrew-linked Mach-O files, and rejects AppleDouble metadata.
 
