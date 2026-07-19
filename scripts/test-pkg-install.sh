@@ -63,6 +63,23 @@ fi
 /usr/local/bin/agenthail daemon status
 /usr/local/bin/agenthail dashboard status
 test "$(jq -r .enabled "$HOME/.agenthail/dashboard.json")" = "true"
+menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"
+dashboard_token="$HOME/.agenthail/dashboard.token"
+old_token_hash="$(shasum -a 256 "$dashboard_token" | awk '{print $1}')"
+mv "$dashboard_token" "$TMPDIR/dashboard.token.before-rotation"
+/usr/local/bin/agenthail daemon restart
+for _ in {1..30}; do
+	[ -s "$dashboard_token" ] && [ "$(shasum -a 256 "$dashboard_token" | awk '{print $1}')" != "$old_token_hash" ] && break
+	sleep 1
+done
+test -s "$dashboard_token"
+test "$(shasum -a 256 "$dashboard_token" | awk '{print $1}')" != "$old_token_hash"
+dashboard_port="$(jq -r '.listen | split(":") | last' "$HOME/.agenthail/dashboard.json")"
+for _ in {1..30}; do
+	lsof -nP -a -p "$menu_pid" -iTCP:"$dashboard_port" -sTCP:ESTABLISHED >/dev/null 2>&1 && break
+	sleep 1
+done
+lsof -nP -a -p "$menu_pid" -iTCP:"$dashboard_port" -sTCP:ESTABLISHED >/dev/null
 doctor_json="$(/usr/local/bin/agenthail doctor --json || true)"
 jq -e '.surfaces | length == 3' <<<"$doctor_json" >/dev/null
 jq -e 'all(.surfaces[]; ((.error // "") | test("curl_cffi|python.*not found|node.*not found|sweet-cookie"; "i") | not))' <<<"$doctor_json" >/dev/null

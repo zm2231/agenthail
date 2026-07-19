@@ -265,10 +265,10 @@ final class AgenthailModel: ObservableObject {
 
     private func startEvents() {
         eventTask?.cancel()
-        guard let api else { return }
         eventTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled {
+                guard let api else { return }
                 do {
                     try await api.streamEvents(
                         after: lastEventID,
@@ -282,11 +282,18 @@ final class AgenthailModel: ObservableObject {
                     if Task.isCancelled { return }
                     reconnecting = true
                     do {
-                        _ = try await api.version()
+                        let reloadedAPI = try AgenthailAPI()
+                        _ = try await reloadedAPI.version()
+                        if Task.isCancelled { return }
+                        self.api = reloadedAPI
                         connectionError = nil
                     } catch {
-                        reconnecting = false
+                        if Task.isCancelled { return }
                         connectionError = error.localizedDescription
+                        if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
+                            reconnecting = false
+                            return
+                        }
                     }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
