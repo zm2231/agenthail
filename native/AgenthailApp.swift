@@ -203,11 +203,37 @@ private enum NativeCommand {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private var duplicateTimer: Timer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
         center.setNotificationCategories([UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: [])])
+        terminateDuplicateApplications()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        duplicateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.terminateDuplicateApplications()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        duplicateTimer?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    @objc private func applicationLaunched(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        terminateDuplicateApplication(application)
+    }
+
+    private func terminateDuplicateApplications() {
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.agenthail.app").forEach(terminateDuplicateApplication)
+    }
+
+    private func terminateDuplicateApplication(_ application: NSRunningApplication) {
+        guard application.processIdentifier != getpid() else { return }
+        application.forceTerminate()
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {

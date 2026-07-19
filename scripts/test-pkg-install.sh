@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 pkg="${1:?usage: scripts/test-pkg-install.sh <Agenthail.pkg>}"
 pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
 expected_revision="${AGENTHAIL_EXPECTED_REVISION:-$(git rev-parse HEAD)}"
@@ -19,6 +20,26 @@ for _ in {1..30}; do
 	sleep 1
 done
 test "$menu_count" = 1
+legacy_app="$TMPDIR/AgenthailLegacy.app"
+mkdir -p "$legacy_app/Contents/MacOS"
+cp /Applications/Agenthail.app/Contents/Info.plist "$legacy_app/Contents/Info.plist"
+cp "$ROOT/scripts/fixtures/legacy-agenthail.sh" "$legacy_app/Contents/MacOS/Agenthail"
+chmod +x "$legacy_app/Contents/MacOS/Agenthail"
+legacy_marker="$HOME/.agenthail/legacy-fixture-started"
+rm -f "$legacy_marker"
+open -g -j "$legacy_app"
+for _ in {1..30}; do
+	[ -f "$legacy_marker" ] && break
+	sleep 1
+done
+test -f "$legacy_marker"
+for _ in {1..30}; do
+	legacy_count="$({ pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
+	[ "$legacy_count" = 0 ] && break
+	sleep 1
+done
+test "$legacy_count" = 0
+rm -f "$legacy_marker"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
 /usr/local/bin/agenthail help | grep -q 'thread create codex'
 /usr/local/bin/agenthail help | grep -q 'update \[--check\]'
