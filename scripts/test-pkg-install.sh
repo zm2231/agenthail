@@ -8,11 +8,20 @@ pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
 expected_revision="${AGENTHAIL_EXPECTED_REVISION:-$(git rev-parse HEAD)}"
 legacy_app=""
 unrelated_app=""
+legacy_pid=""
+unrelated_pid=""
 legacy_marker="$HOME/.agenthail/legacy-fixture-started"
 unrelated_marker="$HOME/.agenthail/unrelated-fixture-started"
+fixture_is_running() {
+	local pid="$1"
+	local executable="$2"
+	[[ "$pid" =~ ^[0-9]+$ ]] || return 1
+	kill -0 "$pid" 2>/dev/null || return 1
+	lsof -a -p "$pid" -d txt -Fn 2>/dev/null | grep -Fqx "n$executable"
+}
 cleanup_fixtures() {
-	[ -z "$legacy_app" ] || pkill -f "^$legacy_app/Contents/MacOS/Agenthail$" >/dev/null 2>&1 || true
-	[ -z "$unrelated_app" ] || pkill -f "^$unrelated_app/Contents/MacOS/Agenthail$" >/dev/null 2>&1 || true
+	[ -z "$legacy_pid" ] || ! fixture_is_running "$legacy_pid" "$legacy_app/Contents/MacOS/Agenthail" || kill -TERM "$legacy_pid" >/dev/null 2>&1 || true
+	[ -z "$unrelated_pid" ] || ! fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail" || kill -TERM "$unrelated_pid" >/dev/null 2>&1 || true
 	rm -f "$legacy_marker" "$unrelated_marker"
 }
 trap cleanup_fixtures EXIT
@@ -58,30 +67,28 @@ swiftc "$ROOT/scripts/fixtures/native-app.swift" -o "$legacy_app/Contents/MacOS/
 rm -f "$legacy_marker"
 open -g -j -n "$legacy_app"
 for _ in {1..30}; do
-	[ -f "$legacy_marker" ] && break
+	[ -s "$legacy_marker" ] && break
 	sleep 1
 done
-if [ ! -f "$legacy_marker" ]; then
+if [ ! -s "$legacy_marker" ]; then
 	lsappinfo list | grep -i agenthail || true
 	ps -axo pid=,command= | grep 'AgenthailLegacy.app' || true
 fi
-test -f "$legacy_marker"
-legacy_count="$({ pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
-test "$legacy_count" = 1
-legacy_pid="$(pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$")"
+test -s "$legacy_marker"
+legacy_pid="$(tr -d '[:space:]' <"$legacy_marker")"
+fixture_is_running "$legacy_pid" "$legacy_app/Contents/MacOS/Agenthail"
 /Applications/Agenthail.app/Contents/MacOS/Agenthail >"$TMPDIR/agenthail-pkg-menu.log" 2>&1 &
 for _ in {1..30}; do
-	legacy_count="$({ pgrep -u "$UID" -f "^$legacy_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
 	menu_count="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')"
-	[ "$legacy_count" = 0 ] && [ "$menu_count" = 1 ] && break
+	! kill -0 "$legacy_pid" 2>/dev/null && [ "$menu_count" = 1 ] && break
 	sleep 1
 done
-test "$legacy_count" = 0
 test "$menu_count" = 1
 if kill -0 "$legacy_pid" 2>/dev/null; then
 	echo "error: same-bundle duplicate remained alive after Agenthail launched" >&2
 	exit 1
 fi
+legacy_pid=""
 rm -f "$legacy_marker"
 unrelated_app="$TMPDIR/AgenthailUnrelated.app"
 mkdir -p "$unrelated_app/Contents/MacOS"
@@ -91,14 +98,13 @@ swiftc "$ROOT/scripts/fixtures/native-app.swift" -o "$unrelated_app/Contents/Mac
 rm -f "$unrelated_marker"
 open -g -j -n "$unrelated_app"
 for _ in {1..30}; do
-	[ -f "$unrelated_marker" ] && break
+	[ -s "$unrelated_marker" ] && break
 	sleep 1
 done
-test -f "$unrelated_marker"
+test -s "$unrelated_marker"
 sleep 2
-unrelated_count="$({ pgrep -u "$UID" -f "^$unrelated_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
-test "$unrelated_count" = 1
-unrelated_pid="$(pgrep -u "$UID" -f "^$unrelated_app/Contents/MacOS/Agenthail$" | head -n 1)"
+unrelated_pid="$(tr -d '[:space:]' <"$unrelated_marker")"
+fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
 /usr/local/bin/agenthail help | grep -q 'thread create codex'
 /usr/local/bin/agenthail help | grep -q 'update \[--check\]'
@@ -144,7 +150,7 @@ test "$menu_pid" != "$upgraded_menu_pid"
 second_pid="$(cat "$HOME/.agenthail/daemon.pid")"
 test "$first_pid" != "$second_pid"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
-kill -0 "$unrelated_pid"
+fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail"
 
 sudo /usr/local/bin/agenthail-uninstall
 test ! -e /usr/local/bin/agenthail
@@ -152,8 +158,17 @@ test ! -e /usr/local/bin/agenthail-uninstall
 test ! -e "/Library/Application Support/Agenthail"
 test ! -e /Applications/Agenthail.app
 test -d "$HOME/.agenthail"
-kill -0 "$unrelated_pid"
+fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail"
 kill -TERM "$unrelated_pid"
+for _ in {1..30}; do
+	! fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail" && break
+	sleep 1
+done
+if fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail"; then
+	echo "error: unrelated fixture did not stop during cleanup" >&2
+	exit 1
+fi
+unrelated_pid=""
 rm -f "$unrelated_marker"
 if launchctl print "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1; then
 	echo "error: daemon service remained loaded after uninstall" >&2
