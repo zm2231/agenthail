@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 trap 'echo "error: package install test failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,6 +62,7 @@ done
 test "$menu_count" = 0
 legacy_app="$TMPDIR/AgenthailLegacy.app"
 mkdir -p "$legacy_app/Contents/MacOS"
+legacy_app="$(cd "$legacy_app" && pwd -P)"
 cp /Applications/Agenthail.app/Contents/Info.plist "$legacy_app/Contents/Info.plist"
 swiftc "$ROOT/scripts/fixtures/native-app.swift" -o "$legacy_app/Contents/MacOS/Agenthail"
 rm -f "$legacy_marker"
@@ -92,6 +93,7 @@ legacy_pid=""
 rm -f "$legacy_marker"
 unrelated_app="$TMPDIR/AgenthailUnrelated.app"
 mkdir -p "$unrelated_app/Contents/MacOS"
+unrelated_app="$(cd "$unrelated_app" && pwd -P)"
 cp /Applications/Agenthail.app/Contents/Info.plist "$unrelated_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.agenthail.unrelated-fixture' "$unrelated_app/Contents/Info.plist"
 swiftc "$ROOT/scripts/fixtures/native-app.swift" -o "$unrelated_app/Contents/MacOS/Agenthail"
