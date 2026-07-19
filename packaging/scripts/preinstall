@@ -5,17 +5,23 @@ user="$(stat -f %Su /dev/console 2>/dev/null || true)"
 if [ -n "$user" ] && [ "$user" != "root" ] && [ "$user" != "loginwindow" ]; then
 	uid="$(id -u "$user")"
 	home="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+	terminate_exact_executable() {
+		expected="$1"
+		for pid in $(pgrep -u "$uid" -x Agenthail 2>/dev/null || true); do
+			[ "$(ps -p "$pid" -o command=)" != "$expected" ] || kill -TERM "$pid" >/dev/null 2>&1 || true
+		done
+	}
 	if [ -x /opt/homebrew/bin/brew ] && launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew list --versions agenthail >/dev/null 2>&1; then
 		brew_prefix="$(launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew --prefix agenthail 2>/dev/null || true)"
 		if [ -x "$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail" ]; then
 			launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" "$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail" service disable >/dev/null 2>&1 || true
-			launchctl asuser "$uid" /usr/bin/sudo -u "$user" /usr/bin/pkill -f "^$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail$" >/dev/null 2>&1 || true
+			terminate_exact_executable "$brew_prefix/libexec/Agenthail.app/Contents/MacOS/Agenthail"
 		fi
 		launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew services stop agenthail >/dev/null 2>&1 || true
 		launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /opt/homebrew/bin/brew uninstall agenthail
 	fi
 	launchctl bootout "gui/$uid/com.agenthail.daemon" >/dev/null 2>&1 || true
-	pkill -u "$uid" -x Agenthail >/dev/null 2>&1 || true
+	terminate_exact_executable "/Applications/Agenthail.app/Contents/MacOS/Agenthail"
 fi
 
 exit 0

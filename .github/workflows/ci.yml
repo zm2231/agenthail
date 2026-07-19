@@ -70,6 +70,8 @@ jobs:
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
       - name: Native helper tests
         run: |
+          swiftc -parse-as-library native/DuplicateApplicationPolicy.swift native/tests/duplicate_application_policy_test.swift -o "$RUNNER_TEMP/duplicate-application-policy-test"
+          "$RUNNER_TEMP/duplicate-application-policy-test"
           swiftc -parse-as-library native/SessionSelection.swift native/tests/session_selection_test.swift -o "$RUNNER_TEMP/session-selection-test"
           "$RUNNER_TEMP/session-selection-test"
           swiftc -parse-as-library native/EventRetryBackoff.swift native/tests/event_retry_backoff_test.swift -o "$RUNNER_TEMP/event-retry-backoff-test"

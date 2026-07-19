@@ -210,8 +210,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         center.delegate = self
         let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
         center.setNotificationCategories([UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: [])])
-        terminateDuplicateApplications()
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        terminateDuplicateApplications()
         duplicateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.terminateDuplicateApplications()
         }
@@ -224,16 +224,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
 
     @objc private func applicationLaunched(_ notification: Notification) {
         guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        guard isDuplicateApplication(application) else { return }
         terminateDuplicateApplication(application)
     }
 
     private func terminateDuplicateApplications() {
-        NSRunningApplication.runningApplications(withBundleIdentifier: "com.agenthail.app").forEach(terminateDuplicateApplication)
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier, !bundleIdentifier.isEmpty else { return }
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).forEach(terminateDuplicateApplication)
     }
 
     private func terminateDuplicateApplication(_ application: NSRunningApplication) {
-        guard application.processIdentifier != getpid() else { return }
+        guard isDuplicateApplication(application) else { return }
         application.forceTerminate()
+    }
+
+    private func isDuplicateApplication(_ application: NSRunningApplication) -> Bool {
+        shouldTerminateDuplicateApplication(
+            candidateBundleIdentifier: application.bundleIdentifier,
+            candidateProcessIdentifier: application.processIdentifier,
+            ownBundleIdentifier: Bundle.main.bundleIdentifier,
+            ownProcessIdentifier: getpid()
+        )
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {

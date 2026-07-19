@@ -22,6 +22,12 @@ while read -r user uid; do
 	fi
 	home="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
 	[ -n "$home" ] || continue
+	terminate_exact_executable() {
+		expected="$1"
+		for pid in $(pgrep -u "$uid" -x Agenthail 2>/dev/null || true); do
+			[ "$(ps -p "$pid" -o command=)" != "$expected" ] || kill -TERM "$pid" >/dev/null 2>&1 || true
+		done
+	}
 	if [ -x /Applications/Agenthail.app/Contents/MacOS/Agenthail ]; then
 		launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" /Applications/Agenthail.app/Contents/MacOS/Agenthail service disable >/dev/null 2>&1 || true
 	fi
@@ -30,7 +36,7 @@ while read -r user uid; do
 		launchctl asuser "$uid" /usr/bin/sudo -u "$user" env HOME="$home" "/Library/Application Support/Agenthail/agenthail" daemon stop >/dev/null 2>&1 || true
 	fi
 	launchctl bootout "gui/$uid/com.agenthail.daemon" >/dev/null 2>&1 || true
-	pkill -u "$uid" -x Agenthail >/dev/null 2>&1 || true
+	terminate_exact_executable "/Applications/Agenthail.app/Contents/MacOS/Agenthail"
 	plist="$home/Library/LaunchAgents/com.agenthail.daemon.plist"
 	if [ -f "$plist" ] && [ "$(plutil -extract ProgramArguments.0 raw -o - "$plist" 2>/dev/null || true)" = "/Library/Application Support/Agenthail/agenthail" ]; then
 		rm -f "$plist"

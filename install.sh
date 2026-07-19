@@ -59,6 +59,12 @@ TARGET_WRAPPER_EXISTED=0
 TARGET_WRAPPER_TOUCHED=0
 TARGET_WRAPPER_BACKUP=""
 printf -v DATA_BINARY_SHELL '%q' "$DATA_DIR/agenthail"
+terminate_exact_executable() {
+	expected="$1"
+	for pid in $(pgrep -u "$UID" -x Agenthail 2>/dev/null || true); do
+		[ "$(ps -p "$pid" -o command=)" != "$expected" ] || kill -TERM "$pid" >/dev/null 2>&1 || true
+	done
+}
 OWNED_WRAPPERS=()
 for candidate in "$INSTALL_DIR/agenthail" "$HOME/.local/bin/agenthail" /opt/homebrew/bin/agenthail /usr/local/bin/agenthail; do
 	if [ ! -f "$candidate" ]; then
@@ -342,7 +348,7 @@ fi
 launchctl bootout "gui/$UID/com.agenthail.menubar" >/dev/null 2>&1 || true
 rm -f "$LEGACY_MENUBAR_PLIST"
 if [ "${AGENTHAIL_SKIP_MAC_APP_LAUNCH:-0}" != "1" ]; then
-	pkill -f '/Agenthail.app/Contents/MacOS/Agenthail' >/dev/null 2>&1 || true
+	terminate_exact_executable "$DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail"
 	SERVICE_OUTPUT="$($DATA_DIR/Agenthail.app/Contents/MacOS/Agenthail service enable 2>&1 || true)"
 	if [ "$SERVICE_OUTPUT" = "requiresApproval" ]; then
 		echo "agenthail: menu bar login item needs approval in System Settings"

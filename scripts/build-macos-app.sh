@@ -81,6 +81,7 @@ cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 "$ROOT/scripts/codesign-with-retry.sh" --force --options runtime --sign "$IDENTITY" "$OUTPUT/Contents/Resources/agenthail"
 /usr/bin/swiftc -parse-as-library -O -target "${ARCH}-apple-macos13.0" \
 	"$ROOT/native/AgenthailApp.swift" \
+	"$ROOT/native/DuplicateApplicationPolicy.swift" \
 	"$ROOT/native/AgenthailModels.swift" \
 	"$ROOT/native/AgenthailAPI.swift" \
 	"$ROOT/native/SessionSelection.swift" \

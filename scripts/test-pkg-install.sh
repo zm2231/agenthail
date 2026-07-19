@@ -5,6 +5,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 pkg="${1:?usage: scripts/test-pkg-install.sh <Agenthail.pkg>}"
 pkg="$(cd "$(dirname "$pkg")" && pwd)/$(basename "$pkg")"
 expected_revision="${AGENTHAIL_EXPECTED_REVISION:-$(git rev-parse HEAD)}"
+legacy_app=""
+unrelated_app=""
+legacy_marker="$HOME/.agenthail/legacy-fixture-started"
+unrelated_marker="$HOME/.agenthail/unrelated-fixture-started"
+cleanup_fixtures() {
+	[ -z "$legacy_app" ] || pkill -f "^$legacy_app/Contents/MacOS/Agenthail$" >/dev/null 2>&1 || true
+	[ -z "$unrelated_app" ] || pkill -f "^$unrelated_app/Contents/MacOS/Agenthail$" >/dev/null 2>&1 || true
+	rm -f "$legacy_marker" "$unrelated_marker"
+}
+trap cleanup_fixtures EXIT
 
 mkdir -p "$HOME/.codex"
 sudo installer -pkg "$pkg" -target /
@@ -35,9 +45,7 @@ test "$menu_count" = 1
 legacy_app="$TMPDIR/AgenthailLegacy.app"
 mkdir -p "$legacy_app/Contents/MacOS"
 cp /Applications/Agenthail.app/Contents/Info.plist "$legacy_app/Contents/Info.plist"
-cp "$ROOT/scripts/fixtures/legacy-agenthail.sh" "$legacy_app/Contents/MacOS/Agenthail"
-chmod +x "$legacy_app/Contents/MacOS/Agenthail"
-legacy_marker="$HOME/.agenthail/legacy-fixture-started"
+swiftc "$ROOT/scripts/fixtures/native-app.swift" -o "$legacy_app/Contents/MacOS/Agenthail"
 rm -f "$legacy_marker"
 open -g -j -n "$legacy_app"
 for _ in {1..30}; do
@@ -56,6 +64,22 @@ for _ in {1..30}; do
 done
 test "$legacy_count" = 0
 rm -f "$legacy_marker"
+unrelated_app="$TMPDIR/AgenthailUnrelated.app"
+mkdir -p "$unrelated_app/Contents/MacOS"
+cp /Applications/Agenthail.app/Contents/Info.plist "$unrelated_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.agenthail.unrelated-fixture' "$unrelated_app/Contents/Info.plist"
+swiftc "$ROOT/scripts/fixtures/native-app.swift" -o "$unrelated_app/Contents/MacOS/Agenthail"
+rm -f "$unrelated_marker"
+open -g -j -n "$unrelated_app"
+for _ in {1..30}; do
+	[ -f "$unrelated_marker" ] && break
+	sleep 1
+done
+test -f "$unrelated_marker"
+sleep 2
+unrelated_count="$({ pgrep -u "$UID" -f "^$unrelated_app/Contents/MacOS/Agenthail$" || true; } | wc -l | tr -d ' ')"
+test "$unrelated_count" = 1
+unrelated_pid="$(pgrep -u "$UID" -f "^$unrelated_app/Contents/MacOS/Agenthail$" | head -n 1)"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
 /usr/local/bin/agenthail help | grep -q 'thread create codex'
 /usr/local/bin/agenthail help | grep -q 'update \[--check\]'
@@ -96,9 +120,12 @@ sudo installer -pkg "$pkg" -target /
 /usr/local/bin/agenthail daemon status
 sleep 2
 test "$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')" = 1
+upgraded_menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"
+test "$menu_pid" != "$upgraded_menu_pid"
 second_pid="$(cat "$HOME/.agenthail/daemon.pid")"
 test "$first_pid" != "$second_pid"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
+kill -0 "$unrelated_pid"
 
 sudo /usr/local/bin/agenthail-uninstall
 test ! -e /usr/local/bin/agenthail
@@ -106,6 +133,9 @@ test ! -e /usr/local/bin/agenthail-uninstall
 test ! -e "/Library/Application Support/Agenthail"
 test ! -e /Applications/Agenthail.app
 test -d "$HOME/.agenthail"
+kill -0 "$unrelated_pid"
+kill -TERM "$unrelated_pid"
+rm -f "$unrelated_marker"
 if launchctl print "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1; then
 	echo "error: daemon service remained loaded after uninstall" >&2
 	exit 1
