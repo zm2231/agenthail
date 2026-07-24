@@ -853,10 +853,34 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 	defer tx.Rollback()
 	_, err = tx.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action)
 		SELECT session_id,id,
-			CASE WHEN last_error LIKE 'delivery outcome is unknown%' THEN 'Delivery outcome could not be confirmed' ELSE 'Delivery failed and needs a decision' END,
-			'Retry or cancel this message'
+			CASE
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 404%' THEN 'Delivery target is unavailable'
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 401%' THEN 'Claude needs to reconnect'
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 403%' THEN 'Claude denied this delivery'
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 400%' THEN 'Delivery request needs correction'
+				WHEN last_error LIKE 'delivery outcome is unknown%' THEN 'Delivery outcome could not be confirmed'
+				WHEN last_error LIKE 'delivery rejected [target missing]:%' THEN 'Delivery target is unavailable'
+				WHEN last_error LIKE 'delivery rejected [authentication needed]:%' THEN 'Claude needs to reconnect'
+				WHEN last_error LIKE 'delivery rejected [access denied]:%' THEN 'Claude denied this delivery'
+				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Delivery request needs correction'
+				ELSE 'Delivery failed and needs a decision'
+			END,
+			CASE
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 404%' THEN 'Cancel and send this message to an available session'
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 401%' THEN 'Reconnect Claude, then retry or cancel this message'
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 403%' THEN 'Check Claude access, then retry or cancel this message'
+				WHEN last_error LIKE 'delivery outcome is unknown:%HTTP 400%' THEN 'Correct this message, then retry or cancel it'
+				WHEN last_error LIKE 'delivery rejected [target missing]:%' THEN 'Cancel and send this message to an available session'
+				WHEN last_error LIKE 'delivery rejected [authentication needed]:%' THEN 'Reconnect Claude, then retry or cancel this message'
+				WHEN last_error LIKE 'delivery rejected [access denied]:%' THEN 'Check Claude access, then retry or cancel this message'
+				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Correct this message, then retry or cancel it'
+				ELSE 'Retry or cancel this message'
+			END
 		FROM message_queue WHERE status='dead'
-		ON CONFLICT(queue_id) DO NOTHING`)
+		ON CONFLICT(queue_id) DO UPDATE SET
+			reason=excluded.reason,
+			requested_action=excluded.requested_action
+		WHERE attention_items.resolved_at=''`)
 	if err != nil {
 		return nil, err
 	}
@@ -1062,6 +1086,21 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 	message := uncertainDeliveryError
 	if cause != nil {
 		message = fmt.Sprintf("delivery outcome is unknown: %s; retry explicitly if the target did not receive it", cause)
+	}
+	res, err := r.db.Exec(`UPDATE message_queue SET status='dead',last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("queue item %d is not inflight", id)
+	}
+	return nil
+}
+
+func (r *Registry) DeadLetterMessage(id int64, cause error) error {
+	message := "delivery failed"
+	if cause != nil {
+		message = cause.Error()
 	}
 	res, err := r.db.Exec(`UPDATE message_queue SET status='dead',last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, id)
 	if err != nil {

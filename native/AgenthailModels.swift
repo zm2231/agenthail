@@ -25,7 +25,7 @@ struct Capabilities: Codable, Hashable {
     var steer = false
 }
 
-struct SurfaceState: Decodable, Identifiable {
+struct SurfaceState: Decodable, Identifiable, Equatable {
     var id: String { name }
     let name: String
     let connected: Bool
@@ -59,7 +59,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var isReadOnly: Bool { readOnly == true }
 }
 
-struct QueueState: Decodable, Identifiable {
+struct QueueState: Decodable, Identifiable, Equatable {
     let id: Int64
     let sessionId: String
     let target: String
@@ -71,7 +71,7 @@ struct QueueState: Decodable, Identifiable {
     let queuedAt: String
 }
 
-struct AttentionState: Decodable, Identifiable {
+struct AttentionState: Decodable, Identifiable, Equatable {
     let id: Int64
     let sessionId: String
     let target: String
@@ -81,26 +81,26 @@ struct AttentionState: Decodable, Identifiable {
     let createdAt: String
 }
 
-struct ChannelState: Decodable, Identifiable {
+struct ChannelState: Decodable, Identifiable, Equatable {
     var id: String { name }
     let name: String
     let members: [String]
     let memberDetails: [ChannelMemberState]?
 }
 
-struct ChannelMemberState: Decodable, Identifiable {
+struct ChannelMemberState: Decodable, Identifiable, Equatable {
     let id: String
     let display: String
 }
 
-struct RelayState: Decodable, Identifiable {
+struct RelayState: Decodable, Identifiable, Equatable {
     let id: Int64
     let from: String
     let to: String
     let pattern: String
 }
 
-struct HistoryState: Decodable, Identifiable {
+struct HistoryState: Decodable, Identifiable, Equatable {
     let id: Int64
     let createdAt: String
     let kind: String
@@ -114,7 +114,7 @@ struct HistoryState: Decodable, Identifiable {
     let error: String?
 }
 
-struct DaemonState: Decodable {
+struct DaemonState: Decodable, Equatable {
     let running: Bool
     let pid: Int?
     let stale: Bool?
@@ -134,6 +134,19 @@ struct DashboardSnapshot: Decodable {
     let history: [HistoryState]
     let attention: [AttentionState]
     let codexRecentHours: Int
+
+    func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
+        daemon == other.daemon &&
+            surfaces == other.surfaces &&
+            sessions == other.sessions &&
+            totalSessions == other.totalSessions &&
+            queue == other.queue &&
+            channels == other.channels &&
+            relays == other.relays &&
+            history == other.history &&
+            attention == other.attention &&
+            codexRecentHours == other.codexRecentHours
+    }
 }
 
 struct ExchangeState: Decodable, Identifiable {

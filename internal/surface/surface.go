@@ -86,6 +86,68 @@ func IsDeliveryOutcomeUnknown(err error) bool {
 	return errors.As(err, &target)
 }
 
+type DeliveryTerminalKind string
+
+const (
+	DeliveryTargetMissing        DeliveryTerminalKind = "target_missing"
+	DeliveryAuthenticationNeeded DeliveryTerminalKind = "authentication_needed"
+	DeliveryAccessDenied         DeliveryTerminalKind = "access_denied"
+	DeliveryInvalidRequest       DeliveryTerminalKind = "invalid_request"
+)
+
+type DeliveryTerminalError struct {
+	Err  error
+	Kind DeliveryTerminalKind
+}
+
+func (e DeliveryTerminalError) Error() string {
+	if e.Kind != "" {
+		return fmt.Sprintf("delivery rejected [%s]: %v", deliveryTerminalLabel(e.Kind), e.Err)
+	}
+	return fmt.Sprintf("delivery rejected: %v", e.Err)
+}
+
+func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
+	switch kind {
+	case DeliveryTargetMissing:
+		return "target missing"
+	case DeliveryAuthenticationNeeded:
+		return "authentication needed"
+	case DeliveryAccessDenied:
+		return "access denied"
+	case DeliveryInvalidRequest:
+		return "invalid request"
+	default:
+		return "delivery rejected"
+	}
+}
+
+func (e DeliveryTerminalError) Unwrap() error { return e.Err }
+
+func DeliveryTerminal(err error, kinds ...DeliveryTerminalKind) error {
+	if err == nil {
+		return nil
+	}
+	var kind DeliveryTerminalKind
+	if len(kinds) > 0 {
+		kind = kinds[0]
+	}
+	return DeliveryTerminalError{Err: err, Kind: kind}
+}
+
+func IsDeliveryTerminal(err error) bool {
+	var target DeliveryTerminalError
+	return errors.As(err, &target)
+}
+
+func DeliveryTerminalReason(err error) DeliveryTerminalKind {
+	var target DeliveryTerminalError
+	if errors.As(err, &target) {
+		return target.Kind
+	}
+	return ""
+}
+
 type SendOptions struct {
 	Model string `json:"model,omitempty"`
 }

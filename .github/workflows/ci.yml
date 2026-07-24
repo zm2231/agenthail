@@ -78,6 +78,12 @@ jobs:
           "$RUNNER_TEMP/event-retry-backoff-test"
           swiftc -parse-as-library native/OperationsRefreshPolicy.swift native/tests/operations_refresh_policy_test.swift -o "$RUNNER_TEMP/operations-refresh-policy-test"
           "$RUNNER_TEMP/operations-refresh-policy-test"
+          swiftc -parse-as-library native/StatusRefreshPolicy.swift native/tests/status_refresh_policy_test.swift -o "$RUNNER_TEMP/status-refresh-policy-test"
+          "$RUNNER_TEMP/status-refresh-policy-test"
+          swiftc -parse-as-library native/ResponsivePairLayout.swift native/tests/responsive_pair_layout_test.swift -o "$RUNNER_TEMP/responsive-pair-layout-test"
+          "$RUNNER_TEMP/responsive-pair-layout-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/tests/dashboard_snapshot_test.swift -o "$RUNNER_TEMP/dashboard-snapshot-test"
+          "$RUNNER_TEMP/dashboard-snapshot-test"
       - name: Installer lint
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n

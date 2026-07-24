@@ -402,7 +402,17 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 	if strings.Contains(respBody, "Just a moment") {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("cloudflare challenge (cf_clearance may need refresh)"))
 	}
-	if status != 200 {
+	switch status {
+	case http.StatusBadRequest:
+		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryInvalidRequest)
+	case http.StatusUnauthorized:
+		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAuthenticationNeeded)
+	case http.StatusForbidden:
+		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryAccessDenied)
+	case http.StatusNotFound:
+		return nil, surface.DeliveryTerminal(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)), surface.DeliveryTargetMissing)
+	}
+	if status != http.StatusOK {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("send failed (HTTP %d): %s", status, diagnosticExcerpt(respBody)))
 	}
 	return &surface.SendResult{UUID: uuid, Accepted: true}, nil

@@ -787,3 +787,20 @@ func TestOutboxDeadLettersUnknownDeliveryWithoutAutomaticRetry(t *testing.T) {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }
+
+func TestOutboxDeadLettersTerminalDeliveryWithoutRetry(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	if err := r.QueueMessage("to", "stale session"); err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = surface.DeliveryTerminal(errors.New("HTTP 404: session not found"))
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	if len(fake.sent) != 1 {
+		t.Fatalf("terminal delivery retried %d times", len(fake.sent))
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "delivery rejected") {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}

@@ -68,15 +68,9 @@ struct OverviewView: View {
                 if !model.isConnected {
                     RecoveryCard(model: model)
                 }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 38) {
-                        currentConversations
-                        surfaces
-                    }
-                    VStack(alignment: .leading, spacing: 34) {
-                        currentConversations
-                        surfaces
-                    }
+                ResponsivePairLayout(spacing: 38, minimumLeadingWidth: 320, minimumTrailingWidth: 360) {
+                    currentConversations
+                    surfaces
                 }
                 AttentionSection(model: model)
             }
@@ -402,7 +396,7 @@ struct OperationsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 34) {
                 PageHeader(eyebrow: "OPERATIONS", title: "Manage Agenthail", subtitle: "Delivery, devices, and automation")
-                ResponsivePair {
+                ResponsivePairLayout(spacing: 24, minimumLeadingWidth: 340, minimumTrailingWidth: 340) {
                     OperationsCard(title: "Waiting to go out", symbol: "tray.full") {
                         if (model.snapshot?.queue ?? []).isEmpty {
                             Text("No messages are waiting.").foregroundStyle(.secondary)
@@ -428,7 +422,6 @@ struct OperationsView: View {
                             }
                         }
                     }
-                } trailing: {
                     OperationsCard(title: "Connected devices", symbol: "iphone.and.arrow.forward") {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
@@ -469,7 +462,7 @@ struct OperationsView: View {
                         }
                     }
                 }
-                ResponsivePair {
+                ResponsivePairLayout(spacing: 24, minimumLeadingWidth: 340, minimumTrailingWidth: 340) {
                     OperationsCard(title: "Automatic handoffs", symbol: "arrow.triangle.branch") {
                         Picker("From", selection: $relayFrom) {
                             Text("Choose a source").tag("")
@@ -507,7 +500,6 @@ struct OperationsView: View {
                             }
                         }
                     }
-                } trailing: {
                     OperationsCard(title: "Desktop notifications", symbol: "bell.badge") {
                         let status = model.settings?.notifications
                         HStack {
@@ -531,7 +523,7 @@ struct OperationsView: View {
                         }
                     }
                 }
-                ResponsivePair {
+                ResponsivePairLayout(spacing: 24, minimumLeadingWidth: 340, minimumTrailingWidth: 340) {
                     OperationsCard(title: "Shared handoffs", symbol: "person.3") {
                         HStack {
                             TextField("Channel name", text: $channelName)
@@ -585,7 +577,6 @@ struct OperationsView: View {
                             .disabled(selectedChannel.isEmpty || channelMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
-                } trailing: {
                     AuditCard(model: model)
                 }
             }
@@ -601,29 +592,6 @@ struct OperationsView: View {
         if status.enabled { return "Agent completions can appear in Notification Center" }
         if status.authorization == "denied" { return "Blocked in System Settings" }
         return "Enable alerts when an agent finishes"
-    }
-}
-
-struct ResponsivePair<Leading: View, Trailing: View>: View {
-    @ViewBuilder let leading: Leading
-    @ViewBuilder let trailing: Trailing
-
-    init(@ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
-        self.leading = leading()
-        self.trailing = trailing()
-    }
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 24) {
-                leading.frame(minWidth: 340)
-                trailing.frame(minWidth: 340)
-            }
-            VStack(alignment: .leading, spacing: 24) {
-                leading
-                trailing
-            }
-        }
     }
 }
 

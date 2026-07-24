@@ -43,6 +43,14 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
 			return
 		}
+		if surface.IsDeliveryTerminal(sendErr) {
+			if err := d.Registry.DeadLetterMessage(item.ID, sendErr); err != nil {
+				d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
+			}
+			d.log.Printf("queue delivery %d was rejected: %s", item.ID, sendErr)
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
+			return
+		}
 		if err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts); err != nil {
 			d.log.Printf("nack queue item %d: %s", item.ID, err)
 		}

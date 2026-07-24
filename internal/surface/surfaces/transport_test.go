@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -56,6 +57,45 @@ func TestClaudePostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 		})
+	}
+}
+
+func TestClaudePostClientFailuresAreTerminal(t *testing.T) {
+	original := claudeSendRequest
+	t.Cleanup(func() { claudeSendRequest = original })
+	for _, test := range []struct {
+		status int
+		reason surface.DeliveryTerminalKind
+	}{
+		{http.StatusBadRequest, surface.DeliveryInvalidRequest},
+		{http.StatusUnauthorized, surface.DeliveryAuthenticationNeeded},
+		{http.StatusForbidden, surface.DeliveryAccessDenied},
+		{http.StatusNotFound, surface.DeliveryTargetMissing},
+	} {
+		t.Run(http.StatusText(test.status), func(t *testing.T) {
+			claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+				return test.status, "rejected", nil
+			}
+			_, err := (&Claude{}).postMessage(context.Background(), &surface.Session{ID: "session_test"}, "message")
+			if !surface.IsDeliveryTerminal(err) || surface.IsDeliveryOutcomeUnknown(err) {
+				t.Fatalf("status=%d err=%v", test.status, err)
+			}
+			if surface.DeliveryTerminalReason(err) != test.reason {
+				t.Fatalf("status=%d reason=%q", test.status, surface.DeliveryTerminalReason(err))
+			}
+		})
+	}
+}
+
+func TestClaudePostRateLimitOutcomeRemainsUnknown(t *testing.T) {
+	original := claudeSendRequest
+	t.Cleanup(func() { claudeSendRequest = original })
+	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		return http.StatusTooManyRequests, "try later", nil
+	}
+	_, err := (&Claude{}).postMessage(context.Background(), &surface.Session{ID: "session_test"}, "message")
+	if !surface.IsDeliveryOutcomeUnknown(err) || surface.IsDeliveryTerminal(err) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

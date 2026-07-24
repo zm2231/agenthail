@@ -82,6 +82,8 @@ cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 /usr/bin/swiftc -parse-as-library -O -target "${ARCH}-apple-macos13.0" \
 	"$ROOT/native/AgenthailApp.swift" \
 	"$ROOT/native/DuplicateApplicationPolicy.swift" \
+	"$ROOT/native/ResponsivePairLayout.swift" \
+	"$ROOT/native/StatusRefreshPolicy.swift" \
 	"$ROOT/native/AgenthailModels.swift" \
 	"$ROOT/native/AgenthailAPI.swift" \
 	"$ROOT/native/SessionSelection.swift" \

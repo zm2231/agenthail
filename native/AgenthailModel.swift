@@ -85,12 +85,14 @@ final class AgenthailModel: ObservableObject {
     @discardableResult
     func refresh(fresh: Bool = false, reloadDetail: Bool = true) async -> Bool {
         guard let api else { return false }
-        loading = snapshot == nil
+        setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            snapshot = loaded
+            if snapshot?.hasSamePresentation(as: loaded) != true {
+                snapshot = loaded
+            }
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            connectionError = nil
+            clearConnectionError()
             if selectedSessionID == nil {
                 selectedSessionID = currentSessions.first?.id
             }
@@ -99,10 +101,10 @@ final class AgenthailModel: ObservableObject {
             }
         } catch {
             connectionError = error.localizedDescription
-            loading = false
+            setLoading(false)
             return false
         }
-        loading = false
+        setLoading(false)
         return true
     }
 
@@ -317,7 +319,7 @@ final class AgenthailModel: ObservableObject {
         statusRefreshTask?.cancel()
         statusRefreshTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: StatusRefreshPolicy.interval(reconnecting: reconnecting))
                 if Task.isCancelled { return }
                 _ = await refresh(reloadDetail: false)
             }
@@ -334,7 +336,10 @@ final class AgenthailModel: ObservableObject {
         refreshTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
             if Task.isCancelled { return }
-            _ = await refresh()
+            _ = await refresh(reloadDetail: false)
+            if section == .conversations, let selectedSessionID, event.entityId == selectedSessionID {
+                await loadSession(selectedSessionID)
+            }
             if OperationsRefreshPolicy.reloadOperations(for: event.type) {
                 await loadOperations()
             } else if section == .operations && OperationsRefreshPolicy.reloadAudit(for: event.type) {
@@ -345,6 +350,14 @@ final class AgenthailModel: ObservableObject {
 
     private func eventStreamConnected() {
         reconnecting = false
-        connectionError = nil
+        clearConnectionError()
+    }
+
+    private func setLoading(_ value: Bool) {
+        if loading != value { loading = value }
+    }
+
+    private func clearConnectionError() {
+        if connectionError != nil { connectionError = nil }
     }
 }

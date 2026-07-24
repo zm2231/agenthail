@@ -613,6 +613,61 @@ func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
 	}
 }
 
+func TestAttentionItemsExplainTerminalDeliveryRecovery(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		error  string
+		reason string
+		action string
+	}{
+		{"missing target", "delivery rejected [target missing]: HTTP 404", "Delivery target is unavailable", "Cancel and send this message to an available session"},
+		{"authentication", "delivery rejected [authentication needed]: HTTP 401", "Claude needs to reconnect", "Reconnect Claude, then retry or cancel this message"},
+		{"access", "delivery rejected [access denied]: HTTP 403", "Claude denied this delivery", "Check Claude access, then retry or cancel this message"},
+		{"invalid request", "delivery rejected [invalid request]: HTTP 400", "Delivery request needs correction", "Correct this message, then retry or cancel it"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := openTestRegistry(t)
+			register(t, r, "s")
+			if err := r.QueueMessage("s", "needs recovery"); err != nil {
+				t.Fatal(err)
+			}
+			item, err := r.ClaimNextMessage("s", time.Now())
+			if err != nil || item == nil {
+				t.Fatalf("item=%+v err=%v", item, err)
+			}
+			if err := r.DeadLetterMessage(item.ID, errors.New(test.error)); err != nil {
+				t.Fatal(err)
+			}
+			items, err := r.ListAttentionItems(false)
+			if err != nil || len(items) != 1 || items[0].Reason != test.reason || items[0].RequestedAction != test.action {
+				t.Fatalf("items=%+v err=%v", items, err)
+			}
+		})
+	}
+}
+
+func TestAttentionItemsRefreshLegacyUnknownHTTPRecovery(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "legacy failure"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.DeadLetterUnknown(item.ID, errors.New("send failed (HTTP 404): session not found")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,?,?)`, "s", item.ID, "Delivery outcome could not be confirmed", "Retry or cancel this message"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.ListAttentionItems(false)
+	if err != nil || len(items) != 1 || items[0].Reason != "Delivery target is unavailable" || items[0].RequestedAction != "Cancel and send this message to an available session" {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
+
 func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
