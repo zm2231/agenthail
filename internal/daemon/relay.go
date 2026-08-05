@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -35,13 +36,21 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 			d.dropRelay(from.ID, route, completionID, text, "target session no longer exists")
 			continue
 		}
-		if surface.IsReadOnlySession(target) {
-			reason := surface.ReadOnlySessionReason(target)
-			d.dropRelay(from.ID, route, completionID, text, reason)
-			continue
-		}
 		if relayTargetInactive(target) {
 			d.dropRelay(from.ID, route, completionID, text, "target session is no longer active")
+			continue
+		}
+		adapter := d.surfaceForKind(target.Surface)
+		if adapter == nil {
+			d.dropRelay(from.ID, route, completionID, text, "target surface is unavailable")
+			continue
+		}
+		if err := surface.EnsureWritableSession(context.Background(), adapter, target); err != nil {
+			d.dropRelay(from.ID, route, completionID, text, err.Error())
+			continue
+		}
+		if err := d.Registry.RegisterSession(*target); err != nil {
+			d.dropRelay(from.ID, route, completionID, text, err.Error())
 			continue
 		}
 		payloadText := text

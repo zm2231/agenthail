@@ -59,6 +59,10 @@ func (*fakeSurface) Model(context.Context, *surface.Session, string) (string, er
 func (*fakeSurface) Interrupt(context.Context, *surface.Session) error               { return nil }
 func (*fakeSurface) Steer(context.Context, *surface.Session, string) error           { return nil }
 func (*fakeSurface) Capabilities() surface.Capabilities                              { return surface.Capabilities{} }
+func (*fakeSurface) EnsureWritable(_ context.Context, session *surface.Session) error {
+	session.Transport = "managed"
+	return nil
+}
 
 func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))

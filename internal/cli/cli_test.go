@@ -22,6 +22,8 @@ type cliSurface struct {
 	kind         surface.SurfaceKind
 	sessions     map[string]surface.Session
 	listed       []surface.Session
+	listErr      error
+	listCalls    int
 	caps         surface.Capabilities
 	observation  *surface.TurnObservation
 	observations []*surface.TurnObservation
@@ -45,6 +47,14 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	err := (&App{}).Run([]string{"codex", "--remote", "ws://example.test"})
 	if err == nil || !strings.Contains(err.Error(), "manages the remote transport") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestProbeCodexAppServerRequiresThreadList(t *testing.T) {
+	fake := &cliSurface{listErr: errors.New("thread/list unavailable")}
+	err := probeCodexAppServer(fake)
+	if !errors.Is(err, fake.listErr) || fake.listCalls != 1 {
+		t.Fatalf("err=%v calls=%d", err, fake.listCalls)
 	}
 }
 
@@ -73,8 +83,11 @@ func TestCodexRemoteArgsIgnoreArgumentsAfterTerminator(t *testing.T) {
 	}
 }
 
-func (f *cliSurface) Name() surface.SurfaceKind                       { return f.kind }
-func (f *cliSurface) List(context.Context) ([]surface.Session, error) { return f.listed, nil }
+func (f *cliSurface) Name() surface.SurfaceKind { return f.kind }
+func (f *cliSurface) List(context.Context) ([]surface.Session, error) {
+	f.listCalls++
+	return f.listed, f.listErr
+}
 func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session, error) {
 	session, ok := f.sessions[target]
 	if !ok {
@@ -128,6 +141,13 @@ func (*cliSurface) Model(context.Context, *surface.Session, string) (string, err
 func (*cliSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
 func (*cliSurface) Steer(context.Context, *surface.Session, string) error { return nil }
 func (f *cliSurface) Capabilities() surface.Capabilities                  { return f.caps }
+func (*cliSurface) EnsureWritable(_ context.Context, session *surface.Session) error {
+	if session.Source == "cli" || session.Transport == "readOnly" {
+		return errors.New(surface.ReadOnlySessionReason(session))
+	}
+	session.Transport = "managed"
+	return nil
+}
 
 func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 	t.Helper()
@@ -643,18 +663,10 @@ func TestUnicodeTruncationIsValid(t *testing.T) {
 	}
 }
 
-func TestCodexLaunchUsesRendererDebuggerOnly(t *testing.T) {
-	args := strings.Join(codexLaunchArgs("9231"), " ")
-	for _, expected := range []string{"--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9231"} {
-		if !strings.Contains(args, expected) {
-			t.Fatalf("missing %s in %q", expected, args)
-		}
-	}
-	if strings.Contains(args, "--remote-allow-origins") {
-		t.Fatalf("launch args expose the renderer debugger to browser origins: %s", args)
-	}
-	if strings.Contains(args, "--inspect") {
-		t.Fatalf("unsafe Node inspector launch flag present in %q", args)
+func TestCodexLaunchDoesNotEnableRendererDebugging(t *testing.T) {
+	args := strings.Join(codexLaunchArgs(), " ")
+	if strings.Contains(args, "remote-debugging") || strings.Contains(args, "--inspect") {
+		t.Fatalf("launch args expose a debug transport: %q", args)
 	}
 }
 

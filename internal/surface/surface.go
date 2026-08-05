@@ -51,7 +51,7 @@ func ReadOnlySessionReason(session *Session) string {
 		return ""
 	}
 	if session.Source == "vscode" {
-		return "Codex Desktop is not bridged; run 'agenthail launch codex'"
+		return "Codex Desktop is not available through the local app-server; run 'agenthail doctor'"
 	}
 	if session.Source == "cli" || session.Transport == "readOnly" {
 		return "Codex terminal session is read only; start a writable session with 'agenthail codex'"
@@ -165,6 +165,22 @@ type SessionStarter interface {
 
 type OptionSender interface {
 	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
+}
+
+type SessionAccessChecker interface {
+	EnsureWritable(ctx context.Context, sess *Session) error
+}
+
+func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) error {
+	if checker, ok := adapter.(SessionAccessChecker); ok {
+		if err := checker.EnsureWritable(ctx, sess); err != nil {
+			return err
+		}
+	}
+	if IsReadOnlySession(sess) {
+		return errors.New(ReadOnlySessionReason(sess))
+	}
+	return nil
 }
 
 type ModelOption struct {

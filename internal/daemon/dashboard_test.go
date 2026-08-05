@@ -549,7 +549,7 @@ func TestDashboardCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 func TestDashboardCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
 	got, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)
-	if !readOnly || got.Send || got.Model || !strings.Contains(reason, "agenthail launch codex") {
+	if !readOnly || got.Send || got.Model || !strings.Contains(reason, "agenthail doctor") {
 		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
 	}
 }

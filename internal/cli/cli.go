@@ -623,6 +623,19 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 	return nil, nil, fmt.Errorf("no session matched '%s'", target)
 }
 
+func (a *App) ensureWritableTarget(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return err
+	}
+	isSyntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
+	if a.Registry != nil && !isSyntheticNotion {
+		if err := a.Registry.RegisterSession(*session); err != nil {
+			return fmt.Errorf("register %s session: %w", adapter.Name(), err)
+		}
+	}
+	return nil
+}
+
 func (a *App) cmdSend(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 2 {
@@ -669,6 +682,9 @@ func (a *App) cmdSend(args []string) error {
 	}
 	if !surf.Capabilities().Send {
 		return fmt.Errorf("%s does not support send", surf.Name())
+	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
 	}
 
 	if wantStream && !surf.Capabilities().Stream {
@@ -963,6 +979,9 @@ func (a *App) cmdGoal(args []string) error {
 		fmt.Printf("%s [%s]\n", goal.Objective, goal.Status)
 		return nil
 	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
+	}
 	action := positional[1]
 	if action == "clear" {
 		return surf.GoalClear(ctx, sess)
@@ -983,6 +1002,9 @@ func (a *App) cmdCompact(args []string) error {
 	}
 	if !surf.Capabilities().Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
+	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
 	}
 	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
 	if err != nil {
@@ -1015,6 +1037,9 @@ func (a *App) cmdModel(args []string) error {
 	name := ""
 	if len(positional) > 1 {
 		name = positional[1]
+		if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+			return err
+		}
 	}
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
@@ -1039,6 +1064,9 @@ func (a *App) cmdInterrupt(args []string) error {
 	if !surf.Capabilities().Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
 	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
+	}
 	return surf.Interrupt(ctx, sess)
 }
 
@@ -1054,6 +1082,9 @@ func (a *App) cmdSteer(args []string) error {
 	}
 	if !surf.Capabilities().Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())
+	}
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
 	}
 	return surf.Steer(ctx, sess, strings.Join(positional[1:], " "))
 }
@@ -1098,8 +1129,12 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil {
 			return err
 		}
-		if surface.IsReadOnlySession(session) {
+		adapter := a.surfaceByKind(session.Surface)
+		if adapter == nil {
 			return errors.New(surface.ReadOnlySessionReason(session))
+		}
+		if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
+			return err
 		}
 		if err := a.Registry.RetryMessage(id); err != nil {
 			return err
@@ -1151,8 +1186,8 @@ func (a *App) cmdQueue(args []string) error {
 	if surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:")) {
 		return fmt.Errorf("a new Notion thread cannot be queued before it has a persisted UUID; use 'agenthail send %s ...'", positional[0])
 	}
-	if surface.IsReadOnlySession(sess) {
-		return errors.New(surface.ReadOnlySessionReason(sess))
+	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
+		return err
 	}
 	message := strings.Join(positional[1:], " ")
 	if message == "-" {
@@ -1408,7 +1443,7 @@ func (a *App) cmdLaunch(args []string) error {
 	}
 	switch target {
 	case "codex":
-		return launchCodex(codexRemotePort())
+		return launchCodex(a.surfaceByKind(surface.KindCodex))
 	case "claude":
 		return fmt.Errorf("claude must be launched manually (open the app or visit claude.ai/code)")
 	case "notion":
@@ -1418,10 +1453,9 @@ func (a *App) cmdLaunch(args []string) error {
 	}
 }
 
-func launchCodex(port string) error {
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return fmt.Errorf("AGENTHAIL_CODEX_REMOTE must be a TCP port from 1 to 65535 (got %q)", port)
+func launchCodex(codex surface.Surface) error {
+	if codex == nil {
+		return fmt.Errorf("Codex surface is unavailable")
 	}
 	candidates := []string{
 		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
@@ -1440,28 +1474,14 @@ func launchCodex(port string) error {
 
 	pid := findCodexPID()
 	if pid > 0 {
-		if rendererDebuggerListening(port) {
-			fmt.Println("Codex is already connected to Agenthail")
+		if err := probeCodexAppServer(codex); err == nil {
+			fmt.Println("Codex is ready for Agenthail")
 			return nil
 		}
-		if nodeDebuggerListening("9229") {
-			fmt.Println("Codex is connected using the compatibility path")
-			fmt.Println("To use the preferred connection, quit Codex once and run 'agenthail launch codex'")
-			return nil
-		}
-		if err := syscall.Kill(pid, syscall.SIGUSR1); err != nil {
-			return fmt.Errorf("Codex is open but Agenthail cannot connect to it: %w; quit Codex, then run 'agenthail launch codex'", err)
-		}
-		time.Sleep(1 * time.Second)
-		if nodeDebuggerListening("9229") {
-			fmt.Println("Codex is connected using the compatibility path")
-			fmt.Println("To use the preferred connection, quit Codex once and run 'agenthail launch codex'")
-			return nil
-		}
-		return fmt.Errorf("Codex is open but Agenthail cannot connect to it; quit Codex, then run 'agenthail launch codex'")
+		return fmt.Errorf("Codex is open but Agenthail cannot use its local app-server; run 'agenthail doctor' for details")
 	}
 
-	cmd := exec.Command(exe, codexLaunchArgs(port)...)
+	cmd := exec.Command(exe, codexLaunchArgs()...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
@@ -1472,24 +1492,29 @@ func launchCodex(port string) error {
 	pid = cmd.Process.Pid
 	cmd.Process.Release()
 	fmt.Println("Opening Codex and waiting for it to connect")
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if rendererDebuggerListening(port) {
-			fmt.Println("Codex is connected to Agenthail")
+		if err := probeCodexAppServer(codex); err == nil {
+			fmt.Println("Codex is ready for Agenthail")
 			fmt.Println("Run 'agenthail doctor' to check every connection")
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("Codex opened but did not connect to Agenthail; quit Codex, then try 'agenthail launch codex' again")
+	return fmt.Errorf("Codex opened but its local app-server did not become ready; run 'agenthail doctor' for details")
 }
 
-func codexLaunchArgs(port string) []string {
+func probeCodexAppServer(codex surface.Surface) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := codex.List(ctx)
+	return err
+}
+
+func codexLaunchArgs() []string {
 	return []string{
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--remote-debugging-address=127.0.0.1",
-		"--remote-debugging-port=" + port,
 	}
 }
 

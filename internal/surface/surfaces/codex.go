@@ -49,9 +49,18 @@ func (c *Codex) Capabilities() surface.Capabilities {
 }
 
 func (c *Codex) Health(ctx context.Context) error {
-	return codexHealth(ctx, c.managed, c.openDesktop, func(ctx context.Context) (codexClient, error) {
-		return dialManagedCodex(ctx)
-	})
+	if c.managed {
+		client, err := dialManagedCodex(ctx)
+		if err != nil {
+			return fmt.Errorf("Codex local app-server is unavailable: %w", err)
+		}
+		return client.Close()
+	}
+	client, err := c.openDesktop(ctx)
+	if err != nil {
+		return fmt.Errorf("Codex Desktop bridge is unavailable: %w", err)
+	}
+	return client.Close()
 }
 
 type codexOpener func(context.Context) (codexClient, error)
@@ -234,6 +243,14 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 const maxCodexListPages = 100
 
 func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
+	if c.managed {
+		client, err := c.openManaged(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer client.Close()
+		return c.listClient(ctx, client, true, false)
+	}
 	clients := []struct {
 		client           codexClient
 		managed          bool
@@ -511,8 +528,8 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		return nil, err
 	}
 	defer conn.Close()
-	if _, err := conn.Request(ctx, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second); err != nil {
-		return nil, fmt.Errorf("thread/resume: %w", err)
+	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
+		return nil, err
 	}
 	active, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
@@ -543,6 +560,13 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
 }
 
+func codexResumeAcceptsDirectInput(response map[string]any) bool {
+	result, _ := response["result"].(map[string]any)
+	thread, _ := result["thread"].(map[string]any)
+	accepts, _ := thread["canAcceptDirectInput"].(bool)
+	return accepts
+}
+
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
@@ -555,7 +579,7 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	if sess.Transport == codexTransportManaged {
+	if sess.Transport == codexTransportManaged || (c.managed && sess.Source == "vscode") {
 		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
 	}
 	conn, err := c.dial(ctx)
@@ -821,9 +845,12 @@ func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (
 }
 
 func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
-	conn, err := c.openDesktop(ctx)
-	if err != nil && c.managed {
+	var conn codexClient
+	var err error
+	if c.managed {
 		conn, err = c.openManaged(ctx)
+	} else {
+		conn, err = c.openDesktop(ctx)
 	}
 	if err != nil {
 		return nil, err
@@ -867,6 +894,9 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 		return err
 	}
 	defer conn.Close()
+	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
+		return err
+	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
 		return err
@@ -886,6 +916,9 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 		return err
 	}
 	defer conn.Close()
+	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
+		return err
+	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
 		return err

@@ -21,10 +21,10 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 		want             string
 	}{
 		{"vscode", "idle", false, true, codexTransportDesktop},
-		{"vscode", "notLoaded", true, true, codexTransportDesktop},
+		{"vscode", "notLoaded", true, true, codexTransportReadOnly},
 		{"vscode", "idle", true, false, codexTransportReadOnly},
 		{"agenthail", "idle", true, false, codexTransportManaged},
-		{"cli", "idle", true, false, codexTransportManaged},
+		{"cli", "idle", true, false, codexTransportReadOnly},
 		{"cli", "notLoaded", true, false, codexTransportReadOnly},
 		{"cli", "idle", false, false, codexTransportReadOnly},
 	}
@@ -154,7 +154,7 @@ func TestManagedStreamWaitsForNewTurnInsteadOfReplayingHistory(t *testing.T) {
 	}
 }
 
-func TestCodexListPageBecomesReadOnlyWhenDesktopBridgeIsLost(t *testing.T) {
+func TestCodexListPageUsesManagedTransportForDesktopSessions(t *testing.T) {
 	client := &fixedCodexClient{response: map[string]any{
 		"result": map[string]any{
 			"data": []any{map[string]any{
@@ -163,15 +163,15 @@ func TestCodexListPageBecomesReadOnlyWhenDesktopBridgeIsLost(t *testing.T) {
 		},
 	}}
 	codex := NewCodex("")
-	bridged, _, err := codex.listPage(context.Background(), client, nil, true, true)
-	if err != nil || len(bridged) != 1 || bridged[0].Transport != codexTransportDesktop {
-		t.Fatalf("bridged sessions=%v err=%v", bridged, err)
+	managed, _, err := codex.listPage(context.Background(), client, nil, true, false)
+	if err != nil || len(managed) != 1 || managed[0].Transport != codexTransportReadOnly {
+		t.Fatalf("managed sessions=%v err=%v", managed, err)
 	}
-	unbridged, _, err := codex.listPage(context.Background(), client, nil, true, false)
-	if err != nil || len(unbridged) != 1 || unbridged[0].Transport != codexTransportReadOnly {
-		t.Fatalf("unbridged sessions=%v err=%v", unbridged, err)
+	legacy, _, err := codex.listPage(context.Background(), client, nil, false, false)
+	if err != nil || len(legacy) != 1 || legacy[0].Transport != codexTransportReadOnly {
+		t.Fatalf("legacy sessions=%v err=%v", legacy, err)
 	}
-	if reason := surface.ReadOnlySessionReason(&unbridged[0]); !strings.Contains(reason, "agenthail launch codex") {
+	if reason := surface.ReadOnlySessionReason(&legacy[0]); !strings.Contains(reason, "agenthail doctor") {
 		t.Fatalf("reason=%q", reason)
 	}
 }
@@ -185,10 +185,22 @@ func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	}
 }
 
+func TestCodexResumeRequiresDesktopDirectInput(t *testing.T) {
+	if !codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": true}}}) {
+		t.Fatal("ready Desktop thread was rejected")
+	}
+	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": false}}}) {
+		t.Fatal("unready Desktop thread was accepted")
+	}
+	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{}}}) {
+		t.Fatal("missing direct-input state was accepted")
+	}
+}
+
 func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 	legacy := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle}
 	unclassifiedDesktopSource := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode"}
-	desktop := &surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}
+	desktop := &surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "managed"}
 	if !surface.IsReadOnlySession(legacy) {
 		t.Fatal("legacy unloaded session was writable")
 	}
@@ -199,7 +211,7 @@ func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 		t.Fatal("Desktop session was read only")
 	}
 	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
-	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); reason != "Codex Desktop is not bridged; run 'agenthail launch codex'" {
+	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); reason != "Codex Desktop is not available through the local app-server; run 'agenthail doctor'" {
 		t.Fatalf("reason=%q", reason)
 	}
 }

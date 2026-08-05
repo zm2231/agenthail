@@ -68,13 +68,7 @@ Start a writable Codex terminal conversation from any project folder:
 agenthail codex
 ```
 
-For Codex Desktop, quit it once and open it through Agenthail:
-
-```bash
-agenthail launch codex
-```
-
-Agenthail can still show older Codex history, but it only offers a message box when it knows the conversation is connected and writable.
+For Codex Desktop, open the app normally. Agenthail connects through Codex's local app-server and can message a saved Desktop conversation when Codex reports that it accepts direct input.
 
 ### Notion
 

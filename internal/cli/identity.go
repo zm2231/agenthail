@@ -9,7 +9,6 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
-	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
@@ -107,12 +106,12 @@ func (a *App) cmdChannel(args []string) error {
 			return fmt.Errorf("usage: agenthail channel add <channel> <target>")
 		}
 		channelName := strings.TrimPrefix(args[1], "#")
-		sess, _, err := a.resolveTarget(ctx, args[2])
+		sess, adapter, err := a.resolveTarget(ctx, args[2])
 		if err != nil {
 			return err
 		}
-		if surface.IsReadOnlySession(sess) {
-			return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
+		if err := a.ensureWritableTarget(ctx, sess, adapter); err != nil {
+			return err
 		}
 		if err := a.Registry.AddToChannel(channelName, sess.ID); err != nil {
 			return err
@@ -248,12 +247,12 @@ func (a *App) cmdRelay(args []string) error {
 		if err != nil {
 			return fmt.Errorf("from-target: %w", err)
 		}
-		toSess, _, err := a.resolveTarget(ctx, args[2])
+		toSess, toAdapter, err := a.resolveTarget(ctx, args[2])
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
 		}
-		if surface.IsReadOnlySession(toSess) {
-			return fmt.Errorf("to-target: %s", surface.ReadOnlySessionReason(toSess))
+		if err := a.ensureWritableTarget(ctx, toSess, toAdapter); err != nil {
+			return fmt.Errorf("to-target: %w", err)
 		}
 		pattern := ".*"
 		if len(args) > 3 {

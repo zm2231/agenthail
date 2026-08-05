@@ -43,6 +43,9 @@ func (d Dispatcher) DeliverWithoutQueue(ctx context.Context, adapter surface.Sur
 }
 
 func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, session *surface.Session) (*Receipt, error) {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return nil, err
+	}
 	if adapter.Name() == surface.KindClaude {
 		observation, err := adapter.Observe(ctx, session)
 		if err != nil {
@@ -62,6 +65,10 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		return nil, err
+	}
 	baselineCompletionID := ""
 	if d.Registry != nil {
 		state, found, stateErr := d.Registry.RuntimeState(session.ID)

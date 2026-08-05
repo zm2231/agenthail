@@ -173,6 +173,9 @@ func (c *Codex) ensureDesktopHook(ctx context.Context, conn *cdpConn) error {
 }
 
 func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable bool) (codexClient, error) {
+	if c.managed {
+		return c.openManaged(ctx)
+	}
 	if writable && (sess.Transport == "" || sess.Transport == codexTransportReadOnly) {
 		return nil, fmt.Errorf("Codex terminal session is read only; start a writable session with 'agenthail codex'")
 	}
@@ -182,12 +185,50 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 	return c.openDesktop(ctx)
 }
 
+func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error {
+	if sess == nil {
+		return fmt.Errorf("Codex session is required")
+	}
+	if !c.managed {
+		if surface.IsReadOnlySession(sess) {
+			return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
+		}
+		return nil
+	}
+	client, err := c.openManaged(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := c.requireDirectInput(ctx, client, sess.ID); err != nil {
+		return err
+	}
+	sess.Transport = codexTransportManaged
+	return nil
+}
+
+func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, threadID string) error {
+	resume, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("thread/resume: %w", err)
+	}
+	if !codexResumeAcceptsDirectInput(resume) {
+		return fmt.Errorf("Codex session is not ready for direct input; open it in Codex Desktop and try again")
+	}
+	return nil
+}
+
 func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
 	client, err := c.openSession(ctx, sess, writable)
 	if err != nil {
 		return nil, err
 	}
 	defer client.Close()
+	if writable {
+		if err := c.requireDirectInput(ctx, client, sess.ID); err != nil {
+			return nil, err
+		}
+	}
 	return client.Request(ctx, method, params, wait)
 }
 
@@ -205,12 +246,12 @@ func codexSource(value any) string {
 
 func codexTransport(source string, status any, managed, desktopReachable bool) string {
 	if source == "vscode" {
-		if desktopReachable {
+		if !managed && desktopReachable {
 			return codexTransportDesktop
 		}
 		return codexTransportReadOnly
 	}
-	if managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
+	if source == "agenthail" && managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
 		return codexTransportManaged
 	}
 	return codexTransportReadOnly

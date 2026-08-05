@@ -655,6 +655,16 @@ func dashboardCapabilities(session surface.Session, capabilities surface.Capabil
 	return capabilities, false, ""
 }
 
+func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return err
+	}
+	if err := d.Registry.RegisterSession(*session); err != nil {
+		return err
+	}
+	return nil
+}
+
 func dashboardSessionPresence(session surface.Session, queueCount int, open bool, codexRecentHours int, now time.Time) (bool, string) {
 	switch session.Surface {
 	case surface.KindClaude:
@@ -836,8 +846,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, targetErr.Error(), http.StatusBadRequest)
 			return
 		}
-		if surface.IsReadOnlySession(target) {
-			http.Error(w, surface.ReadOnlySessionReason(target), http.StatusConflict)
+		adapter := d.surfaceForKind(target.Surface)
+		if adapter == nil {
+			http.Error(w, "target surface is not configured", http.StatusConflict)
+			return
+		}
+		if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		if err := d.Registry.RetryMessage(request.QueueID); err != nil {
@@ -904,7 +919,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 			adapter := d.surfaceForKind(session.Surface)
-			if adapter == nil || surface.IsReadOnlySession(session) {
+			if adapter == nil {
+				failed++
+				continue
+			}
+			if err := d.ensureDashboardWritable(operationCtx, adapter, session); err != nil {
 				failed++
 				continue
 			}
@@ -943,8 +962,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "session not found", http.StatusNotFound)
 				return
 			}
-			if surface.IsReadOnlySession(target) {
-				http.Error(w, surface.ReadOnlySessionReason(target), http.StatusConflict)
+			adapter := d.surfaceForKind(target.Surface)
+			if adapter == nil {
+				http.Error(w, "target surface is not configured", http.StatusConflict)
+				return
+			}
+			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			actionErr = d.Registry.AddToChannel(strings.TrimPrefix(strings.TrimSpace(request.Channel), "#"), targetID)
@@ -978,8 +1002,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "destination session not found", http.StatusNotFound)
 			return
 		}
-		if surface.IsReadOnlySession(toSession) {
-			http.Error(w, surface.ReadOnlySessionReason(toSession), http.StatusConflict)
+		adapter := d.surfaceForKind(toSession.Surface)
+		if adapter == nil {
+			http.Error(w, "destination surface is not configured", http.StatusConflict)
+			return
+		}
+		if err := d.ensureDashboardWritable(r.Context(), adapter, toSession); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		pattern := request.Pattern
@@ -1067,9 +1096,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
-	_, readOnly, reason := dashboardCapabilities(*session, adapter.Capabilities())
-	if readOnly {
-		http.Error(w, reason, http.StatusConflict)
+	if err := d.ensureDashboardWritable(r.Context(), adapter, session); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
@@ -1185,6 +1213,11 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
+	accessErr := d.ensureDashboardWritable(ctx, adapter, session)
+	if accessErr != nil && session.Surface == surface.KindCodex {
+		session.Transport = "readOnly"
+		_ = d.Registry.RegisterSession(*session)
+	}
 	limit := 20
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
 		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 4 && parsed <= 40 {
@@ -1199,6 +1232,11 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	exchanges, transcript := truncateSessionExchanges(exchanges)
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	capabilities, readOnly, readOnlyReason := dashboardCapabilities(*session, adapter.Capabilities())
+	if accessErr != nil {
+		capabilities = surface.Capabilities{}
+		readOnly = true
+		readOnlyReason = accessErr.Error()
+	}
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		if usage, usageErr := provider.ContextUsage(ctx, session); usageErr == nil && usage != nil {
