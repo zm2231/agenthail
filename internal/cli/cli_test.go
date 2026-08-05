@@ -70,6 +70,12 @@ func TestProbeCodexAppServerRequiresThreadList(t *testing.T) {
 	}
 }
 
+func TestCodexLaunchProbeTimeoutAccommodatesLargeThreadLists(t *testing.T) {
+	if codexLaunchProbeTimeout < 30*time.Second {
+		t.Fatalf("codexLaunchProbeTimeout = %s, want at least 30s", codexLaunchProbeTimeout)
+	}
+}
+
 func TestCodexRemoteArgsUseCallerDirectory(t *testing.T) {
 	got := codexRemoteArgs([]string{"--model", "gpt-5.6-sol"}, "/tmp/project")
 	want := []string{"--cd", "/tmp/project", "--model", "gpt-5.6-sol"}

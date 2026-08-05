@@ -1504,8 +1504,10 @@ func launchCodex(codex surface.Surface) error {
 	return fmt.Errorf("Codex opened but its local app-server did not become ready; run 'agenthail doctor' for details")
 }
 
+const codexLaunchProbeTimeout = 30 * time.Second
+
 func probeCodexAppServer(codex surface.Surface) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), codexLaunchProbeTimeout)
 	defer cancel()
 	_, err := codex.List(ctx)
 	return err
