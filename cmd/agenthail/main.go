@@ -66,5 +66,5 @@ func codexRemotePort() string {
 	if value := os.Getenv("AGENTHAIL_CODEX_INSPECT"); value != "" {
 		return value
 	}
-	return "9231"
+	return ""
 }

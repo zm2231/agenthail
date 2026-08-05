@@ -41,6 +41,18 @@ type runtimeCLISurface struct {
 	status surface.RuntimeStatus
 }
 
+func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
+	t.Setenv("AGENTHAIL_CODEX_REMOTE", "")
+	t.Setenv("AGENTHAIL_CODEX_INSPECT", "")
+	if got := codexRemotePort(); got != "" {
+		t.Fatalf("codexRemotePort() = %q, want empty managed-runtime default", got)
+	}
+	t.Setenv("AGENTHAIL_CODEX_INSPECT", "9333")
+	if got := codexRemotePort(); got != "9333" {
+		t.Fatalf("codexRemotePort() = %q, want inspector override", got)
+	}
+}
+
 func (f *runtimeCLISurface) RuntimeStatus(context.Context) surface.RuntimeStatus { return f.status }
 
 func TestCodexCommandRejectsCustomRemote(t *testing.T) {
