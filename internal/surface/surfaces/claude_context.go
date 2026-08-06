@@ -13,6 +13,7 @@ import (
 
 type claudeContextState struct {
 	offset              int64
+	fileInfo            os.FileInfo
 	usage               surface.ContextUsage
 	latestCommandAt     time.Time
 	latestCommandDoneAt time.Time
@@ -61,14 +62,14 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		c.contextState = map[string]*claudeContextState{}
 	}
 	state := c.contextState[path]
-	if state == nil || info.Size() < state.offset {
+	if state == nil || info.Size() < state.offset || (state.fileInfo != nil && !os.SameFile(state.fileInfo, info)) {
 		state = &claudeContextState{seenBoundaries: map[string]bool{}}
 		c.contextState[path] = state
 	}
 	if state.seenBoundaries == nil {
 		state.seenBoundaries = map[string]bool{}
 	}
-	offset, err := scanAppendedJSONL(ctx, path, state.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+	visit := func(line []byte) error {
 		var record claudeContextRecord
 		if json.Unmarshal(line, &record) != nil {
 			return nil
@@ -123,10 +124,26 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 			state.rememberCommandCompletion(at)
 		}
 		return nil
-	})
-	state.offset = offset
-	if err != nil {
-		return nil, err
+	}
+	if state.offset == 0 {
+		lines, offset, readErr := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
+		if readErr != nil {
+			return nil, readErr
+		}
+		for _, line := range lines {
+			if err := visit(line); err != nil {
+				return nil, err
+			}
+		}
+		state.offset = offset
+		state.fileInfo = info
+	} else {
+		offset, scanErr := scanAppendedJSONL(ctx, path, state.offset, maxClaudeTranscriptRecordBytes, visit)
+		state.offset = offset
+		state.fileInfo = info
+		if scanErr != nil {
+			return nil, scanErr
+		}
 	}
 	completedAt := state.usage.LastCompactedAt
 	if state.latestCommandDoneAt.After(completedAt) {

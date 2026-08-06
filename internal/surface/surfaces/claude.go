@@ -26,6 +26,8 @@ type Claude struct {
 	cookieBridge string
 	contextMu    sync.Mutex
 	contextState map[string]*claudeContextState
+	observeMu    sync.Mutex
+	observeState map[string]*claudeObservationState
 }
 
 func NewClaude(profile, home string) *Claude {
@@ -300,15 +302,12 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 		}
 		return observation, nil
 	}
-	turns, err := readClaudeTurns(path)
+	state, err := c.observeTranscript(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	compactPending, err := claudeCompactPending(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(turns) == 0 {
+	compactPending := state.compactPending()
+	if !state.hasCurrent {
 		transcriptCanSetReady := observation.Status != surface.StatusOffline || claudeProcessAlive(sess.PID)
 		if compactPending && transcriptCanSetReady {
 			observation.Status = surface.StatusBusy
@@ -318,7 +317,7 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 		}
 		return observation, nil
 	}
-	last := turns[len(turns)-1]
+	last := state.current
 	transcriptCanSetReady := observation.Status != surface.StatusOffline || claudeProcessAlive(sess.PID)
 	if !last.Done && !last.Interrupted && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
@@ -330,14 +329,9 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = "compact"
 	}
-	for i := len(turns) - 1; i >= 0; i-- {
-		turn := turns[i]
-		if !turn.Done || turn.MessageID == "" {
-			continue
-		}
-		observation.CompletedTurnID = turn.MessageID
-		observation.Reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: true}
-		break
+	if state.hasCompleted && state.completed.MessageID != "" {
+		observation.CompletedTurnID = state.completed.MessageID
+		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true}
 	}
 	return observation, nil
 }
@@ -443,15 +437,18 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 		return fmt.Errorf("no local transcript for streaming")
 	}
 	deadline := time.Now().Add(timeout)
-	initial, err := readClaudeTurns(path)
+	state, err := c.observeTranscript(ctx, path)
 	if err != nil {
 		return err
 	}
 	targetID := uuid
-	if targetID == "" && len(initial) > 0 && !initial[len(initial)-1].Done && !initial[len(initial)-1].Interrupted {
-		targetID = initial[len(initial)-1].UserID
+	baselineUserID := ""
+	if state.hasCurrent {
+		baselineUserID = state.current.UserID
 	}
-	baseline := len(initial)
+	if targetID == "" && state.hasCurrent && !state.current.Done && !state.current.Interrupted {
+		targetID = state.current.UserID
+	}
 	lastText := ""
 	var lastContext surface.ContextUsage
 	var nextContextPoll time.Time
@@ -468,36 +465,35 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
 			}
 		}
-		turns, err := readClaudeTurns(path)
+		state, err := c.observeTranscript(ctx, path)
 		if err != nil {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		if targetID == "" && len(turns) > baseline {
-			targetID = turns[baseline].UserID
+		if targetID == "" && state.hasCurrent && state.current.UserID != "" && state.current.UserID != baselineUserID {
+			targetID = state.current.UserID
 		}
-		for _, turn := range turns {
-			if targetID == "" || turn.UserID != targetID {
-				continue
+		if !state.hasCurrent || targetID == "" || state.current.UserID != targetID {
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		turn := state.current
+		if turn.Assistant != "" && turn.Assistant != lastText {
+			text := turn.Assistant
+			if strings.HasPrefix(text, lastText) {
+				text = strings.TrimPrefix(text, lastText)
 			}
-			if turn.Assistant != "" && turn.Assistant != lastText {
-				text := turn.Assistant
-				if strings.HasPrefix(text, lastText) {
-					text = strings.TrimPrefix(text, lastText)
-				}
-				lastText = turn.Assistant
-				if text != "" {
-					onEvent(surface.StreamEvent{Kind: "text", Text: text})
-				}
+			lastText = turn.Assistant
+			if text != "" {
+				onEvent(surface.StreamEvent{Kind: "text", Text: text})
 			}
-			if turn.Done {
-				onEvent(surface.StreamEvent{Kind: "done"})
-				return nil
-			}
-			if turn.Interrupted {
-				return fmt.Errorf("Claude turn %s was interrupted", targetID)
-			}
-			break
+		}
+		if turn.Done {
+			onEvent(surface.StreamEvent{Kind: "done"})
+			return nil
+		}
+		if turn.Interrupted {
+			return fmt.Errorf("Claude turn %s was interrupted", targetID)
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
@@ -532,7 +528,7 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 	if path == "" {
 		path = c.transcriptPath(sess)
 	}
-	turns, err := readClaudeTurns(path)
+	turns, err := readClaudeTailTurns(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -663,7 +659,7 @@ func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surf
 	if path == "" || !fileExists(path) {
 		return nil, fmt.Errorf("no local transcript")
 	}
-	turns, err := readClaudeTurns(path)
+	turns, err := readClaudeTailTurns(ctx, path)
 	if err != nil {
 		return nil, err
 	}

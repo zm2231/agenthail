@@ -67,6 +67,113 @@ func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	}
 }
 
+func TestClaudeObserveUsesRecentRecordsThenScansOnlyAppends(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const turnCount = 4120
+	for i := 0; i < turnCount; i++ {
+		if _, err := fmt.Fprintf(file, `{"type":"user","uuid":"u%d","message":{"content":"work"}}`+"\n"+`{"type":"assistant","uuid":"a%d","timestamp":"2026-08-06T00:00:%02dZ","message":{"id":"m%d","stop_reason":"end_turn","content":"done"}}`+"\n", i, i, i%60, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	claude := NewClaude("", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Status: surface.StatusBusy, Transcript: path}
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != fmt.Sprintf("m%d", turnCount-1) {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	firstOffset := claude.observeState[path].offset
+	appendTestTranscript(t, path, `{"type":"user","uuid":"next","message":{"content":"next"}}`)
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "next" {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	if claude.observeState[path].offset <= firstOffset {
+		t.Fatalf("offset did not advance: before=%d after=%d", firstOffset, claude.observeState[path].offset)
+	}
+	if err := os.WriteFile(path, []byte(`{"type":"user","uuid":"replacement","message":{"content":"replacement"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "replacement" || observation.CompletedTurnID != "" {
+		t.Fatalf("replacement observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestClaudeObserveFindsTurnBeforeToolHeavyTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"type":"user","uuid":"human","message":{"content":"do the work"}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 4097; index++ {
+		if _, err := fmt.Fprintf(file, `{"type":"user","uuid":"tool-%d","message":{"tool_use_id":"tool","content":"result"}}`+"\n", index); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	claude := NewClaude("", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Status: surface.StatusIdle, Transcript: path}
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "human" {
+		t.Fatalf("inflight observation=%+v err=%v", observation, err)
+	}
+	appendTestTranscript(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`)
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "done" || observation.Reply == nil || observation.Reply.UserText != "do the work" {
+		t.Fatalf("completed observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestClaudeObserveResetsAfterSameSizeReplacement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	old := `{"type":"user","uuid":"old","message":{"content":"old"}}` + "\n"
+	new := `{"type":"user","uuid":"new","message":{"content":"new"}}` + "\n"
+	if len(old) != len(new) {
+		t.Fatalf("replacement lengths differ")
+	}
+	if err := os.WriteFile(path, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	claude := NewClaude("", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Status: surface.StatusIdle, Transcript: path}
+	if _, err := claude.Observe(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(filepath.Dir(path), "replacement.jsonl")
+	if err := os.WriteFile(replacement, []byte(new), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	observation, err := claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "new" || observation.CompletedTurnID != "" {
+		t.Fatalf("replacement observation=%+v err=%v", observation, err)
+	}
+}
+
+func TestScanAppendedJSONLRejectsOversizedPartialRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxClaudeTranscriptRecordBytes+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scanAppendedJSONL(context.Background(), path, 0, maxClaudeTranscriptRecordBytes, func([]byte) error { return nil }); err == nil {
+		t.Fatal("expected oversized partial record error")
+	}
+}
+
 func TestReadClaudeTurnsRequiresEndTurnAndKeepsTurnIdentity(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
@@ -298,6 +405,23 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 		t.Fatal(err)
 	}
 	if len(events) != 2 || events[0].Kind != "text" || events[0].Text != "answer" || events[1].Kind != "done" {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestClaudeStreamWaitsForNewTurnAfterCompletedBaseline(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	claude := NewClaude("Default", t.TempDir())
+	var events []surface.StreamEvent
+	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, 350*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("stream err=%v", err)
+	}
+	if len(events) != 0 {
 		t.Fatalf("events=%+v", events)
 	}
 }

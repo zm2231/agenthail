@@ -9,7 +9,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const surfaceOperationTimeout = 20 * time.Second
+const (
+	surfaceOperationTimeout         = 20 * time.Second
+	completionNotificationFreshness = time.Minute
+)
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
 	if expired, err := d.Registry.ExpireMessages(time.Now()); err != nil {
@@ -32,14 +35,21 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 		}
 		d.clearObserveError(key)
 	}
-	removed, claudeRefreshed := d.refreshAndPruneInactiveClaudeRoutes(ctx, time.Now().Add(-time.Hour))
-	if removed > 0 {
-		d.publishEvent("state.changed", "", map[string]any{"source": "relay-removed", "count": removed})
-	}
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {
 		d.log.Printf("scan watched sessions: %s", err)
 		return
+	}
+	needsClaudeRefresh := false
+	for _, session := range watched {
+		if session.Surface == surface.KindClaude {
+			needsClaudeRefresh = true
+			break
+		}
+	}
+	removed, claudeRefreshed := d.refreshAndPruneInactiveClaudeRoutes(ctx, time.Now().Add(-time.Hour), needsClaudeRefresh)
+	if removed > 0 {
+		d.publishEvent("state.changed", "", map[string]any{"source": "relay-removed", "count": removed})
 	}
 	queueCounts, err := d.Registry.QueueCounts()
 	if err != nil {
@@ -71,9 +81,12 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	}
 }
 
-func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff time.Time) (int, bool) {
+func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff time.Time, refresh bool) (int, bool) {
 	routes, err := d.Registry.ListRoutes()
 	if err != nil {
+		return 0, false
+	}
+	if !refresh {
 		return 0, false
 	}
 	refreshed := false
@@ -154,7 +167,8 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	desktopNotificationMessage := ""
 	mobileNotificationMessage := ""
 	completionPredatesActiveDelivery := previous.ActiveTurnID != "" && observation.ActiveTurnID == previous.ActiveTurnID
-	if found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID {
+	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
+	if completionChanged {
 		text := ""
 		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
 			text = observation.Reply.Text
@@ -162,7 +176,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		if text != "" {
 			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
-		if observation.Reply != nil && observation.Reply.Done {
+		if completionNotificationFresh(previous, time.Now()) && observation.Reply != nil && observation.Reply.Done {
 			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
 			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
 			if observation.Reply.Error != "" {
@@ -179,10 +193,10 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if changed {
 		d.publishEvent("session.updated", session.ID, map[string]any{"status": observation.Status, "activeTurnId": observation.ActiveTurnID, "completedTurnId": observation.CompletedTurnID})
 	}
-	if found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID {
+	if completionChanged {
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
 	}
-	if desktopNotificationMessage != "" {
+	if desktopNotificationMessage != "" && notificationsEnabled(d) {
 		go func(desktopMessage, mobileMessage, sessionID string) {
 			if err := Notify("Agenthail", desktopMessage); err != nil {
 				d.log.Printf("desktop notification: %s", err)
@@ -199,6 +213,19 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}
 	}
+}
+
+func completionNotificationFresh(state registry.RuntimeState, now time.Time) bool {
+	return !state.UpdatedAt.IsZero() && now.Sub(state.UpdatedAt) <= completionNotificationFreshness
+}
+
+func notificationsEnabled(d *Daemon) bool {
+	config, err := LoadNotificationConfig()
+	if err != nil {
+		d.log.Printf("load notification config: %s", err)
+		return false
+	}
+	return config.Enabled
 }
 
 func notificationSurfaceName(kind surface.SurfaceKind) string {

@@ -323,6 +323,9 @@ func TestAcceptedDeliveryDoesNotRelayPreviousCompletion(t *testing.T) {
 
 func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	if err := SaveNotificationConfig(NotificationConfig{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	d, r, fake, from, _ := daemonFixture(t)
 	if err := r.SetAlias("private-project-title", from.ID); err != nil {
 		t.Fatal(err)
@@ -364,6 +367,25 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("mobile completion notification was not sent")
+	}
+}
+
+func TestCompletionNotificationRequiresFreshRuntimeState(t *testing.T) {
+	now := time.Now()
+	for _, test := range []struct {
+		name  string
+		state registry.RuntimeState
+		want  bool
+	}{
+		{name: "missing timestamp", state: registry.RuntimeState{}, want: false},
+		{name: "stale timestamp", state: registry.RuntimeState{UpdatedAt: now.Add(-completionNotificationFreshness - time.Second)}, want: false},
+		{name: "recent timestamp", state: registry.RuntimeState{UpdatedAt: now.Add(-completionNotificationFreshness + time.Second)}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := completionNotificationFresh(test.state, now); got != test.want {
+				t.Fatalf("completionNotificationFresh=%v want=%v", got, test.want)
+			}
+		})
 	}
 }
 
@@ -418,7 +440,7 @@ func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
 	current := surface.Session{ID: "current", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: os.Getpid(), Transcript: old.Transcript}
 	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{current.ID: current}}
 	d.Surfaces = append(d.Surfaces, claude)
-	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour))
+	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour), true)
 	routes, err := r.ListRoutes()
 	if err != nil || len(routes) != 1 || routes[0].ToSession != current.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
@@ -449,7 +471,7 @@ func TestInactiveClaudeRouteIsRemovedAfterGracePeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Surfaces = append(d.Surfaces, &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}})
-	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour))
+	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour), true)
 	routes, err := r.ListRoutes()
 	if err != nil || len(routes) != 2 || routes[0].ToSession == closed.ID || routes[1].ToSession == closed.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
@@ -528,6 +550,18 @@ func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
 	}
 	if got := fake.resolveCalls.Load(); got != 0 {
 		t.Fatalf("daemon performed %d redundant resolve call(s)", got)
+	}
+}
+
+func TestScanSkipsClaudeDiscoveryWithoutClaudeWork(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"open": {ID: "open", Surface: surface.KindClaude, Status: surface.StatusBusy}}}
+	d.Surfaces = []surface.Surface{claude}
+
+	d.scanAndRelay(context.Background())
+
+	if got := claude.listCalls.Load(); got != 0 {
+		t.Fatalf("Claude discovery calls=%d", got)
 	}
 }
 

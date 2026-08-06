@@ -1125,12 +1125,13 @@ type RuntimeState struct {
 	ActiveTurnID    string
 	CompletedTurnID string
 	RelayHops       int
+	UpdatedAt       time.Time
 }
 
 func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	var state RuntimeState
-	var status string
-	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops FROM session_runtime WHERE session_id=?`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops)
+	var status, updatedAt string
+	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,updated_at FROM session_runtime WHERE session_id=?`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &updatedAt)
 	if err == sql.ErrNoRows {
 		return state, false, nil
 	}
@@ -1138,6 +1139,12 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 		return state, false, err
 	}
 	state.LastStatus = surface.SessionStatus(status)
+	if updatedAt != "" {
+		state.UpdatedAt, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
+		if err != nil {
+			return state, false, fmt.Errorf("parse runtime state timestamp: %w", err)
+		}
+	}
 	return state, true, nil
 }
 

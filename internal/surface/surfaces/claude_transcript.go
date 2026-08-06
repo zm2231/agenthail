@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,59 +57,80 @@ func readClaudeTurns(path string) ([]claudeTurn, error) {
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
 			continue
 		}
-		switch record.Type {
-		case "user":
-			text := transcriptText(record.Message.Content)
-			if isClaudeInterruptMarker(text) {
-				if len(turns) > 0 {
-					turns[len(turns)-1].Interrupted = true
-				}
-				continue
-			}
-			if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
-				continue
-			}
-			turns = append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)})
-		case "assistant":
-			if len(turns) == 0 {
-				turns = append(turns, claudeTurn{})
-			}
-			turn := &turns[len(turns)-1]
-			if turn.MessageID != "" && record.Message.ID != "" && turn.MessageID != record.Message.ID && turn.Done {
-				turns = append(turns, claudeTurn{})
-				turn = &turns[len(turns)-1]
-			}
-			if record.Message.ID != "" {
-				turn.MessageID = record.Message.ID
-			} else if turn.MessageID == "" {
-				turn.MessageID = record.UUID
-			}
-			if record.Message.Model != "" {
-				turn.Model = record.Message.Model
-			}
-			if text := strings.TrimSpace(transcriptText(record.Message.Content)); text != "" {
-				if turn.Assistant == "" {
-					turn.Assistant = text
-				} else if turn.Assistant != text && !strings.Contains(turn.Assistant, text) {
-					turn.Assistant += "\n" + text
-				}
-			}
-			turn.Done = record.Message.StopReason == "end_turn"
-			turn.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
-			if turn.Done || turn.Interrupted {
-				turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
-			}
-		case "system":
-			if record.Subtype == "turn_duration" && len(turns) > 0 {
-				turns[len(turns)-1].Done = true
-				turns[len(turns)-1].TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
-			}
-		}
+		turns = appendClaudeTurn(turns, record)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan Claude transcript: %w", err)
 	}
 	return turns, nil
+}
+
+func readClaudeTailTurns(ctx context.Context, path string) ([]claudeTurn, error) {
+	lines, _, err := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
+	if err != nil {
+		return nil, err
+	}
+	turns := make([]claudeTurn, 0)
+	for _, line := range lines {
+		var record claudeRecord
+		if json.Unmarshal(line, &record) != nil {
+			continue
+		}
+		turns = appendClaudeTurn(turns, record)
+	}
+	return turns, nil
+}
+
+func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
+	switch record.Type {
+	case "user":
+		text := transcriptText(record.Message.Content)
+		if isClaudeInterruptMarker(text) {
+			if len(turns) > 0 {
+				turns[len(turns)-1].Interrupted = true
+			}
+			return turns
+		}
+		if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
+			return turns
+		}
+		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)})
+	case "assistant":
+		if len(turns) == 0 {
+			turns = append(turns, claudeTurn{})
+		}
+		turn := &turns[len(turns)-1]
+		if turn.MessageID != "" && record.Message.ID != "" && turn.MessageID != record.Message.ID && turn.Done {
+			turns = append(turns, claudeTurn{})
+			turn = &turns[len(turns)-1]
+		}
+		if record.Message.ID != "" {
+			turn.MessageID = record.Message.ID
+		} else if turn.MessageID == "" {
+			turn.MessageID = record.UUID
+		}
+		if record.Message.Model != "" {
+			turn.Model = record.Message.Model
+		}
+		if text := strings.TrimSpace(transcriptText(record.Message.Content)); text != "" {
+			if turn.Assistant == "" {
+				turn.Assistant = text
+			} else if turn.Assistant != text && !strings.Contains(turn.Assistant, text) {
+				turn.Assistant += "\n" + text
+			}
+		}
+		turn.Done = record.Message.StopReason == "end_turn"
+		turn.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
+		if turn.Done || turn.Interrupted {
+			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+		}
+	case "system":
+		if record.Subtype == "turn_duration" && len(turns) > 0 {
+			turns[len(turns)-1].Done = true
+			turns[len(turns)-1].TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+		}
+	}
+	return turns
 }
 
 func claudeTerminalInterruption(reason string) bool {
