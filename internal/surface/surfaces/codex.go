@@ -23,7 +23,6 @@ type Codex struct {
 	bridgeErr    error
 	bridgeRetry  time.Time
 	runtimeMu    sync.Mutex
-	runtimeReady bool
 	contextMu    sync.Mutex
 	contextState map[string]*codexContextState
 }
@@ -50,7 +49,7 @@ func (c *Codex) Capabilities() surface.Capabilities {
 
 func (c *Codex) Health(ctx context.Context) error {
 	if c.managed {
-		client, err := dialManagedCodex(ctx)
+		client, err := c.openManaged(ctx)
 		if err != nil {
 			return fmt.Errorf("Codex local app-server is unavailable: %w", err)
 		}

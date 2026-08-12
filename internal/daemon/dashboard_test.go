@@ -546,6 +546,15 @@ func TestDashboardCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 	}
 }
 
+func TestDashboardCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
+	capabilities := surface.Capabilities{Send: true, Steer: true, Compact: true, Model: true}
+	session := surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "managed"}
+	got, readOnly, reason := dashboardCapabilities(session, capabilities)
+	if readOnly || reason != "" || !got.Send || !got.Steer || !got.Compact || !got.Model {
+		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
+	}
+}
+
 func TestDashboardCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
 	got, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)

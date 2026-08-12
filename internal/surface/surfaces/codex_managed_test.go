@@ -22,7 +22,7 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 	}{
 		{"vscode", "idle", false, true, codexTransportDesktop},
 		{"vscode", "notLoaded", true, true, codexTransportReadOnly},
-		{"vscode", "idle", true, false, codexTransportReadOnly},
+		{"vscode", "idle", true, false, codexTransportManaged},
 		{"agenthail", "idle", true, false, codexTransportManaged},
 		{"cli", "idle", true, false, codexTransportReadOnly},
 		{"cli", "notLoaded", true, false, codexTransportReadOnly},
@@ -164,7 +164,7 @@ func TestCodexListPageUsesManagedTransportForDesktopSessions(t *testing.T) {
 	}}
 	codex := NewCodex("")
 	managed, _, err := codex.listPage(context.Background(), client, nil, true, false)
-	if err != nil || len(managed) != 1 || managed[0].Transport != codexTransportReadOnly {
+	if err != nil || len(managed) != 1 || managed[0].Transport != codexTransportManaged {
 		t.Fatalf("managed sessions=%v err=%v", managed, err)
 	}
 	legacy, _, err := codex.listPage(context.Background(), client, nil, false, false)
@@ -307,13 +307,13 @@ func TestCodexManagedRuntimeStatusReportsDurableSupervisedBackend(t *testing.T) 
 	}
 }
 
-func TestCodexEnsureRuntimeBootstrapsMissingManagedDaemonOnce(t *testing.T) {
+func TestCodexEnsureRuntimeStartsMissingManagedDaemonOnce(t *testing.T) {
 	root := t.TempDir()
 	logPath := filepath.Join(root, "calls.log")
 	codeHome := filepath.Join(root, "codex-home")
 	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
 	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nif [ \"$1 $2 $3\" = \"app-server daemon bootstrap\" ]; then mkdir -p \"$(dirname \"$AGENTHAIL_TEST_SOCKET\")\"; : > \"$AGENTHAIL_TEST_SOCKET\"; exit 0; fi\nexit 2\n"
+	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nif [ \"$1 $2 $3\" = \"app-server daemon enable-remote-control\" ]; then exit 0; fi\nif [ \"$1 $2 $3\" = \"app-server daemon start\" ]; then mkdir -p \"$(dirname \"$AGENTHAIL_TEST_SOCKET\")\"; : > \"$AGENTHAIL_TEST_SOCKET\"; exit 0; fi\nexit 2\n"
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -332,8 +332,8 @@ func TestCodexEnsureRuntimeBootstrapsMissingManagedDaemonOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(string(data), "app-server daemon bootstrap"); got != 1 {
-		t.Fatalf("bootstrap calls=%d log=%q", got, data)
+	if got := strings.Count(string(data), "app-server daemon start"); got != 1 {
+		t.Fatalf("start calls=%d log=%q", got, data)
 	}
 }
 
@@ -341,12 +341,12 @@ func TestCodexEnsureRuntimeNamesMissingManagedDaemon(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", filepath.Join(t.TempDir(), "missing-codex"))
 	t.Setenv("CODEX_HOME", t.TempDir())
 	err := NewCodex("").EnsureRuntime(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "managed Codex app-server") || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_BIN") {
+	if err == nil || !strings.Contains(err.Error(), "remote control") || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_BIN") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestCodexForcedRuntimeRecoveryStartsWithStaleSocket(t *testing.T) {
+func TestCodexEnsureRuntimeDoesNotRestartWhenSocketExists(t *testing.T) {
 	root := t.TempDir()
 	codeHome := filepath.Join(root, "codex-home")
 	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
@@ -365,11 +365,46 @@ func TestCodexForcedRuntimeRecoveryStartsWithStaleSocket(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	t.Setenv("CODEX_HOME", codeHome)
-	if err := NewCodex("").ensureRuntime(context.Background(), true); err != nil {
+	if err := NewCodex("").ensureRuntime(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(logPath)
-	if err != nil || !strings.Contains(string(data), "app-server daemon bootstrap") {
+	if err != nil || strings.TrimSpace(string(data)) != "app-server daemon enable-remote-control" {
+		t.Fatalf("log=%q err=%v", data, err)
+	}
+}
+
+func TestCodexEnsureRuntimeEnablesRemoteControlWhenDisabled(t *testing.T) {
+	root := t.TempDir()
+	codeHome := filepath.Join(root, "codex-home")
+	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(socketPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(codeHome, "app-server-daemon", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"remoteControlEnabled":false}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(root, "calls.log")
+	script := filepath.Join(root, "codex")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 0\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
+	t.Setenv("CODEX_HOME", codeHome)
+	if err := NewCodex("").EnsureRuntime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil || strings.TrimSpace(string(data)) != "app-server daemon enable-remote-control" {
 		t.Fatalf("log=%q err=%v", data, err)
 	}
 }

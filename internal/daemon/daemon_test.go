@@ -155,6 +155,15 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 		t.Fatal("successful observation did not clear backoff")
 	}
 }
+
+func TestPruneObservationFailuresClearsLocalNotificationArms(t *testing.T) {
+	d, _, _, from, _ := daemonFixture(t)
+	d.armCompletionNotification(from.ID)
+	d.pruneObservationFailures(nil)
+	if d.consumeNotificationArm(from.ID) {
+		t.Fatal("unwatched session retained local notification arm")
+	}
+}
 func (f *daemonSurface) Send(_ context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
 	if f.rejectBusy && session.Status == surface.StatusBusy {
 		return &surface.SendResult{Accepted: false}, nil
@@ -323,9 +332,6 @@ func TestAcceptedDeliveryDoesNotRelayPreviousCompletion(t *testing.T) {
 
 func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := SaveNotificationConfig(NotificationConfig{Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
 	d, r, fake, from, _ := daemonFixture(t)
 	if err := r.SetAlias("private-project-title", from.ID); err != nil {
 		t.Fatal(err)
@@ -353,8 +359,17 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
-	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}}
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle}
 	d.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
+	d.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-2", CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Done: true}}
+	d.observeSession(context.Background(), fake, &from)
+	select {
+	case <-received:
+		t.Fatal("active follow-up turn emitted a completion notification")
+	case <-time.After(250 * time.Millisecond):
+	}
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-2", Reply: &surface.ReplyResult{Done: true}}
 	d.observeSession(context.Background(), fake, &from)
 	select {
@@ -370,20 +385,53 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	}
 }
 
+func TestCompletionNotificationDoesNotSendForBusyBaseline(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, r, fake, from, _ := daemonFixture(t)
+	pairing, err := r.CreateDevicePairing("Phone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, _, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveDevicePushTarget(device.ID, "installation", "credential"); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		received <- struct{}{}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "old-turn"}
+	d.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "old-completion", Reply: &surface.ReplyResult{Done: true}}
+	d.observeSession(context.Background(), fake, &from)
+	select {
+	case <-received:
+		t.Fatal("busy baseline emitted a completion notification")
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
 func TestCompletionNotificationRequiresFreshRuntimeState(t *testing.T) {
-	now := time.Now()
 	for _, test := range []struct {
-		name  string
-		state registry.RuntimeState
-		want  bool
+		name           string
+		state          registry.RuntimeState
+		observedActive bool
+		want           bool
 	}{
-		{name: "missing timestamp", state: registry.RuntimeState{}, want: false},
-		{name: "stale timestamp", state: registry.RuntimeState{UpdatedAt: now.Add(-completionNotificationFreshness - time.Second)}, want: false},
-		{name: "recent timestamp", state: registry.RuntimeState{UpdatedAt: now.Add(-completionNotificationFreshness + time.Second)}, want: true},
+		{name: "unarmed baseline", state: registry.RuntimeState{}, want: false},
+		{name: "observed active turn", state: registry.RuntimeState{}, observedActive: true, want: true},
+		{name: "agenthail delivery", state: registry.RuntimeState{NotificationArmed: true}, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := completionNotificationFresh(test.state, now); got != test.want {
-				t.Fatalf("completionNotificationFresh=%v want=%v", got, test.want)
+			if got := completionNotificationEligible(test.state, test.observedActive); got != test.want {
+				t.Fatalf("completionNotificationEligible=%v want=%v", got, test.want)
 			}
 		})
 	}

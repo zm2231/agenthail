@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	surfaceOperationTimeout         = 20 * time.Second
-	completionNotificationFreshness = time.Minute
+	surfaceOperationTimeout = 20 * time.Second
 )
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
@@ -176,7 +175,8 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		if text != "" {
 			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
-		if completionNotificationFresh(previous, time.Now()) && observation.Reply != nil && observation.Reply.Done {
+		terminalCompletion := observation.ActiveTurnID == ""
+		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done {
 			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
 			mobileNotificationMessage = fmt.Sprintf("%s finished", notificationSurfaceName(session.Surface))
 			if observation.Reply.Error != "" {
@@ -184,6 +184,14 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 				mobileNotificationMessage = fmt.Sprintf("%s failed", notificationSurfaceName(session.Surface))
 			}
 		}
+		if terminalCompletion {
+			if err := d.Registry.ClearCompletionNotification(session.ID); err != nil {
+				d.log.Printf("clear completion notification %s: %s", d.resolveDisplay(session.ID), err)
+			}
+		}
+	}
+	if found && observation.Status == surface.StatusBusy && (previous.LastStatus != surface.StatusBusy || previous.ActiveTurnID != observation.ActiveTurnID) {
+		d.armCompletionNotification(session.ID)
 	}
 	if err := d.Registry.SaveRuntimeState(session.ID, *observation); err != nil {
 		d.log.Printf("save runtime state %s: %s", d.resolveDisplay(session.ID), err)
@@ -196,7 +204,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	if completionChanged {
 		d.publishEvent("turn.completed", session.ID, map[string]string{"turnId": observation.CompletedTurnID})
 	}
-	if desktopNotificationMessage != "" && notificationsEnabled(d) {
+	if desktopNotificationMessage != "" {
 		go func(desktopMessage, mobileMessage, sessionID string) {
 			if err := Notify("Agenthail", desktopMessage); err != nil {
 				d.log.Printf("desktop notification: %s", err)
@@ -215,17 +223,22 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 }
 
-func completionNotificationFresh(state registry.RuntimeState, now time.Time) bool {
-	return !state.UpdatedAt.IsZero() && now.Sub(state.UpdatedAt) <= completionNotificationFreshness
+func completionNotificationEligible(state registry.RuntimeState, observedActive bool) bool {
+	return state.NotificationArmed || observedActive
 }
 
-func notificationsEnabled(d *Daemon) bool {
-	config, err := LoadNotificationConfig()
-	if err != nil {
-		d.log.Printf("load notification config: %s", err)
-		return false
-	}
-	return config.Enabled
+func (d *Daemon) armCompletionNotification(sessionID string) {
+	d.notificationMu.Lock()
+	d.notificationArmed[sessionID] = true
+	d.notificationMu.Unlock()
+}
+
+func (d *Daemon) consumeNotificationArm(sessionID string) bool {
+	d.notificationMu.Lock()
+	armed := d.notificationArmed[sessionID]
+	delete(d.notificationArmed, sessionID)
+	d.notificationMu.Unlock()
+	return armed
 }
 
 func notificationSurfaceName(kind surface.SurfaceKind) string {

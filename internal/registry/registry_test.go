@@ -82,6 +82,7 @@ func TestOpenMigratesLegacyQueue(t *testing.T) {
 	_, err = db.Exec(`
 		CREATE TABLE sessions(id TEXT PRIMARY KEY, surface TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', cwd TEXT NOT NULL DEFAULT '', pid INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '', has_local INTEGER NOT NULL DEFAULT 0, registered_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
 		CREATE TABLE message_queue(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, message TEXT NOT NULL, queued_at TEXT NOT NULL DEFAULT '', delivered INTEGER NOT NULL DEFAULT 0);
+		CREATE TABLE session_runtime(session_id TEXT PRIMARY KEY, last_status TEXT NOT NULL DEFAULT 'unknown', active_turn_id TEXT NOT NULL DEFAULT '', completed_turn_id TEXT NOT NULL DEFAULT '', relay_hops INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT '');
 		INSERT INTO sessions(id,surface) VALUES('s','codex');
 		INSERT INTO message_queue(session_id,message,delivered) VALUES('s','old',1);`)
 	if err != nil {
@@ -110,6 +111,10 @@ func TestOpenMigratesLegacyQueue(t *testing.T) {
 	}
 	if err := r.SaveRuntimeState("runtime", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
+	}
+	var armed int
+	if err := r.db.QueryRow(`SELECT notification_armed FROM session_runtime WHERE session_id='runtime'`).Scan(&armed); err != nil || armed != 0 {
+		t.Fatalf("notification_armed=%d err=%v", armed, err)
 	}
 	state, found, err := r.RuntimeState("runtime")
 	if err != nil || !found || state.RelayHops != 0 {
@@ -425,6 +430,28 @@ func TestRelayLineageSurvivesDeliveryUntilCompletion(t *testing.T) {
 	state, found, err = r.RuntimeState("s")
 	if err != nil || !found || state.RelayHops != 0 {
 		t.Fatalf("completed runtime=%+v found=%v err=%v", state, found, err)
+	}
+}
+
+func TestSaveRuntimeStatePreservesDeliveryNotificationArm(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.MarkDeliveryStarted("s", "turn-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRuntimeState("s", surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err := r.RuntimeState("s")
+	if err != nil || !found || !state.NotificationArmed {
+		t.Fatalf("state=%+v found=%v err=%v", state, found, err)
+	}
+	if err := r.ClearCompletionNotification("s"); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err = r.RuntimeState("s")
+	if err != nil || !found || state.NotificationArmed {
+		t.Fatalf("state=%+v found=%v err=%v", state, found, err)
 	}
 }
 

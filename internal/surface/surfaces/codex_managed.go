@@ -246,6 +246,9 @@ func codexSource(value any) string {
 
 func codexTransport(source string, status any, managed, desktopReachable bool) string {
 	if source == "vscode" {
+		if managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
+			return codexTransportManaged
+		}
 		if !managed && desktopReachable {
 			return codexTransportDesktop
 		}

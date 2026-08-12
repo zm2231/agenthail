@@ -81,8 +81,13 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
-	if err := r.ensureColumn("session_runtime", "relay_hops", `INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return err
+	for _, column := range []struct{ name, decl string }{
+		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
+		{"notification_armed", `INTEGER NOT NULL DEFAULT 0`},
+	} {
+		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
+			return err
+		}
 	}
 	_, err := r.db.Exec(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
@@ -177,6 +182,7 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	active_turn_id TEXT NOT NULL DEFAULT '',
 	completed_turn_id TEXT NOT NULL DEFAULT '',
 	relay_hops INTEGER NOT NULL DEFAULT 0,
+	notification_armed INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS relay_deliveries (
@@ -1121,17 +1127,19 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 }
 
 type RuntimeState struct {
-	LastStatus      surface.SessionStatus
-	ActiveTurnID    string
-	CompletedTurnID string
-	RelayHops       int
-	UpdatedAt       time.Time
+	LastStatus        surface.SessionStatus
+	ActiveTurnID      string
+	CompletedTurnID   string
+	RelayHops         int
+	NotificationArmed bool
+	UpdatedAt         time.Time
 }
 
 func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	var state RuntimeState
 	var status, updatedAt string
-	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,updated_at FROM session_runtime WHERE session_id=?`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &updatedAt)
+	var notificationArmed int
+	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=?`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
 	if err == sql.ErrNoRows {
 		return state, false, nil
 	}
@@ -1139,6 +1147,7 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 		return state, false, err
 	}
 	state.LastStatus = surface.SessionStatus(status)
+	state.NotificationArmed = notificationArmed != 0
 	if updatedAt != "" {
 		state.UpdatedAt, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
 		if err != nil {
@@ -1149,12 +1158,17 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 }
 
 func (r *Registry) MarkDeliveryStarted(sessionID, activeTurnID, completedTurnID string) error {
-	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,updated_at=datetime('now')`, sessionID, string(surface.StatusBusy), activeTurnID, completedTurnID)
+	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,notification_armed,updated_at) VALUES(?,?,?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,notification_armed=1,updated_at=datetime('now')`, sessionID, string(surface.StatusBusy), activeTurnID, completedTurnID)
 	return err
 }
 
 func (r *Registry) SaveRuntimeState(sessionID string, observation surface.TurnObservation) error {
 	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now')`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
+	return err
+}
+
+func (r *Registry) ClearCompletionNotification(sessionID string) error {
+	_, err := r.db.Exec(`UPDATE session_runtime SET notification_armed=0 WHERE session_id=?`, sessionID)
 	return err
 }
 

@@ -19,6 +19,31 @@ type codexDaemonVersion struct {
 	SocketPath string `json:"socketPath"`
 }
 
+type codexDaemonSettings struct {
+	RemoteControlEnabled bool `json:"remoteControlEnabled"`
+}
+
+func codexDaemonSettingsPath() string {
+	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	if home == "" {
+		userHome, _ := os.UserHomeDir()
+		home = filepath.Join(userHome, ".codex")
+	}
+	return filepath.Join(home, "app-server-daemon", "settings.json")
+}
+
+func codexRemoteControlEnabled() (bool, error) {
+	data, err := os.ReadFile(codexDaemonSettingsPath())
+	if err != nil {
+		return false, err
+	}
+	var settings codexDaemonSettings
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return false, err
+	}
+	return settings.RemoteControlEnabled, nil
+}
+
 func codexBinary() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_BIN")); configured != "" {
 		path, err := exec.LookPath(configured)
@@ -103,24 +128,27 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 func (c *Codex) EnsureRuntime(ctx context.Context) error {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
-	return c.ensureRuntime(ctx, false)
+	return c.ensureRuntime(ctx)
 }
 
-func (c *Codex) ensureRuntime(ctx context.Context, force bool) error {
+func (c *Codex) ensureRuntime(ctx context.Context) error {
 	if !c.managed {
 		return nil
 	}
-	if _, err := os.Stat(managedCodexSocketPath()); err == nil && !force && c.runtimeReady {
+	if enabled, err := codexRemoteControlEnabled(); err != nil || !enabled {
+		if _, err := runCodexDaemon(ctx, "enable-remote-control"); err != nil {
+			return fmt.Errorf("enable Codex app-server remote control: %w", err)
+		}
+	}
+	if _, err := os.Stat(managedCodexSocketPath()); err == nil {
 		return nil
 	}
-	if _, err := runCodexDaemon(ctx, "bootstrap"); err != nil {
-		c.runtimeReady = false
+	if _, err := runCodexDaemon(ctx, "start"); err != nil {
 		return fmt.Errorf("managed Codex app-server is unavailable: %w; install the Codex standalone runtime, then run 'agenthail daemon install'", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(managedCodexSocketPath()); err == nil {
-			c.runtimeReady = true
 			return nil
 		}
 		select {
@@ -133,20 +161,12 @@ func (c *Codex) ensureRuntime(ctx context.Context, force bool) error {
 }
 
 func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {
+	if err := c.EnsureRuntime(ctx); err != nil {
+		return nil, err
+	}
 	client, err := dialManagedCodex(ctx)
-	if err == nil {
-		return client, nil
-	}
-	c.runtimeMu.Lock()
-	c.runtimeReady = false
-	ensureErr := c.ensureRuntime(ctx, true)
-	c.runtimeMu.Unlock()
-	if ensureErr != nil {
-		return nil, fmt.Errorf("%v; recovery failed: %w", err, ensureErr)
-	}
-	client, retryErr := dialManagedCodex(ctx)
-	if retryErr != nil {
-		return nil, fmt.Errorf("managed Codex app-server did not recover: %w", retryErr)
+	if err != nil {
+		return nil, fmt.Errorf("managed Codex app-server is unreachable: %w; restart it from Codex only after closing active remote sessions", err)
 	}
 	return client, nil
 }

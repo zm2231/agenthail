@@ -21,15 +21,17 @@ const (
 )
 
 type Daemon struct {
-	Registry      *registry.Registry
-	Surfaces      []surface.Surface
-	log           *log.Logger
-	errorMu       sync.Mutex
-	observeErrors map[string]observedError
-	retryMu       sync.Mutex
-	observeRetry  map[string]observeRetry
-	events        *eventHub
-	dashboard     *dashboardServer
+	Registry          *registry.Registry
+	Surfaces          []surface.Surface
+	log               *log.Logger
+	errorMu           sync.Mutex
+	observeErrors     map[string]observedError
+	retryMu           sync.Mutex
+	observeRetry      map[string]observeRetry
+	notificationMu    sync.Mutex
+	notificationArmed map[string]bool
+	events            *eventHub
+	dashboard         *dashboardServer
 }
 
 type observedError struct {
@@ -58,12 +60,13 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	return &Daemon{
-		Registry:      reg,
-		Surfaces:      surfaces,
-		log:           log.New(os.Stderr, "[daemon] ", log.LstdFlags),
-		observeErrors: map[string]observedError{},
-		observeRetry:  map[string]observeRetry{},
-		events:        newEventHub(reg),
+		Registry:          reg,
+		Surfaces:          surfaces,
+		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
+		observeErrors:     map[string]observedError{},
+		observeRetry:      map[string]observeRetry{},
+		notificationArmed: map[string]bool{},
+		events:            newEventHub(reg),
 	}
 }
 
@@ -105,6 +108,13 @@ func (d *Daemon) pruneObservationFailures(watched []registry.WatchedSession) {
 		}
 	}
 	d.retryMu.Unlock()
+	d.notificationMu.Lock()
+	for sessionID := range d.notificationArmed {
+		if _, found := active[sessionID]; !found {
+			delete(d.notificationArmed, sessionID)
+		}
+	}
+	d.notificationMu.Unlock()
 }
 
 func (d *Daemon) logObserveError(sessionID string, err error) {
