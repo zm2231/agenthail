@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+var codexDaemonStartTimeout = 60 * time.Second
 
 type codexDaemonVersion struct {
 	Status     string `json:"status"`
@@ -77,17 +80,25 @@ func codexBinary() (string, error) {
 }
 
 func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
+	commandCtx := ctx
+	cancel := func() {}
+	timeout := 10 * time.Second
+	if action == "start" || action == "restart" {
+		timeout = codexDaemonStartTimeout
+		commandCtx, cancel = context.WithTimeout(context.Background(), timeout)
+	} else if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		commandCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
+	defer cancel()
 	binary, err := codexBinary()
 	if err != nil {
 		return nil, err
 	}
-	output, err := exec.CommandContext(ctx, binary, "app-server", "daemon", action).CombinedOutput()
+	output, err := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action).CombinedOutput()
 	if err != nil {
+		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+			return output, fmt.Errorf("codex app-server daemon %s timed out after %s; Agenthail ended the command (%s)", action, timeout, strings.TrimSpace(string(output)))
+		}
 		return output, fmt.Errorf("codex app-server daemon %s: %w (%s)", action, err, strings.TrimSpace(string(output)))
 	}
 	return output, nil

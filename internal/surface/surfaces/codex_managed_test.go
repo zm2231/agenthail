@@ -337,6 +337,36 @@ func TestCodexEnsureRuntimeStartsMissingManagedDaemonOnce(t *testing.T) {
 	}
 }
 
+func TestRunCodexDaemonStartOutlivesCallerDeadline(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "codex")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 0.05\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := runCodexDaemon(ctx, "start"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunCodexDaemonStartNamesAgenthailTimeout(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "codex")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	original := codexDaemonStartTimeout
+	codexDaemonStartTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { codexDaemonStartTimeout = original })
+	_, err := runCodexDaemon(context.Background(), "start")
+	if err == nil || !strings.Contains(err.Error(), "timed out after 20ms; Agenthail ended the command") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestCodexEnsureRuntimeNamesMissingManagedDaemon(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", filepath.Join(t.TempDir(), "missing-codex"))
 	t.Setenv("CODEX_HOME", t.TempDir())
