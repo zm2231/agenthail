@@ -19,6 +19,17 @@ fixture_is_running() {
 	kill -0 "$pid" 2>/dev/null || return 1
 	lsof -a -p "$pid" -d txt -Fn 2>/dev/null | grep -Fqx "n$executable"
 }
+service_daemon_pid() {
+	launchctl print "gui/$UID/com.agenthail.daemon" | awk '/^[[:space:]]*pid = [0-9]+/{print $3; exit}'
+}
+assert_supervised_daemon() {
+	local pid
+	pid="$(service_daemon_pid)"
+	[[ "$pid" =~ ^[0-9]+$ ]]
+	test "$(cat "$HOME/.agenthail/daemon.pid")" = "$pid"
+	ps -p "$pid" -o command= | grep -Fq '/Library/Application Support/Agenthail/agenthail daemon-run'
+	test "$({ pgrep -u "$UID" -f '^/Library/Application Support/Agenthail/agenthail daemon-run$' || true; } | wc -l | tr -d ' ')" = 1
+}
 cleanup_fixtures() {
 	[ -z "$legacy_pid" ] || ! fixture_is_running "$legacy_pid" "$legacy_app/Contents/MacOS/Agenthail" || kill -TERM "$legacy_pid" >/dev/null 2>&1 || true
 	[ -z "$unrelated_pid" ] || ! fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail" || kill -TERM "$unrelated_pid" >/dev/null 2>&1 || true
@@ -118,7 +129,29 @@ fi
 /usr/local/bin/agenthail daemon status
 /usr/local/bin/agenthail dashboard status
 test "$(jq -r .enabled "$HOME/.agenthail/dashboard.json")" = "true"
+assert_supervised_daemon
 menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"
+daemon_pid_before_menu_relaunch="$(cat "$HOME/.agenthail/daemon.pid")"
+daemon_log_offset="$(wc -c <"$HOME/.agenthail/daemon.log" | tr -d ' ')"
+kill -TERM "$menu_pid"
+menu_relaunched=0
+for _ in {1..30}; do
+	menu_pids="$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | tr '\n' ' ' | xargs)"
+	menu_count="$(wc -w <<<"$menu_pids" | tr -d ' ')"
+	if [ "$menu_count" = 1 ] && [ "$menu_pids" != "$menu_pid" ]; then
+		break
+	fi
+	if [ "$menu_count" = 0 ] && [ "$menu_relaunched" = 0 ]; then
+		/Applications/Agenthail.app/Contents/MacOS/Agenthail >"$TMPDIR/agenthail-pkg-menu.log" 2>&1 &
+		menu_relaunched=1
+	fi
+	sleep 1
+done
+test "$menu_count" = 1
+test "$menu_pids" != "$menu_pid"
+menu_pid="$menu_pids"
+assert_supervised_daemon
+test "$(cat "$HOME/.agenthail/daemon.pid")" = "$daemon_pid_before_menu_relaunch"
 dashboard_token="$HOME/.agenthail/dashboard.token"
 old_token_hash="$(shasum -a 256 "$dashboard_token" | awk '{print $1}')"
 mv "$dashboard_token" "$TMPDIR/dashboard.token.before-rotation"
@@ -135,14 +168,19 @@ for _ in {1..30}; do
 	sleep 1
 done
 lsof -nP -a -p "$menu_pid" -iTCP:"$dashboard_port" -sTCP:ESTABLISHED >/dev/null
+assert_supervised_daemon
+first_pid="$(cat "$HOME/.agenthail/daemon.pid")"
+test "$(cat "$HOME/.agenthail/daemon.pid")" = "$first_pid"
+if tail -c "+$((daemon_log_offset + 1))" "$HOME/.agenthail/daemon.log" | grep -Fq 'daemon already running or starting'; then
+	echo "error: menu app attempted an unsupervised daemon start" >&2
+	exit 1
+fi
 doctor_json="$(/usr/local/bin/agenthail doctor --json || true)"
 jq -e '.surfaces | length == 3' <<<"$doctor_json" >/dev/null
 jq -e 'all(.surfaces[]; ((.error // "") | test("curl_cffi|python.*not found|node.*not found|sweet-cookie"; "i") | not))' <<<"$doctor_json" >/dev/null
 plist="$HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$plist")" = "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_SIDECAR raw -o - "$plist")" = "/Library/Application Support/Agenthail/sidecar.py"
-first_pid="$(cat "$HOME/.agenthail/daemon.pid")"
-
 sudo installer -pkg "$pkg" -target /
 /usr/local/bin/agenthail daemon status
 sleep 2

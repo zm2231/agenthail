@@ -75,8 +75,7 @@ Codex sessions have separate read and write boundaries:
 | Codex launch path | Read | Send |
 |---|:---:|:---:|
 | `agenthail codex` | yes | yes |
-| Desktop launched with `agenthail launch codex` | yes | yes |
-| Desktop opened normally | yes | no |
+| Codex Desktop session Codex reports writable | yes | yes |
 | Plain `codex` terminal | yes | no |
 
 Let AgentHail report read-only sessions. Do not claim a send succeeded when the
@@ -308,8 +307,8 @@ agenthail codex
 ```
 
 `thread create codex` starts a managed thread without a TTY. `launch codex`
-opens Desktop with AgentHail's writable renderer bridge. `agenthail codex`
-starts an interactive writable terminal session and requires a human TTY.
+opens Codex if needed and verifies its local connection. `agenthail codex` starts
+an interactive writable terminal session and requires a human TTY.
 Claude and Notion must be opened and signed in manually.
 
 ## Verification Boundary

@@ -45,13 +45,12 @@ final class AgenthailModel: ObservableObject {
         statusRefreshTask?.cancel()
     }
 
-    func connect(startDaemonIfNeeded: Bool = true) {
+    func connect() {
         eventTask?.cancel()
         connectionTask?.cancel()
         statusRefreshTask?.cancel()
         connectionTask = Task {
             let backoff = EventRetryBackoff()
-            var shouldStartDaemon = startDaemonIfNeeded
             while !Task.isCancelled {
                 do {
                     let api = try AgenthailAPI()
@@ -71,10 +70,6 @@ final class AgenthailModel: ObservableObject {
                     if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
                         return
                     }
-                }
-                if shouldStartDaemon {
-                    AgenthailProcess.run(["daemon", "start"])
-                    shouldStartDaemon = false
                 }
                 let delay = backoff.nextDelay()
                 try? await Task.sleep(for: .seconds(delay))
@@ -269,8 +264,17 @@ final class AgenthailModel: ObservableObject {
     }
 
     func restartDaemon() {
-        AgenthailProcess.run(["daemon", "restart"])
         Task {
+            let (status, output) = await Task.detached {
+                AgenthailProcess.output(["daemon", "restart"])
+            }.value
+            guard status == 0 else {
+                let failure = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let message = failure.isEmpty ? "Agenthail could not restart." : failure
+                connectionError = message
+                operationError = message
+                return
+            }
             try? await Task.sleep(for: .seconds(2))
             connect()
         }

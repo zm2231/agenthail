@@ -230,7 +230,7 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 	if !status.Reachable || status.Durable || status.Backend != "pid" {
 		t.Fatalf("status=%+v", status)
 	}
-	if !strings.Contains(status.Remediation, "agenthail daemon install") {
+	if !strings.Contains(status.Remediation, "agenthail launch codex") {
 		t.Fatalf("remediation=%q", status.Remediation)
 	}
 }

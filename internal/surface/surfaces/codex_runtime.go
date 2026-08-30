@@ -99,7 +99,7 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 	}
 	status := surface.RuntimeStatus{
 		Name:        "Codex managed app-server",
-		Remediation: "run 'agenthail daemon install'",
+		Remediation: "run 'agenthail launch codex'",
 	}
 	output, err := runCodexDaemon(ctx, "version")
 	if err != nil {
@@ -144,7 +144,7 @@ func (c *Codex) ensureRuntime(ctx context.Context) error {
 		return nil
 	}
 	if _, err := runCodexDaemon(ctx, "start"); err != nil {
-		return fmt.Errorf("managed Codex app-server is unavailable: %w; install the Codex standalone runtime, then run 'agenthail daemon install'", err)
+		return fmt.Errorf("managed Codex app-server is unavailable: %w; install the Codex standalone runtime, then run 'agenthail launch codex'", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -157,7 +157,7 @@ func (c *Codex) ensureRuntime(ctx context.Context) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("managed Codex app-server did not create %s; run 'agenthail doctor'", managedCodexSocketPath())
+	return fmt.Errorf("managed Codex app-server did not create %s; run 'agenthail launch codex' again or inspect 'agenthail doctor'", managedCodexSocketPath())
 }
 
 func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {

@@ -233,7 +233,7 @@ func TestCommandTimeout(t *testing.T) {
 
 func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "thread", Surface: surface.KindCodex}}}
-	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail daemon install"}}
+	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail launch codex"}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
 	app.daemonServiceLoaded = func() bool { return false }
@@ -251,7 +251,7 @@ func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 		t.Fatalf("output=%s", output)
 	}
 	result := payload.Surfaces[0]
-	if result.OK || !result.Runtime.Reachable || result.Runtime.Durable || result.Runtime.Remediation != "agenthail daemon install" {
+	if result.OK || !result.Runtime.Reachable || result.Runtime.Durable || result.Runtime.Remediation != "agenthail launch codex" {
 		t.Fatalf("result=%+v", result)
 	}
 }
