@@ -58,6 +58,8 @@ func (a *App) Run(args []string) error {
 	switch cmd {
 	case "list", "ls":
 		return a.cmdList(rest)
+	case "search":
+		return a.cmdSearch(rest)
 	case "send":
 		return a.cmdSend(rest)
 	case "reply":
@@ -119,7 +121,8 @@ Usage:
 Session commands:
   codex [args]                  Start a writable Codex terminal session
   thread create codex "msg"    Start a writable Codex thread non-interactively
-  list [--all]                   List active sessions (default 15, sorted by recency)
+  list [--all]                   List current sessions (--all includes saved conversation catalog)
+  search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send (--from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
   reply <target> [--json]       Fetch last assistant reply
@@ -338,7 +341,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}},
+		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {bools: map[string]bool{"--full": true, "--json": true}}, "tail": {bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -426,6 +429,21 @@ func (a *App) cmdList(args []string) error {
 	}
 
 	showAll := hasFlag(args, "--all")
+	if showAll && a.Registry != nil {
+		stored, err := a.Registry.ListSessions(0)
+		if err != nil {
+			return fmt.Errorf("list saved sessions: %w", err)
+		}
+		seen := make(map[string]bool, len(allSessions))
+		for _, session := range allSessions {
+			seen[session.ID] = true
+		}
+		for _, session := range stored {
+			if !seen[session.ID] {
+				allSessions = append(allSessions, session)
+			}
+		}
+	}
 	if !showAll {
 		cutoff := time.Now().AddDate(0, 0, -7)
 		filtered := allSessions[:0]
@@ -502,6 +520,85 @@ func (a *App) cmdList(args []string) error {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+func (a *App) cmdSearch(args []string) error {
+	positional := stripFlags(args)
+	if len(positional) < 2 || positional[0] != "codex" {
+		return fmt.Errorf("usage: agenthail search codex <query> [--json]")
+	}
+	adapter := a.surfaceByKind(surface.KindCodex)
+	if adapter == nil {
+		return fmt.Errorf("Codex is not configured")
+	}
+	searcher, ok := adapter.(surface.SessionSearcher)
+	if !ok {
+		return fmt.Errorf("Codex history search is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	query := strings.Join(positional[1:], " ")
+	if len([]rune(strings.TrimSpace(query))) < 3 {
+		return fmt.Errorf("Codex history search requires at least 3 characters")
+	}
+	results := make([]surface.SessionSearchResult, 0)
+	if a.Registry != nil {
+		stored, err := a.Registry.SearchSessions(surface.KindCodex, query, 20)
+		if err != nil {
+			return fmt.Errorf("search saved Codex conversations: %w", err)
+		}
+		for _, session := range stored {
+			results = append(results, surface.SessionSearchResult{Session: session, Snippet: "Saved by Agenthail"})
+		}
+	}
+	remote, err := searcher.SearchSessions(ctx, query, 20)
+	remoteError := ""
+	if err != nil {
+		if errors.Is(err, surface.ErrUnsupported) {
+			remoteError = "Codex history search is unavailable in this Codex version"
+		} else {
+			remoteError = err.Error()
+		}
+	} else {
+		results = mergeSearchResults(results, remote)
+	}
+	for _, result := range results {
+		if a.Registry != nil {
+			if err := a.Registry.RegisterSession(result.Session); err != nil {
+				return fmt.Errorf("register Codex search result: %w", err)
+			}
+		}
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"results": results, "remoteError": remoteError})
+	}
+	if remoteError != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", remoteError)
+	}
+	if len(results) == 0 {
+		fmt.Println("no Codex conversations matched")
+		return nil
+	}
+	for _, result := range results {
+		fmt.Printf("%s  %s  %s\n", result.Session.ID, result.Session.Name, result.Snippet)
+	}
+	return nil
+}
+
+func mergeSearchResults(left, right []surface.SessionSearchResult) []surface.SessionSearchResult {
+	byID := make(map[string]surface.SessionSearchResult, len(left)+len(right))
+	for _, result := range left {
+		byID[result.Session.ID] = result
+	}
+	for _, result := range right {
+		byID[result.Session.ID] = result
+	}
+	output := make([]surface.SessionSearchResult, 0, len(byID))
+	for _, result := range byID {
+		output = append(output, result)
+	}
+	sort.Slice(output, func(i, j int) bool { return output[i].Session.LastActive.After(output[j].Session.LastActive) })
+	return output
 }
 
 func sessStat(s surface.Session, queued int) string {
@@ -1504,11 +1601,14 @@ func launchCodex(codex surface.Surface) error {
 	return fmt.Errorf("Codex opened but its local app-server did not become ready; run 'agenthail doctor' for details")
 }
 
-const codexLaunchProbeTimeout = 30 * time.Second
+const codexLaunchProbeTimeout = 5 * time.Second
 
 func probeCodexAppServer(codex surface.Surface) error {
 	ctx, cancel := context.WithTimeout(context.Background(), codexLaunchProbeTimeout)
 	defer cancel()
+	if checker, ok := codex.(surface.ReadinessChecker); ok {
+		return checker.Ready(ctx)
+	}
 	_, err := codex.List(ctx)
 	return err
 }

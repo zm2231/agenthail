@@ -1358,6 +1358,75 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	return &session, nil
 }
 
+func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit int) ([]surface.Session, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []surface.Session{}, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	pattern := "%" + escapeLike(query) + "%"
+	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.last_active_ms
+		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id
+		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
+		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := make([]surface.Session, 0)
+	for rows.Next() {
+		var session surface.Session
+		var kindText, status string
+		var hasLocal int
+		var lastActiveMS int64
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+			return nil, err
+		}
+		session.Surface = surface.SurfaceKind(kindText)
+		session.Status = surface.SessionStatus(status)
+		session.HasLocal = hasLocal != 0
+		if lastActiveMS > 0 {
+			session.LastActive = time.UnixMilli(lastActiveMS)
+		}
+		results = append(results, session)
+	}
+	return results, rows.Err()
+}
+
+func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
+	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
+	args := []any{}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	results := make([]surface.Session, 0)
+	for rows.Next() {
+		var session surface.Session
+		var kindText, status string
+		var hasLocal int
+		var lastActiveMS int64
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+			return nil, err
+		}
+		session.Surface = surface.SurfaceKind(kindText)
+		session.Status = surface.SessionStatus(status)
+		session.HasLocal = hasLocal != 0
+		if lastActiveMS > 0 {
+			session.LastActive = time.UnixMilli(lastActiveMS)
+		}
+		results = append(results, session)
+	}
+	return results, rows.Err()
+}
+
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {
 	var stale bool
 	err := r.db.QueryRow(`SELECT updated_at < datetime(?,'unixepoch') FROM sessions WHERE id=?`, before.Unix(), id).Scan(&stale)

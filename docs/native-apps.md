@@ -8,6 +8,7 @@ The Mac app opens automatically and keeps your connected conversations in one pl
 
 - **Overview** shows what is working and which apps are connected.
 - **Conversations** lets you read, send, steer, stop, compact, and change models when supported.
+- Search starts with Agenthail's saved conversations; typing at least three characters can also search older Codex history on demand.
 - **Operations** manages waiting messages, automatic handoffs, history, phone access, and settings.
 
 The menu bar item gives you a quick connection check and opens the full app.

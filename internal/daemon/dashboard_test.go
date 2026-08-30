@@ -50,6 +50,18 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	}
 }
 
+func TestDashboardSearchCancelsSupersededRequests(t *testing.T) {
+	source, err := os.ReadFile("dashboard/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"new AbortController()", "signal: controller.signal", "app.codexSearch.controller?.abort()", "window.addEventListener(\"beforeunload\", cancelCodexSearch)"} {
+		if !strings.Contains(string(source), required) {
+			t.Fatalf("dashboard search cancellation missing %q", required)
+		}
+	}
+}
+
 func TestSessionTranscriptIsBoundedFromNewestExchange(t *testing.T) {
 	exchanges := make([]surface.Exchange, 40)
 	for index := range exchanges {
@@ -130,6 +142,34 @@ func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || len(fake.sent) != 1 || fake.sent[0] != "ship this" {
 		t.Fatalf("status=%d sent=%v body=%s", response.Code, fake.sent, response.Body.String())
+	}
+}
+
+func TestDashboardSearchStoresCodexHistoryResult(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindCodex
+	fake.searchResults = []surface.SessionSearchResult{{Session: surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}, Snippet: "matched text"}}
+	response := httptest.NewRecorder()
+	d.dashboardSearchHandler(response, httptest.NewRequest(http.MethodGet, "/api/search?surface=codex&q=project", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "matched text") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := registry.Session("old"); err != nil {
+		t.Fatalf("search result was not retained: %v", err)
+	}
+}
+
+func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindCodex
+	fake.searchErr = errors.New("app-server timeout")
+	if err := registry.RegisterSession(surface.Session{ID: "saved", Surface: surface.KindCodex, Name: "saved project"}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	d.dashboardSearchHandler(response, httptest.NewRequest(http.MethodGet, "/api/search?surface=codex&q=project", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "saved project") || !strings.Contains(response.Body.String(), "app-server timeout") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

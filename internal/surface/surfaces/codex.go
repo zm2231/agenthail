@@ -239,7 +239,7 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 	return nil, fmt.Errorf("timeout waiting for eval response")
 }
 
-const maxCodexListPages = 100
+const codexRecentListLimit = 50
 
 func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	if c.managed {
@@ -248,7 +248,7 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 			return nil, err
 		}
 		defer client.Close()
-		return c.listClient(ctx, client, true, false)
+		return c.listCurrent(ctx, client, true, false)
 	}
 	clients := []struct {
 		client           codexClient
@@ -282,7 +282,7 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	byID := map[string]surface.Session{}
 	succeeded := false
 	for _, entry := range clients {
-		sessions, err := c.listClient(ctx, entry.client, entry.managed, entry.desktopReachable)
+		sessions, err := c.listCurrent(ctx, entry.client, entry.managed, entry.desktopReachable)
 		_ = entry.client.Close()
 		if err != nil {
 			failures = append(failures, err.Error())
@@ -307,65 +307,137 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	return out, nil
 }
 
-func (c *Codex) listClient(ctx context.Context, conn codexClient, managed, desktopReachable bool) ([]surface.Session, error) {
-	var out []surface.Session
-	var cursor any
-	seenCursors := map[string]bool{}
-	for page := 0; page < maxCodexListPages; page++ {
-		sessions, nextCursor, err := c.listPage(ctx, conn, cursor, managed, desktopReachable)
-		if err != nil {
-			return nil, fmt.Errorf("thread/list: %w", err)
-		}
-		out = append(out, sessions...)
-		cursor = nextCursor
-		if cursor == nil {
-			break
-		}
-		cursorKey := fmt.Sprint(cursor)
-		if seenCursors[cursorKey] {
-			return nil, fmt.Errorf("thread/list returned repeated cursor %q", cursorKey)
-		}
-		seenCursors[cursorKey] = true
+func (c *Codex) Ready(ctx context.Context) error {
+	conn, _, _, err := c.openDiscovery(ctx)
+	if err != nil {
+		return err
 	}
-	if cursor != nil {
-		return nil, fmt.Errorf("thread/list exceeded pagination limit of %d pages", maxCodexListPages)
-	}
-	return out, nil
+	defer conn.Close()
+	_, err = c.loadedThreadIDs(ctx, conn, 1)
+	return err
 }
 
-func (c *Codex) listPage(ctx context.Context, conn codexClient, cursor any, managed, desktopReachable bool) ([]surface.Session, any, error) {
-	params := map[string]any{}
-	if cursor != nil {
-		params["cursor"] = cursor
+func (c *Codex) listCurrent(ctx context.Context, conn codexClient, managed, desktopReachable bool) ([]surface.Session, error) {
+	loaded, err := c.listLoaded(ctx, conn, codexRecentListLimit, managed, desktopReachable)
+	if err != nil {
+		return nil, err
 	}
+	recent, err := c.listRecent(ctx, conn, managed, desktopReachable)
+	if err != nil {
+		return loaded, nil
+	}
+	return mergeCodexSessions(loaded, recent), nil
+}
+
+func (c *Codex) listLoaded(ctx context.Context, conn codexClient, limit int, managed, desktopReachable bool) ([]surface.Session, error) {
+	ids, err := c.loadedThreadIDs(ctx, conn, limit)
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]surface.Session, 0, len(ids))
+	var readErrors []string
+	for _, id := range ids {
+		session, err := c.readSession(ctx, conn, id, managed, desktopReachable)
+		if err != nil {
+			readErrors = append(readErrors, err.Error())
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+	if len(sessions) == 0 && len(ids) > 0 && len(readErrors) > 0 {
+		return nil, fmt.Errorf("read loaded Codex threads: %s", strings.Join(readErrors, "; "))
+	}
+	return sessions, nil
+}
+
+func (c *Codex) loadedThreadIDs(ctx context.Context, conn codexClient, limit int) ([]string, error) {
+	resp, err := conn.Request(ctx, "thread/loaded/list", map[string]any{"limit": limit}, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	result, _ := resp["result"].(map[string]any)
+	values, _ := result["data"].([]any)
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		id := loadedThreadID(value)
+		if id == "" {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func loadedThreadID(value any) string {
+	if id, ok := value.(string); ok {
+		return id
+	}
+	entry, _ := value.(map[string]any)
+	if id := str(entry, "id"); id != "" {
+		return id
+	}
+	thread, _ := entry["thread"].(map[string]any)
+	return str(thread, "id")
+}
+
+func mergeCodexSessions(primary, secondary []surface.Session) []surface.Session {
+	byID := make(map[string]surface.Session, len(primary)+len(secondary))
+	for _, session := range secondary {
+		byID[session.ID] = session
+	}
+	for _, session := range primary {
+		byID[session.ID] = session
+	}
+	out := make([]surface.Session, 0, len(byID))
+	for _, session := range byID {
+		out = append(out, session)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
+	return out
+}
+
+func (c *Codex) listRecent(ctx context.Context, conn codexClient, managed, desktopReachable bool) ([]surface.Session, error) {
+	return c.listPage(ctx, conn, map[string]any{
+		"limit":          codexRecentListLimit,
+		"sortKey":        "recency_at",
+		"sortDirection":  "desc",
+		"useStateDbOnly": true,
+	}, managed, desktopReachable)
+}
+
+func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[string]any, managed, desktopReachable bool) ([]surface.Session, error) {
 	resp, err := conn.Request(ctx, "thread/list", params, 10*time.Second)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	result, _ := resp["result"].(map[string]any)
 	threads, _ := result["data"].([]any)
 	sessions := make([]surface.Session, 0, len(threads))
 	for _, value := range threads {
 		thread, _ := value.(map[string]any)
-		source := codexSource(thread["source"])
-		if str(thread, "threadSource") == "agenthail" {
-			source = "agenthail"
-		}
-		session := surface.Session{
-			ID:        str(thread, "id"),
-			Surface:   surface.KindCodex,
-			Name:      surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
-			Cwd:       str(thread, "cwd"),
-			Status:    codexStatus(thread["status"]),
-			Source:    source,
-			Transport: codexTransport(source, thread["status"], managed, desktopReachable),
-		}
-		if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
-			session.LastActive = time.Unix(int64(timestamp), 0)
-		}
-		sessions = append(sessions, session)
+		sessions = append(sessions, codexSession(thread, managed, desktopReachable))
 	}
-	return sessions, result["nextCursor"], nil
+	return sessions, nil
+}
+
+func codexSession(thread map[string]any, managed, desktopReachable bool) surface.Session {
+	source := codexSource(thread["source"])
+	if str(thread, "threadSource") == "agenthail" {
+		source = "agenthail"
+	}
+	session := surface.Session{
+		ID:        str(thread, "id"),
+		Surface:   surface.KindCodex,
+		Name:      surface.DeriveName(str(thread, "name"), str(thread, "preview"), 60),
+		Cwd:       str(thread, "cwd"),
+		Status:    codexStatus(thread["status"]),
+		Source:    source,
+		Transport: codexTransport(source, thread["status"], managed, desktopReachable),
+	}
+	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
+		session.LastActive = time.Unix(int64(timestamp), 0)
+	}
+	return session
 }
 
 func codexStatus(s any) surface.SessionStatus {
@@ -386,18 +458,18 @@ func codexStatus(s any) surface.SessionStatus {
 }
 
 func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, error) {
-	sessions, err := c.List(ctx)
+	if looksLikeUUID(target) {
+		return c.resolveID(ctx, target)
+	}
+	results, err := c.SearchSessions(ctx, target, 20)
 	if err != nil {
 		return nil, err
 	}
 	lower := strings.ToLower(target)
 	var matches []surface.Session
 	var exactMatches []surface.Session
-	for _, session := range sessions {
-		if looksLikeUUID(target) && session.ID == target {
-			copy := session
-			return &copy, nil
-		}
+	for _, result := range results {
+		session := result.Session
 		if strings.EqualFold(session.Name, target) {
 			exactMatches = append(exactMatches, session)
 			continue
@@ -422,6 +494,96 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 		return nil, fmt.Errorf("ambiguous target '%s':\n%s", target, strings.Join(lines, "\n"))
 	}
 	return &matches[0], nil
+}
+
+func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, error) {
+	conn, managed, desktopReachable, err := c.openDiscovery(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	session, err := c.readSession(ctx, conn, id, managed, desktopReachable)
+	if err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (c *Codex) readSession(ctx context.Context, conn codexClient, id string, managed, desktopReachable bool) (surface.Session, error) {
+	response, err := conn.Request(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, 5*time.Second)
+	if err != nil {
+		return surface.Session{}, fmt.Errorf("thread/read: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	thread, _ := result["thread"].(map[string]any)
+	if thread == nil {
+		return surface.Session{}, fmt.Errorf("thread/read response missing thread")
+	}
+	session := codexSession(thread, managed, desktopReachable)
+	if session.ID == "" {
+		session.ID = id
+	}
+	return session, nil
+}
+
+func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]surface.SessionSearchResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("Codex history search requires a query")
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	conn, managed, desktopReachable, err := c.openDiscovery(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	response, err := conn.Request(ctx, "thread/search", map[string]any{
+		"searchTerm":    query,
+		"limit":         limit,
+		"sortKey":       "recency_at",
+		"sortDirection": "desc",
+		"archived":      false,
+	}, 5*time.Second)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "method not found") || strings.Contains(err.Error(), "-32601") {
+			return nil, surface.ErrUnsupported
+		}
+		return nil, fmt.Errorf("Codex history search: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	values, _ := result["data"].([]any)
+	output := make([]surface.SessionSearchResult, 0, len(values))
+	for _, value := range values {
+		entry, _ := value.(map[string]any)
+		thread, _ := entry["thread"].(map[string]any)
+		if thread == nil {
+			thread = entry
+		}
+		session := codexSession(thread, managed, desktopReachable)
+		if session.ID == "" {
+			continue
+		}
+		output = append(output, surface.SessionSearchResult{Session: session, Snippet: str(entry, "snippet")})
+	}
+	return output, nil
+}
+
+func (c *Codex) openDiscovery(ctx context.Context) (codexClient, bool, bool, error) {
+	if c.managed {
+		client, err := c.openManaged(ctx)
+		return client, true, false, err
+	}
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if err := c.ensureHooked(ctx, conn); err != nil {
+		_ = conn.close()
+		return nil, false, false, err
+	}
+	return &desktopCodexClient{owner: c, conn: conn}, false, true, nil
 }
 
 func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {

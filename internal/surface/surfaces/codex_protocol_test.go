@@ -96,10 +96,10 @@ func TestResolveCodexEndpointRejectsUnrelatedTargets(t *testing.T) {
 	}
 }
 
-func TestCodexResolveExactNameScansForAmbiguity(t *testing.T) {
+func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
-	listCalls := 0
+	searchCalls := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
@@ -123,13 +123,9 @@ func TestCodexResolveExactNameScansForAmbiguity(t *testing.T) {
 				value = true
 			case strings.Contains(expression, "typeof current.handler === 'function'"):
 				value = "already"
-			case strings.Contains(expression, `"thread/list"`):
-				listCalls++
-				if listCalls == 1 {
-					value = `{"result":{"data":[{"id":"thread-1","name":"test-session-23","cwd":"/tmp","status":{"type":"idle"}}],"nextCursor":"more"}}`
-				} else {
-					value = `{"result":{"data":[{"id":"thread-2","name":"another-session","cwd":"/tmp","status":{"type":"idle"}}]}}`
-				}
+			case strings.Contains(expression, `"thread/search"`):
+				searchCalls++
+				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","status":{"type":"idle"}},"snippet":"test"}]}}`
 			}
 			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
 		}
@@ -137,16 +133,62 @@ func TestCodexResolveExactNameScansForAmbiguity(t *testing.T) {
 	server = httptest.NewServer(handler)
 	defer server.Close()
 
-	session, err := NewCodex(server.URL).Resolve(context.Background(), "test-session-23")
-	if err != nil || session == nil || session.ID != "thread-1" || listCalls != 2 {
-		t.Fatalf("session=%+v list_calls=%d err=%v", session, listCalls, err)
+	session, err := NewCodex(server.URL).Resolve(context.Background(), "Q")
+	if err != nil || session == nil || session.ID != "thread-1" || searchCalls != 1 {
+		t.Fatalf("session=%+v search_calls=%d err=%v", session, searchCalls, err)
+	}
+}
+
+func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var server *httptest.Server
+	readCalls := 0
+	listCalls := 0
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+	})
+	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var request map[string]any
+			if conn.ReadJSON(&request) != nil {
+				return
+			}
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			value := any("")
+			switch {
+			case expression == codexRendererCapabilityJS:
+				value = true
+			case strings.Contains(expression, "typeof current.handler === 'function'"):
+				value = "already"
+			case strings.Contains(expression, `"thread/read"`):
+				readCalls++
+				value = `{"result":{"thread":{"id":"019f004a-a94e-7313-a599-2db587a1f67a","name":"known","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}}}`
+			case strings.Contains(expression, `"thread/list"`):
+				listCalls++
+			}
+			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+		}
+	})
+	server = httptest.NewServer(handler)
+	defer server.Close()
+
+	session, err := NewCodex(server.URL).Resolve(context.Background(), "019f004a-a94e-7313-a599-2db587a1f67a")
+	if err != nil || session == nil || session.ID != "019f004a-a94e-7313-a599-2db587a1f67a" || readCalls != 1 || listCalls != 0 {
+		t.Fatalf("session=%+v read_calls=%d list_calls=%d err=%v", session, readCalls, listCalls, err)
 	}
 }
 
 func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
-	listCalls := 0
+	searchCalls := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
@@ -170,13 +212,9 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 				value = true
 			case strings.Contains(expression, "typeof current.handler === 'function'"):
 				value = "already"
-			case strings.Contains(expression, `"thread/list"`):
-				listCalls++
-				if listCalls == 1 {
-					value = `{"result":{"data":[{"id":"thread-1","name":"duplicate","cwd":"/one"}],"nextCursor":"more"}}`
-				} else {
-					value = `{"result":{"data":[{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}]}}`
-				}
+			case strings.Contains(expression, `"thread/search"`):
+				searchCalls++
+				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"duplicate","cwd":"/one"}},{"thread":{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}}]}}`
 			}
 			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
 		}
@@ -190,10 +228,14 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	}
 }
 
-func TestCodexListReportsPaginationLimitInsteadOfReturningPartialResults(t *testing.T) {
+func TestCodexListUsesOneBoundedStateDatabasePage(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
 	listCalls := 0
+	loadedCalls := 0
+	readCalls := 0
+	listExpression := ""
+	loadedExpression := ""
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
@@ -217,8 +259,16 @@ func TestCodexListReportsPaginationLimitInsteadOfReturningPartialResults(t *test
 				value = true
 			case strings.Contains(expression, "typeof current.handler === 'function'"):
 				value = "already"
+			case strings.Contains(expression, `"thread/loaded/list"`):
+				loadedCalls++
+				loadedExpression = expression
+				value = `{"result":{"data":["loaded-thread"]}}`
+			case strings.Contains(expression, `"thread/read"`):
+				readCalls++
+				value = `{"result":{"thread":{"id":"loaded-thread","name":"loaded session","status":"busy"}}}`
 			case strings.Contains(expression, `"thread/list"`):
 				listCalls++
+				listExpression = expression
 				value = fmt.Sprintf(`{"result":{"data":[{"id":"thread-%d","name":"session"}],"nextCursor":"cursor-%d"}}`, listCalls, listCalls)
 			}
 			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
@@ -228,8 +278,67 @@ func TestCodexListReportsPaginationLimitInsteadOfReturningPartialResults(t *test
 	defer server.Close()
 
 	sessions, err := NewCodex(server.URL).List(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "pagination limit of 100 pages") || sessions != nil || listCalls != maxCodexListPages {
-		t.Fatalf("sessions=%v list_calls=%d err=%v", sessions, listCalls, err)
+	if err != nil || len(sessions) != 2 || listCalls != 1 || loadedCalls != 1 || readCalls != 1 {
+		t.Fatalf("sessions=%v list_calls=%d loaded_calls=%d read_calls=%d err=%v", sessions, listCalls, loadedCalls, readCalls, err)
+	}
+	for _, required := range []string{`"limit":50`, `"useStateDbOnly":true`, `"sortKey":"recency_at"`} {
+		if !strings.Contains(listExpression, required) {
+			t.Fatalf("bounded list expression missing %s: %s", required, listExpression)
+		}
+	}
+	if !strings.Contains(loadedExpression, `"limit":50`) {
+		t.Fatalf("loaded list expression missing limit: %s", loadedExpression)
+	}
+}
+
+func TestCodexReadyUsesLoadedListOnly(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var server *httptest.Server
+	loadedCalls := 0
+	listCalls := 0
+	readCalls := 0
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+	})
+	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var request map[string]any
+			if conn.ReadJSON(&request) != nil {
+				return
+			}
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			value := any("")
+			switch {
+			case expression == codexRendererCapabilityJS:
+				value = true
+			case strings.Contains(expression, "typeof current.handler === 'function'"):
+				value = "already"
+			case strings.Contains(expression, `"thread/loaded/list"`):
+				loadedCalls++
+				value = `{"result":{"data":[]}}`
+			case strings.Contains(expression, `"thread/list"`):
+				listCalls++
+			case strings.Contains(expression, `"thread/read"`):
+				readCalls++
+			}
+			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+		}
+	})
+	server = httptest.NewServer(handler)
+	defer server.Close()
+
+	if err := NewCodex(server.URL).Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if loadedCalls != 1 || listCalls != 0 || readCalls != 0 {
+		t.Fatalf("loaded_calls=%d list_calls=%d read_calls=%d", loadedCalls, listCalls, readCalls)
 	}
 }
 

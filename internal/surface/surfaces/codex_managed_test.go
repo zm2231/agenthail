@@ -163,11 +163,11 @@ func TestCodexListPageUsesManagedTransportForDesktopSessions(t *testing.T) {
 		},
 	}}
 	codex := NewCodex("")
-	managed, _, err := codex.listPage(context.Background(), client, nil, true, false)
+	managed, err := codex.listPage(context.Background(), client, map[string]any{}, true, false)
 	if err != nil || len(managed) != 1 || managed[0].Transport != codexTransportManaged {
 		t.Fatalf("managed sessions=%v err=%v", managed, err)
 	}
-	legacy, _, err := codex.listPage(context.Background(), client, nil, false, false)
+	legacy, err := codex.listPage(context.Background(), client, map[string]any{}, false, false)
 	if err != nil || len(legacy) != 1 || legacy[0].Transport != codexTransportReadOnly {
 		t.Fatalf("legacy sessions=%v err=%v", legacy, err)
 	}

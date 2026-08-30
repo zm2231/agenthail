@@ -288,6 +288,34 @@ func TestResolveTargetRejectsAmbiguityAndEscapesWildcards(t *testing.T) {
 	}
 }
 
+func TestSearchSessionsMatchesStoredNameCwdAndAlias(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "old", Surface: surface.KindCodex, Name: "Quarterly planning", Cwd: "/work/agenthail"}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("planner", session.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"quarterly", "agenthail", "planner"} {
+		results, err := r.SearchSessions(surface.KindCodex, query, 20)
+		if err != nil || len(results) != 1 || results[0].ID != session.ID {
+			t.Fatalf("query=%q results=%+v err=%v", query, results, err)
+		}
+	}
+}
+
+func TestListSessionsReturnsSavedCatalog(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := r.ListSessions(0)
+	if err != nil || len(results) != 1 || results[0].ID != "old" {
+		t.Fatalf("results=%+v err=%v", results, err)
+	}
+}
+
 func TestAddRouteValidatesPatternAndCycles(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "a", "b", "c")

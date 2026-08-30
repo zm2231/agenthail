@@ -31,6 +31,7 @@ const app = {
   remoteQRVisible: false,
   remoteQRHideTimer: null,
   startModels: {},
+  codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
 globalThis.escape = (value) =>
@@ -509,6 +510,7 @@ function renderSessions() {
     return matchesQuery && matchesSurface && matchesStatus;
   });
   const visible = sessions.slice(0, app.sessionLimit);
+  const historyResults = app.codexSearch.query === query ? app.codexSearch.results : [];
   $("#conversation-count").textContent = `${sessions.length}`;
   $("#session-tools").classList.toggle("hidden", app.inboxMode !== "all");
   document
@@ -535,14 +537,30 @@ function renderSessions() {
       : sessions.length > visible.length
         ? `Showing ${visible.length} of ${sessions.length}`
         : `${sessions.length} conversations`;
-  $("#session-list").innerHTML =
+  const sessionItems =
     visible
       .map(
         (session) =>
           `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
-      .join("") ||
-    `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Open History to find an older conversation." : "No conversations in this view."}</p></div>`;
+      .join("");
+  const historyItems = historyResults
+    .map(
+      (result) =>
+        `<button class="session" title="${escape(rawDisplayName(result))}" type="button" data-session="${escape(result.id)}"><div class="session-name"><i class="dot recent"></i><span>${escape(displayName(result))}</span></div><div class="session-detail"><span>Codex history</span><span>${escape(result.snippet || "Matched conversation")}</span></div></button>`,
+    )
+    .join("");
+  const searchStatus = app.codexSearch.loading
+    ? '<div class="filter-summary">Searching Codex history…</div>'
+    : app.codexSearch.error
+      ? `<div class="filter-summary">${escape(app.codexSearch.error)}</div>`
+      : historyItems
+        ? '<div class="filter-summary">Codex history matches</div>'
+        : "";
+  $("#session-list").innerHTML =
+    sessionItems || historyItems || searchStatus
+      ? `${sessionItems}${searchStatus}${historyItems}`
+      : `<div class="empty-state compact"><p>${app.inboxMode === "current" ? "No current work. Search to find an older Codex conversation." : "No conversations in this view."}</p></div>`;
   const more = $("#session-more");
   more.hidden = app.inboxMode !== "all" || visible.length >= sessions.length;
   more.textContent = `Show more (${sessions.length - visible.length})`;
@@ -852,7 +870,7 @@ async function load(fresh = false) {
   }
 }
 async function selectSession(id, focus = false) {
-  const session = app.state.sessions.find((item) => item.id === id);
+  const session = app.state.sessions.find((item) => item.id === id) || app.codexSearch.results.find((item) => item.id === id);
   if (!session) return;
   if (app.selected?.id !== id) stopLiveStream(true);
   if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
@@ -1176,6 +1194,8 @@ document.addEventListener("click", async (event) => {
     app.mobileChatOpen = false;
     showView("conversations");
     $("#session-search").value = "";
+    cancelCodexSearch();
+    app.codexSearch = { query: "", results: [], loading: false, error: "", timer: null, controller: null };
     app.inboxMode = "all";
     app.sessionLimit = sessionBatchSize();
     app.filters.surface = surfaceButton.dataset.surface;
@@ -1294,8 +1314,43 @@ document.addEventListener("click", async (event) => {
     toast(friendlyError(error));
   }
 });
+function cancelCodexSearch() {
+  clearTimeout(app.codexSearch.timer);
+  app.codexSearch.controller?.abort();
+}
+function startCodexSearch(query) {
+  cancelCodexSearch();
+  const search = { query: query.toLowerCase(), results: [], loading: true, error: "", timer: null, controller: null };
+  app.codexSearch = search;
+  search.timer = setTimeout(async () => {
+    const controller = new AbortController();
+    search.controller = controller;
+    try {
+      const response = await fetch(`/api/search?surface=codex&q=${encodeURIComponent(query)}`, { signal: controller.signal });
+      if (!response.ok) throw Error(await response.text());
+      const payload = await response.json();
+      if (app.codexSearch !== search) return;
+      search.results = (payload.results || []).map((result) => ({ ...result.session, snippet: result.snippet }));
+      search.error = payload.remoteError || "";
+    } catch (error) {
+      if (error.name !== "AbortError" && app.codexSearch === search) search.error = friendlyError(error);
+    } finally {
+      if (app.codexSearch === search) {
+        search.loading = false;
+        renderSessions();
+      }
+    }
+  }, 300);
+}
 $("#session-search").addEventListener("input", () => {
   app.sessionLimit = sessionBatchSize();
+  const query = $("#session-search").value.trim();
+  if (query.length >= 3 && ["all", "codex"].includes(app.filters.surface)) {
+    startCodexSearch(query);
+  } else {
+    cancelCodexSearch();
+    app.codexSearch = { query: "", results: [], loading: false, error: "", timer: null, controller: null };
+  }
   renderSessions();
 });
 function startableSurfaces() {
@@ -1379,6 +1434,10 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
 $("#session-surface-filter").addEventListener("change", (event) => {
   app.sessionLimit = sessionBatchSize();
   app.filters.surface = event.target.value;
+  const query = $("#session-search").value.trim();
+  cancelCodexSearch();
+  app.codexSearch = { query: "", results: [], loading: false, error: "", timer: null, controller: null };
+  if (query.length >= 3 && ["all", "codex"].includes(app.filters.surface)) startCodexSearch(query);
   renderSessions();
 });
 $("#session-status-filter").addEventListener("change", (event) => {
@@ -1386,6 +1445,7 @@ $("#session-status-filter").addEventListener("change", (event) => {
   app.filters.status = event.target.value;
   renderSessions();
 });
+window.addEventListener("beforeunload", cancelCodexSearch);
 $("#session-more").addEventListener("click", () => {
   app.sessionLimit += sessionBatchSize();
   renderSessions();

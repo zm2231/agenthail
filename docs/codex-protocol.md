@@ -10,6 +10,10 @@ Agenthail implements Codex protocol methods only when they support a user-facing
 - Start a managed thread and its first turn from the CLI or dashboard
 - Send, steer, interrupt, compact, and change models
 - Stream active turn events into the dashboard
+- Keep current work bounded through loaded-thread and state-database views
+- Search older local Codex history only when an operator requests it
+
+`thread/search` is available through the app-server experimental API capability. Agenthail requests that capability on initialization and calls the method only for an explicit history search. If a newer Codex version promotes the method to the normal protocol, the method name and request shape remain the same. If an older version does not support it, Agenthail retains its local conversation catalog and reports that full Codex history search is unavailable rather than scanning rollout files.
 
 ## Deferred
 

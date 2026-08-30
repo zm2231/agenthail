@@ -21,26 +21,28 @@ import (
 )
 
 type daemonSurface struct {
-	kind         surface.SurfaceKind
-	sessions     map[string]surface.Session
-	observations map[string]*surface.TurnObservation
-	accepted     bool
-	sent         []string
-	models       []string
-	modelOptions []surface.ModelOption
-	listCalls    atomic.Int32
-	resolveCalls atomic.Int32
-	rejectBusy   bool
-	sendErr      error
-	turnID       string
-	observeErr   error
-	observeCalls atomic.Int32
-	startOptions []surface.SessionStartOptions
-	startErr     error
-	caps         surface.Capabilities
-	streamEvents []surface.StreamEvent
-	streamErr    error
-	contextUsage *surface.ContextUsage
+	kind          surface.SurfaceKind
+	sessions      map[string]surface.Session
+	observations  map[string]*surface.TurnObservation
+	accepted      bool
+	sent          []string
+	models        []string
+	modelOptions  []surface.ModelOption
+	listCalls     atomic.Int32
+	resolveCalls  atomic.Int32
+	rejectBusy    bool
+	sendErr       error
+	turnID        string
+	observeErr    error
+	observeCalls  atomic.Int32
+	startOptions  []surface.SessionStartOptions
+	startErr      error
+	caps          surface.Capabilities
+	streamEvents  []surface.StreamEvent
+	streamErr     error
+	contextUsage  *surface.ContextUsage
+	searchResults []surface.SessionSearchResult
+	searchErr     error
 }
 
 type runtimeDaemonSurface struct {
@@ -109,6 +111,9 @@ func (f *daemonSurface) Resolve(_ context.Context, id string) (*surface.Session,
 		return nil, fmt.Errorf("not found")
 	}
 	return &session, nil
+}
+func (f *daemonSurface) SearchSessions(context.Context, string, int) ([]surface.SessionSearchResult, error) {
+	return f.searchResults, f.searchErr
 }
 func (f *daemonSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
 	f.observeCalls.Add(1)

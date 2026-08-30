@@ -19,21 +19,23 @@ import (
 )
 
 type cliSurface struct {
-	kind         surface.SurfaceKind
-	sessions     map[string]surface.Session
-	listed       []surface.Session
-	listErr      error
-	listCalls    int
-	caps         surface.Capabilities
-	observation  *surface.TurnObservation
-	observations []*surface.TurnObservation
-	observeErr   error
-	sendResult   *surface.SendResult
-	reply        *surface.ReplyResult
-	sendWait     bool
-	sent         []string
-	tail         []surface.Exchange
-	streamEvents []surface.StreamEvent
+	kind          surface.SurfaceKind
+	sessions      map[string]surface.Session
+	listed        []surface.Session
+	listErr       error
+	listCalls     int
+	caps          surface.Capabilities
+	observation   *surface.TurnObservation
+	observations  []*surface.TurnObservation
+	observeErr    error
+	sendResult    *surface.SendResult
+	reply         *surface.ReplyResult
+	sendWait      bool
+	sent          []string
+	tail          []surface.Exchange
+	streamEvents  []surface.StreamEvent
+	searchResults []surface.SessionSearchResult
+	searchErr     error
 }
 
 type runtimeCLISurface struct {
@@ -62,7 +64,27 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	}
 }
 
-func TestProbeCodexAppServerRequiresThreadList(t *testing.T) {
+type readinessCLISurface struct {
+	*cliSurface
+	readyCalls int
+	readyErr   error
+}
+
+func (f *readinessCLISurface) Ready(context.Context) error {
+	f.readyCalls++
+	return f.readyErr
+}
+
+func TestProbeCodexAppServerUsesReadinessCheck(t *testing.T) {
+	fake := &cliSurface{listErr: errors.New("thread/list unavailable")}
+	ready := &readinessCLISurface{cliSurface: fake, readyErr: errors.New("thread/loaded/list unavailable")}
+	err := probeCodexAppServer(ready)
+	if !errors.Is(err, ready.readyErr) || ready.readyCalls != 1 || fake.listCalls != 0 {
+		t.Fatalf("err=%v ready_calls=%d list_calls=%d", err, ready.readyCalls, fake.listCalls)
+	}
+}
+
+func TestProbeCodexAppServerFallsBackToList(t *testing.T) {
 	fake := &cliSurface{listErr: errors.New("thread/list unavailable")}
 	err := probeCodexAppServer(fake)
 	if !errors.Is(err, fake.listErr) || fake.listCalls != 1 {
@@ -70,9 +92,9 @@ func TestProbeCodexAppServerRequiresThreadList(t *testing.T) {
 	}
 }
 
-func TestCodexLaunchProbeTimeoutAccommodatesLargeThreadLists(t *testing.T) {
-	if codexLaunchProbeTimeout < 30*time.Second {
-		t.Fatalf("codexLaunchProbeTimeout = %s, want at least 30s", codexLaunchProbeTimeout)
+func TestCodexLaunchProbeTimeoutBoundsReadiness(t *testing.T) {
+	if codexLaunchProbeTimeout != 5*time.Second {
+		t.Fatalf("codexLaunchProbeTimeout = %s, want 5s", codexLaunchProbeTimeout)
 	}
 }
 
@@ -112,6 +134,9 @@ func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session
 		return nil, errors.New("not found")
 	}
 	return &session, nil
+}
+func (f *cliSurface) SearchSessions(context.Context, string, int) ([]surface.SessionSearchResult, error) {
+	return f.searchResults, f.searchErr
 }
 func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
 	if len(f.observations) > 0 {
@@ -655,6 +680,40 @@ func TestListJSONUsesDefaultLimit(t *testing.T) {
 	}
 	if json.Unmarshal([]byte(output), &document) != nil || len(document.Sessions) != 15 {
 		t.Fatalf("output=%s sessions=%d", output, len(document.Sessions))
+	}
+}
+
+func TestListAllIncludesSavedSessionsWithoutSurfaceDiscovery(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, registry := cliFixture(t, fake)
+	if err := registry.RegisterSession(surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--all", "--json"}) })
+	if err != nil || !strings.Contains(output, "old project") || fake.listCalls != 1 {
+		t.Fatalf("output=%s calls=%d err=%v", output, fake.listCalls, err)
+	}
+}
+
+func TestSearchCodexPrintsAndRegistersHistoryHits(t *testing.T) {
+	hit := surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}
+	fake := &cliSurface{kind: surface.KindCodex, searchResults: []surface.SessionSearchResult{{Session: hit, Snippet: "matched text"}}}
+	app, registry := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdSearch([]string{"codex", "project"}) })
+	if err != nil || !strings.Contains(output, "old project") || !strings.Contains(output, "matched text") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if _, err := registry.Session("old"); err != nil {
+		t.Fatalf("search result was not retained: %v", err)
+	}
+}
+
+func TestSearchCodexRequiresThreeCharacters(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, _ := cliFixture(t, fake)
+	err := app.cmdSearch([]string{"codex", "Q"})
+	if err == nil || !strings.Contains(err.Error(), "at least 3") {
+		t.Fatalf("err=%v", err)
 	}
 }
 

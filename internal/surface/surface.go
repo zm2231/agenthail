@@ -39,6 +39,19 @@ type Session struct {
 	LastActive time.Time     `json:"lastActive"`
 }
 
+type SessionSearchResult struct {
+	Session Session `json:"session"`
+	Snippet string  `json:"snippet,omitempty"`
+}
+
+type SessionSearcher interface {
+	SearchSessions(ctx context.Context, query string, limit int) ([]SessionSearchResult, error)
+}
+
+type ReadinessChecker interface {
+	Ready(ctx context.Context) error
+}
+
 func IsReadOnlySession(session *Session) bool {
 	if session == nil || session.Surface != KindCodex {
 		return false

@@ -86,10 +86,13 @@ agenthail send @writer "draft the explanation" --reply
 agenthail steer @builder "keep the example, cut the setup"
 agenthail queue @reviewer "check the final implementation"
 agenthail history @writer 25
+agenthail search codex "quarterly planning"
 ```
 
 When an agent is already working, Agenthail holds the next message until it is ready. Use `steer` when you want to change the turn that is running now.
 Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
+
+Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.
 
 ## Let agents hand work to each other
 
