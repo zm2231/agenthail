@@ -85,6 +85,18 @@ func TestSidecarFailsClosedWhenCookieBridgeFails(t *testing.T) {
 	}
 }
 
+func TestSidecarDoesNotReadBridgeWhenCookieHeaderIsProvided(t *testing.T) {
+	root := fakeCurlCFFI(t)
+	marker := filepath.Join(t.TempDir(), "requested")
+	response := runSidecar(t, root, `{"url":"https://example.test","headers":{"cookie":"session=cached"}}`, "AGENTHAIL_COOKIE_BRIDGE=/does/not/exist.mjs", "FAKE_REQUEST_MARKER="+marker)
+	if response.Status != 200 || response.Error != "" {
+		t.Fatalf("response=%+v", response)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("request missing: %v", err)
+	}
+}
+
 func TestSidecarInvalidRequestIsStructured(t *testing.T) {
 	response := runSidecar(t, fakeCurlCFFI(t), `{`)
 	if !strings.Contains(response.Error, "invalid request JSON") {

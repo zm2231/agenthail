@@ -35,7 +35,7 @@ def main():
         sys.stdout.write(json.dumps({"status": 0, "body": "", "error": "request requires a URL"}))
         return
     headers = dict(req.get("headers", {}))
-    bridge = req.get("cookie_bridge") or os.environ.get("AGENTHAIL_COOKIE_BRIDGE")
+    bridge = req.get("cookie_bridge") or (None if headers.get("cookie") else os.environ.get("AGENTHAIL_COOKIE_BRIDGE"))
     try:
         cookie = load_cookies(bridge, req.get("cookie_bridge_args"), req.get("profile"))
     except Exception as e:

@@ -4,12 +4,157 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func resetCookieHeaderCache(t *testing.T) {
+	t.Helper()
+	cookieHeaderCache.Lock()
+	cookieHeaderCache.entries = map[string]cookieHeaderCacheEntry{}
+	cookieHeaderCache.Unlock()
+	t.Cleanup(func() {
+		cookieHeaderCache.Lock()
+		cookieHeaderCache.entries = map[string]cookieHeaderCacheEntry{}
+		cookieHeaderCache.Unlock()
+	})
+}
+
+func TestLoadCookieHeaderCachesAndInvalidates(t *testing.T) {
+	resetCookieHeaderCache(t)
+	root := t.TempDir()
+	countPath := filepath.Join(root, "count")
+	node := filepath.Join(root, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\ncount=0\n[ -f \"$AGENTHAIL_TEST_COOKIE_COUNT\" ] && count=$(cat \"$AGENTHAIL_TEST_COOKIE_COUNT\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$AGENTHAIL_TEST_COOKIE_COUNT\"\nprintf 'session=cached'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
+	t.Setenv("AGENTHAIL_TEST_COOKIE_COUNT", countPath)
+	bridge := filepath.Join(root, "cookie.mjs")
+	if err := os.WriteFile(bridge, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		header, err := loadCookieHeader(context.Background(), bridge, "https://claude.ai/")
+		if err != nil || header != "session=cached" {
+			t.Fatalf("header=%q err=%v", header, err)
+		}
+	}
+	data, err := os.ReadFile(countPath)
+	if err != nil || string(data) != "1" {
+		t.Fatalf("calls=%q err=%v", data, err)
+	}
+	invalidateCookieHeader(bridge, "https://claude.ai/")
+	if _, err := loadCookieHeader(context.Background(), bridge, "https://claude.ai/"); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(countPath)
+	if err != nil || string(data) != "2" {
+		t.Fatalf("calls=%q err=%v", data, err)
+	}
+}
+
+func TestLoadCookieHeaderCachesBridgeFailure(t *testing.T) {
+	resetCookieHeaderCache(t)
+	root := t.TempDir()
+	countPath := filepath.Join(root, "count")
+	node := filepath.Join(root, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\ncount=0\n[ -f \"$AGENTHAIL_TEST_COOKIE_COUNT\" ] && count=$(cat \"$AGENTHAIL_TEST_COOKIE_COUNT\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$AGENTHAIL_TEST_COOKIE_COUNT\"\nexit 2\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
+	t.Setenv("AGENTHAIL_TEST_COOKIE_COUNT", countPath)
+	bridge := filepath.Join(root, "cookie.mjs")
+	if err := os.WriteFile(bridge, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := loadCookieHeader(context.Background(), bridge, "https://claude.ai/"); err == nil {
+			t.Fatal("expected cookie bridge failure")
+		}
+	}
+	data, err := os.ReadFile(countPath)
+	if err != nil || string(data) != "1" {
+		t.Fatalf("calls=%q err=%v", data, err)
+	}
+}
+
+func TestSidecarRequestUsesCachedCookieWithoutBridgeFallback(t *testing.T) {
+	resetCookieHeaderCache(t)
+	root := t.TempDir()
+	countPath := filepath.Join(root, "count")
+	node := filepath.Join(root, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\ncount=0\n[ -f \"$AGENTHAIL_TEST_COOKIE_COUNT\" ] && count=$(cat \"$AGENTHAIL_TEST_COOKIE_COUNT\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$AGENTHAIL_TEST_COOKIE_COUNT\"\nprintf 'session=cached'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	python := filepath.Join(root, "python")
+	if err := os.WriteFile(python, []byte("#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then exit 0; fi\ncat >/dev/null\nprintf '{\"status\":200,\"body\":\"ok\",\"error\":\"\"}'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(root, "cookie.mjs")
+	worker := filepath.Join(root, "sidecar.py")
+	if err := os.WriteFile(bridge, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(worker, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
+	t.Setenv("AGENTHAIL_TEST_COOKIE_COUNT", countPath)
+	t.Setenv("AGENTHAIL_PYTHON", python)
+	t.Setenv("AGENTHAIL_SIDECAR", worker)
+	t.Setenv("AGENTHAIL_COOKIE_BRIDGE", bridge)
+	for range 2 {
+		status, body, err := sidecarRequestWithCookies(context.Background(), "GET", "https://claude.ai/api/organizations", nil, "", bridge, "https://claude.ai/", time.Second)
+		if err != nil || status != 200 || body != "ok" {
+			t.Fatalf("status=%d body=%q err=%v", status, body, err)
+		}
+	}
+	data, err := os.ReadFile(countPath)
+	if err != nil || string(data) != "1" {
+		t.Fatalf("cookie bridge calls=%q err=%v", data, err)
+	}
+}
+
+func TestProcessGroupCommandKillsDescendantsOnTimeout(t *testing.T) {
+	root := t.TempDir()
+	childPath := filepath.Join(root, "child.pid")
+	script := filepath.Join(root, "worker")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 30 &\nprintf '%s' \"$!\" > \"$AGENTHAIL_TEST_CHILD_PID\"\nwait\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_TEST_CHILD_PID", childPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := processGroupCommand(ctx, script).Run(); err == nil {
+		t.Fatal("expected timeout")
+	}
+	data, err := os.ReadFile(childPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		err = syscall.Kill(pid, 0)
+		if err == syscall.ESRCH {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child %d survived timeout: %v", pid, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestSidecarPythonRejectsConfiguredUnsupportedRuntime(t *testing.T) {
 	executable, err := os.Executable()
