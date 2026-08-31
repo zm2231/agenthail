@@ -90,7 +90,7 @@ agenthail search codex "quarterly planning"
 ```
 
 When an agent is already working, Agenthail holds the next message until it is ready. Use `steer` when you want to change the turn that is running now.
-Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
+If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
 
 Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.
 
@@ -169,7 +169,7 @@ Read the full [security and privacy model](SECURITY.md).
 
 ## Help and deeper documentation
 
-- `agenthail doctor` checks every connected app and tells you what needs attention.
+- `agenthail doctor` checks connection and current-session discovery. Each delivery also checks that the target can accept input immediately before a turn starts.
 - [Native Mac and iPhone apps](docs/native-apps.md)
 - [Security and privacy](SECURITY.md)
 - [Maintainer documentation](docs/maintainers/)

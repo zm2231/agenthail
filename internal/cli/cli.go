@@ -1386,6 +1386,7 @@ func (a *App) cmdDoctor(args []string) error {
 		Surface      string                 `json:"surface"`
 		Capabilities []string               `json:"capabilities"`
 		Sessions     int                    `json:"sessions"`
+		WritePath    string                 `json:"writePath"`
 		OK           bool                   `json:"ok"`
 		Error        string                 `json:"error,omitempty"`
 		Runtime      *surface.RuntimeStatus `json:"runtime,omitempty"`
@@ -1430,7 +1431,7 @@ func (a *App) cmdDoctor(args []string) error {
 		} else {
 			err = healthErr
 		}
-		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), OK: err == nil}
+		result := doctorResult{Surface: e.Name, Capabilities: enabled, Sessions: len(sessions), WritePath: "checked immediately before delivery", OK: err == nil}
 		if provider, ok := e.Surface.(surface.RuntimeStatusProvider); ok {
 			runtimeStatus := provider.RuntimeStatus(ctx)
 			if runtimeStatus.Name != "" {
@@ -1488,6 +1489,7 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 			if result.OK {
 				fmt.Printf("  sessions: %d\n", result.Sessions)
+				fmt.Printf("  writes: %s\n", result.WritePath)
 			} else {
 				fmt.Printf("  list: ERR %s\n", result.Error)
 			}

@@ -48,18 +48,10 @@ func (c *Codex) Capabilities() surface.Capabilities {
 }
 
 func (c *Codex) Health(ctx context.Context) error {
-	if c.managed {
-		client, err := c.openManaged(ctx)
-		if err != nil {
-			return fmt.Errorf("Codex local app-server is unavailable: %w", err)
-		}
-		return client.Close()
+	if err := c.Ready(ctx); err != nil {
+		return fmt.Errorf("Codex session discovery is unavailable: %w", err)
 	}
-	client, err := c.openDesktop(ctx)
-	if err != nil {
-		return fmt.Errorf("Codex Desktop bridge is unavailable: %w", err)
-	}
-	return client.Close()
+	return nil
 }
 
 type codexOpener func(context.Context) (codexClient, error)
@@ -617,9 +609,14 @@ func (c *Codex) Send(ctx context.Context, sess *surface.Session, message string)
 }
 
 func (c *Codex) StartSession(ctx context.Context, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	lock, err := acquireCodexWriteLock(ctx)
+	if err != nil {
+		return nil, nil, surface.DeliveryUnavailable(err)
+	}
+	defer releaseCodexWriteLock(lock)
 	client, err := c.openManaged(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, surface.DeliveryUnavailable(err)
 	}
 	defer client.Close()
 	return c.startSession(ctx, client, options)
@@ -684,17 +681,22 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 }
 
 func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	lock, err := acquireCodexWriteLock(ctx)
+	if err != nil {
+		return nil, surface.DeliveryUnavailable(err)
+	}
+	defer releaseCodexWriteLock(lock)
 	conn, err := c.openSession(ctx, sess, true)
 	if err != nil {
-		return nil, err
+		return nil, surface.DeliveryUnavailable(err)
 	}
 	defer conn.Close()
 	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
-		return nil, err
+		return nil, surface.DeliveryUnavailable(err)
 	}
 	active, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
-		return nil, fmt.Errorf("inspect active turn: %w", err)
+		return nil, surface.DeliveryUnavailable(fmt.Errorf("inspect active turn: %w", err))
 	}
 	if active != "" {
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
@@ -1050,17 +1052,22 @@ func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
 }
 
 func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
+	lock, err := acquireCodexWriteLock(ctx)
+	if err != nil {
+		return surface.DeliveryUnavailable(err)
+	}
+	defer releaseCodexWriteLock(lock)
 	conn, err := c.openSession(ctx, sess, true)
 	if err != nil {
-		return err
+		return surface.DeliveryUnavailable(err)
 	}
 	defer conn.Close()
 	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
-		return err
+		return surface.DeliveryUnavailable(err)
 	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
-		return err
+		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to interrupt")
@@ -1072,17 +1079,22 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	lock, err := acquireCodexWriteLock(ctx)
+	if err != nil {
+		return surface.DeliveryUnavailable(err)
+	}
+	defer releaseCodexWriteLock(lock)
 	conn, err := c.openSession(ctx, sess, true)
 	if err != nil {
-		return err
+		return surface.DeliveryUnavailable(err)
 	}
 	defer conn.Close()
 	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
-		return err
+		return surface.DeliveryUnavailable(err)
 	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
-		return err
+		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")

@@ -99,6 +99,28 @@ func IsDeliveryOutcomeUnknown(err error) bool {
 	return errors.As(err, &target)
 }
 
+type DeliveryUnavailableError struct {
+	Err error
+}
+
+func (e DeliveryUnavailableError) Error() string {
+	return fmt.Sprintf("delivery did not start: %v", e.Err)
+}
+
+func (e DeliveryUnavailableError) Unwrap() error { return e.Err }
+
+func DeliveryUnavailable(err error) error {
+	if err == nil {
+		return nil
+	}
+	return DeliveryUnavailableError{Err: err}
+}
+
+func IsDeliveryUnavailable(err error) bool {
+	var target DeliveryUnavailableError
+	return errors.As(err, &target)
+}
+
 type DeliveryTerminalKind string
 
 const (

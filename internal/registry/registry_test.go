@@ -64,6 +64,54 @@ func TestOpenUsesWALAndAllowsReadsDuringAWrite(t *testing.T) {
 	}
 }
 
+func TestOpenRunsMigrationsOnlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.Exec(`CREATE TRIGGER reject_queue_updates BEFORE UPDATE ON message_queue BEGIN SELECT RAISE(FAIL, 'unexpected migration write'); END`); err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var version int
+	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("version=%d err=%v", version, err)
+	}
+}
+
+func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	if err := r.QueueMessage("session", "wait"); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 7; attempt++ {
+		item, err := r.ClaimNextMessage("session", time.Now())
+		if err != nil || item == nil {
+			t.Fatalf("attempt=%d item=%+v err=%v", attempt, item, err)
+		}
+		if err := r.DeferMessage(item.ID, errors.New("delivery did not start"), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.db.Exec(`UPDATE message_queue SET available_at_ms=0 WHERE id=?`, item.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	item, err := r.QueueItem(1)
+	if err != nil || item.Status != "pending" || item.Attempts != 7 {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
 func register(t *testing.T, r *Registry, ids ...string) {
 	t.Helper()
 	for _, id := range ids {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -185,7 +186,7 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 	return c.openDesktop(ctx)
 }
 
-func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error {
+func (c *Codex) EnsureWritable(_ context.Context, sess *surface.Session) error {
 	if sess == nil {
 		return fmt.Errorf("Codex session is required")
 	}
@@ -195,15 +196,9 @@ func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error
 		}
 		return nil
 	}
-	client, err := c.openManaged(ctx)
-	if err != nil {
-		return err
+	if surface.IsReadOnlySession(sess) {
+		return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
 	}
-	defer client.Close()
-	if err := c.requireDirectInput(ctx, client, sess.ID); err != nil {
-		return err
-	}
-	sess.Transport = codexTransportManaged
 	return nil
 }
 
@@ -218,15 +213,61 @@ func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, thre
 	return nil
 }
 
+func codexWriteLockPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agenthail", "codex-write.lock")
+}
+
+func acquireCodexWriteLock(ctx context.Context) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(codexWriteLockPath()), 0700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(codexWriteLockPath(), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			return file, nil
+		}
+		select {
+		case <-ctx.Done():
+			_ = file.Close()
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+func releaseCodexWriteLock(file *os.File) {
+	if file == nil {
+		return
+	}
+	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	_ = file.Close()
+}
+
 func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writable bool, method string, params map[string]any, wait time.Duration) (map[string]any, error) {
+	var lock *os.File
+	var err error
+	if writable {
+		lock, err = acquireCodexWriteLock(ctx)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(err)
+		}
+		defer releaseCodexWriteLock(lock)
+	}
 	client, err := c.openSession(ctx, sess, writable)
 	if err != nil {
+		if writable {
+			return nil, surface.DeliveryUnavailable(err)
+		}
 		return nil, err
 	}
 	defer client.Close()
 	if writable {
 		if err := c.requireDirectInput(ctx, client, sess.ID); err != nil {
-			return nil, err
+			return nil, surface.DeliveryUnavailable(err)
 		}
 	}
 	return client.Request(ctx, method, params, wait)

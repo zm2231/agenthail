@@ -17,6 +17,8 @@ type Registry struct {
 	db *sql.DB
 }
 
+const schemaVersion = 1
+
 func Open(path string) (*Registry, error) {
 	if path == "" {
 		home, _ := os.UserHomeDir()
@@ -46,6 +48,13 @@ func Open(path string) (*Registry, error) {
 func (r *Registry) Close() error { return r.db.Close() }
 
 func (r *Registry) migrate() error {
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version >= schemaVersion {
+		return nil
+	}
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
@@ -101,7 +110,11 @@ func (r *Registry) migrate() error {
 	if err != nil {
 		return err
 	}
-	return r.mergeDuplicateClaudeSessions()
+	if err := r.mergeDuplicateClaudeSessions(); err != nil {
+		return err
+	}
+	_, err = r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+	return err
 }
 
 func (r *Registry) ensureColumn(table, name, declaration string) error {
@@ -1085,6 +1098,26 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 		message = cause.Error()
 	}
 	_, err := r.db.Exec(`UPDATE message_queue SET status=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, message, available.UnixMilli(), id)
+	return err
+}
+
+func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
+	var attempts int
+	if err := r.db.QueryRow(`SELECT attempts FROM message_queue WHERE id=?`, id).Scan(&attempts); err != nil {
+		return err
+	}
+	shift := attempts - 1
+	if shift < 0 {
+		shift = 0
+	}
+	if shift > 6 {
+		shift = 6
+	}
+	message := "delivery did not start"
+	if cause != nil {
+		message = cause.Error()
+	}
+	_, err := r.db.Exec(`UPDATE message_queue SET status='pending',last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), id)
 	return err
 }
 

@@ -875,6 +875,22 @@ func TestOutboxDeadLettersUnknownDeliveryWithoutAutomaticRetry(t *testing.T) {
 	}
 }
 
+func TestOutboxDefersPreDeliveryFailureWithoutDeadLettering(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	if err := r.QueueMessage("to", "wait for bridge"); err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = surface.DeliveryUnavailable(context.DeadlineExceeded)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	item, err := r.QueueItem(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Status != "pending" || item.Attempts != 1 || !strings.Contains(item.LastError, "delivery did not start") {
+		t.Fatalf("item=%+v", item)
+	}
+}
+
 func TestOutboxDeadLettersTerminalDeliveryWithoutRetry(t *testing.T) {
 	daemon, r, fake, _, to := daemonFixture(t)
 	if err := r.QueueMessage("to", "stale session"); err != nil {

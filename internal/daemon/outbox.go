@@ -35,6 +35,14 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	}
 	cancel()
 	if sendErr != nil {
+		if surface.IsDeliveryUnavailable(sendErr) {
+			if err := d.Registry.DeferMessage(item.ID, sendErr, now); err != nil {
+				d.log.Printf("defer queue item %d: %s", item.ID, err)
+			}
+			d.log.Printf("queue delivery %d did not start and will retry: %s", item.ID, sendErr)
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
+			return
+		}
 		if surface.IsDeliveryOutcomeUnknown(sendErr) {
 			if err := d.Registry.DeadLetterUnknown(item.ID, sendErr); err != nil {
 				d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)

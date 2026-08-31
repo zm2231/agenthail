@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,21 @@ func TestCodexHealthReportsBothUnavailableTransports(t *testing.T) {
 	err := codexHealth(context.Background(), true, desktop, managed)
 	if err == nil || !strings.Contains(err.Error(), "desktop unavailable") || !strings.Contains(err.Error(), "managed unavailable") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCodexWriteLockHonorsContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	first, err := acquireCodexWriteLock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseCodexWriteLock(first)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	second, err := acquireCodexWriteLock(ctx)
+	if second != nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("lock=%v err=%v", second, err)
 	}
 }
 
