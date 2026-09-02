@@ -392,7 +392,7 @@ func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[strin
 	sessions := make([]surface.Session, 0, len(threads))
 	for _, value := range threads {
 		thread, _ := value.(map[string]any)
-		sessions = append(sessions, codexSession(thread, false, false))
+		sessions = append(sessions, codexSession(thread, managed, desktopReachable))
 	}
 	return sessions, nil
 }
@@ -478,32 +478,37 @@ func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, err
 	transport := transports[id]
 	var conn codexClient
 	var err error
+	var managed, desktopReachable bool
 	switch transport {
 	case codexTransportDesktop:
 		conn, err = c.openDesktop(ctx)
+		desktopReachable = true
 	case codexTransportManaged:
 		conn, err = c.openManaged(ctx)
+		managed = true
 	default:
-		conn, _, _, err = c.openDiscovery(ctx)
+		conn, managed, desktopReachable, err = c.openDiscovery(ctx)
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	session, err := c.readSession(ctx, conn, id, false, false)
+	session, err := c.readSession(ctx, conn, id, managed, desktopReachable)
 	if err != nil && transport == "" && c.managed {
 		if _, desktop := conn.(*desktopCodexClient); desktop {
 			managed, managedErr := c.openManaged(ctx)
 			if managedErr == nil {
 				defer managed.Close()
-				session, err = c.readSession(ctx, managed, id, false, false)
+				session, err = c.readSession(ctx, managed, id, true, false)
 			}
 		}
 	}
 	if err != nil {
 		return nil, err
 	}
-	session.Transport = transport
+	if transport != "" {
+		session.Transport = transport
+	}
 	if session.Transport == "" {
 		session.Transport = codexTransportReadOnly
 	}
@@ -581,7 +586,9 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 	}
 	transports := c.loadedTransports(ctx)
 	for index := range output {
-		output[index].Session.Transport = transports[output[index].Session.ID]
+		if transport := transports[output[index].Session.ID]; transport != "" {
+			output[index].Session.Transport = transport
+		}
 		if output[index].Session.Transport == "" {
 			output[index].Session.Transport = codexTransportReadOnly
 		}

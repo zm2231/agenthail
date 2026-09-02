@@ -141,7 +141,7 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 	}{
 		{"vscode", "idle", false, true, codexTransportDesktop},
 		{"vscode", "notLoaded", true, true, codexTransportDesktop},
-		{"vscode", "idle", true, false, codexTransportManaged},
+		{"vscode", "idle", true, false, codexTransportReadOnly},
 		{"agenthail", "idle", true, false, codexTransportManaged},
 		{"cli", "idle", true, false, codexTransportReadOnly},
 		{"cli", "notLoaded", true, false, codexTransportReadOnly},
@@ -335,6 +335,21 @@ func TestCodexListPageKeepsHistoryReadOnly(t *testing.T) {
 	}
 	if reason := surface.ReadOnlySessionReason(&sessions[0]); !strings.Contains(reason, "agenthail launch codex") {
 		t.Fatalf("reason=%q", reason)
+	}
+}
+
+func TestCodexListPageKeepsDesktopSessionsWritable(t *testing.T) {
+	client := &fixedCodexClient{response: map[string]any{
+		"result": map[string]any{
+			"data": []any{map[string]any{
+				"id": "desktop-thread", "name": "Desktop thread", "source": "vscode", "status": "idle",
+			}},
+		},
+	}}
+	codex := NewCodex("")
+	sessions, err := codex.listPage(context.Background(), client, map[string]any{}, false, true)
+	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportDesktop {
+		t.Fatalf("sessions=%v err=%v", sessions, err)
 	}
 }
 

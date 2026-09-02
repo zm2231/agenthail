@@ -306,7 +306,7 @@ func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
 				value = "already"
 			case strings.Contains(expression, `"thread/search"`):
 				searchCalls++
-				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","status":{"type":"idle"}},"snippet":"test"}]}}`
+				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}},"snippet":"test"}]}}`
 			}
 			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
 		}
@@ -315,7 +315,7 @@ func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
 	defer server.Close()
 
 	session, err := NewCodex(server.URL).Resolve(context.Background(), "Q")
-	if err != nil || session == nil || session.ID != "thread-1" || searchCalls != 1 {
+	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || searchCalls != 1 {
 		t.Fatalf("session=%+v search_calls=%d err=%v", session, searchCalls, err)
 	}
 }
@@ -347,10 +347,10 @@ func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
 			case strings.Contains(expression, "process._getActiveHandles"):
 				value = "already"
 			case strings.Contains(expression, `"thread/loaded/list"`):
-				value = `{"result":{"data":["019f004a-a94e-7313-a599-2db587a1f67a"]}}`
+				value = `{"result":{"data":[]}}`
 			case strings.Contains(expression, `"thread/read"`):
 				readCalls++
-				value = `{"result":{"thread":{"id":"019f004a-a94e-7313-a599-2db587a1f67a","name":"known","cwd":"/tmp","source":"cli","status":{"type":"idle"}}}}`
+				value = `{"result":{"thread":{"id":"019f004a-a94e-7313-a599-2db587a1f67a","name":"known","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}}}`
 			case strings.Contains(expression, `"thread/list"`):
 				listCalls++
 			}

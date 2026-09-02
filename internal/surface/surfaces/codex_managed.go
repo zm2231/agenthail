@@ -277,9 +277,6 @@ func codexTransport(source string, status any, managed, desktopReachable bool) s
 		if desktopReachable {
 			return codexTransportDesktop
 		}
-		if managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
-			return codexTransportManaged
-		}
 		return codexTransportReadOnly
 	}
 	if source == "agenthail" && managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
