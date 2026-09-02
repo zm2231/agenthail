@@ -2,16 +2,127 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func startManagedCodexFixture(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("/tmp", "ah-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	socketDir := filepath.Join(home, "app-server-control")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(socketDir, "app-server-control.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgrader := websocket.Upgrader{}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		for {
+			var request map[string]any
+			if connection.ReadJSON(&request) != nil {
+				return
+			}
+			id, hasID := request["id"]
+			if !hasID {
+				continue
+			}
+			method, _ := request["method"].(string)
+			result := map[string]any{}
+			switch method {
+			case "thread/loaded/list":
+				result["data"] = []any{"managed-thread"}
+			case "thread/read":
+				result["thread"] = map[string]any{"id": "managed-thread", "name": "managed", "source": "agenthail", "status": map[string]any{"type": "idle"}}
+			case "thread/search":
+				result["data"] = []any{map[string]any{"thread": map[string]any{"id": "managed-thread", "name": "managed", "source": "agenthail", "status": map[string]any{"type": "idle"}}}}
+			}
+			_ = connection.WriteJSON(map[string]any{"id": id, "result": result})
+		}
+	})}
+	go server.Serve(listener)
+	t.Cleanup(func() {
+		_ = server.Close()
+	})
+	return home
+}
+
+func TestCodexResolveIDKeepsManagedLoadedSessionWritable(t *testing.T) {
+	home := startManagedCodexFixture(t)
+	t.Setenv("CODEX_HOME", home)
+	codex := NewCodex("")
+	codex.desktopURL = "http://127.0.0.1:1"
+	session, err := codex.resolveID(context.Background(), "managed-thread")
+	if err != nil || session == nil || session.Transport != codexTransportManaged {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+}
+
+func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
+	home := startManagedCodexFixture(t)
+	t.Setenv("CODEX_HOME", home)
+	upgrader := websocket.Upgrader{}
+	var server *httptest.Server
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+	})
+	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		connection, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		for {
+			var request map[string]any
+			if connection.ReadJSON(&request) != nil {
+				return
+			}
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			value := ""
+			switch {
+			case strings.Contains(expression, "process._getActiveHandles"):
+				value = "already"
+			case strings.Contains(expression, `"thread/loaded/list"`):
+				value = `{"result":{"data":[]}}`
+			case strings.Contains(expression, `"thread/search"`):
+				value = `{"error":{"code":-32601,"message":"method not found"}}`
+			}
+			_ = connection.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+		}
+	})
+	server = httptest.NewServer(handler)
+	defer server.Close()
+	codex := NewCodex("")
+	codex.desktopURL = server.URL
+	results, err := codex.SearchSessions(context.Background(), "managed", 10)
+	if err != nil || len(results) != 1 || results[0].Session.Transport != codexTransportManaged {
+		t.Fatalf("results=%+v err=%v", results, err)
+	}
+}
 
 func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 	cases := []struct {
@@ -22,7 +133,7 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 		want             string
 	}{
 		{"vscode", "idle", false, true, codexTransportDesktop},
-		{"vscode", "notLoaded", true, true, codexTransportReadOnly},
+		{"vscode", "notLoaded", true, true, codexTransportDesktop},
 		{"vscode", "idle", true, false, codexTransportManaged},
 		{"agenthail", "idle", true, false, codexTransportManaged},
 		{"cli", "idle", true, false, codexTransportReadOnly},
@@ -35,6 +146,38 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadedDesktopThreadIsWritableRegardlessOfOriginalSource(t *testing.T) {
+	client := &loadedDesktopClient{}
+	sessions, err := NewCodex("").listLoaded(context.Background(), client, 1, false, true)
+	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportDesktop {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+}
+
+func TestLoadedManagedThreadIsWritableRegardlessOfOriginalSource(t *testing.T) {
+	client := &loadedDesktopClient{}
+	sessions, err := NewCodex("").listLoaded(context.Background(), client, 1, true, false)
+	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportManaged {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+}
+
+type loadedDesktopClient struct{}
+
+func (*loadedDesktopClient) Request(_ context.Context, method string, _ map[string]any, _ time.Duration) (map[string]any, error) {
+	if method == "thread/loaded/list" {
+		return map[string]any{"result": map[string]any{"data": []any{"thread"}}}, nil
+	}
+	if method == "thread/read" {
+		return map[string]any{"result": map[string]any{"thread": map[string]any{
+			"id": "thread", "source": "cli", "status": "idle",
+		}}}, nil
+	}
+	return nil, fmt.Errorf("unexpected method %s", method)
+}
+
+func (*loadedDesktopClient) Close() error { return nil }
 
 type fixedCodexClient struct {
 	response map[string]any
@@ -170,7 +313,7 @@ func TestManagedStreamWaitsForNewTurnInsteadOfReplayingHistory(t *testing.T) {
 	}
 }
 
-func TestCodexListPageUsesManagedTransportForDesktopSessions(t *testing.T) {
+func TestCodexListPageKeepsHistoryReadOnly(t *testing.T) {
 	client := &fixedCodexClient{response: map[string]any{
 		"result": map[string]any{
 			"data": []any{map[string]any{
@@ -179,15 +322,11 @@ func TestCodexListPageUsesManagedTransportForDesktopSessions(t *testing.T) {
 		},
 	}}
 	codex := NewCodex("")
-	managed, err := codex.listPage(context.Background(), client, map[string]any{}, true, false)
-	if err != nil || len(managed) != 1 || managed[0].Transport != codexTransportManaged {
-		t.Fatalf("managed sessions=%v err=%v", managed, err)
+	sessions, err := codex.listPage(context.Background(), client, map[string]any{}, true, false)
+	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportReadOnly {
+		t.Fatalf("sessions=%v err=%v", sessions, err)
 	}
-	legacy, err := codex.listPage(context.Background(), client, map[string]any{}, false, false)
-	if err != nil || len(legacy) != 1 || legacy[0].Transport != codexTransportReadOnly {
-		t.Fatalf("legacy sessions=%v err=%v", legacy, err)
-	}
-	if reason := surface.ReadOnlySessionReason(&legacy[0]); !strings.Contains(reason, "agenthail doctor") {
+	if reason := surface.ReadOnlySessionReason(&sessions[0]); !strings.Contains(reason, "agenthail launch codex") {
 		t.Fatalf("reason=%q", reason)
 	}
 }
@@ -208,8 +347,11 @@ func TestCodexResumeRequiresDesktopDirectInput(t *testing.T) {
 	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": false}}}) {
 		t.Fatal("unready Desktop thread was accepted")
 	}
-	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{}}}) {
-		t.Fatal("missing direct-input state was accepted")
+	if !codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{}}}) {
+		t.Fatal("Desktop resume without an explicit direct-input state was rejected")
+	}
+	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{}}) {
+		t.Fatal("missing thread was accepted")
 	}
 }
 
@@ -227,7 +369,7 @@ func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 		t.Fatal("Desktop session was read only")
 	}
 	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
-	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); reason != "Codex Desktop is not available through the local app-server; run 'agenthail doctor'" {
+	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); reason != "Codex Desktop is not available through Agenthail's Desktop bridge; quit Codex and run 'agenthail launch codex'" {
 		t.Fatalf("reason=%q", reason)
 	}
 }

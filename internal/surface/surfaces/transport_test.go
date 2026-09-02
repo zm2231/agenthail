@@ -130,7 +130,7 @@ func TestProcessGroupCommandKillsDescendantsOnTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_TEST_CHILD_PID", childPath)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	if err := processGroupCommand(ctx, script).Run(); err == nil {
 		t.Fatal("expected timeout")

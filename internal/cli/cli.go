@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1573,11 +1572,11 @@ func launchCodex(codex surface.Surface) error {
 
 	pid := findCodexPID()
 	if pid > 0 {
-		if err := probeCodexAppServer(codex); err == nil {
+		if err := probeCodexDesktop(codex); err == nil {
 			fmt.Println("Codex is ready for Agenthail")
 			return nil
 		}
-		return fmt.Errorf("Codex is open but Agenthail cannot use its local app-server; run 'agenthail doctor' for details")
+		return fmt.Errorf("Codex is already open without Agenthail's Desktop bridge; quit Codex, then run 'agenthail launch codex'")
 	}
 
 	cmd := exec.Command(exe, codexLaunchArgs()...)
@@ -1593,7 +1592,7 @@ func launchCodex(codex surface.Surface) error {
 	fmt.Println("Opening Codex and waiting for it to connect")
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := probeCodexAppServer(codex); err == nil {
+		if err := probeCodexDesktop(codex); err == nil {
 			fmt.Println("Codex is ready for Agenthail")
 			fmt.Println("Run 'agenthail doctor' to check every connection")
 			return nil
@@ -1615,21 +1614,25 @@ func probeCodexAppServer(codex surface.Surface) error {
 	return err
 }
 
+func probeCodexDesktop(codex surface.Surface) error {
+	ctx, cancel := context.WithTimeout(context.Background(), codexLaunchProbeTimeout)
+	defer cancel()
+	if checker, ok := codex.(interface{ DesktopReady(context.Context) error }); ok {
+		return checker.DesktopReady(ctx)
+	}
+	return probeCodexAppServer(codex)
+}
+
 func codexLaunchArgs() []string {
 	return []string{
 		"--no-first-run",
 		"--no-default-browser-check",
+		"--inspect=127.0.0.1:9230",
 	}
 }
 
 func codexRemotePort() string {
-	if value := os.Getenv("AGENTHAIL_CODEX_REMOTE"); value != "" {
-		return value
-	}
-	if value := os.Getenv("AGENTHAIL_CODEX_INSPECT"); value != "" {
-		return value
-	}
-	return ""
+	return os.Getenv("AGENTHAIL_CODEX_INSPECT")
 }
 
 func envOr(key, def string) string {
@@ -1668,51 +1671,6 @@ func selectCodexPID(output string, expectedExecutables []string) int {
 		}
 	}
 	return 0
-}
-
-func rendererDebuggerListening(port string) bool {
-	targets, err := codexDebugTargets(port)
-	if err != nil {
-		return false
-	}
-	for _, target := range targets {
-		targetType, _ := target["type"].(string)
-		targetURL, _ := target["url"].(string)
-		if (targetType == "page" || targetType == "window") && strings.HasPrefix(targetURL, "app://") {
-			return true
-		}
-	}
-	return false
-}
-
-func nodeDebuggerListening(port string) bool {
-	targets, err := codexDebugTargets(port)
-	if err != nil {
-		return false
-	}
-	for _, target := range targets {
-		if target["type"] == "node" {
-			return true
-		}
-	}
-	return false
-}
-
-func codexDebugTargets(port string) ([]map[string]any, error) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:" + port + "/json")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("debug endpoint returned HTTP %d", resp.StatusCode)
-	}
-	var targets []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
-		return nil, err
-	}
-	return targets, nil
 }
 
 func truncate(s string, n int) string {

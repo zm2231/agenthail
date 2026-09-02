@@ -44,7 +44,6 @@ type runtimeCLISurface struct {
 }
 
 func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
-	t.Setenv("AGENTHAIL_CODEX_REMOTE", "")
 	t.Setenv("AGENTHAIL_CODEX_INSPECT", "")
 	if got := codexRemotePort(); got != "" {
 		t.Fatalf("codexRemotePort() = %q, want empty managed-runtime default", got)
@@ -740,10 +739,10 @@ func TestUnicodeTruncationIsValid(t *testing.T) {
 	}
 }
 
-func TestCodexLaunchDoesNotEnableRendererDebugging(t *testing.T) {
+func TestCodexLaunchEnablesLoopbackMainInspector(t *testing.T) {
 	args := strings.Join(codexLaunchArgs(), " ")
-	if strings.Contains(args, "remote-debugging") || strings.Contains(args, "--inspect") {
-		t.Fatalf("launch args expose a debug transport: %q", args)
+	if strings.Contains(args, "remote-debugging") || !strings.Contains(args, "--inspect=127.0.0.1:9230") {
+		t.Fatalf("launch args=%q", args)
 	}
 }
 

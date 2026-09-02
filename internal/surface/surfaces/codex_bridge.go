@@ -13,71 +13,55 @@ import (
 
 const codexHookJS = `
 (() => {
-  if (typeof window?.electronBridge?.sendMessageFromView !== 'function') return 'no-electron-bridge';
-  const current = globalThis.__agenthailRendererBridgeV3;
-  if (current && typeof current.handler === 'function' && typeof current.request === 'function') return 'already';
-
-  const bridge = current && typeof current.handler === 'function' ? current : {
+  const handle = process._getActiveHandles().find(value => value && value.pid && Array.isArray(value.spawnargs) && value.spawnargs.join(' ').includes('app-server'));
+  if (!handle || !handle.stdin || !handle.stdout) return 'no-app-server-child';
+  const current = globalThis.__agenthailDesktopAppServerV1;
+  if (current && current.handle === handle && typeof current.request === 'function') return 'already';
+  const bridge = {
+    handle,
     events: [],
     sequence: 0,
-    handler: null,
-    request: null
+    next: 900000,
+    pending: new Map(),
+    buffer: ''
   };
-  if (typeof bridge.handler !== 'function') {
-    bridge.handler = function(event) {
+  handle.stdout.on('data', chunk => {
+    bridge.buffer += Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+    let index;
+    while ((index = bridge.buffer.indexOf('\n')) !== -1) {
+      const line = bridge.buffer.slice(0, index).trim();
+      bridge.buffer = bridge.buffer.slice(index + 1);
+      if (!line) continue;
       try {
-        const value = event && event.data;
-        if (value && value.type === 'mcp-notification' && value.hostId === 'local' && typeof value.method === 'string') {
-          bridge.events.push({ sequence: ++bridge.sequence, method: value.method, params: value.params || {} });
+        const message = JSON.parse(line);
+        if (message.id != null && bridge.pending.has(message.id)) {
+          const resolve = bridge.pending.get(message.id);
+          bridge.pending.delete(message.id);
+          resolve(message);
+        } else if (typeof message.method === 'string') {
+          bridge.events.push({sequence: ++bridge.sequence, method: message.method, params: message.params || {}});
           if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
         }
       } catch {}
-    };
-    window.addEventListener('message', bridge.handler, true);
-  }
-  globalThis.__agenthailRendererBridgeV3 = bridge;
-
-  const findRequestDispatcher = async () => {
-    const queue = [...document.scripts].map(script => script.src).filter(Boolean);
-    const seen = new Set();
-    while (queue.length && seen.size < 400) {
-      const url = queue.shift();
-      if (seen.has(url)) continue;
-      seen.add(url);
-      try {
-        const source = await fetch(url).then(response => response.text());
-        if (source.includes('Missing AppServer request message handler')) {
-          const module = await import(url);
-          for (const value of Object.values(module)) {
-            if (typeof value !== 'function' || value.length !== 2) continue;
-            const text = Function.prototype.toString.call(value);
-            if (/return\s+[A-Za-z_$][\w$]*\.sendRequest\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)/.test(text)) return value;
-          }
-        }
-        const imports = /(?:from\s*|import\s*\(|import\s*)["']([^"']+\.js)["']/g;
-        let match;
-        while ((match = imports.exec(source))) queue.push(new URL(match[1], url).href);
-        for (const asset of source.matchAll(/["'](\.\/[^"']+\.js)["']/g)) queue.push(new URL(asset[1], url).href);
-      } catch {}
     }
-    return null;
-  };
-  return findRequestDispatcher().then(dispatcher => {
-    if (typeof dispatcher !== 'function') return 'no-request-dispatcher';
-    bridge.request = (method, params, timeoutMs) => dispatcher('send-cli-request-for-host', {
-      hostId: 'local', method, params, timeoutMs, source: 'agenthail'
-    });
-    return 'hooked';
   });
+  bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
+    const id = bridge.next++;
+    const timer = setTimeout(() => {
+      if (bridge.pending.delete(id)) resolve({error:{code:'timeout', message:'Codex Desktop app-server request timed out'}});
+    }, timeoutMs);
+    bridge.pending.set(id, response => { clearTimeout(timer); resolve(response); });
+    handle.stdin.write(JSON.stringify({jsonrpc:'2.0', id, method, params:params||{}}) + '\n', error => {
+      if (error && bridge.pending.delete(id)) { clearTimeout(timer); resolve({error:{code:'write_failed', message:String(error.message || error)}}); }
+    });
+  });
+  globalThis.__agenthailDesktopAppServerV1 = bridge;
+  return 'hooked';
 })()
 `
 
-func codexRendererTrampolineJS(expression string) string {
-	return fmt.Sprintf(`(async()=>{const electron=process.getBuiltinModule('module').createRequire(process.execPath)('electron');const view=electron.webContents.getAllWebContents().find(x=>(x.getType()==='window'||x.getType()==='page')&&x.getURL().startsWith('app://'));if(!view)throw new Error('Codex renderer webContents not found');return await view.executeJavaScript(%s)})()`, strconvQuote(expression))
-}
-
 func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailRendererBridgeV3;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop request dispatcher is unavailable'}});const result=await b.request(%s,%s,%d);return JSON.stringify({result})}catch(e){return JSON.stringify({error:{code:e&&e.code!=null?e.code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailDesktopAppServerV1;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop app-server bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
 		strconvQuote(method), paramsJSON, timeout.Milliseconds())
 }
 
@@ -94,13 +78,13 @@ func codexPayloadDeleteJS(id string) string {
 }
 
 func codexStagedRPCJS(id, method string, timeout time.Duration) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailRendererBridgeV3,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop request dispatcher is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));const result=await b.request(%s,params,%d);return JSON.stringify({result})}catch(e){return JSON.stringify({error:{code:e&&e.code!=null?e.code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailDesktopAppServerV1,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop app-server bridge is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));return JSON.stringify(await b.request(%s,params,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
 }
 
-const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailRendererBridgeV3;return b?b.sequence:0})()`
+const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailDesktopAppServerV1;return b?b.sequence:0})()`
 
 func codexEventsJS(after int64) string {
-	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailRendererBridgeV3;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
+	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailDesktopAppServerV1;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
 }
 
 func strconvQuote(value string) string {
@@ -126,16 +110,13 @@ func (c *Codex) ensureHooked(ctx context.Context, conn *cdpConn) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	if lastResult == "no-electron-bridge" {
-		return fmt.Errorf("Codex renderer does not expose the Desktop app-server bridge; update Codex Desktop or relaunch it with 'agenthail launch codex'")
-	}
-	if lastResult == "no-request-dispatcher" {
-		return fmt.Errorf("Codex Desktop's request dispatcher could not be discovered; this Desktop build is not yet supported by Agenthail")
+	if lastResult == "no-app-server-child" {
+		return fmt.Errorf("Codex Desktop app-server child was not found; wait for Codex to finish launching or relaunch it with 'agenthail launch codex'")
 	}
 	if lastErr != nil {
-		return fmt.Errorf("install Codex renderer bridge: %w", lastErr)
+		return fmt.Errorf("install Codex Desktop bridge: %w", lastErr)
 	}
-	return fmt.Errorf("install Codex renderer bridge: unexpected result %q after 3 attempts", lastResult)
+	return fmt.Errorf("install Codex Desktop bridge: unexpected result %q after 3 attempts", lastResult)
 }
 
 func (c *Codex) rpc(ctx context.Context, conn *cdpConn, method string, params map[string]any, wait time.Duration) (map[string]any, error) {

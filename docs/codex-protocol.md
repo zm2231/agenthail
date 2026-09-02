@@ -13,6 +13,10 @@ Agenthail implements Codex protocol methods only when they support a user-facing
 - Keep current work bounded through loaded-thread and state-database views
 - Search older local Codex history only when an operator requests it
 
+## Desktop-owned conversations
+
+Codex Desktop keeps its app-server on private stdio and holds the active thread writer lock. Agenthail reaches that same child through the Desktop main-process inspector, bound only to `127.0.0.1`, so it does not compete for ownership with a second app-server. `agenthail launch codex` starts Desktop with the required inspector. A Desktop already running without that launch path must be quit and relaunched before Agenthail can send to its active conversations. The inspector is intentionally loopback-only, but it grants code execution to local processes that can reach it; use it only on a trusted local account.
+
 `thread/search` is available through the app-server experimental API capability. Agenthail requests that capability on initialization and calls the method only for an explicit history search. If a newer Codex version promotes the method to the normal protocol, the method name and request shape remain the same. If an older version does not support it, Agenthail retains its local conversation catalog and reports that full Codex history search is unavailable rather than scanning rollout files.
 
 ## Deferred

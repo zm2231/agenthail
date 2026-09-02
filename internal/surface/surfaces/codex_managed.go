@@ -147,10 +147,6 @@ func (c *Codex) openDesktop(ctx context.Context) (codexClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := c.ensureDesktopHook(ctx, conn); err != nil {
-		_ = conn.close()
-		return nil, err
-	}
 	return &desktopCodexClient{owner: c, conn: conn}, nil
 }
 
@@ -163,7 +159,7 @@ func (c *Codex) ensureDesktopHook(ctx context.Context, conn *cdpConn) error {
 	}
 	err := c.ensureHooked(ctx, conn)
 	c.bridgeTarget = conn.target
-	if err != nil && strings.Contains(err.Error(), "request dispatcher") {
+	if err != nil && (strings.Contains(err.Error(), "request dispatcher") || strings.Contains(err.Error(), "app-server child was not found")) {
 		c.bridgeErr = err
 		c.bridgeRetry = now.Add(10 * time.Second)
 		return err
@@ -174,11 +170,8 @@ func (c *Codex) ensureDesktopHook(ctx context.Context, conn *cdpConn) error {
 }
 
 func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable bool) (codexClient, error) {
-	if c.managed {
-		return c.openManaged(ctx)
-	}
 	if writable && (sess.Transport == "" || sess.Transport == codexTransportReadOnly) {
-		return nil, fmt.Errorf("Codex terminal session is read only; start a writable session with 'agenthail codex'")
+		return nil, fmt.Errorf("Codex session is read only; open the session in Codex Desktop and relaunch it with 'agenthail launch codex'")
 	}
 	if sess.Transport == codexTransportManaged {
 		return c.openManaged(ctx)
@@ -189,12 +182,6 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 func (c *Codex) EnsureWritable(_ context.Context, sess *surface.Session) error {
 	if sess == nil {
 		return fmt.Errorf("Codex session is required")
-	}
-	if !c.managed {
-		if surface.IsReadOnlySession(sess) {
-			return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
-		}
-		return nil
 	}
 	if surface.IsReadOnlySession(sess) {
 		return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
@@ -287,11 +274,11 @@ func codexSource(value any) string {
 
 func codexTransport(source string, status any, managed, desktopReachable bool) string {
 	if source == "vscode" {
+		if desktopReachable {
+			return codexTransportDesktop
+		}
 		if managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
 			return codexTransportManaged
-		}
-		if !managed && desktopReachable {
-			return codexTransportDesktop
 		}
 		return codexTransportReadOnly
 	}

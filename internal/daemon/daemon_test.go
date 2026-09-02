@@ -132,7 +132,7 @@ func TestScanBacksOffFailingRelayOnlySessionsAndRecovers(t *testing.T) {
 	if _, err := registry.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
-	fake.observeErr = errors.New("renderer bridge unavailable")
+	fake.observeErr = errors.New("desktop bridge unavailable")
 	d.scanAndRelay(context.Background())
 	d.scanAndRelay(context.Background())
 	if got := fake.observeCalls.Load(); got != 1 {
@@ -754,7 +754,7 @@ func TestQueueWaitsForBridgeRecoveryAndDeliversExactlyOnce(t *testing.T) {
 	fake.observeErr = errors.New("Codex Desktop request dispatcher is unavailable")
 	daemon.scanAndRelay(context.Background())
 	daemon.scanAndRelay(context.Background())
-	fake.observeErr = errors.New("Codex Desktop renderer was replaced; rebinding")
+	fake.observeErr = errors.New("Codex Desktop bridge was replaced; rebinding")
 	daemon.scanAndRelay(context.Background())
 	item, err := r.QueueItem(1)
 	if err != nil || item.Status != "pending" || item.Attempts != 0 || len(fake.sent) != 0 {

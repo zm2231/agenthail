@@ -15,8 +15,7 @@ import (
 )
 
 type Codex struct {
-	rendererURL  string
-	nodeURL      string
+	desktopURL   string
 	managed      bool
 	bridgeMu     sync.Mutex
 	bridgeTarget string
@@ -30,12 +29,12 @@ type Codex struct {
 func NewCodex(remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
-		remoteURL = "9231"
+		remoteURL = "9230"
 	}
 	if !strings.Contains(remoteURL, "://") {
 		remoteURL = "ws://127.0.0.1:" + remoteURL
 	}
-	return &Codex{rendererURL: remoteURL, nodeURL: "ws://127.0.0.1:9229", managed: managed}
+	return &Codex{desktopURL: remoteURL, managed: managed}
 }
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
@@ -72,15 +71,14 @@ func codexHealth(ctx context.Context, managed bool, desktop, managedRuntime code
 }
 
 type cdpConn struct {
-	ws         *websocket.Conn
-	mu         sync.Mutex
-	next       int
-	trampoline bool
-	target     string
+	ws     *websocket.Conn
+	mu     sync.Mutex
+	next   int
+	target string
 }
 
 func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
-	targets, err := c.resolveCDPTargets(ctx)
+	targets, err := resolveCodexNodeEndpoint(ctx, c.desktopURL)
 	if err != nil {
 		return nil, err
 	}
@@ -92,89 +90,55 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 			failures = append(failures, fmt.Sprintf("%s: %v", target.wsURL, dialErr))
 			continue
 		}
-		conn := &cdpConn{ws: ws, next: 1, trampoline: target.trampoline, target: target.wsURL}
-		value, probeErr := conn.evaluate(ctx, codexRendererCapabilityJS, 2*time.Second)
-		if probeErr == nil && value == true {
+		conn := &cdpConn{ws: ws, next: 1, target: target.wsURL}
+		if probeErr := c.ensureDesktopHook(ctx, conn); probeErr == nil {
 			return conn, nil
+		} else {
+			failures = append(failures, fmt.Sprintf("%s: Desktop app-server bridge unavailable (%v)", target.wsURL, probeErr))
 		}
 		_ = conn.close()
-		failures = append(failures, fmt.Sprintf("%s: renderer bridge unavailable (%v)", target.wsURL, probeErr))
 	}
-	return nil, fmt.Errorf("connect Codex Desktop renderer: no debug target exposed electronBridge.sendMessageFromView (%s)", strings.Join(failures, "; "))
+	return nil, fmt.Errorf("connect Codex Desktop main inspector: %s", strings.Join(failures, "; "))
 }
-
-const codexRendererCapabilityJS = `typeof window?.electronBridge?.sendMessageFromView === 'function'`
 
 type codexCDPTarget struct {
-	wsURL      string
-	trampoline bool
+	wsURL string
 }
 
-func (c *Codex) resolveCDPTargets(ctx context.Context) ([]codexCDPTarget, error) {
-	targets, rendererErr := resolveCodexEndpoint(ctx, c.rendererURL, true)
-	if rendererErr == nil {
-		return targets, nil
-	}
-	if c.nodeURL != "" && c.nodeURL != c.rendererURL {
-		if targets, nodeErr := resolveCodexEndpoint(ctx, c.nodeURL, false); nodeErr == nil {
-			return targets, nil
-		}
-	}
-	return nil, fmt.Errorf("connect Codex Desktop renderer at %s: %w (run 'agenthail launch codex'; an already-running app may need the compatibility bridge or a relaunch)", c.rendererURL, rendererErr)
-}
-
-func resolveCodexEndpoint(ctx context.Context, endpoint string, preferRenderer bool) ([]codexCDPTarget, error) {
+func resolveCodexNodeEndpoint(ctx context.Context, endpoint string) ([]codexCDPTarget, error) {
 	httpURL := strings.Replace(endpoint, "ws://", "http://", 1)
 	httpURL = strings.Replace(httpURL, "wss://", "https://", 1)
-	req, _ := http.NewRequestWithContext(ctx, "GET", httpURL+"/json", nil)
-	resp, err := localHTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("debug endpoint returned HTTP %d", resp.StatusCode)
-	}
-	var targets []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
-		return nil, fmt.Errorf("parse debug targets: %w", err)
-	}
-	var rendererTargets []codexCDPTarget
-	var nodeTargets []codexCDPTarget
-	for _, t := range targets {
-		u, _ := t["webSocketDebuggerUrl"].(string)
-		if u == "" {
+	for _, path := range []string{"/json/list", "/json"} {
+		req, _ := http.NewRequestWithContext(ctx, "GET", httpURL+path, nil)
+		resp, err := localHTTPClient.Do(req)
+		if err != nil {
 			continue
 		}
-		targetType, _ := t["type"].(string)
-		targetURL, _ := t["url"].(string)
-		if preferRenderer && (targetType == "page" || targetType == "window") && strings.HasPrefix(targetURL, "app://") {
-			target := codexCDPTarget{wsURL: u}
-			if targetURL == "app://-/index.html" {
-				rendererTargets = append([]codexCDPTarget{target}, rendererTargets...)
-			} else {
-				rendererTargets = append(rendererTargets, target)
+		var values []map[string]any
+		decodeErr := json.NewDecoder(resp.Body).Decode(&values)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || decodeErr != nil {
+			continue
+		}
+		var nodes []codexCDPTarget
+		for _, value := range values {
+			if kind, _ := value["type"].(string); kind != "node" {
+				continue
+			}
+			if wsURL, _ := value["webSocketDebuggerUrl"].(string); wsURL != "" {
+				nodes = append(nodes, codexCDPTarget{wsURL: wsURL})
 			}
 		}
-		if targetType == "node" {
-			nodeTargets = append(nodeTargets, codexCDPTarget{wsURL: u, trampoline: true})
+		if len(nodes) > 0 {
+			return nodes, nil
 		}
 	}
-	if len(rendererTargets) > 0 {
-		return rendererTargets, nil
-	}
-	if len(nodeTargets) > 0 {
-		return nodeTargets, nil
-	}
-	return nil, fmt.Errorf("no Codex renderer%s target found", map[bool]string{true: " or compatibility node", false: ""}[preferRenderer])
+	return nil, fmt.Errorf("no Codex Desktop main-process inspector at %s; quit Codex and relaunch it with 'agenthail launch codex'", endpoint)
 }
 
 func (c *cdpConn) close() error { return c.ws.Close() }
 
 func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Duration) (any, error) {
-	if c.trampoline {
-		expr = codexRendererTrampolineJS(expr)
-	}
 	c.mu.Lock()
 	id := c.next
 	c.next++
@@ -234,14 +198,6 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 const codexRecentListLimit = 50
 
 func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
-	if c.managed {
-		client, err := c.openManaged(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer client.Close()
-		return c.listCurrent(ctx, client, true, false)
-	}
 	clients := []struct {
 		client           codexClient
 		managed          bool
@@ -283,7 +239,7 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 		succeeded = true
 		for _, session := range sessions {
 			previous, exists := byID[session.ID]
-			if !exists || session.Transport == codexTransportManaged || previous.Transport == codexTransportReadOnly {
+			if !exists || codexTransportRank(session.Transport) > codexTransportRank(previous.Transport) {
 				byID[session.ID] = session
 			}
 		}
@@ -299,6 +255,17 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	return out, nil
 }
 
+func codexTransportRank(transport string) int {
+	switch transport {
+	case codexTransportDesktop:
+		return 3
+	case codexTransportManaged:
+		return 2
+	default:
+		return 1
+	}
+}
+
 func (c *Codex) Ready(ctx context.Context) error {
 	conn, _, _, err := c.openDiscovery(ctx)
 	if err != nil {
@@ -306,6 +273,16 @@ func (c *Codex) Ready(ctx context.Context) error {
 	}
 	defer conn.Close()
 	_, err = c.loadedThreadIDs(ctx, conn, 1)
+	return err
+}
+
+func (c *Codex) DesktopReady(ctx context.Context) error {
+	client, err := c.openDesktop(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	_, err = c.loadedThreadIDs(ctx, client, 1)
 	return err
 }
 
@@ -329,10 +306,15 @@ func (c *Codex) listLoaded(ctx context.Context, conn codexClient, limit int, man
 	sessions := make([]surface.Session, 0, len(ids))
 	var readErrors []string
 	for _, id := range ids {
-		session, err := c.readSession(ctx, conn, id, managed, desktopReachable)
+		session, err := c.readSession(ctx, conn, id, false, false)
 		if err != nil {
 			readErrors = append(readErrors, err.Error())
 			continue
+		}
+		if desktopReachable {
+			session.Transport = codexTransportDesktop
+		} else if managed {
+			session.Transport = codexTransportManaged
 		}
 		sessions = append(sessions, session)
 	}
@@ -398,6 +380,9 @@ func (c *Codex) listRecent(ctx context.Context, conn codexClient, managed, deskt
 }
 
 func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[string]any, managed, desktopReachable bool) ([]surface.Session, error) {
+	if _, desktop := conn.(*desktopCodexClient); desktop {
+		params = map[string]any{"page": map[string]any{"limit": params["limit"]}}
+	}
 	resp, err := conn.Request(ctx, "thread/list", params, 10*time.Second)
 	if err != nil {
 		return nil, err
@@ -407,7 +392,7 @@ func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[strin
 	sessions := make([]surface.Session, 0, len(threads))
 	for _, value := range threads {
 		thread, _ := value.(map[string]any)
-		sessions = append(sessions, codexSession(thread, managed, desktopReachable))
+		sessions = append(sessions, codexSession(thread, false, false))
 	}
 	return sessions, nil
 }
@@ -489,14 +474,38 @@ func (c *Codex) Resolve(ctx context.Context, target string) (*surface.Session, e
 }
 
 func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, error) {
-	conn, managed, desktopReachable, err := c.openDiscovery(ctx)
+	transports := c.loadedTransports(ctx)
+	transport := transports[id]
+	var conn codexClient
+	var err error
+	switch transport {
+	case codexTransportDesktop:
+		conn, err = c.openDesktop(ctx)
+	case codexTransportManaged:
+		conn, err = c.openManaged(ctx)
+	default:
+		conn, _, _, err = c.openDiscovery(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	session, err := c.readSession(ctx, conn, id, managed, desktopReachable)
+	session, err := c.readSession(ctx, conn, id, false, false)
+	if err != nil && transport == "" && c.managed {
+		if _, desktop := conn.(*desktopCodexClient); desktop {
+			managed, managedErr := c.openManaged(ctx)
+			if managedErr == nil {
+				defer managed.Close()
+				session, err = c.readSession(ctx, managed, id, false, false)
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
+	}
+	session.Transport = transport
+	if session.Transport == "" {
+		session.Transport = codexTransportReadOnly
 	}
 	return &session, nil
 }
@@ -531,13 +540,24 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 		return nil, err
 	}
 	defer conn.Close()
-	response, err := conn.Request(ctx, "thread/search", map[string]any{
+	params := map[string]any{
 		"searchTerm":    query,
 		"limit":         limit,
 		"sortKey":       "recency_at",
 		"sortDirection": "desc",
 		"archived":      false,
-	}, 5*time.Second)
+	}
+	response, err := conn.Request(ctx, "thread/search", params, 5*time.Second)
+	if err != nil && c.managed {
+		if _, desktop := conn.(*desktopCodexClient); desktop {
+			managedConn, managedErr := c.openManaged(ctx)
+			if managedErr == nil {
+				defer managedConn.Close()
+				response, err = managedConn.Request(ctx, "thread/search", params, 5*time.Second)
+				managed, desktopReachable = true, false
+			}
+		}
+	}
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "method not found") || strings.Contains(err.Error(), "-32601") {
 			return nil, surface.ErrUnsupported
@@ -559,23 +579,48 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 		}
 		output = append(output, surface.SessionSearchResult{Session: session, Snippet: str(entry, "snippet")})
 	}
+	transports := c.loadedTransports(ctx)
+	for index := range output {
+		output[index].Session.Transport = transports[output[index].Session.ID]
+		if output[index].Session.Transport == "" {
+			output[index].Session.Transport = codexTransportReadOnly
+		}
+	}
 	return output, nil
 }
 
 func (c *Codex) openDiscovery(ctx context.Context) (codexClient, bool, bool, error) {
-	if c.managed {
-		client, err := c.openManaged(ctx)
-		return client, true, false, err
+	if client, err := c.openDesktop(ctx); err == nil {
+		return client, false, true, nil
 	}
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return nil, false, false, err
+	client, err := c.openManaged(ctx)
+	return client, true, false, err
+}
+
+func (c *Codex) loadedTransports(ctx context.Context) map[string]string {
+	transports := make(map[string]string)
+	if desktop, err := c.openDesktop(ctx); err == nil {
+		if ids, listErr := c.loadedThreadIDs(ctx, desktop, 100); listErr == nil {
+			for _, id := range ids {
+				transports[id] = codexTransportDesktop
+			}
+		}
+		_ = desktop.Close()
 	}
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		_ = conn.close()
-		return nil, false, false, err
+	if !c.managed {
+		return transports
 	}
-	return &desktopCodexClient{owner: c, conn: conn}, false, true, nil
+	if managed, err := c.openManaged(ctx); err == nil {
+		if ids, listErr := c.loadedThreadIDs(ctx, managed, 100); listErr == nil {
+			for _, id := range ids {
+				if _, desktopOwns := transports[id]; !desktopOwns {
+					transports[id] = codexTransportManaged
+				}
+			}
+		}
+		_ = managed.Close()
+	}
+	return transports
 }
 
 func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
@@ -584,7 +629,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 		return nil, err
 	}
 	defer conn.Close()
-	thread, err := c.readThread(ctx, conn, sess.ID)
+	thread, err := c.readObservationThread(ctx, conn, sess.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +637,7 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 }
 
 func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
-	thread, err := c.readThread(ctx, conn, threadID)
+	thread, err := c.readObservationThread(ctx, conn, threadID)
 	if err != nil {
 		return "", err
 	}
@@ -726,8 +771,13 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 func codexResumeAcceptsDirectInput(response map[string]any) bool {
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
-	accepts, _ := thread["canAcceptDirectInput"].(bool)
-	return accepts
+	if thread == nil {
+		return false
+	}
+	if accepts, present := thread["canAcceptDirectInput"].(bool); present {
+		return accepts
+	}
+	return true
 }
 
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
@@ -742,19 +792,16 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	if sess.Transport == codexTransportManaged || (c.managed && sess.Source == "vscode") {
+	if sess.Transport == codexTransportManaged {
 		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
 	}
-	conn, err := c.dial(ctx)
+	client, err := c.openDesktop(ctx)
 	if err != nil {
 		return err
 	}
-	defer conn.close()
-	if err := c.ensureHooked(ctx, conn); err != nil {
-		return err
-	}
+	defer client.Close()
 	if uuid != "" {
-		thread, readErr := c.readThread(ctx, &desktopCodexClient{owner: c, conn: conn}, sess.ID)
+		thread, readErr := c.readObservationThread(ctx, client, sess.ID)
 		if readErr != nil {
 			return readErr
 		}
@@ -769,7 +816,11 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			return nil
 		}
 	}
-	cursorValue, err := conn.evaluate(ctx, codexEventCursorJS, 2*time.Second)
+	desktop, ok := client.(*desktopCodexClient)
+	if !ok {
+		return fmt.Errorf("Codex Desktop stream requires the Desktop transport")
+	}
+	cursorValue, err := desktop.conn.evaluate(ctx, codexEventCursorJS, 2*time.Second)
 	if err != nil {
 		return err
 	}
@@ -787,7 +838,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			return ctx.Err()
 		default:
 		}
-		v, err := conn.evaluate(ctx, codexEventsJS(int64(cursor)), 2*time.Second)
+		v, err := desktop.conn.evaluate(ctx, codexEventsJS(int64(cursor)), 2*time.Second)
 		if err != nil {
 			return err
 		}
@@ -821,7 +872,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 					onEvent(surface.StreamEvent{Kind: "tool_use", Text: name})
 				}
 			case codexCompletionMethod(method):
-				thread, readErr := c.readThread(ctx, &desktopCodexClient{owner: c, conn: conn}, sess.ID)
+				thread, readErr := c.readObservationThread(ctx, client, sess.ID)
 				if readErr != nil {
 					return readErr
 				}
@@ -1008,12 +1059,9 @@ func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (
 }
 
 func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
-	var conn codexClient
-	var err error
-	if c.managed {
+	conn, err := c.openDesktop(ctx)
+	if err != nil && c.managed {
 		conn, err = c.openManaged(ctx)
-	} else {
-		conn, err = c.openDesktop(ctx)
 	}
 	if err != nil {
 		return nil, err

@@ -64,7 +64,7 @@ func ReadOnlySessionReason(session *Session) string {
 		return ""
 	}
 	if session.Source == "vscode" {
-		return "Codex Desktop is not available through the local app-server; run 'agenthail doctor'"
+		return "Codex Desktop is not available through Agenthail's Desktop bridge; quit Codex and run 'agenthail launch codex'"
 	}
 	if session.Source == "cli" || session.Transport == "readOnly" {
 		return "Codex terminal session is read only; start a writable session with 'agenthail codex'"

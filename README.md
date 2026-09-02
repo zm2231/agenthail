@@ -68,7 +68,7 @@ Start a writable Codex terminal conversation from any project folder:
 agenthail codex
 ```
 
-For Codex Desktop, open the app normally or run `agenthail launch codex`. Agenthail enables the local connection when it first needs it, then can message a saved Desktop conversation when Codex reports that it accepts direct input. It never restarts Codex while conversations are attached.
+For Codex Desktop, start it with `agenthail launch codex`. Agenthail then uses a loopback-only Desktop bridge to communicate with the app-server that already owns your open conversations. If Codex is already open, quit it and run that command before using Desktop message controls. Agenthail never restarts Codex while conversations are attached.
 
 ### Notion
 
