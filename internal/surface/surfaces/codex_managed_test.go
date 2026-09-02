@@ -29,6 +29,13 @@ func startManagedCodexFixture(t *testing.T) string {
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
 		t.Fatal(err)
 	}
+	settingsDir := filepath.Join(home, "app-server-daemon")
+	if err := os.MkdirAll(settingsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, "settings.json"), []byte(`{"remoteControlEnabled":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	listener, err := net.Listen("unix", filepath.Join(socketDir, "app-server-control.sock"))
 	if err != nil {
 		t.Fatal(err)
