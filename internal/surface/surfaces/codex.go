@@ -399,9 +399,6 @@ func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[strin
 
 func codexSession(thread map[string]any, managed, desktopReachable bool) surface.Session {
 	source := codexSource(thread["source"])
-	if str(thread, "threadSource") == "agenthail" {
-		source = "agenthail"
-	}
 	session := surface.Session{
 		ID:        str(thread, "id"),
 		Surface:   surface.KindCodex,

@@ -154,6 +154,15 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 	}
 }
 
+func TestCodexSessionUsesCurrentOwnerInsteadOfHistoricalCreator(t *testing.T) {
+	session := codexSession(map[string]any{
+		"id": "thread", "source": "vscode", "threadSource": "agenthail", "status": "idle",
+	}, false, true)
+	if session.Source != "vscode" || session.Transport != codexTransportDesktop {
+		t.Fatalf("session=%+v", session)
+	}
+}
+
 func TestLoadedDesktopThreadIsWritableRegardlessOfOriginalSource(t *testing.T) {
 	client := &loadedDesktopClient{}
 	sessions, err := NewCodex("").listLoaded(context.Background(), client, 1, false, true)

@@ -30,7 +30,7 @@ func startNodeDesktopBridge(t *testing.T) string {
 	dir := t.TempDir()
 	child := dir + "/app-server.js"
 	main := dir + "/desktop-main.js"
-	if err := os.WriteFile(child, []byte(`let buffer='';process.stdin.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(!line)continue;const request=JSON.parse(line);if(request.params&&request.params.mode==='timeout')continue;if(request.params&&request.params.mode==='malformed')process.stdout.write('{bad json}\n');process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'turn/progress',params:{threadId:'thread'}})+'\n');process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{method:request.method,params:request.params}})+'\n')}});`), 0600); err != nil {
+	if err := os.WriteFile(child, []byte(`let buffer='';process.stdin.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(!line)continue;const request=JSON.parse(line);if(request.params&&request.params.mode==='timeout')continue;if(request.params&&request.params.mode==='malformed')process.stdout.write('{bad json}\n');process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'turn/progress',params:{threadId:'thread'}})+'\n');const result=request.method==='thread/read'?{thread:{id:request.params.threadId,source:'vscode',status:{type:'idle'}}}:{method:request.method,params:request.params};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\n')}});`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(main, []byte(`const {spawn}=require('child_process');spawn(process.execPath,[process.argv[2]],{stdio:['pipe','pipe','inherit']});setInterval(()=>{},1000);`), 0600); err != nil {
@@ -363,6 +363,17 @@ func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
 	session, err := NewCodex(server.URL).Resolve(context.Background(), "019f004a-a94e-7313-a599-2db587a1f67a")
 	if err != nil || session == nil || session.ID != "019f004a-a94e-7313-a599-2db587a1f67a" || session.Transport != codexTransportDesktop || readCalls != 1 || listCalls != 0 {
 		t.Fatalf("session=%+v read_calls=%d list_calls=%d err=%v", session, readCalls, listCalls, err)
+	}
+}
+
+func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
+	codex := NewCodex(startNodeDesktopBridge(t))
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportReadOnly}
+	if err := codex.EnsureWritable(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if session.Transport != codexTransportDesktop {
+		t.Fatalf("transport=%q", session.Transport)
 	}
 }
 

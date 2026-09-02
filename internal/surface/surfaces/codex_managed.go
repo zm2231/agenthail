@@ -179,9 +179,20 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 	return c.openDesktop(ctx)
 }
 
-func (c *Codex) EnsureWritable(_ context.Context, sess *surface.Session) error {
+func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error {
 	if sess == nil {
 		return fmt.Errorf("Codex session is required")
+	}
+	if surface.IsReadOnlySession(sess) {
+		client, err := c.openDesktop(ctx)
+		if err == nil {
+			refreshed, readErr := c.readSession(ctx, client, sess.ID, false, true)
+			_ = client.Close()
+			if readErr == nil && refreshed.Source == "vscode" {
+				sess.Source = refreshed.Source
+				sess.Transport = codexTransportDesktop
+			}
+		}
 	}
 	if surface.IsReadOnlySession(sess) {
 		return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
