@@ -12,6 +12,7 @@ struct NewSessionSheet: View {
     @State private var error: String?
     @State private var modelError: String?
     @State private var loading = false
+    @State private var claude = ClaudeCreationSettings()
 
     var body: some View {
         NavigationStack {
@@ -26,7 +27,7 @@ struct NewSessionSheet: View {
                             Picker("Run with", selection: $selectedSurface) {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
-                            Text("Uses the runtime configured on your Mac. Claude sessions must currently be started on the Mac.").font(.footnote).foregroundStyle(.secondary)
+                            Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
                         }
                         if options.surfaces.first(where: { $0.id == selectedSurface })?.workspace == true {
                             Section("Workspace on your Mac") {
@@ -48,6 +49,28 @@ struct NewSessionSheet: View {
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
                         }
+                        if selectedSurface == "claude" {
+                            Section {
+                                DisclosureGroup("Claude options") {
+                                    TextField("Session name (optional)", text: $claude.name)
+                                    TextField("New worktree name (optional)", text: $claude.worktree).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    TextField("Named agent (optional)", text: $claude.agent).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                    Picker("Effort", selection: $claude.effort) {
+                                        Text("Runtime default").tag("")
+                                        ForEach(["low", "medium", "high", "xhigh", "max"], id: \.self) { Text($0.capitalized).tag($0) }
+                                    }
+                                    Picker("Permissions", selection: $claude.permissionMode) {
+                                        Text("Runtime default").tag("")
+                                        Text("Ask before changes").tag("manual")
+                                        Text("Accept edits").tag("acceptEdits")
+                                        Text("Automatic review").tag("auto")
+                                        Text("Deny approval prompts").tag("dontAsk")
+                                        Text("Plan only").tag("plan")
+                                    }
+                                    Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                 }
                 if let error = model.creationError { Section { Text(error).foregroundStyle(.red) } }
@@ -59,7 +82,7 @@ struct NewSessionSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.creatingSession) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task {
-                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel) { dismiss() }
+                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, claude: claude) { dismiss() }
                     } } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
                     }.disabled(model.creatingSession || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

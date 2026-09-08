@@ -189,6 +189,12 @@ func (d *Daemon) RunWithSignal() error {
 			d.log.Printf("warn: remove pidfile: %s", removeErr)
 		}
 	}()
+	stopPeers, err := d.startClaudePeers(ctx)
+	if err != nil {
+		d.log.Printf("Claude peer registration unavailable: %s", err)
+	} else {
+		defer stopPeers()
+	}
 	dashboard, err := d.startDashboard()
 	if err != nil {
 		return err

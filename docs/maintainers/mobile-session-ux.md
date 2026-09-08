@@ -42,4 +42,12 @@ The second pass adds mobile creation through the existing Codex/Notion action ha
 
 Final second-pass receipts: `parity-release-check.log` / `parity-release-check.xcresult` (19 tests), `second-final-go.log`, `second-final-vet.log`, `second-final-race.log`, `second-release.log`, and `second-macos.log`. The independent broad review found no remaining Critical or Major blockers. Simulator checks exercised compact group expansion, the tablet creation toolbar, and the phone’s workspace selection. The public creation form can be opened with `--preview-session --preview-new`.
 
+## Claude integration
+
+The Claude peer/session operations branch is integrated into this mobile worktree. Claude implements `SessionStarter`, so authenticated session options include it automatically. The phone sends optional native name/worktree/agent/effort/permission fields only for Claude. Unknown creation without a returned identity keeps the form open and displays the server’s explanation; confirmed registration opens the returned session and does not claim turn completion.
+
+`mobile_claude_test.go` exercises options → authenticated create → real Claude adapter → fake native CLI → returned background identity → registry. It also verifies that the mobile queue response retains integrated turn settings. Swift fixtures verify creation payloads, no cross-runtime option leakage, native identity decoding, unknown-without-identity handling and queue schema rendering. The creation fixture immediately reads a registered session before its transcript exists, verifies an explicit unavailable timeline, then writes the transcript and verifies that the next read returns activity. The phone refreshes unavailable history while the conversation is open. Live paid model execution and daemon deployment remain outside this local verification.
+
+Integration receipts: `claude-final-go.log`, `claude-final-vet.log`, `claude-final-race.log` (all Go packages), `claude-final-tests.log` / `claude-final-tests.xcresult` (22 iOS tests, zero failures), `claude-final-release.log`, and `claude-final-macos.log`. The web lifecycle controls also pass `node scripts/test-session-controls.mjs` (`integrated-web-controls.log`).
+
 Pages and text are deliberately bounded and disclose truncation. JSONL files must remain append-only for byte cursors to retain meaning; a cursor beyond a shortened file returns a refresh error. Agent transcript schema changes can require parser updates. Remote-only sessions without a local transcript display available message history and an explanation.

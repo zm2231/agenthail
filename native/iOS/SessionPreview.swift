@@ -62,7 +62,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         var status = 200
         let body: String
         switch request.url?.path {
-        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
+        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
         case "/api/v1/models": body = #"{"models":[{"id":"demo-model","displayName":"Example model"}]}"#
         case "/api/v1/session": body = SessionPreview.detailJSON
         default: status = 503; body = #"{"error":{"message":"This public preview does not execute actions."}}"#

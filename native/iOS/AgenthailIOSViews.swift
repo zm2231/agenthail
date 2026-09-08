@@ -408,7 +408,9 @@ struct SessionScreen: View {
             .task(id: "activity-" + session.id) {
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(4)) } catch { return }
-                    if detail?.session.status == "busy" { await model.refreshSession(session.id) }
+                    if detail?.session.status == "busy" || detail?.timeline?.unavailableReason != nil {
+                        await model.refreshSession(session.id)
+                    }
                 }
             }
             .onChange(of: detail?.timeline?.items.last?.id) { _, _ in

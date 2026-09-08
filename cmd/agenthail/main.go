@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -17,6 +20,18 @@ var (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "claude-peer-worker" {
+		var config claudepeer.Config
+		if err := json.NewDecoder(os.Stdin).Decode(&config); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := claudepeer.RunWorker(context.Background(), config, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	home, _ := os.UserHomeDir()
 	reg, err := registry.Open("")
 	if err != nil {

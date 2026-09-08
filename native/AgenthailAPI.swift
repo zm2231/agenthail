@@ -104,8 +104,10 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String) async throws -> SessionCreationReceipt {
-        try await request("/api/v1/actions", method: "POST", body: ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model], timeout: 65)
+    func createSession(surface: String, message: String, cwd: String, model: String, claude: ClaudeCreationSettings = .init()) async throws -> SessionCreationReceipt {
+        var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
+        if surface == "claude" { body.merge(claude.fields) { _, value in value } }
+        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
     }
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {

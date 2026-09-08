@@ -60,6 +60,12 @@ struct QueueListView: View {
                     NavigationLink { SessionRouteView(model: model, sessionID: item.sessionId) } label: { Text(item.target).fontWeight(.semibold) }
                     Text(item.message).textSelection(.enabled)
                     Text(item.status.capitalized).font(.caption).foregroundStyle(.secondary)
+                    if let value = item.model { LabeledContent("Model", value: value).font(.caption) }
+                    if let value = item.effort { LabeledContent("Effort", value: value).font(.caption) }
+                    if let value = item.mode { LabeledContent("Mode", value: value).font(.caption) }
+                    if let value = item.serviceTier { LabeledContent("Service tier", value: value).font(.caption) }
+                    if let value = item.sourceSessionId { LabeledContent("Source session", value: value).font(.caption).textSelection(.enabled) }
+                    if let schema = item.outputSchema { DisclosureGroup("Output schema") { Text(schema.formatted).font(.caption.monospaced()).textSelection(.enabled) } }
                     if let reason = item.lastError, !reason.isEmpty { Text(reason).font(.footnote).foregroundStyle(.red) }
                     HStack {
                         if item.status == "dead" || item.status == "expired" { Button("Retry") { update(item, retry: true) }.buttonStyle(.bordered) }

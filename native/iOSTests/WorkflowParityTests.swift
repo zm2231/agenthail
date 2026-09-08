@@ -2,6 +2,42 @@ import XCTest
 @testable import Agenthail
 
 final class WorkflowParityTests: XCTestCase {
+    @MainActor
+    func testClaudeCreationPreservesSettingsAndNativeIdentity() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let settings = ClaudeCreationSettings(name: "phone-task", worktree: "phone-work", agent: "reviewer", effort: "high", permissionMode: "plan")
+        let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "sonnet", claude: settings)
+        XCTAssertTrue(created)
+        XCTAssertEqual(model.requestedSessionID, "native-claude")
+        XCTAssertEqual(model.deliveryStatus["native-claude"], "Background session registered. Waiting for activity.")
+        let sent = ParityProtocol.state.actions[0]
+        for (key,value) in settings.fields { XCTAssertEqual(sent[key] as? String, value) }
+        XCTAssertNil(sent["approvalPolicy"])
+        _ = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "", claude: settings)
+        for key in settings.fields.keys { XCTAssertNil(ParityProtocol.state.actions[1][key], "Claude settings must not leak after switching runtime") }
+    }
+
+    @MainActor
+    func testClaudeUnknownCreationWithoutIdentityDoesNotNavigateOrRetry() async throws {
+        ParityProtocol.state.reset(unknown: true)
+        let model = makeModel()
+        let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "")
+        XCTAssertFalse(created); XCTAssertNil(model.requestedSessionID)
+        XCTAssertTrue(model.creationError?.contains("without a confirmed session ID") == true)
+        XCTAssertTrue(model.creationError?.contains("registration delayed") == true)
+        XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+    }
+
+    func testQueueDecodesIntegratedTurnSettings() throws {
+        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","attempts":0,"queuedAt":"now","effort":"high","mode":"plan","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
+        let queue = try JSONDecoder().decode(QueueState.self, from: data)
+        XCTAssertEqual(queue.sourceSessionId, "sender"); XCTAssertEqual(queue.effort, "high")
+        XCTAssertEqual(queue.mode, "plan"); XCTAssertEqual(queue.serviceTier, "fast")
+        let schema = try JSONSerialization.jsonObject(with: Data(queue.outputSchema!.formatted.utf8)) as! [String:Any]
+        XCTAssertEqual(schema["required"] as? [String], ["answer"])
+        XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
+    }
     func testCompactGroupingPreservesOrderErrorsAndStableAnchor() throws {
         let data = #"[{"id":"u","kind":"message","role":"user","title":"You","text":"work","truncated":false},{"id":"c","kind":"toolCall","title":"Bash","text":"{\"cmd\":\"swift test\"}","callId":"a","truncated":false},{"id":"r","kind":"toolResult","title":"Result","text":"failed","status":"error","callId":"a","truncated":true},{"id":"m","kind":"message","role":"assistant","title":"Assistant","text":"result","truncated":false}]"#
         let items = try JSONDecoder().decode([TimelineItem].self, from: Data(data.utf8))
@@ -82,6 +118,9 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             records.append(body)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
             if (body["action"] as? String)?.contains("create") == true {
+                if body["surface"] as? String == "claude" {
+                    return unknown ? (202, #"{"ok":false,"unknown":true,"session":null,"error":"registration delayed"}"#) : (201, #"{"ok":true,"session":{"id":"native-claude","surface":"claude","name":"phone-task","status":"unknown","lastActive":"2026-09-08T08:00:00Z"},"result":null}"#)
+                }
                 return (unknown ? 202 : 201, unknown ? #"{"ok":false,"unknown":true,"sessionId":"created"}"# : #"{"ok":true,"sessionId":"created"}"#)
             }
             return (200,#"{"ok":true}"#)

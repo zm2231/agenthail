@@ -59,7 +59,7 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 		}
 		payload := fmt.Sprintf("[agenthail relay hops=%d id=%d source=%s turn=%s] %s", hops+1, route.ID, d.resolveDisplay(from.ID), completionID, payloadText)
 		key := fmt.Sprintf("relay:%d:%s", route.ID, completionID)
-		queueID, err := d.Registry.QueueRelayMessage(route.ToSession, payload, key, hops+1)
+		queueID, err := d.Registry.QueueRelayMessageWithOptions(route.ToSession, payload, key, hops+1, surface.SendOptions{SourceSessionID: from.ID})
 		if err != nil {
 			d.log.Printf("queue relay %d: %s", route.ID, err)
 			continue

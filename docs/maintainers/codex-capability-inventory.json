@@ -1,0 +1,663 @@
+{
+  "observed_at": "2026-09-07",
+  "codex_version": "0.153.4",
+  "source_command": "codex app-server generate-json-schema --experimental --out .research/codex-schema",
+  "source_sha256": "22d8039094586f0c957ab1b17825c9233942c1b18abcd9d3c9e9e97c47a35d9e",
+  "scope": "Historical snapshot before session-operations implementation (commit 2257ee2). See session-operations.md for current coverage. All ClientRequest methods, including experimental. Literal references are a coverage index, not evidence that every method is active or a semantic coverage percentage.",
+  "methods": [
+    {
+      "method": "initialize",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex_managed.go:77"
+      ]
+    },
+    {
+      "method": "server/diagnostics",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/start",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:689"
+      ]
+    },
+    {
+      "method": "thread/resume",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1053",
+        "internal/surface/surfaces/codex_managed.go:204"
+      ]
+    },
+    {
+      "method": "thread/fork",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/archive",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/delete",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/unsubscribe",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/increment_elicitation",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/decrement_elicitation",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/name/set",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/goal/set",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1008"
+      ]
+    },
+    {
+      "method": "thread/goal/get",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1024"
+      ]
+    },
+    {
+      "method": "thread/goal/clear",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1017"
+      ]
+    },
+    {
+      "method": "thread/queue/add",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/queue/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/queue/update",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/queue/delete",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/queue/reorder",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/queue/start",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/metadata/update",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/section/move",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/settings/update",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/memoryMode/set",
+      "production_literal_references": []
+    },
+    {
+      "method": "memory/reset",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/unarchive",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/compact/start",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1042"
+      ]
+    },
+    {
+      "method": "thread/shellCommand",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/approveGuardianDeniedAction",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/backgroundTerminals/clean",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/backgroundTerminals/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/backgroundTerminals/terminate",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/rollback",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/revert",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/list",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:386"
+      ]
+    },
+    {
+      "method": "project/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "project/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "project/create",
+      "production_literal_references": []
+    },
+    {
+      "method": "project/import",
+      "production_literal_references": []
+    },
+    {
+      "method": "project/update",
+      "production_literal_references": []
+    },
+    {
+      "method": "project/move",
+      "production_literal_references": []
+    },
+    {
+      "method": "project/delete",
+      "production_literal_references": []
+    },
+    {
+      "method": "threadSection/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "threadSection/create",
+      "production_literal_references": []
+    },
+    {
+      "method": "threadSection/update",
+      "production_literal_references": []
+    },
+    {
+      "method": "threadSection/delete",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/search",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:552",
+        "internal/surface/surfaces/codex.go:558"
+      ]
+    },
+    {
+      "method": "thread/searchOccurrences",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/loaded/list",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:328"
+      ]
+    },
+    {
+      "method": "thread/read",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:516",
+        "internal/surface/surfaces/codex_thread.go:38"
+      ]
+    },
+    {
+      "method": "thread/turns/list",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex_thread.go:127"
+      ]
+    },
+    {
+      "method": "thread/items/list",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex_thread.go:144"
+      ]
+    },
+    {
+      "method": "thread/inject_items",
+      "production_literal_references": []
+    },
+    {
+      "method": "skills/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "skills/extraRoots/set",
+      "production_literal_references": []
+    },
+    {
+      "method": "hooks/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "marketplace/add",
+      "production_literal_references": []
+    },
+    {
+      "method": "marketplace/remove",
+      "production_literal_references": []
+    },
+    {
+      "method": "marketplace/upgrade",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/search",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/installed",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/skill/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/share/save",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/share/updateTargets",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/share/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/share/checkout",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/share/delete",
+      "production_literal_references": []
+    },
+    {
+      "method": "app/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "app/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "app/installed",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/readFile",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/writeFile",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/createDirectory",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/getMetadata",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/readDirectory",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/remove",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/copy",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/watch",
+      "production_literal_references": []
+    },
+    {
+      "method": "fs/unwatch",
+      "production_literal_references": []
+    },
+    {
+      "method": "skills/config/write",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/install",
+      "production_literal_references": []
+    },
+    {
+      "method": "plugin/uninstall",
+      "production_literal_references": []
+    },
+    {
+      "method": "turn/start",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:717",
+        "internal/surface/surfaces/codex.go:760"
+      ]
+    },
+    {
+      "method": "turn/settings/update",
+      "production_literal_references": []
+    },
+    {
+      "method": "turn/steer",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1154"
+      ]
+    },
+    {
+      "method": "turn/interrupt",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1127"
+      ]
+    },
+    {
+      "method": "thread/realtime/start",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/realtime/appendAudio",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/realtime/appendText",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/realtime/appendSpeech",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/realtime/stop",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/timeline/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "thread/realtime/listVoices",
+      "production_literal_references": []
+    },
+    {
+      "method": "review/start",
+      "production_literal_references": []
+    },
+    {
+      "method": "model/list",
+      "production_literal_references": [
+        "internal/surface/surfaces/codex.go:1081"
+      ]
+    },
+    {
+      "method": "modelProvider/capabilities/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "experimentalFeature/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "permissionProfile/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "experimentalFeature/enablement/set",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/enable",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/disable",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/status/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/pairing/start",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/pairing/status",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/client/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "remoteControl/client/revoke",
+      "production_literal_references": []
+    },
+    {
+      "method": "collaborationMode/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "mock/experimentalMethod",
+      "production_literal_references": []
+    },
+    {
+      "method": "environment/add",
+      "production_literal_references": []
+    },
+    {
+      "method": "environment/info",
+      "production_literal_references": []
+    },
+    {
+      "method": "environment/status",
+      "production_literal_references": []
+    },
+    {
+      "method": "mcpServer/oauth/login",
+      "production_literal_references": []
+    },
+    {
+      "method": "config/mcpServer/reload",
+      "production_literal_references": []
+    },
+    {
+      "method": "mcpServerStatus/list",
+      "production_literal_references": []
+    },
+    {
+      "method": "mcpServer/resource/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "mcpServer/event/stream/start",
+      "production_literal_references": []
+    },
+    {
+      "method": "mcpServer/event/stream/stop",
+      "production_literal_references": []
+    },
+    {
+      "method": "mcpServer/tool/call",
+      "production_literal_references": []
+    },
+    {
+      "method": "windowsSandbox/setupStart",
+      "production_literal_references": []
+    },
+    {
+      "method": "windowsSandbox/readiness",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/login/start",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/bedrock/discover",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/bedrock/setup",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/login/cancel",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/logout",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/rateLimits/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/rateLimitResetCredit/consume",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/usage/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/workspaceMessages/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/sendAddCreditsNudgeEmail",
+      "production_literal_references": []
+    },
+    {
+      "method": "feedback/upload",
+      "production_literal_references": []
+    },
+    {
+      "method": "command/exec",
+      "production_literal_references": []
+    },
+    {
+      "method": "command/exec/write",
+      "production_literal_references": []
+    },
+    {
+      "method": "command/exec/terminate",
+      "production_literal_references": []
+    },
+    {
+      "method": "command/exec/resize",
+      "production_literal_references": []
+    },
+    {
+      "method": "process/spawn",
+      "production_literal_references": []
+    },
+    {
+      "method": "process/writeStdin",
+      "production_literal_references": []
+    },
+    {
+      "method": "process/kill",
+      "production_literal_references": []
+    },
+    {
+      "method": "process/resizePty",
+      "production_literal_references": []
+    },
+    {
+      "method": "config/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "externalAgentConfig/detect",
+      "production_literal_references": []
+    },
+    {
+      "method": "externalAgentConfig/import",
+      "production_literal_references": []
+    },
+    {
+      "method": "externalAgentConfig/import/recordHistory",
+      "production_literal_references": []
+    },
+    {
+      "method": "externalAgentConfig/import/readHistories",
+      "production_literal_references": []
+    },
+    {
+      "method": "config/value/write",
+      "production_literal_references": []
+    },
+    {
+      "method": "config/batchWrite",
+      "production_literal_references": []
+    },
+    {
+      "method": "configRequirements/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "account/read",
+      "production_literal_references": []
+    },
+    {
+      "method": "fuzzyFileSearch",
+      "production_literal_references": []
+    },
+    {
+      "method": "fuzzyFileSearch/sessionStart",
+      "production_literal_references": []
+    },
+    {
+      "method": "fuzzyFileSearch/sessionUpdate",
+      "production_literal_references": []
+    },
+    {
+      "method": "fuzzyFileSearch/sessionStop",
+      "production_literal_references": []
+    }
+  ]
+}

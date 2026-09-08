@@ -74,14 +74,18 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         return try await api.creationModels(surface: surface)
     }
-    func createSession(surface: String, message: String, cwd: String, model: String) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, claude: ClaudeCreationSettings = .init()) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil
         defer { creatingSession = false }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, claude: claude)
+            if receipt.unknown == true && receipt.id == nil {
+                creationError = "\(surface.capitalized) may have started without a confirmed session ID. Check the agent catalog on your Mac before retrying. \(receipt.error ?? "")"
+                return false
+            }
             guard let id = receipt.id, !id.isEmpty, receipt.ok || receipt.unknown == true else { throw AgenthailAPIError.invalidResponse }
-            deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : "Conversation started"
+            deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
             requestedSessionID = id
             return true
         } catch {

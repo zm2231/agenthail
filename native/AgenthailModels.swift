@@ -1,5 +1,16 @@
 import Foundation
 
+struct ClaudeCreationSettings {
+    var name = ""
+    var worktree = ""
+    var agent = ""
+    var effort = ""
+    var permissionMode = ""
+    var fields: [String: String] {
+        ["name": name, "worktree": worktree, "agent": agent, "effort": effort, "permissionMode": permissionMode].filter { !$0.value.isEmpty }
+    }
+}
+
 struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
     let surfaces: [Surface]
@@ -76,6 +87,11 @@ struct SessionState: Codable, Identifiable, Hashable {
 }
 
 struct QueueState: Decodable, Identifiable, Equatable {
+    let sourceSessionId: String?
+    let effort: String?
+    let mode: String?
+    let serviceTier: String?
+    let outputSchema: RecordedJSON?
     let id: Int64
     let sessionId: String
     let target: String
@@ -85,6 +101,34 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let attempts: Int
     let lastError: String?
     let queuedAt: String
+}
+
+indirect enum RecordedJSON: Codable, Equatable {
+    case object([String: RecordedJSON]), array([RecordedJSON]), string(String), number(Double), bool(Bool), null
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() { self = .null }
+        else if let item = try? value.decode(Bool.self) { self = .bool(item) }
+        else if let item = try? value.decode(String.self) { self = .string(item) }
+        else if let item = try? value.decode(Double.self) { self = .number(item) }
+        else if let item = try? value.decode([String: RecordedJSON].self) { self = .object(item) }
+        else { self = .array(try value.decode([RecordedJSON].self)) }
+    }
+    func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        switch self {
+        case .object(let item): try value.encode(item)
+        case .array(let item): try value.encode(item)
+        case .string(let item): try value.encode(item)
+        case .number(let item): try value.encode(item)
+        case .bool(let item): try value.encode(item)
+        case .null: try value.encodeNil()
+        }
+    }
+    var formatted: String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return (try? encoder.encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    }
 }
 
 struct AttentionState: Decodable, Identifiable, Equatable {

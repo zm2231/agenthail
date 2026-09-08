@@ -14,10 +14,11 @@ import (
 )
 
 type Registry struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
-const schemaVersion = 1
+const schemaVersion = 3
 
 func Open(path string) (*Registry, error) {
 	if path == "" {
@@ -37,13 +38,15 @@ func Open(path string) (*Registry, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	r := &Registry{db: db}
+	r := &Registry{db: db, path: path}
 	if err := r.migrate(); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return r, nil
 }
+
+func (r *Registry) Path() string { return r.path }
 
 func (r *Registry) Close() error { return r.db.Close() }
 
@@ -58,6 +61,16 @@ func (r *Registry) migrate() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
+	if version >= 1 {
+		if err := r.ensureColumn("message_queue", "turn_options", `TEXT NOT NULL DEFAULT '{}'`); err != nil {
+			return err
+		}
+		if err := r.ensureColumn("message_queue", "source_session_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		_, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+		return err
+	}
 	columns := []struct {
 		name string
 		decl string
@@ -69,6 +82,8 @@ func (r *Registry) migrate() error {
 		{"inflight_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"delivery_key", `TEXT NOT NULL DEFAULT ''`},
 		{"model", `TEXT NOT NULL DEFAULT ''`},
+		{"source_session_id", `TEXT NOT NULL DEFAULT ''`},
+		{"turn_options", `TEXT NOT NULL DEFAULT '{}'`},
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
 		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
@@ -186,6 +201,8 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	last_error TEXT NOT NULL DEFAULT '', available_at_ms INTEGER NOT NULL DEFAULT 0,
 	inflight_at_ms INTEGER NOT NULL DEFAULT 0, delivery_key TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '', relay_hops INTEGER NOT NULL DEFAULT 0,
+	source_session_id TEXT NOT NULL DEFAULT '',
+ turn_options TEXT NOT NULL DEFAULT '{}',
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -377,6 +394,7 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 		{`DELETE FROM routes WHERE from_session=to_session`, nil},
 		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
 		{`UPDATE message_queue SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
+		{`UPDATE message_queue SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE delivery_history SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE delivery_history SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
@@ -552,12 +570,16 @@ func (r *Registry) QueueMessageWithOptions(sessionID, message, deliveryKey strin
 }
 
 func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, relayHops int) (int64, error) {
-	return r.queueMessageWithOptions(sessionID, message, deliveryKey, surface.SendOptions{}, relayHops)
+	return r.QueueRelayMessageWithOptions(sessionID, message, deliveryKey, relayHops, surface.SendOptions{})
+}
+
+func (r *Registry) QueueRelayMessageWithOptions(sessionID, message, deliveryKey string, relayHops int, options surface.SendOptions) (int64, error) {
+	return r.queueMessageWithOptions(sessionID, message, deliveryKey, options, relayHops)
 }
 
 func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int) (int64, error) {
 	expiresAt := time.Now().Add(time.Hour).UnixMilli()
-	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model, relayHops, expiresAt)
+	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -646,12 +668,14 @@ func (r *Registry) QueueCounts() (map[string]int, error) {
 }
 
 type QueuedMessage struct {
-	ID        int64
-	SessionID string
-	Message   string
-	Model     string
-	Attempts  int
-	RelayHops int
+	surface.TurnOptions
+	ID              int64
+	SessionID       string
+	Message         string
+	Model           string
+	SourceSessionID string
+	Attempts        int
+	RelayHops       int
 }
 
 const (
@@ -803,15 +827,17 @@ func (r *Registry) ListHistoryKinds() ([]string, error) {
 }
 
 type QueueRow struct {
-	ID        int64  `json:"id"`
-	SessionID string `json:"sessionId"`
-	Message   string `json:"message"`
-	Model     string `json:"model,omitempty"`
-	Status    string `json:"status"`
-	Attempts  int    `json:"attempts"`
-	LastError string `json:"lastError,omitempty"`
-	QueuedAt  string `json:"queuedAt"`
-	ExpiresAt int64  `json:"expiresAt,omitempty"`
+	surface.TurnOptions
+	ID              int64  `json:"id"`
+	SessionID       string `json:"sessionId"`
+	Message         string `json:"message"`
+	Model           string `json:"model,omitempty"`
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	Status          string `json:"status"`
+	Attempts        int    `json:"attempts"`
+	LastError       string `json:"lastError,omitempty"`
+	QueuedAt        string `json:"queuedAt"`
+	ExpiresAt       int64  `json:"expiresAt,omitempty"`
 }
 
 type AttentionItem struct {
@@ -831,7 +857,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	if err := r.expireMessages(time.Now()); err != nil {
 		return nil, err
 	}
-	query := `SELECT id,session_id,message,model,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue`
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled','expired')`
 	}
@@ -844,7 +870,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	result := make([]QueueRow, 0)
 	for rows.Next() {
 		var row QueueRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -857,7 +883,7 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 		return nil, err
 	}
 	var row QueueRow
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt)
+	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1014,7 +1040,7 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,attempts,relay_hops,status,available_at_ms,inflight_at_ms FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

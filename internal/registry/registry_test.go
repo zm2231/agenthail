@@ -154,6 +154,10 @@ func TestOpenMigratesLegacyQueue(t *testing.T) {
 	if err := r.db.QueryRow(`SELECT relay_hops FROM message_queue WHERE message='old'`).Scan(&queueHops); err != nil || queueHops != 0 {
 		t.Fatalf("queue relay_hops=%d err=%v", queueHops, err)
 	}
+	var sourceSessionID string
+	if err := r.db.QueryRow(`SELECT source_session_id FROM message_queue WHERE message='old'`).Scan(&sourceSessionID); err != nil || sourceSessionID != "" {
+		t.Fatalf("source_session_id=%q err=%v", sourceSessionID, err)
+	}
 	if err := r.RegisterSession(surface.Session{ID: "runtime", Surface: surface.KindCodex}); err != nil {
 		t.Fatal(err)
 	}

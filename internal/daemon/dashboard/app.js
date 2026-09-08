@@ -870,11 +870,13 @@ async function load(fresh = false) {
   }
 }
 async function selectSession(id, focus = false) {
+  if (app.selected?.id !== id) { for (const selector of ["#turn-effort", "#turn-mode", "#turn-tier", "#turn-schema"]) $(selector).value = ""; $("#session-operation-result").textContent = ""; $("#session-operation-form").reset(); }
   const session = app.state.sessions.find((item) => item.id === id) || app.codexSearch.results.find((item) => item.id === id);
   if (!session) return;
   if (app.selected?.id !== id) stopLiveStream(true);
   if (app.selected) app.drafts.set(app.selected.id, $("#message").value);
   app.selected = session;
+  syncSessionOperationFields();
   app.history = null;
   app.transcriptSignature = null;
   app.pendingEntryScroll = true;
@@ -1098,7 +1100,7 @@ async function send(requestedAction = "send") {
       ? await action("steer", { message })
       : commandAction
       ? await action(commandAction[0], commandAction[1])
-      : await action("send", { message });
+      : await action("send", { message, ...selectedTurnOptions() });
     $("#message").value = "";
     app.drafts.delete(app.selected.id);
     resizeComposer();
@@ -1113,6 +1115,8 @@ async function send(requestedAction = "send") {
         ? `${command} requested.`
         : queued
         ? "This agent is busy, so your message is safely queued."
+        : result?.result?.reason === "peer_transport_accepted"
+        ? "Accepted by Claude's socket. Receiver policy and completion are pending."
         : "Message sent.",
     );
     await load();
@@ -1355,7 +1359,7 @@ $("#session-search").addEventListener("input", () => {
 });
 function startableSurfaces() {
   return app.state.surfaces.filter(
-    (item) => item.connected && ["codex", "notion"].includes(item.name),
+    (item) => (item.connected || item.name === "claude") && ["codex", "claude", "notion"].includes(item.name),
   );
 }
 function renderStartSurfaceOptions() {
@@ -1370,10 +1374,14 @@ function renderStartSurfaceOptions() {
   syncStartForm();
 }
 function syncStartForm() {
-  const isCodex = $("#new-conversation-surface").value === "codex";
+  const selected = $("#new-conversation-surface").value;
+  const isCodex = selected === "codex";
+  for (const [attribute, enabled] of [["data-code-start", selected !== "notion"], ["data-claude-start", selected === "claude"]]) {
+    document.querySelectorAll(`[${attribute}]`).forEach(field => { field.hidden = !enabled; field.querySelectorAll("input,select,textarea").forEach(input => input.disabled = !enabled); });
+  }
   document.querySelectorAll("[data-codex-start]").forEach((field) => {
     field.hidden = !isCodex;
-    field.querySelectorAll("input,select").forEach((input) => {
+    field.querySelectorAll("input,select,textarea").forEach((input) => {
       input.disabled = !isCodex;
     });
   });
@@ -1418,6 +1426,7 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
   const values = Object.fromEntries(new FormData(form).entries());
   button.disabled = true;
   try {
+    if (values.outputSchema?.trim()) values.outputSchema = JSON.parse(values.outputSchema); else delete values.outputSchema;
     const response = await action(values.surface === "notion" ? "notion-create" : "session-create", values);
     form.reset();
     toggleNewConversationForm(false);
@@ -1555,3 +1564,50 @@ load();
 setInterval(() => {
   if (document.visibilityState === "visible") load();
 }, 30000);
+
+function selectedTurnOptions() {
+  if (app.selected?.surface !== "codex") return {};
+  const options = { effort: $("#turn-effort").value.trim(), mode: $("#turn-mode").value, serviceTier: $("#turn-tier").value };
+  if ($("#turn-schema").value.trim()) options.outputSchema = JSON.parse($("#turn-schema").value);
+  return options;
+}
+$("#session-operation-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button");
+  if (!app.selected) return toast("Select a conversation first.");
+  const values = Object.fromEntries(new FormData(event.currentTarget));
+  button.disabled = true;
+  try {
+    const isQueue = values.operation.startsWith("native-");
+    const payload = isQueue ? {nativeQueue: {queueAction: values.operation.slice(7), message: values.message, queuedSubmissionId: values.id, clientUserMessageId: values.clientId, queuedSubmissionIds: values.ids ? values.ids.split(",").map(x => x.trim()) : [], cursor: values.cursor}} : {fork: {cwd: values.cwd}};
+    const result = await action(isQueue ? "native-queue" : values.operation, payload);
+    $("#session-operation-result").textContent = JSON.stringify(result.result, null, 2);
+    if (values.operation === "native-add") {
+      form.elements.clientId.value = crypto.randomUUID();
+    }
+    await load(true);
+  } catch (error) { toast(friendlyError(error)); }
+  finally { button.disabled = false; }
+});
+
+function syncSessionOperationFields() {
+  const form = $("#session-operation-form");
+  const surface = app.selected?.surface;
+  form.closest("details").hidden = !["codex", "claude"].includes(surface);
+  $("#turn-effort").closest("details").hidden = surface !== "codex";
+  for (const option of form.elements.operation.options) {
+    const matches = surface === "claude" ? option.value.startsWith("session-lifecycle-") : !option.value.startsWith("session-lifecycle-");
+    option.hidden = !matches;
+    option.disabled = !matches || (Boolean(app.selected?.readOnly) && option.value !== "native-list");
+  }
+  if (form.elements.operation.selectedOptions[0]?.disabled) {
+    form.elements.operation.value = [...form.elements.operation.options].find(option => !option.disabled)?.value || "";
+  }
+  const operation = form.elements.operation.value;
+  const allowed = operation === "session-fork" ? ["cwd"] : ({"native-list":["cursor"],"native-add":["message","clientId"],"native-update":["message","id"],"native-delete":["id"],"native-reorder":["ids"],"native-start":["id"]}[operation] || []);
+  for (const field of form.querySelectorAll("input,textarea")) { field.closest("label").hidden = !allowed.includes(field.name); field.disabled = !allowed.includes(field.name); }
+  if (operation === "native-add" && !form.elements.clientId.value) form.elements.clientId.value = crypto.randomUUID();
+}
+$("#session-operation-form").elements.operation.addEventListener("change", syncSessionOperationFields);
+syncSessionOperationFields();

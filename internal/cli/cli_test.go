@@ -193,6 +193,9 @@ func (*cliSurface) EnsureWritable(_ context.Context, session *surface.Session) e
 
 func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 	t.Helper()
+	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID"} {
+		t.Setenv(key, "")
+	}
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)

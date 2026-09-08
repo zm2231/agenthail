@@ -118,15 +118,17 @@ type dashboardAttention struct {
 }
 
 type dashboardQueue struct {
-	ID        int64  `json:"id"`
-	SessionID string `json:"sessionId"`
-	Target    string `json:"target"`
-	Message   string `json:"message"`
-	Model     string `json:"model,omitempty"`
-	Status    string `json:"status"`
-	Attempts  int    `json:"attempts"`
-	LastError string `json:"lastError,omitempty"`
-	QueuedAt  string `json:"queuedAt"`
+	surface.TurnOptions
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	ID              int64  `json:"id"`
+	SessionID       string `json:"sessionId"`
+	Target          string `json:"target"`
+	Message         string `json:"message"`
+	Model           string `json:"model,omitempty"`
+	Status          string `json:"status"`
+	Attempts        int    `json:"attempts"`
+	LastError       string `json:"lastError,omitempty"`
+	QueuedAt        string `json:"queuedAt"`
 }
 
 type dashboardChannel struct {
@@ -539,7 +541,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
+		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -651,6 +653,15 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 }
 
 func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
+	if session.Surface == surface.KindClaude && session.Transport == "uds" {
+		capabilities.Stream = false
+		capabilities.Steer = false
+		capabilities.Compact = false
+		if !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_") {
+			capabilities.Model = false
+			capabilities.Interrupt = false
+		}
+	}
 	if surface.IsReadOnlySession(&session) {
 		return surface.Capabilities{}, true, surface.ReadOnlySessionReason(&session)
 	}
@@ -735,21 +746,29 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}()
 	defer r.Body.Close()
 	var request struct {
-		Action    string `json:"action"`
-		SessionID string `json:"sessionId"`
-		Message   string `json:"message"`
-		Alias     string `json:"alias"`
-		Model     string `json:"model"`
-		QueueID   int64  `json:"queueId"`
-		Channel   string `json:"channel"`
-		TargetID  string `json:"targetId"`
-		FromID    string `json:"fromId"`
-		ToID      string `json:"toId"`
-		Pattern   string `json:"pattern"`
-		RelayID   int64  `json:"relayId"`
-		Surface   string `json:"surface"`
-		Cwd       string `json:"cwd"`
-		Approval  string `json:"approvalPolicy"`
+		surface.TurnOptions
+		Name            string                     `json:"name"`
+		Worktree        string                     `json:"worktree"`
+		Agent           string                     `json:"agent"`
+		PermissionMode  string                     `json:"permissionMode"`
+		Fork            surface.ForkOptions        `json:"fork"`
+		NativeQueue     surface.NativeQueueRequest `json:"nativeQueue"`
+		Action          string                     `json:"action"`
+		SourceSessionID string                     `json:"sourceSessionId"`
+		SessionID       string                     `json:"sessionId"`
+		Message         string                     `json:"message"`
+		Alias           string                     `json:"alias"`
+		Model           string                     `json:"model"`
+		QueueID         int64                      `json:"queueId"`
+		Channel         string                     `json:"channel"`
+		TargetID        string                     `json:"targetId"`
+		FromID          string                     `json:"fromId"`
+		ToID            string                     `json:"toId"`
+		Pattern         string                     `json:"pattern"`
+		RelayID         int64                      `json:"relayId"`
+		Surface         string                     `json:"surface"`
+		Cwd             string                     `json:"cwd"`
+		Approval        string                     `json:"approvalPolicy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -778,7 +797,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval})
+		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode})
 		if session != nil {
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
 				http.Error(w, fmt.Sprintf("register conversation: %s", registerErr), http.StatusInternalServerError)
@@ -802,7 +821,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				sessionID = session.ID
 			}
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
-			if unknown && session != nil {
+			if unknown {
 				writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "unknown": true, "session": session, "error": startErr.Error()})
 				return
 			}
@@ -1098,6 +1117,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
+	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
+		d.dashboardSessionOperation(w, r, adapter, session, request.Action, request.Fork, request.NativeQueue)
+		return
+	}
 	if err := d.ensureDashboardWritable(r.Context(), adapter, session); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -1111,7 +1134,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model})
+		if request.SourceSessionID != "" {
+			if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
+				http.Error(w, "source session not found", http.StatusBadRequest)
+				return
+			}
+		}
+		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, TurnOptions: request.TurnOptions})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return
@@ -1300,10 +1329,9 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 			limit = parsed
 		}
 	}
-	exchanges, err := adapter.Tail(ctx, session, limit)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("load conversation: %s", err), http.StatusBadGateway)
-		return
+	exchanges, transcriptErr := adapter.Tail(ctx, session, limit)
+	if transcriptErr != nil {
+		exchanges = []surface.Exchange{}
 	}
 	exchanges, transcript := truncateSessionExchanges(exchanges)
 	alias, _ := d.Registry.ReverseAlias(session.ID)
@@ -1314,6 +1342,9 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 		readOnlyReason = accessErr.Error()
 	}
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	if transcriptErr != nil {
+		response["timeline"] = surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: fmt.Sprintf("Message history is not available yet: %s. Refreshing while this conversation is open.", transcriptErr)}
+	}
 	var timelineBefore int64
 	if raw := r.URL.Query().Get("timelineBefore"); raw != "" {
 		var parseErr error
@@ -1323,7 +1354,7 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if provider, ok := adapter.(surface.TimelineProvider); ok && r.URL.Query().Get("timeline") == "1" {
+	if provider, ok := adapter.(surface.TimelineProvider); ok && transcriptErr == nil && r.URL.Query().Get("timeline") == "1" {
 		if timeline, timelineErr := provider.Timeline(ctx, session, timelineBefore); timelineErr == nil {
 			response["timeline"] = timeline
 		} else {
