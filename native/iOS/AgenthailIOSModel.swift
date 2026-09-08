@@ -32,6 +32,63 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var showPairingConfirmation = false
 
     private var api: AgenthailAPI?
+    @Published var creatingSession = false
+    @Published var creationError: String?
+    @Published var pendingControls: Set<String> = []
+
+    func queuedInstructions() async throws -> [QueueState] {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        return try await api.queuedInstructions()
+    }
+
+    func editSession(id: String, action: String, text: String = "") async throws {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        guard !pendingControls.contains(id) else { throw AgenthailAPIError.unavailable("An update is already in progress.") }
+        if action != "alias" {
+            guard let detail = selectedDetail, detail.session.id == id, !detail.readOnly, detail.capabilities.goal,
+                  action == "goal-set" || action == "goal-clear" else { throw AgenthailAPIError.unavailable("This session cannot change goals.") }
+        }
+        pendingControls.insert(id)
+        defer { pendingControls.remove(id) }
+        if action == "alias" { try await api.nameSession(id: id, alias: text) }
+        else { try await api.action(action, sessionID: id, message: text) }
+        await refresh(fresh: true)
+        await refreshSession(id)
+    }
+
+    func updateQueue(_ item: QueueState, retry: Bool) async throws {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        let key = "queue:\(item.id)"
+        guard !pendingControls.contains(key) else { return }
+        pendingControls.insert(key)
+        defer { pendingControls.remove(key) }
+        try await api.action(retry ? "queue-retry" : "queue-cancel", queueID: item.id)
+        await refresh(fresh: true)
+    }
+
+    func sessionOptions() async throws -> SessionCreationOptions {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        return try await api.sessionOptions()
+    }
+    func creationModels(surface: String) async throws -> [ModelOption] {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        return try await api.creationModels(surface: surface)
+    }
+    func createSession(surface: String, message: String, cwd: String, model: String) async -> Bool {
+        guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        creatingSession = true; creationError = nil
+        defer { creatingSession = false }
+        do {
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model)
+            guard let id = receipt.id, !id.isEmpty, receipt.ok || receipt.unknown == true else { throw AgenthailAPIError.invalidResponse }
+            deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : "Conversation started"
+            requestedSessionID = id
+            return true
+        } catch {
+            creationError = "Creation unconfirmed. Check Saved before retrying to avoid starting twice. \(error.localizedDescription)"
+            return false
+        }
+    }
     private var endpoint: URL?
     private var token: String?
     private var eventTask: Task<Void, Never>?

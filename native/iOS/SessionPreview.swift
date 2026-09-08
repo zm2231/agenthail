@@ -13,7 +13,9 @@ struct SessionPreview: View {
         self.detail = detail
         session = SessionState(id: "demo", surface: "claude", name: "Make the build reliable", alias: nil, status: "busy", lastActive: nil,
                                queueCount: 1, open: true, current: true, currentReason: nil, capabilities: detail.capabilities, readOnly: false, readOnlyReason: nil)
-        let model = AgenthailIOSModel(autoConnect: false)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SessionPreviewProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)))
         model.selectedSessionID = "demo"
         model.selectedDetail = detail
         model.composer = "Keep the regression check with the fix."
@@ -24,7 +26,9 @@ struct SessionPreview: View {
         _model = StateObject(wrappedValue: model)
     }
     var body: some View {
-        if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
+        if ProcessInfo.processInfo.arguments.contains("--preview-new") {
+            NewSessionSheet(model: model)
+        } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
             SessionInspector(model: model, session: session, detail: detail)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
             ConversationFlow(model: model, initialSessionID: "demo").tint(.orange)
@@ -49,5 +53,24 @@ struct SessionPreview: View {
       ]}
     }
     """#
+}
+
+private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        var status = 200
+        let body: String
+        switch request.url?.path {
+        case "/api/v1/session-options": body = #"{"surfaces":[{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
+        case "/api/v1/models": body = #"{"models":[{"id":"demo-model","displayName":"Example model"}]}"#
+        case "/api/v1/session": body = SessionPreview.detailJSON
+        default: status = 503; body = #"{"error":{"message":"This public preview does not execute actions."}}"#
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type":"application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 #endif

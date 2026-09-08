@@ -85,6 +85,29 @@ final class AgenthailAPI: @unchecked Sendable {
         try await post("/api/v1/actions", body: ["action": action, "sessionId": sessionID, "message": message])
     }
 
+    func sessionOptions() async throws -> SessionCreationOptions { try await get("/api/v1/session-options") }
+    func queuedInstructions() async throws -> [QueueState] {
+        let response: QueueResponse = try await get("/api/v1/queue")
+        return response.items
+    }
+
+    func nameSession(id: String, alias: String) async throws {
+        let _: EmptyResponse = try await post("/api/v1/actions", body: ["action": "alias", "sessionId": id, "alias": alias])
+    }
+
+    func creationModels(surface: String) async throws -> [ModelOption] {
+        var components = URLComponents()
+        components.path = "/api/v1/models"
+        components.queryItems = [URLQueryItem(name: "surface", value: surface)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        let response: CreationModels = try await get(path)
+        return response.models
+    }
+
+    func createSession(surface: String, message: String, cwd: String, model: String) async throws -> SessionCreationReceipt {
+        try await request("/api/v1/actions", method: "POST", body: ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model], timeout: 65)
+    }
+
     func searchSessions(query: String) async throws -> SessionSearchResponse {
         var components = URLComponents()
         components.path = "/api/v1/search"

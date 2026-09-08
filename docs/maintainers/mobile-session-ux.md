@@ -21,7 +21,7 @@ The timeline is optional on the existing session endpoint. Mac callers retain th
 - `go test ./...`
 - `go vet ./...`
 - `go test -race ./internal/surface/surfaces ./internal/daemon`
-- Signed `xcodebuild test` for `AgenthailIOS`: 15 tests, zero failures, iOS 26.3 simulator.
+- Signed `xcodebuild test` for `AgenthailIOS`: 19 tests, zero failures, iOS 26.3 simulator (including the second pass).
 - `xcodebuild ... -configuration Release -destination 'generic/platform=iOS Simulator' build`.
 - `AGENTHAIL_CODESIGN_IDENTITY=- scripts/build-macos-app.sh build/Agenthail.app`, including strict signature verification.
 - `git diff --check` and GitNexus change analysis against the worktree's own refreshed index.
@@ -32,6 +32,14 @@ Local receipts are in ignored `build/`: `go-all-tests.log`, `go-vet.log`, `go-ra
 
 This is local implementation and verification, not a deployed TestFlight release. No live daemon restart, real agent instruction, physical-device Tailscale connection, push delivery, camera permission round trip, or VoiceOver session was exercised. Simulator screenshots establish layout, not those integration guarantees.
 
-The new activity path preserves supported transcript records, not every possible agent protocol feature. Live approval/question replies, artifact/image retrieval, subagent navigation and authoritative repository diff review need additional request/response contracts. Recorded tool inputs are inspectable but do not become live permission controls. Goal information is viewable; goal editing remains outside the phone controls.
+The new activity path preserves supported transcript records, not every possible agent protocol feature. Live approval/question replies, artifact/image retrieval, subagent navigation and authoritative repository diff review need additional request/response contracts. Recorded tool inputs are inspectable but do not become live permission controls.
+
+## Second pass
+
+The second pass adds mobile creation through the existing Codex/Notion action handlers, a read-authorized options endpoint with supported starters and saved workspace paths, compact activity groups that retain record order, and goal/name/queue controls. The native API decodes both creation success and accepted-but-unknown receipts and navigates by the returned identity. A failed request retains the form and warns against blind retries. Controls preserve runtime permission defaults.
+
+`WorkflowParityTests` verifies ordered grouping, call/result continuity, error visibility, exact creation options, unknown creation identity, failure recovery, duplicate submission guards, and goal/alias/queue action payloads. `session_options_test.go` exercises authenticated discovery and creation through `/api/v1`, including registration of the resulting session, plus expired queue visibility and retry back to pending. The queue endpoint includes recoverable expired entries omitted from the overview snapshot. Preview network requests use a Debug-only URLProtocol fixture; action requests are refused and never leave the process.
+
+Final second-pass receipts: `parity-release-check.log` / `parity-release-check.xcresult` (19 tests), `second-final-go.log`, `second-final-vet.log`, `second-final-race.log`, `second-release.log`, and `second-macos.log`. The independent broad review found no remaining Critical or Major blockers. Simulator checks exercised compact group expansion, the tablet creation toolbar, and the phone’s workspace selection. The public creation form can be opened with `--preview-session --preview-new`.
 
 Pages and text are deliberately bounded and disclose truncation. JSONL files must remain append-only for byte cursors to retain meaning; a cursor beyond a shortened file returns a refresh error. Agent transcript schema changes can require parser updates. Remote-only sessions without a local transcript display available message history and an explanation.

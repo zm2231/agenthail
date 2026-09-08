@@ -33,9 +33,15 @@ The pairing code expires quickly and works once. You can disconnect a phone from
 
 On iPhone, **Today** shows current work, **Conversations** lets you check in or send the next instruction, and **Settings** manages the connection and notifications.
 
+Use **+** in Conversations to start work with a configured Codex or Notion runtime. Choose a recent Mac workspace or enter an existing directory for Codex, optionally choose a model, and write the first instruction. Runtime permission defaults remain in effect; approvals may require attention on the Mac. Claude session creation is not supported by this transport. If creation cannot be confirmed, check Saved before retrying; if the server returns a created session with uncertain first-instruction delivery, the app opens that session and labels the uncertainty.
+
 Conversation details preserve recent Claude Code and Codex activity from local transcripts: messages, commentary, tool calls and results, available reasoning summaries, and compaction events. Expand a tool to inspect its recorded input or output. Commands, edit inputs, and plans have focused presentations; unknown tools keep their recorded content. Choose **Activity** to focus on agent work, and **Load older activity** to page backward. Reading older content pauses automatic scrolling; **Jump to latest** resumes it.
 
+Consecutive activity collapses into compact groups with tool/record counts, a recent summary, and reported errors. Expand a group to inspect every record in order. Grouping does not infer completion from the absence of a result.
+
 The info button opens context usage, reported token breakdowns, goal, model, workspace, connection source, and supported controls. Context usage also stays beside the composer. Drafts belong to individual conversations, and send feedback distinguishes a queued instruction from an accepted one. If delivery cannot be confirmed, check the transcript before retrying.
+
+Session details also let you name a conversation and set, edit, or clear a supported goal. **Queued instructions** is available in Today and session details: inspect messages and delivery errors, cancel pending/dead instructions, or retry dead-lettered and expired instructions. Instructions already in flight cannot be canceled from this queue view.
 
 **Saved** shows conversations known to Agenthail. Searching with at least three characters also queries older Codex history. Notification links resolve the target directly even when it is absent from the current list. On iPad, the conversation list and selected session can sit side by side.
 

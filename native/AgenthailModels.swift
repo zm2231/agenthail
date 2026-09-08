@@ -1,5 +1,21 @@
 import Foundation
 
+struct SessionCreationOptions: Decodable {
+    struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
+    let surfaces: [Surface]
+    let workspaces: [String]
+}
+struct CreationModels: Decodable { let models: [ModelOption] }
+struct QueueResponse: Decodable { let items: [QueueState] }
+struct SessionCreationReceipt: Decodable {
+    let ok: Bool
+    let unknown: Bool?
+    let session: RawSession?
+    let sessionId: String?
+    let error: String?
+    var id: String? { session?.id ?? sessionId }
+}
+
 struct APIVersion: Decodable {
     let protocolVersion: Int
     let minimumProtocol: Int

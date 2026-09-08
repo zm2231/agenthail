@@ -212,6 +212,7 @@ struct WorkView: View {
                     }
                 }
                 Text("Needs attention").font(.title2.bold()).padding(.top, 12)
+                NavigationLink { QueueListView(model: model) } label: { Label("Queued instructions", systemImage: "tray") }.frame(minHeight: 44)
                 if (model.snapshot?.attention ?? []).isEmpty {
                     Text("You are all caught up.").foregroundStyle(.secondary).padding(.vertical, 8)
                 } else {
@@ -240,6 +241,7 @@ struct ConversationListView: View {
     @ObservedObject var model: AgenthailIOSModel
     @Binding var selectedID: String?
     @State private var showHistory = false
+    @State private var showingNewSession = false
     @State private var search = ""
 
     init(model: AgenthailIOSModel, selectedID: Binding<String?> = .constant(nil)) {
@@ -264,7 +266,7 @@ struct ConversationListView: View {
                 NavigationLink(value: session.id) { IOSSessionRow(session: session) }
             }
             if sessions.isEmpty && !model.searching {
-                ContentUnavailableView(search.isEmpty ? "No conversations in this view" : "No saved matches", systemImage: "bubble.left", description: Text(search.isEmpty ? "Try Saved, or start a session on your Mac." : "Search with at least three characters to include older Codex sessions."))
+                ContentUnavailableView(search.isEmpty ? "No conversations in this view" : "No saved matches", systemImage: "bubble.left", description: Text(search.isEmpty ? "Start a conversation with the + button, or try Saved." : "Search with at least three characters to include older Codex sessions."))
             }
             if search.count >= 3 {
                 Section("Older Codex conversations") {
@@ -285,6 +287,8 @@ struct ConversationListView: View {
         .listStyle(.plain)
         .searchable(text: $search, prompt: "Find a conversation")
         .navigationTitle("Conversations")
+        .toolbar { ToolbarItem(placement: .primaryAction) { Button("New conversation", systemImage: "plus") { model.creationError = nil; showingNewSession = true } } }
+        .sheet(isPresented: $showingNewSession) { NewSessionSheet(model: model) }
         .refreshable { await model.refresh(fresh: true) }
     }
 }
@@ -340,7 +344,7 @@ struct SessionScreen: View {
                                 Label("Showing recent activity. Older activity or long output has been shortened.", systemImage: "text.badge.ellipsis")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
-                            ForEach(items) { item in IOSTimelineRow(item: item) }
+                            ForEach(TimelineGroup.make(items)) { group in CompactActivityGroup(group: group) }
                             if items.isEmpty { Text("No tool activity in this part of the conversation.").foregroundStyle(.secondary) }
                         } else {
                             if let reason = detail.timeline?.unavailableReason {
@@ -583,6 +587,8 @@ struct SessionInspector: View {
                         if context.compacting { Label("Compacting context", systemImage: "arrow.down.right.and.arrow.up.left") }
                     } else { Text("This agent has not reported context usage.").foregroundStyle(.secondary) }
                 }
+                SessionEditingControls(model: model, detail: detail)
+                Section { NavigationLink { QueueListView(model: model, sessionID: session.id) } label: { Label("Queued instructions", systemImage: "tray") } }
                 if let goal = detail.goal, !goal.objective.isEmpty {
                     Section("Goal") { Text(goal.objective).textSelection(.enabled); LabeledContent("Status", value: goal.status) }
                 }
