@@ -159,7 +159,7 @@ func (c *Codex) ensureDesktopHook(ctx context.Context, conn *cdpConn) error {
 	}
 	err := c.ensureHooked(ctx, conn)
 	c.bridgeTarget = conn.target
-	if err != nil && (strings.Contains(err.Error(), "request dispatcher") || strings.Contains(err.Error(), "app-server child was not found")) {
+	if err != nil && strings.Contains(err.Error(), "renderer bridge was not found") {
 		c.bridgeErr = err
 		c.bridgeRetry = now.Add(10 * time.Second)
 		return err

@@ -309,22 +309,22 @@ func (a *App) daemonInstallService() error {
 		return fmt.Errorf("rotate daemon log: %w", err)
 	}
 	environment := map[string]string{
-		"AGENTHAIL_SIDECAR":            os.Getenv("AGENTHAIL_SIDECAR"),
-		"AGENTHAIL_COOKIE_BRIDGE":      os.Getenv("AGENTHAIL_COOKIE_BRIDGE"),
-		"AGENTHAIL_PYTHON":             os.Getenv("AGENTHAIL_PYTHON"),
-		"AGENTHAIL_CODEX_BIN":          os.Getenv("AGENTHAIL_CODEX_BIN"),
-		"AGENTHAIL_CODEX_INSPECT":      codexRemotePort(),
-		"AGENTHAIL_CHROME_PROFILE":     envOr("AGENTHAIL_CHROME_PROFILE", "Default"),
-		"AGENTHAIL_NOTION_SPACE":       os.Getenv("AGENTHAIL_NOTION_SPACE"),
-		"AGENTHAIL_NOTION_USER":        os.Getenv("AGENTHAIL_NOTION_USER"),
-		"AGENTHAIL_NOTION_TZ":          os.Getenv("AGENTHAIL_NOTION_TZ"),
-		"AGENTHAIL_MAX_RESPONSE_BYTES": os.Getenv("AGENTHAIL_MAX_RESPONSE_BYTES"),
-		"AGENTHAIL_DEBUG":              os.Getenv("AGENTHAIL_DEBUG"),
-		"PYTHONPATH":                   os.Getenv("PYTHONPATH"),
-		"PATH":                         envOr("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"),
+		"AGENTHAIL_SIDECAR":                     os.Getenv("AGENTHAIL_SIDECAR"),
+		"AGENTHAIL_COOKIE_BRIDGE":               os.Getenv("AGENTHAIL_COOKIE_BRIDGE"),
+		"AGENTHAIL_PYTHON":                      os.Getenv("AGENTHAIL_PYTHON"),
+		"AGENTHAIL_CODEX_BIN":                   os.Getenv("AGENTHAIL_CODEX_BIN"),
+		"AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT": codexRemotePort(),
+		"AGENTHAIL_CHROME_PROFILE":              envOr("AGENTHAIL_CHROME_PROFILE", "Default"),
+		"AGENTHAIL_NOTION_SPACE":                os.Getenv("AGENTHAIL_NOTION_SPACE"),
+		"AGENTHAIL_NOTION_USER":                 os.Getenv("AGENTHAIL_NOTION_USER"),
+		"AGENTHAIL_NOTION_TZ":                   os.Getenv("AGENTHAIL_NOTION_TZ"),
+		"AGENTHAIL_MAX_RESPONSE_BYTES":          os.Getenv("AGENTHAIL_MAX_RESPONSE_BYTES"),
+		"AGENTHAIL_DEBUG":                       os.Getenv("AGENTHAIL_DEBUG"),
+		"PYTHONPATH":                            os.Getenv("PYTHONPATH"),
+		"PATH":                                  envOr("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"),
 	}
 	var envXML strings.Builder
-	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "AGENTHAIL_CODEX_BIN", "AGENTHAIL_CODEX_INSPECT", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
+	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "AGENTHAIL_CODEX_BIN", "AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
 		if environment[key] != "" {
 			fmt.Fprintf(&envXML, "    <key>%s</key><string>%s</string>\n", key, html.EscapeString(environment[key]))
 		}

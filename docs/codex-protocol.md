@@ -15,9 +15,11 @@ Agenthail implements Codex protocol methods only when they support a user-facing
 
 ## Desktop-owned conversations
 
-Codex Desktop keeps its app-server on private stdio and holds the active thread writer lock. Agenthail reaches that same child through the Desktop main-process inspector, bound only to `127.0.0.1`, so it does not compete for ownership with a second app-server. `agenthail launch codex` starts Desktop with the required inspector. A Desktop already running without that launch path must be quit and relaunched before Agenthail can send to its active conversations. The inspector is intentionally loopback-only, but it grants code execution to local processes that can reach it; use it only on a trusted local account.
+Codex Desktop keeps its app-server on private stdio and holds the active thread writer lock. Agenthail reaches that same child through the Desktop renderer’s loopback-only Chrome DevTools endpoint, so it does not compete for ownership with a second app-server. `agenthail launch codex` starts Desktop with `--remote-debugging-address=127.0.0.1 --remote-debugging-port=9231`. A Desktop already running without that launch path must be quit and relaunched before Agenthail can send to its active conversations. The endpoint grants code execution to local processes that can reach it; use it only on a trusted local account.
 
-`thread/search` is available through the app-server experimental API capability. Agenthail requests that capability on initialization and calls the method only for an explicit history search. If a newer Codex version promotes the method to the normal protocol, the method name and request shape remain the same. If an older version does not support it, Agenthail retains its local conversation catalog and reports that full Codex history search is unavailable rather than scanning rollout files.
+Agenthail uses the renderer’s `mcp-request` and `mcp-notification` bridge to the Desktop-owned app-server. It does not rely on Node’s `--inspect` interface, which current signed Codex Desktop builds can disable. `AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT` changes the loopback port when `9231` is unavailable.
+
+`thread/search` is available through the app-server experimental API capability. Agenthail requests that capability when it initializes its managed app-server and calls the method only for an explicit history search. Desktop requests use the Desktop app-server’s existing capability set. If a newer Codex version promotes the method to the normal protocol, the method name and request shape remain the same. If an older version does not support it, Agenthail retains its local conversation catalog and reports that full Codex history search is unavailable rather than scanning rollout files.
 
 ## Deferred
 

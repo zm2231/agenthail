@@ -44,13 +44,13 @@ type runtimeCLISurface struct {
 }
 
 func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
-	t.Setenv("AGENTHAIL_CODEX_INSPECT", "")
+	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "")
 	if got := codexRemotePort(); got != "" {
 		t.Fatalf("codexRemotePort() = %q, want empty managed-runtime default", got)
 	}
-	t.Setenv("AGENTHAIL_CODEX_INSPECT", "9333")
+	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "9333")
 	if got := codexRemotePort(); got != "9333" {
-		t.Fatalf("codexRemotePort() = %q, want inspector override", got)
+		t.Fatalf("codexRemotePort() = %q, want renderer override", got)
 	}
 }
 
@@ -739,9 +739,10 @@ func TestUnicodeTruncationIsValid(t *testing.T) {
 	}
 }
 
-func TestCodexLaunchEnablesLoopbackMainInspector(t *testing.T) {
+func TestCodexLaunchEnablesLoopbackRendererDebugging(t *testing.T) {
+	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "9333")
 	args := strings.Join(codexLaunchArgs(), " ")
-	if strings.Contains(args, "remote-debugging") || !strings.Contains(args, "--inspect=127.0.0.1:9230") {
+	if strings.Contains(args, "--inspect") || !strings.Contains(args, "--remote-debugging-address=127.0.0.1") || !strings.Contains(args, "--remote-debugging-port=9333") {
 		t.Fatalf("launch args=%q", args)
 	}
 }
@@ -785,8 +786,8 @@ func TestParseDaemonServicePID(t *testing.T) {
 func TestSelectCodexPIDValidatesExecutableAndMultipleResults(t *testing.T) {
 	pid := selectCodexPID(`bad
 12 /Applications/Other.app/Contents/MacOS/ChatGPT
-34 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT --flag
-`, []string{"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"})
+34 /Applications/Codex.app/Contents/MacOS/ChatGPT --flag
+`, []string{"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", "/Applications/Codex.app/Contents/MacOS/ChatGPT"})
 	if pid != 34 {
 		t.Fatalf("pid=%d", pid)
 	}

@@ -105,8 +105,23 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 }
 
 func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
+	desktopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	desktopErr := c.DesktopReady(desktopCtx)
+	cancel()
+	if desktopErr == nil {
+		return surface.RuntimeStatus{
+			Name:      "Codex Desktop bridge",
+			Reachable: true,
+			Durable:   true,
+			Backend:   "desktop",
+		}
+	}
 	if !c.managed {
-		return surface.RuntimeStatus{}
+		return surface.RuntimeStatus{
+			Name:        "Codex Desktop bridge",
+			Detail:      desktopErr.Error(),
+			Remediation: "run 'agenthail launch codex'",
+		}
 	}
 	status := surface.RuntimeStatus{
 		Name:        "Codex managed app-server",

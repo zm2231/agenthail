@@ -424,6 +424,13 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 	}
 }
 
+func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
+	status := NewCodex(startRendererDesktopBridge(t)).RuntimeStatus(context.Background())
+	if !status.Reachable || !status.Durable || status.Backend != "desktop" || status.Name != "Codex Desktop bridge" {
+		t.Fatalf("status=%+v", status)
+	}
+}
+
 func TestCodexManagedRuntimeStatusReportsSupervisedPIDBackend(t *testing.T) {
 	root := t.TempDir()
 	script := filepath.Join(root, "codex")

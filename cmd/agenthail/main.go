@@ -60,5 +60,5 @@ func envOr(key, def string) string {
 }
 
 func codexRemotePort() string {
-	return os.Getenv("AGENTHAIL_CODEX_INSPECT")
+	return os.Getenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT")
 }

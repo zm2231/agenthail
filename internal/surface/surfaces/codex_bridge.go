@@ -13,55 +13,49 @@ import (
 
 const codexHookJS = `
 (() => {
-  const handle = process._getActiveHandles().find(value => value && value.pid && Array.isArray(value.spawnargs) && value.spawnargs.join(' ').includes('app-server'));
-  if (!handle || !handle.stdin || !handle.stdout) return 'no-app-server-child';
-  const current = globalThis.__agenthailDesktopAppServerV1;
-  if (current && current.handle === handle && typeof current.request === 'function') return 'already';
+  if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
+  const current = globalThis.__agenthailCodexDesktopRendererV1;
+  if (current && typeof current.request === 'function') return 'already';
   const bridge = {
-    handle,
     events: [],
     sequence: 0,
-    next: 900000,
+    next: 0,
     pending: new Map(),
-    buffer: ''
   };
-  handle.stdout.on('data', chunk => {
-    bridge.buffer += Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
-    let index;
-    while ((index = bridge.buffer.indexOf('\n')) !== -1) {
-      const line = bridge.buffer.slice(0, index).trim();
-      bridge.buffer = bridge.buffer.slice(index + 1);
-      if (!line) continue;
-      try {
-        const message = JSON.parse(line);
-        if (message.id != null && bridge.pending.has(message.id)) {
-          const resolve = bridge.pending.get(message.id);
-          bridge.pending.delete(message.id);
-          resolve(message);
-        } else if (typeof message.method === 'string') {
-          bridge.events.push({sequence: ++bridge.sequence, method: message.method, params: message.params || {}});
-          if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
-        }
-      } catch {}
+  window.addEventListener('message', event => {
+    const data = event.data;
+    if (!data || data.hostId !== 'local') return;
+    if (data.type === 'mcp-response' && data.message && data.message.id != null) {
+      const id = String(data.message.id);
+      const resolve = bridge.pending.get(id);
+      if (resolve) {
+        bridge.pending.delete(id);
+        resolve(data.message);
+      }
+      return;
+    }
+    if (data.type === 'mcp-notification' && data.message && typeof data.message.method === 'string') {
+      bridge.events.push({sequence: ++bridge.sequence, method: data.message.method, params: data.message.params || {}});
+      if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
   });
   bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
-    const id = bridge.next++;
+    const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
     const timer = setTimeout(() => {
       if (bridge.pending.delete(id)) resolve({error:{code:'timeout', message:'Codex Desktop app-server request timed out'}});
     }, timeoutMs);
     bridge.pending.set(id, response => { clearTimeout(timer); resolve(response); });
-    handle.stdin.write(JSON.stringify({jsonrpc:'2.0', id, method, params:params||{}}) + '\n', error => {
-      if (error && bridge.pending.delete(id)) { clearTimeout(timer); resolve({error:{code:'write_failed', message:String(error.message || error)}}); }
+    Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'mcp-request', hostId:'local', request:{id, method, params:params||{}}, timeoutMs, retainResponse:false})).catch(error => {
+      if (bridge.pending.delete(id)) { clearTimeout(timer); resolve({error:{code:'write_failed', message:String(error && error.message || error)}}); }
     });
   });
-  globalThis.__agenthailDesktopAppServerV1 = bridge;
+  globalThis.__agenthailCodexDesktopRendererV1 = bridge;
   return 'hooked';
 })()
 `
 
 func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailDesktopAppServerV1;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop app-server bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV1;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
 		strconvQuote(method), paramsJSON, timeout.Milliseconds())
 }
 
@@ -78,13 +72,13 @@ func codexPayloadDeleteJS(id string) string {
 }
 
 func codexStagedRPCJS(id, method string, timeout time.Duration) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailDesktopAppServerV1,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop app-server bridge is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));return JSON.stringify(await b.request(%s,params,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV1,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));return JSON.stringify(await b.request(%s,params,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
 }
 
-const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailDesktopAppServerV1;return b?b.sequence:0})()`
+const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailCodexDesktopRendererV1;return b?b.sequence:0})()`
 
 func codexEventsJS(after int64) string {
-	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailDesktopAppServerV1;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
+	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV1;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
 }
 
 func strconvQuote(value string) string {
@@ -110,8 +104,8 @@ func (c *Codex) ensureHooked(ctx context.Context, conn *cdpConn) error {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	if lastResult == "no-app-server-child" {
-		return fmt.Errorf("Codex Desktop app-server child was not found; wait for Codex to finish launching or relaunch it with 'agenthail launch codex'")
+	if lastResult == "no-renderer-bridge" {
+		return fmt.Errorf("Codex Desktop renderer bridge was not found; wait for Codex to finish launching or relaunch it with 'agenthail launch codex'")
 	}
 	if lastErr != nil {
 		return fmt.Errorf("install Codex Desktop bridge: %w", lastErr)
