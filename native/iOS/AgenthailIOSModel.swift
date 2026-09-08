@@ -12,6 +12,20 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var operationError: String?
     @Published var pairing = false
     @Published var composer = ""
+    @Published var sessionError: String?
+    @Published var loadingSession = false
+    @Published var sendingSessionIDs: Set<String> = []
+    @Published var deliveryStatus: [String: String] = [:]
+    @Published var olderActivity: [TimelineItem] = []
+    @Published var activityCursor: Int64?
+    @Published var loadingOlderActivity = false
+    @Published var olderActivityError: String?
+    @Published var searchResults: [SessionSearchItem] = []
+    @Published var searchError: String?
+    @Published var searching = false
+    private var searchQuery = ""
+    private var sessionRequestID = UUID()
+    private var drafts: [String: String] = [:]
     @Published var notificationStatus = "Not enabled"
     @Published var requestedSessionID: String?
     @Published var showForgetMacConfirmation = false
@@ -40,6 +54,12 @@ final class AgenthailIOSModel: ObservableObject {
             self.token = token
             if autoConnect { connect() }
         }
+    }
+
+    init(api: AgenthailAPI) {
+        networkSession = .shared
+        automaticallyConnect = false
+        self.api = api
     }
 
     deinit {
@@ -185,22 +205,78 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func loadSession(_ id: String) async {
+        if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
+        if selectedSessionID != id {
+            composer = drafts[id] ?? ""
+            selectedDetail = nil
+            olderActivity = []
+            activityCursor = nil
+            olderActivityError = nil
+        }
         selectedSessionID = id
-        selectedDetail = nil
+        sessionError = nil
+        loadingSession = selectedDetail == nil
         await refreshSession(id)
+        if selectedSessionID == id { loadingSession = false }
     }
 
-    private func refreshSession(_ id: String) async {
+    func refreshSession(_ id: String) async {
         guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        let requestID = UUID()
+        sessionRequestID = requestID
         do {
-            let detail = try await api.sessionDetail(id: id)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            let detail = try await api.sessionDetail(id: id, includeTimeline: true)
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            if !olderActivity.isEmpty {
+                let retained = Set(olderActivity.map(\.id) + (detail.timeline?.items.map(\.id) ?? []))
+                olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
+            }
             selectedDetail = detail
-            operationError = nil
+            if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
+            sessionError = nil
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
-            operationError = error.localizedDescription
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            sessionError = error.localizedDescription
         }
+    }
+
+    func loadOlderActivity() async {
+        guard let api, let id = selectedSessionID, let cursor = activityCursor, cursor > 0, !loadingOlderActivity else { return }
+        loadingOlderActivity = true
+        defer { loadingOlderActivity = false }
+        do {
+            let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: cursor)
+            guard selectedSessionID == id else { return }
+            guard let timeline = page.timeline, timeline.unavailableReason == nil else {
+                throw AgenthailAPIError.unavailable(page.timeline?.unavailableReason ?? "Older activity is unavailable.")
+            }
+            let known = Set(olderActivity.map(\.id) + (selectedDetail?.timeline?.items.map(\.id) ?? []))
+            olderActivity = timeline.items.filter { !known.contains($0.id) } + olderActivity
+            activityCursor = timeline.nextBefore
+            olderActivityError = nil
+        } catch {
+            if selectedSessionID == id { olderActivityError = error.localizedDescription }
+        }
+    }
+
+    func searchSessions(_ query: String) async {
+        searchQuery = query
+        searchResults = []
+        searchError = nil
+        searching = false
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3, let api else { return }
+        searching = true
+        do {
+            try await Task.sleep(for: .milliseconds(350))
+            let response = try await api.searchSessions(query: query)
+            guard !Task.isCancelled, searchQuery == query else { return }
+            searchResults = response.results
+            searchError = response.remoteError?.isEmpty == false ? response.remoteError : nil
+        } catch {
+            guard !Task.isCancelled, searchQuery == query else { return }
+            searchError = error.localizedDescription
+        }
+        if searchQuery == query { searching = false }
     }
 
     func openNotification(_ sessionID: String) {
@@ -209,15 +285,31 @@ final class AgenthailIOSModel: ObservableObject {
 
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, let api else { return }
+        guard !message.isEmpty, let api,
+              let detail = selectedDetail, detail.session.id == session.id,
+              !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
+        let working = detail.session.status == "busy"
+        let action = working && detail.capabilities.steer ? "steer" : "send"
+        guard action == "steer" || detail.capabilities.send else { return }
+        sendingSessionIDs.insert(session.id)
+        deliveryStatus[session.id] = "Sending…"
         composer = ""
+        drafts[session.id] = ""
         Task {
+            defer { sendingSessionIDs.remove(session.id) }
             do {
-                try await api.action(session.isWorking ? "steer" : "send", sessionID: session.id, message: message)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message)
+                deliveryStatus[session.id] = response.result?.disposition == "queued" ? "Queued for the agent" : "Instruction accepted"
                 await refreshSession(session.id)
             } catch {
+                deliveryStatus[session.id] = "Delivery unconfirmed. Draft kept; check activity before retrying."
                 operationError = error.localizedDescription
-                if composer.isEmpty { composer = message }
+                if selectedSessionID == session.id {
+                    composer = composer.isEmpty ? message : message + "\n\n" + composer
+                } else {
+                    let newer = drafts[session.id] ?? ""
+                    drafts[session.id] = newer.isEmpty ? message : message + "\n\n" + newer
+                }
             }
         }
     }
@@ -273,6 +365,12 @@ final class AgenthailIOSModel: ObservableObject {
         snapshot = nil
         selectedDetail = nil
         selectedSessionID = nil
+        composer = ""
+        drafts = [:]
+        olderActivity = []
+        activityCursor = nil
+        searchResults = []
+        deliveryStatus = [:]
         lastEventID = 0
         connectionError = nil
         reconnecting = false

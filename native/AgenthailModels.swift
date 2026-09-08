@@ -163,6 +163,13 @@ struct ContextState: Decodable {
     let compacting: Bool
     let compactionCount: Int
     let reclaimedTokens: Int64?
+    let inputTokens: Int64?
+    let cachedInputTokens: Int64?
+    let outputTokens: Int64?
+    let reasoningOutputTokens: Int64?
+    let windowEstimated: Bool?
+    let updatedAt: String?
+    let lastCompactedAt: String?
 
     var fraction: Double {
         guard contextWindow > 0 else { return 0 }
@@ -188,6 +195,7 @@ struct SessionDetail: Decodable {
     let goal: GoalState?
     let model: String?
     let models: [ModelOption]?
+    let timeline: SessionTimeline?
     let transcriptTruncated: Bool?
     let transcriptOriginalBytes: Int?
     let transcriptReturnedBytes: Int?
@@ -201,6 +209,7 @@ struct RawSession: Decodable {
     let lastActive: String
     let source: String?
     let transport: String?
+    let cwd: String?
 }
 
 struct GoalState: Decodable {
@@ -288,4 +297,34 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .operations: return "slider.horizontal.3"
         }
     }
+}
+
+struct SessionTimeline: Decodable {
+    let nextBefore: Int64?
+    let items: [TimelineItem]
+    let source: String?
+    let truncated: Bool
+    let unavailableReason: String?
+}
+
+struct TimelineItem: Decodable, Identifiable {
+    let id: String
+    let kind: String
+    let role: String?
+    let title: String
+    let text: String
+    let timestamp: String?
+    let callId: String?
+    let status: String?
+    let truncated: Bool
+}
+
+struct SessionSearchResponse: Decodable {
+    let results: [SessionSearchItem]
+    let remoteError: String?
+}
+struct SessionSearchItem: Decodable, Identifiable {
+    var id: String { session.id }
+    let session: SessionState
+    let snippet: String?
 }

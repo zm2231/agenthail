@@ -37,23 +37,43 @@ extension Notification.Name {
 @main
 struct AgenthailIOSApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
-    @StateObject private var model = AgenthailIOSModel()
+    @StateObject private var model = AgenthailIOSModel(autoConnect: !sessionPreviewEnabled)
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            AgenthailIOSRoot(model: model)
-                .onOpenURL { model.handlePairingURL($0) }
-                .onReceive(NotificationCenter.default.publisher(for: .agenthailPushToken)) { notification in
-                    if let token = notification.object as? String { model.registerPushToken(token) }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .agenthailPushRegistrationFailed)) { notification in
-                    model.notificationStatus = "Setup failed"
-                    model.operationError = notification.object as? String ?? "This device could not register for notifications."
-                }
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { model.resumeConnection() }
-                }
+            Group {
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--preview-session") {
+                    SessionPreview()
+                } else { connectedRoot }
+#else
+                connectedRoot
+#endif
+            }
         }
     }
+    private var connectedRoot: some View {
+        AgenthailIOSRoot(model: model)
+            .onOpenURL { model.handlePairingURL($0) }
+            .onReceive(NotificationCenter.default.publisher(for: .agenthailPushToken)) { notification in
+                if let token = notification.object as? String { model.registerPushToken(token) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .agenthailPushRegistrationFailed)) { notification in
+                model.notificationStatus = "Setup failed"
+                model.operationError = notification.object as? String ?? "This device could not register for notifications."
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { model.resumeConnection() }
+            }
+    }
+
+}
+
+private var sessionPreviewEnabled: Bool {
+#if DEBUG
+    ProcessInfo.processInfo.arguments.contains("--preview-session")
+#else
+    false
+#endif
 }

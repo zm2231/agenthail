@@ -71,10 +71,24 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/snapshot" + (fresh ? "?fresh=1" : ""))
     }
 
-    func sessionDetail(id: String) async throws -> SessionDetail {
+    func sessionDetail(id: String, includeTimeline: Bool = false, timelineBefore: Int64? = nil) async throws -> SessionDetail {
         var components = URLComponents()
         components.path = "/api/v1/session"
         components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "limit", value: "40")]
+        if includeTimeline { components.queryItems?.append(URLQueryItem(name: "timeline", value: "1")) }
+        if let timelineBefore { components.queryItems?.append(URLQueryItem(name: "timelineBefore", value: String(timelineBefore))) }
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
+    func sendInstruction(action: String, sessionID: String, message: String) async throws -> ActionReceipt {
+        try await post("/api/v1/actions", body: ["action": action, "sessionId": sessionID, "message": message])
+    }
+
+    func searchSessions(query: String) async throws -> SessionSearchResponse {
+        var components = URLComponents()
+        components.path = "/api/v1/search"
+        components.queryItems = [URLQueryItem(name: "surface", value: "codex"), URLQueryItem(name: "q", value: query)]
         guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
         return try await get(path)
     }
@@ -226,3 +240,11 @@ final class AgenthailAPI: @unchecked Sendable {
 }
 
 private struct EmptyResponse: Decodable {}
+
+struct ActionReceipt: Decodable {
+    let result: DeliveryReceipt?
+}
+struct DeliveryReceipt: Decodable {
+    let disposition: String?
+    let queueId: Int64?
+}

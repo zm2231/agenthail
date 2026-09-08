@@ -1314,6 +1314,22 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 		readOnlyReason = accessErr.Error()
 	}
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	var timelineBefore int64
+	if raw := r.URL.Query().Get("timelineBefore"); raw != "" {
+		var parseErr error
+		timelineBefore, parseErr = strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || timelineBefore < 0 {
+			http.Error(w, "invalid activity cursor", http.StatusBadRequest)
+			return
+		}
+	}
+	if provider, ok := adapter.(surface.TimelineProvider); ok && r.URL.Query().Get("timeline") == "1" {
+		if timeline, timelineErr := provider.Timeline(ctx, session, timelineBefore); timelineErr == nil {
+			response["timeline"] = timeline
+		} else {
+			response["timeline"] = surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: "Detailed activity could not be loaded from the local transcript. Pull to refresh to retry."}
+		}
+	}
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		if usage, usageErr := provider.ContextUsage(ctx, session); usageErr == nil && usage != nil {
 			response["context"] = usage

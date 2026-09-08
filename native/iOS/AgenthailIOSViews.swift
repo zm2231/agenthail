@@ -40,8 +40,8 @@ struct PairingScreen: View {
 
     var body: some View {
         NavigationStack {
+            ScrollView {
             VStack(spacing: 24) {
-                Spacer()
                 ZStack {
                     RoundedRectangle(cornerRadius: 28).fill(orange)
                     Text("A").font(.system(size: 58, weight: .black)).foregroundStyle(.black)
@@ -67,12 +67,19 @@ struct PairingScreen: View {
                     .onSubmit {
                         if let url = URL(string: pastedURL) { model.handlePairingURL(url) }
                     }
+                Button("Connect with pairing link") {
+                    if let url = URL(string: pastedURL.trimmingCharacters(in: .whitespacesAndNewlines)) { model.handlePairingURL(url) }
+                }.disabled(pastedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pairing)
                 if model.pairing { ProgressView("Pairing securely") }
                 Spacer()
                 Text("Your conversations stay between this phone and your Mac over Tailscale.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 30)
             }
             .padding(.vertical)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity)
+            }
+            .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $scanning) {
                 NavigationStack {
                     QRCodeScanner { value in
@@ -117,18 +124,38 @@ struct MainTabs: View {
 
 struct ConversationFlow: View {
     @ObservedObject var model: AgenthailIOSModel
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var path: [String] = []
+    @State private var wideSelection: String?
+
+    init(model: AgenthailIOSModel, initialSessionID: String? = nil) {
+        self.model = model
+        _wideSelection = State(initialValue: initialSessionID)
+        _path = State(initialValue: initialSessionID.map { [$0] } ?? [])
+    }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            ConversationListView(model: model)
-                .navigationDestination(for: String.self) { sessionID in
-                    SessionRouteView(model: model, sessionID: sessionID)
+        Group {
+            if sizeClass == .regular {
+                NavigationSplitView {
+                    ConversationListView(model: model, selectedID: $wideSelection)
+                } detail: {
+                    if let wideSelection { SessionRouteView(model: model, sessionID: wideSelection) }
+                    else { ContentUnavailableView("Choose a conversation", systemImage: "bubble.left.and.bubble.right", description: Text("Keep your conversations alongside the session as you work.")) }
                 }
+            } else {
+                NavigationStack(path: $path) {
+                    ConversationListView(model: model)
+                        .navigationDestination(for: String.self) { sessionID in
+                            SessionRouteView(model: model, sessionID: sessionID)
+                        }
+                }
+            }
         }
         .onChange(of: model.requestedSessionID) { _, sessionID in
             guard let sessionID else { return }
             path = [sessionID]
+            wideSelection = sessionID
             model.requestedSessionID = nil
         }
     }
@@ -138,13 +165,27 @@ struct SessionRouteView: View {
     @ObservedObject var model: AgenthailIOSModel
     let sessionID: String
 
+    private var session: SessionState? {
+        if let value = model.snapshot?.sessions.first(where: { $0.id == sessionID }) { return value }
+        if let value = model.searchResults.first(where: { $0.id == sessionID })?.session { return value }
+        guard let detail = model.selectedDetail, detail.session.id == sessionID else { return nil }
+        return SessionState(id: sessionID, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+                            status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: false,
+                            current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+                            readOnlyReason: detail.readOnlyReason)
+    }
     var body: some View {
-        if let session = model.snapshot?.sessions.first(where: { $0.id == sessionID }) {
-            SessionScreen(model: model, session: session)
-        } else {
-            ProgressView("Opening conversation")
-                .task { await model.refresh(fresh: true) }
+        Group {
+            if let session { SessionScreen(model: model, session: session) }
+            else if let error = model.sessionError {
+                ContentUnavailableView {
+                    Label("Conversation unavailable", systemImage: "exclamationmark.bubble")
+                } description: { Text(error) } actions: {
+                    Button("Retry") { Task { await model.loadSession(sessionID) } }
+                }
+            } else { ProgressView("Opening conversation") }
         }
+        .task(id: sessionID) { if session == nil { await model.loadSession(sessionID) } }
     }
 }
 
@@ -157,9 +198,9 @@ struct WorkView: View {
                 if let error = model.connectionError {
                     Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(orange).padding()
                 }
-                Text("Working now").font(.title2.bold())
+                Text("Current conversations").font(.title2.bold())
                 if model.currentSessions.isEmpty {
-                    ContentUnavailableView("Nothing is running", systemImage: "checkmark.circle", description: Text("Current Claude Code and recent Codex work will appear here."))
+                    ContentUnavailableView("No current conversations", systemImage: "checkmark.circle", description: Text("Current Claude Code and recent Codex work will appear here."))
                 } else {
                     ForEach(model.currentSessions) { session in
                         NavigationLink {
@@ -175,12 +216,16 @@ struct WorkView: View {
                     Text("You are all caught up.").foregroundStyle(.secondary).padding(.vertical, 8)
                 } else {
                     ForEach(model.snapshot?.attention ?? []) { item in
+                        NavigationLink {
+                            SessionRouteView(model: model, sessionID: item.sessionId)
+                        } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(item.target).fontWeight(.semibold)
                             Text(item.reason).foregroundStyle(.secondary)
                             Text(item.requestedAction).font(.caption.weight(.bold)).foregroundStyle(orange)
                         }
-                        .padding().background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .padding().frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.plain)
                     }
                 }
             }
@@ -193,8 +238,14 @@ struct WorkView: View {
 
 struct ConversationListView: View {
     @ObservedObject var model: AgenthailIOSModel
+    @Binding var selectedID: String?
     @State private var showHistory = false
     @State private var search = ""
+
+    init(model: AgenthailIOSModel, selectedID: Binding<String?> = .constant(nil)) {
+        self.model = model
+        _selectedID = selectedID
+    }
 
     private var sessions: [SessionState] {
         let source = showHistory ? (model.snapshot?.sessions ?? []) : model.currentSessions
@@ -202,18 +253,35 @@ struct ConversationListView: View {
     }
 
     var body: some View {
-        List {
+        List(selection: $selectedID) {
+            if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").font(.footnote).foregroundStyle(.secondary) }
             Picker("Scope", selection: $showHistory) {
                 Text("Current").tag(false)
-                Text("History").tag(true)
+                Text("Saved").tag(true)
             }
             .pickerStyle(.segmented)
             ForEach(sessions) { session in
-                NavigationLink(value: session.id) {
-                    IOSSessionRow(session: session)
+                NavigationLink(value: session.id) { IOSSessionRow(session: session) }
+            }
+            if sessions.isEmpty && !model.searching {
+                ContentUnavailableView(search.isEmpty ? "No conversations in this view" : "No saved matches", systemImage: "bubble.left", description: Text(search.isEmpty ? "Try Saved, or start a session on your Mac." : "Search with at least three characters to include older Codex sessions."))
+            }
+            if search.count >= 3 {
+                Section("Older Codex conversations") {
+                    if model.searching { ProgressView("Searching history") }
+                    if let error = model.searchError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                    ForEach(model.searchResults.filter { result in !sessions.contains(where: { $0.id == result.id }) }) { result in
+                        NavigationLink(value: result.id) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                IOSSessionRow(session: result.session)
+                                if let snippet = result.snippet { Text(snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                            }
+                        }
+                    }
                 }
             }
         }
+        .task(id: search) { await model.searchSessions(search) }
         .listStyle(.plain)
         .searchable(text: $search, prompt: "Find a conversation")
         .navigationTitle("Conversations")
@@ -224,54 +292,127 @@ struct ConversationListView: View {
 struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
-    @State private var showingCommands = false
+    @State private var showingInfo = false
+    @State private var activityOnly = false
+    @State private var followingLatest = true
 
     private var detail: SessionDetail? {
         model.selectedDetail?.session.id == session.id ? model.selectedDetail : nil
+    }
+    private var items: [TimelineItem] {
+        let latest = detail?.timeline?.items ?? []
+        let ids = Set(latest.map(\.id))
+        return (model.olderActivity.filter { !ids.contains($0.id) } + latest).filter { !activityOnly || $0.kind != "message" }
     }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    if detail?.transcriptTruncated == true {
-                        Label("Older or oversized transcript content was shortened for this view.", systemImage: "text.badge.ellipsis")
-                            .font(.footnote).foregroundStyle(.secondary)
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    if let error = model.connectionError {
+                        Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(.secondary)
+                    } else if model.reconnecting {
+                        Label("Reconnecting live updates", systemImage: "arrow.triangle.2.circlepath").font(.callout).foregroundStyle(.secondary)
                     }
-                    if let context = detail?.context, context.contextWindow > 0 {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ProgressView(value: context.fraction).tint(context.fraction > 0.85 ? orange : .green)
-                            Text(context.compacting ? "Compacting context" : "\(Int(context.fraction * 100))% context · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted()) tokens")
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    if model.loadingSession && detail == nil { ProgressView("Loading conversation") }
+                    if let error = model.sessionError {
+                        ContentUnavailableView {
+                            Label("Could not refresh conversation", systemImage: "exclamationmark.bubble")
+                        } description: { Text(error) } actions: {
+                            Button("Retry") { Task { await model.loadSession(session.id) } }
                         }
                     }
-                    ForEach(detail?.exchanges ?? []) { exchange in
-                        if !exchange.user.isEmpty { IOSMessage(label: "YOU", text: exchange.user, color: orange) }
-                        if !exchange.assistant.isEmpty { IOSMessage(label: session.surface == "claude" ? "CLAUDE CODE" : session.surface.uppercased(), text: exchange.assistant, color: .secondary) }
+                    if let detail {
+                        SessionSummary(detail: detail) { showingInfo = true }
+                        if let timeline = detail.timeline, timeline.unavailableReason == nil, (!timeline.items.isEmpty || (timeline.nextBefore ?? 0) > 0) {
+                            Picker("Transcript filter", selection: $activityOnly) {
+                                Text("Conversation").tag(false)
+                                Text("Activity").tag(true)
+                            }.pickerStyle(.segmented)
+                            if (model.activityCursor ?? 0) > 0 {
+                                Button { followingLatest = false; Task { await model.loadOlderActivity() } } label: {
+                                    if model.loadingOlderActivity { ProgressView("Loading older activity") }
+                                    else { Label("Load older activity", systemImage: "arrow.up") }
+                                }.disabled(model.loadingOlderActivity).frame(minHeight: 44)
+                            }
+                            if let error = model.olderActivityError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                            if timeline.truncated {
+                                Label("Showing recent activity. Older activity or long output has been shortened.", systemImage: "text.badge.ellipsis")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            ForEach(items) { item in IOSTimelineRow(item: item) }
+                            if items.isEmpty { Text("No tool activity in this part of the conversation.").foregroundStyle(.secondary) }
+                        } else {
+                            if let reason = detail.timeline?.unavailableReason {
+                                Label(reason, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+                            } else {
+                                Text("Message history. Detailed activity is not available for this session.").font(.footnote).foregroundStyle(.secondary)
+                            }
+                            if detail.transcriptTruncated == true {
+                                Text("Older or oversized messages were shortened.").font(.footnote).foregroundStyle(.secondary)
+                            }
+                            ForEach(Array(detail.exchanges.enumerated()), id: \.offset) { _, exchange in
+                                if !exchange.user.isEmpty { IOSMessage(label: "You", text: exchange.user, color: orange) }
+                                if !exchange.assistant.isEmpty { IOSMessage(label: session.surface.capitalized, text: exchange.assistant, color: .secondary) }
+                            }
+                            if detail.exchanges.isEmpty {
+                                ContentUnavailableView("No messages yet", systemImage: "bubble.left", description: Text("Messages will appear here as the agent works."))
+                            }
+                        }
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(DragGesture().onChanged { _ in followingLatest = false })
+            .refreshable { await model.refreshSession(session.id) }
             .safeAreaInset(edge: .bottom) {
-                if session.isReadOnly {
-                    Label(session.readOnlyReason ?? "This conversation is read only.", systemImage: "lock").font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity).background(.ultraThinMaterial)
-                } else {
-                    IOSComposer(model: model, session: session, showingCommands: $showingCommands)
-                }
+                VStack(spacing: 0) {
+                    if !followingLatest {
+                        Button {
+                            followingLatest = true
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        } label: { Label("Jump to latest", systemImage: "arrow.down").padding(10) }
+                    }
+                    if let detail {
+                        if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
+                            Label(detail.readOnlyReason.isEmpty ? "This session does not support messages." : detail.readOnlyReason, systemImage: "lock")
+                                .font(.footnote).foregroundStyle(.secondary).padding().frame(maxWidth: .infinity)
+                        } else {
+                            IOSComposer(model: model, session: session, detail: detail)
+                        }
+                    }
+                }.background(.bar)
             }
             .navigationTitle(session.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        if session.capabilities.compact { Button("Compact", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session) } }
-                        if session.capabilities.interrupt && session.isWorking { Button("Stop", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session) } }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    Button("Session details", systemImage: "info.circle") { showingInfo = true }.disabled(detail == nil)
                 }
             }
-            .task { await model.loadSession(session.id); proxy.scrollTo("bottom", anchor: .bottom) }
-            .onChange(of: detail?.exchanges.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+            .sheet(isPresented: $showingInfo) {
+                if let detail { SessionInspector(model: model, session: session, detail: detail) }
+            }
+            .task(id: session.id) {
+                await model.loadSession(session.id)
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            .task(id: "activity-" + session.id) {
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(4)) } catch { return }
+                    if detail?.session.status == "busy" { await model.refreshSession(session.id) }
+                }
+            }
+            .onChange(of: detail?.timeline?.items.last?.id) { _, _ in
+                if followingLatest { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: detail?.exchanges.last?.assistant) { _, _ in
+                if followingLatest { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
         }
     }
 }
@@ -279,35 +420,42 @@ struct SessionScreen: View {
 struct IOSComposer: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
-    @Binding var showingCommands: Bool
+    let detail: SessionDetail
+
+    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer }
+    private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     var body: some View {
-        VStack(spacing: 8) {
-            if model.composer.hasPrefix("/") || showingCommands {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        if session.capabilities.compact { Button("/compact") { model.action("compact", session: session); model.composer = "" } }
-                        if session.capabilities.interrupt { Button("/stop") { model.action("interrupt", session: session); model.composer = "" } }
-                        if session.capabilities.model,
-                           model.selectedDetail?.session.id == session.id,
-                           let models = model.selectedDetail?.models {
-                            Menu("/model") {
-                                ForEach(models) { option in Button(option.displayName) { model.action("model", session: session, model: option.id); model.composer = "" } }
-                            }
-                        }
-                    }.buttonStyle(.bordered)
+        VStack(alignment: .leading, spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text(detail.model ?? detail.session.surface.capitalized)
+                    if let context = detail.context, context.contextWindow > 0 { Text("· \(Int(context.fraction * 100))% context") }
+                    Spacer()
+                    Text(steering ? "Steering current turn" : "New instruction")
                 }
+                Text(steering ? "Steering current turn" : "New instruction")
+            }.font(.caption).foregroundStyle(.secondary)
+            if let status = model.deliveryStatus[session.id] {
+                Text(status).font(.footnote).foregroundStyle(.secondary)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                TextField(session.isWorking ? "Steer this turn" : "Message this agent", text: $model.composer, axis: .vertical)
-                    .lineLimit(1...6).textFieldStyle(.plain).padding(12).background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
-                    .onChange(of: model.composer) { _, value in showingCommands = value.hasPrefix("/") }
-                Button { model.send(to: session) } label: { Image(systemName: "arrow.up").font(.headline).frame(width: 38, height: 38) }
-                    .buttonStyle(.borderedProminent).buttonBorderShape(.circle).tint(orange)
-                    .disabled(model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                TextField(steering ? "Steer this turn" : "Message this agent", text: $model.composer, axis: .vertical)
+                    .lineLimit(1...6).textFieldStyle(.plain).padding(12)
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                    .accessibilityLabel(steering ? "Instruction for the current turn" : "Message to this agent")
+                Button { model.send(to: session) } label: {
+                    if sending { ProgressView().frame(width: 44, height: 44) }
+                    else { Image(systemName: "arrow.up").font(.headline).frame(width: 44, height: 44) }
+                }
+                .buttonStyle(.borderedProminent).buttonBorderShape(.circle).tint(orange)
+                .accessibilityLabel(steering ? "Send steering instruction" : "Send message")
+                .disabled(sending || model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!steering && !detail.capabilities.send))
             }
         }
-        .padding(.horizontal).padding(.vertical, 10).background(.ultraThinMaterial)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal).padding(.vertical, 10)
     }
 }
 
@@ -316,11 +464,154 @@ struct IOSMessage: View {
     let text: String
     let color: Color
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(label).font(.caption.weight(.bold)).tracking(1.2).foregroundStyle(.secondary)
-            if let attributed = try? AttributedString(markdown: text) { Text(attributed).textSelection(.enabled) } else { Text(text).textSelection(.enabled) }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            if let markdown = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                Text(markdown).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.leading, 14).overlay(alignment: .leading) { Rectangle().fill(color.opacity(0.6)).frame(width: 2) }
+        .contextMenu { ShareLink(item: text) { Label("Share text", systemImage: "square.and.arrow.up") } }
+    }
+}
+
+struct IOSTimelineRow: View {
+    let item: TimelineItem
+    @State private var expanded = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if item.kind == "message" {
+                IOSMessage(label: item.role == "user" ? "You" : item.title.capitalized, text: item.text, color: .secondary)
+            } else {
+                DisclosureGroup(isExpanded: $expanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let callID = item.callId {
+                            Text("Call: \(callID)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                        if item.kind == "toolCall" { ToolContentView(item: item) }
+                        else {
+                            Text(item.text.isEmpty ? "No additional details were recorded." : item.text)
+                                .font(item.kind == "toolResult" ? .system(.callout, design: .monospaced) : .body)
+                                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }.padding(.top, 8)
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).font(.callout.weight(.semibold))
+                            if let status = item.status, !status.isEmpty { Text(status.capitalized).font(.caption).foregroundStyle(.secondary) }
+                            if !expanded && !item.text.isEmpty { Text(item.kind == "toolCall" ? ToolPresentation(name: item.title, text: item.text).summary : item.text).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                        }
+                    } icon: { Image(systemName: symbol) }
+                    .frame(minHeight: 44)
+                }
+                .tint(.primary)
+            }
+            if item.truncated { Label("This output was shortened", systemImage: "text.badge.ellipsis").font(.caption).foregroundStyle(.secondary) }
+            if let timestamp = item.timestamp, let date = ISO8601DateFormatter.sessionDate(timestamp) {
+                Text(date, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+    private var symbol: String {
+        switch item.kind {
+        case "toolCall": return "terminal"
+        case "toolResult": return item.status == "error" ? "exclamationmark.circle" : "text.alignleft"
+        case "reasoning": return "text.bubble"
+        case "attachment": return "paperclip"
+        default: return "clock.arrow.circlepath"
+        }
+    }
+}
+
+struct SessionSummary: View {
+    let detail: SessionDetail
+    let openDetails: () -> Void
+    var body: some View {
+        Button(action: openDetails) {
+            VStack(alignment: .leading, spacing: 8) {
+                ViewThatFits(in: .horizontal) {
+                    HStack { status; Spacer(); modelLabel }
+                    VStack(alignment: .leading, spacing: 4) { status; modelLabel }
+                }
+                if let context = detail.context, context.contextWindow > 0 {
+                    ProgressView(value: context.fraction)
+                        .accessibilityLabel("Context used").accessibilityValue("\(Int(context.fraction * 100)) percent")
+                    Text("\(Int(context.fraction * 100))% context · \(context.usedTokens.formatted()) tokens")
+                        .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                if let goal = detail.goal, !goal.objective.isEmpty {
+                    Label(goal.objective, systemImage: "target").font(.callout).lineLimit(2)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+        }.buttonStyle(.plain).accessibilityHint("Opens context, goal, model and session controls")
+    }
+    private var status: some View { Label(detail.session.status.capitalized, systemImage: detail.session.status == "busy" ? "waveform" : "bubble.left").font(.subheadline.weight(.semibold)) }
+    private var modelLabel: some View { Text(detail.model ?? detail.session.surface.capitalized).font(.subheadline).foregroundStyle(.secondary) }
+}
+
+struct SessionInspector: View {
+    @ObservedObject var model: AgenthailIOSModel
+    let session: SessionState
+    let detail: SessionDetail
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Session") {
+                    LabeledContent("Agent", value: detail.session.surface.capitalized)
+                    LabeledContent("Status", value: detail.session.status.capitalized)
+                    if let value = detail.model { LabeledContent("Model", value: value) }
+                    if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
+                    if let value = detail.session.source { LabeledContent("Source", value: value) }
+                    if let value = detail.session.transport { LabeledContent("Connection", value: value) }
+                    LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
+                }
+                Section("Context") {
+                    if let context = detail.context {
+                        LabeledContent("Used tokens", value: context.usedTokens.formatted())
+                        LabeledContent(context.windowEstimated == true ? "Estimated window" : "Context window", value: context.contextWindow > 0 ? context.contextWindow.formatted() : "Unavailable")
+                        if let value = context.inputTokens { LabeledContent("Input", value: value.formatted()) }
+                        if let value = context.cachedInputTokens { LabeledContent("Cached input", value: value.formatted()) }
+                        if let value = context.outputTokens { LabeledContent("Output", value: value.formatted()) }
+                        if let value = context.reasoningOutputTokens { LabeledContent("Reasoning output", value: value.formatted()) }
+                        if let value = context.cumulativeTokens { LabeledContent("Cumulative tokens", value: value.formatted()) }
+                        LabeledContent("Compactions", value: context.compactionCount.formatted())
+                        if let value = context.reclaimedTokens { LabeledContent("Tokens reclaimed", value: value.formatted()) }
+                        if context.compacting { Label("Compacting context", systemImage: "arrow.down.right.and.arrow.up.left") }
+                    } else { Text("This agent has not reported context usage.").foregroundStyle(.secondary) }
+                }
+                if let goal = detail.goal, !goal.objective.isEmpty {
+                    Section("Goal") { Text(goal.objective).textSelection(.enabled); LabeledContent("Status", value: goal.status) }
+                }
+                Section("Controls") {
+                    if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
+                    else {
+                        if detail.capabilities.model, let options = detail.models, !options.isEmpty {
+                            Menu("Change model") {
+                                ForEach(options) { option in Button(option.displayName) { model.action("model", session: session, model: option.id); dismiss() } }
+                            }
+                        }
+                        if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
+                        if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
+                        LabeledContent("Send messages", value: detail.capabilities.send ? "Available" : "Unavailable")
+                        LabeledContent("Steer active turns", value: detail.capabilities.steer ? "Available" : "Unavailable")
+                    }
+                }
+            }
+            .navigationTitle("Session details").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+extension ISO8601DateFormatter {
+    static func sessionDate(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 }
 
@@ -330,11 +621,14 @@ struct IOSSessionRow: View {
         HStack(spacing: 12) {
             Circle().fill(session.isWorking ? orange : session.current ? .green : .secondary).frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 3) {
-                Text(session.displayName).fontWeight(.semibold).lineLimit(1)
-                Text("\(session.surface == "claude" ? "Claude Code" : session.surface.capitalized) · \(session.isWorking ? "Working" : session.currentReason?.capitalized ?? "Ready")").font(.subheadline).foregroundStyle(.secondary)
+                Text(session.displayName).fontWeight(.semibold).lineLimit(2)
+                Text("\(session.surface == "claude" ? "Claude Code" : session.surface.capitalized) · \(session.isWorking ? "Working" : session.status.capitalized)").font(.subheadline).foregroundStyle(.secondary)
+                if session.queueCount > 0 { Text("\(session.queueCount) queued").font(.caption).foregroundStyle(.secondary) }
+                if session.isReadOnly { Label("Read only", systemImage: "lock").font(.caption).foregroundStyle(.secondary) }
             }
         }
         .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
     }
 }
 

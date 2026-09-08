@@ -30,3 +30,5 @@ docs/brand/internal/*
 docs/brand/*.jpg
 /index.pre.js
 /package.json
+
+.worktrees/
