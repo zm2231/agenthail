@@ -184,6 +184,7 @@ func DeliveryTerminalReason(err error) DeliveryTerminalKind {
 }
 
 type SendOptions struct {
+	TurnOptions
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 }
@@ -203,6 +204,11 @@ func SourceSessionID(ctx context.Context) string {
 }
 
 type SessionStartOptions struct {
+	TurnOptions
+	Name           string `json:"name,omitempty"`
+	Worktree       string `json:"worktree,omitempty"`
+	Agent          string `json:"agent,omitempty"`
+	PermissionMode string `json:"permissionMode,omitempty"`
 	Message        string `json:"message"`
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`

@@ -672,6 +672,12 @@ func (c *Codex) StartSession(ctx context.Context, options surface.SessionStartOp
 }
 
 func (c *Codex) startSession(ctx context.Context, client codexClient, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
+		return nil, nil, err
+	}
+	if options.Worktree != "" || options.Agent != "" || options.PermissionMode != "" || options.Name != "" {
+		return nil, nil, fmt.Errorf("name, worktree, agent and permission-mode creation options require Claude")
+	}
 	message := strings.TrimSpace(options.Message)
 	if message == "" {
 		return nil, nil, fmt.Errorf("message is required")
@@ -714,6 +720,9 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": message}},
 	}
+	if err := applyCodexTurnOptions(ctx, client, threadID, options.Model, options.TurnOptions, turnParams); err != nil {
+		return session, nil, err
+	}
 	turnResponse, err := client.Request(ctx, "turn/start", turnParams, 10*time.Second)
 	if err != nil {
 		return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("turn/start: %w", err))
@@ -730,6 +739,9 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 }
 
 func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
+		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+	}
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
@@ -756,6 +768,9 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	}
 	if options.Model != "" {
 		params["model"] = options.Model
+	}
+	if err := applyCodexTurnOptions(ctx, conn, sess.ID, options.Model, options.TurnOptions, params); err != nil {
+		return nil, surface.DeliveryUnavailable(err)
 	}
 	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
 	if err != nil {

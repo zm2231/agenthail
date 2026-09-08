@@ -3,7 +3,7 @@
   "codex_version": "0.153.4",
   "source_command": "codex app-server generate-json-schema --experimental --out .research/codex-schema",
   "source_sha256": "22d8039094586f0c957ab1b17825c9233942c1b18abcd9d3c9e9e97c47a35d9e",
-  "scope": "All ClientRequest methods, including experimental. Literal references are a coverage index, not evidence that every method is active or a semantic coverage percentage.",
+  "scope": "Historical snapshot before session-operations implementation (commit 2257ee2). See session-operations.md for current coverage. All ClientRequest methods, including experimental. Literal references are a coverage index, not evidence that every method is active or a semantic coverage percentage.",
   "methods": [
     {
       "method": "initialize",

@@ -121,7 +121,7 @@
                 <span>Name <small>optional</small></span>
                 <input name="alias" maxlength="80" placeholder="research" />
               </label>
-              <label data-codex-start>
+              <label data-code-start>
                 <span>Working directory</span>
                 <input name="cwd" value="~" placeholder="~/project" />
               </label>
@@ -140,6 +140,14 @@
                   <option value="never">Never ask</option>
                 </select>
               </label>
+              <label data-claude-start><span>Claude model (optional)</span><input name="model" placeholder="Use Claude default" /></label>
+              <label data-claude-start><span>Claude agent (optional)</span><input name="agent" /></label>
+              <label data-claude-start><span>Worktree name (optional)</span><input name="worktree" /></label>
+              <label data-claude-start><span>Permission mode</span><select name="permissionMode"><option value="">Use Claude default</option><option>plan</option><option>auto</option><option>manual</option><option>acceptEdits</option><option>dontAsk</option></select></label>
+              <label data-code-start><span>Effort (optional)</span><input name="effort" placeholder="high" /></label>
+              <label data-codex-start><span>Mode</span><select name="mode"><option value="">Use session default</option><option value="plan">Plan</option><option value="default">Default</option></select></label>
+              <label data-codex-start><span>Service tier</span><select name="serviceTier"><option value="">Use default</option><option>default</option><option>fast</option><option>flex</option></select></label>
+              <label data-codex-start><span>Output JSON schema (optional)</span><textarea name="outputSchema" rows="3"></textarea></label>
               <label>
                 <span>First message</span>
                 <textarea name="message" maxlength="120000" rows="4" required placeholder="What should this thread work on?"></textarea>
@@ -227,6 +235,24 @@
               </div>
             </div>
             <footer class="composer">
+              <details><summary>Codex turn options</summary>
+                <label>Effort <input id="turn-effort" placeholder="Use session default" /></label>
+                <label>Mode <select id="turn-mode"><option value="">Use session default</option><option>plan</option><option>default</option></select></label>
+                <label>Service tier <select id="turn-tier"><option value="">Use session default</option><option>default</option><option>fast</option><option>flex</option></select></label>
+                <label>Output JSON schema <textarea id="turn-schema" rows="3" placeholder='{"type":"object","properties":{}}'></textarea></label>
+              </details>
+              <details><summary>Session lifecycle and native queue</summary>
+                <form id="session-operation-form">
+                  <label>Operation <select name="operation"><option value="session-fork">Fork Codex</option><option value="native-list">List Codex native queue</option><option value="native-add">Add to Codex native queue</option><option value="native-update">Update Codex native queue item</option><option value="native-delete">Delete Codex native queue item</option><option value="native-reorder">Reorder Codex native queue</option><option value="native-start">Start Codex queued input</option><option value="session-lifecycle-status">Claude background status</option><option value="session-lifecycle-logs">Claude background logs</option><option value="session-lifecycle-stop">Stop Claude background session</option><option value="session-lifecycle-resume">Resume Claude background session</option></select></label>
+                  <label>Message <textarea name="message" rows="2"></textarea></label>
+                  <label>Queue item ID <input name="id" /></label>
+                  <label>Stable client message ID (required when adding) <input name="clientId" /></label>
+                  <label>Queue order (comma-separated IDs) <input name="ids" /></label>
+                  <label>Next-page cursor <input name="cursor" /></label>
+                  <label>Fork directory (optional) <input name="cwd" /></label>
+                  <button type="submit">Run selected operation</button>
+                </form><pre id="session-operation-result" aria-live="polite"></pre>
+              </details>
               <div class="slash-menu" id="slash-menu" hidden></div>
               <form id="composer">
                 <textarea

@@ -23,6 +23,7 @@ type threadCreateOutput struct {
 }
 
 type threadCreateRequest struct {
+	options  surface.SessionStartOptions
 	surface  surface.SurfaceKind
 	message  string
 	cwd      string
@@ -32,12 +33,18 @@ type threadCreateRequest struct {
 	jsonOut  bool
 }
 
-const threadUsage = `usage: agenthail thread create codex "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--timeout <duration>] [--json]`
+const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--timeout <duration>] [--json]
+       agenthail thread fork <target> [--cwd <path>] [--model <model>] [--before-turn <id>|--last-turn <id>] [--alias <name>] [--json]
+       agenthail thread <status|stop|resume|logs> <target> [--json]
+       agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]`
 
 func (a *App) cmdThread(args []string) error {
 	if hasFlag(args, "--help") {
 		fmt.Println(threadUsage)
 		return nil
+	}
+	if len(args) > 0 && args[0] != "create" {
+		return a.cmdThreadOperation(args)
 	}
 	request, err := parseThreadCreateRequest(args)
 	if err != nil {
@@ -61,12 +68,7 @@ func (a *App) cmdThread(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	session, deliveryResult, startErr := starter.StartSession(ctx, surface.SessionStartOptions{
-		Message:        request.message,
-		Cwd:            request.cwd,
-		Model:          request.model,
-		ApprovalPolicy: request.approval,
-	})
+	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
 	if session != nil {
 		if err := a.Registry.RegisterSession(*session); err != nil {
 			return fmt.Errorf("register created thread %s: %w", session.ID, err)
@@ -87,7 +89,7 @@ func (a *App) cmdThread(args []string) error {
 			kind = "unknown"
 		}
 		recordThreadCreateHistory(a.Registry, kind, session, request.message, "", output.Error)
-		if request.jsonOut && session != nil {
+		if request.jsonOut {
 			if err := json.NewEncoder(os.Stdout).Encode(output); err != nil {
 				return fmt.Errorf("write JSON output: %w", err)
 			}
@@ -113,7 +115,7 @@ func (a *App) cmdThread(args []string) error {
 	if request.jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(output)
 	}
-	target := "codex/" + session.ID
+	target := string(session.Surface) + "/" + session.ID
 	if request.alias != "" {
 		target = "@" + request.alias
 	}
@@ -130,8 +132,8 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 		return threadCreateRequest{}, fmt.Errorf("%s", threadUsage)
 	}
 	request := threadCreateRequest{surface: surface.SurfaceKind(strings.ToLower(args[1])), jsonOut: hasFlag(args, "--json")}
-	if request.surface != surface.KindCodex {
-		return threadCreateRequest{}, fmt.Errorf("only Codex supports non-interactive thread creation")
+	if request.surface != surface.KindCodex && request.surface != surface.KindClaude {
+		return threadCreateRequest{}, fmt.Errorf("thread creation requires Codex or Claude")
 	}
 	var positional []string
 	positionalOnly := false
@@ -146,7 +148,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 			continue
 		}
 		switch arg {
-		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout":
+		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode":
 			i++
 		case "--json":
 		default:
@@ -183,6 +185,11 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 	if request.approval != "" && request.approval != "untrusted" && request.approval != "on-request" && request.approval != "never" {
 		return threadCreateRequest{}, fmt.Errorf("approval must be untrusted, on-request, or never")
 	}
+	turnOptions, err := parseTurnOptions(args)
+	if err != nil {
+		return request, err
+	}
+	request.options = surface.SessionStartOptions{Message: request.message, Cwd: request.cwd, Model: request.model, ApprovalPolicy: request.approval, TurnOptions: turnOptions, Name: flagVal(args, "--name"), Worktree: flagVal(args, "--worktree"), Agent: flagVal(args, "--agent"), PermissionMode: flagVal(args, "--permission-mode")}
 	return request, nil
 }
 

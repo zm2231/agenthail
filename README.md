@@ -133,13 +133,14 @@ agenthail channel send launch "The release date moved to Friday"
 
 ## Start work without opening another window
 
-An agent or script can start a new Codex thread directly:
+An agent or script can start a Codex thread or Claude background session directly:
 
 ```bash
 agenthail thread create codex "Implement the verified fix" --alias builder --json
+agenthail thread create claude "Investigate the build failure" --alias investigator --json
 ```
 
-The thread starts in your current folder unless you choose another project with `--cwd`.
+The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
 Notion threads can start the same way:
 

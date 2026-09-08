@@ -65,6 +65,9 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
+	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
+		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
@@ -83,7 +86,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	var result *surface.SendResult
 	var err error
-	if options.Model != "" {
+	if options.Model != "" || !options.TurnOptions.Empty() {
 		sender, ok := adapter.(surface.OptionSender)
 		if !ok {
 			return nil, fmt.Errorf("%s does not support per-message model selection", adapter.Name())

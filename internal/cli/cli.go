@@ -119,10 +119,13 @@ Usage:
 
 Session commands:
   codex [args]                  Start a writable Codex terminal session
-  thread create codex "msg"    Start a writable Codex thread non-interactively
+  thread create <codex|claude> "msg"    Create a background conversation
+  thread fork <target>         Fork a Codex conversation
+  thread <status|stop|resume|logs> <target>  Manage a Claude background session
+  thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
   list [--all]                   List current sessions (--all includes saved conversation catalog)
   search codex <query>           Search older Codex conversation history on demand
-  send <target> "msg"|-       Send (--from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
+  send <target> "msg"|-       Send (--effort, --mode, --service-tier, --output-schema, --from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
   reply <target> [--json]       Fetch last assistant reply
   last <target> [count] [--full] [--json]  Show last N exchanges (full text with --full)
@@ -313,7 +316,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--alias": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -344,10 +347,10 @@ func validateCommandFlags(command string, args []string) error {
 	}
 	specs := map[string]flagSpec{
 		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
-		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
+		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {bools: map[string]bool{"--full": true, "--json": true}}, "tail": {bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
@@ -802,7 +805,11 @@ func (a *App) cmdSend(args []string) error {
 			baseline = observation.CompletedTurnID
 		}
 	}
-	options := surface.SendOptions{Model: flagVal(args, "--model")}
+	turnOptions, err := parseTurnOptions(args)
+	if err != nil {
+		return err
+	}
+	options := surface.SendOptions{Model: flagVal(args, "--model"), TurnOptions: turnOptions}
 	options.SourceSessionID, err = a.sourceSessionID(ctx, fromLabel)
 	if err != nil {
 		return err

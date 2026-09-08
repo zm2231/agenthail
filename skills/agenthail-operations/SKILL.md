@@ -1,6 +1,6 @@
 ---
 name: agenthail-operations
-description: "Operate AgentHail across Claude, Codex, and Notion: discover sessions, create Codex and Notion threads, send and observe work, manage queues, aliases, channels, relay subscriptions, daemon notifications, and the dashboard."
+description: "Operate AgentHail across Claude, Codex, and Notion: discover sessions, create Claude, Codex and Notion threads, send and observe work, manage queues, aliases, channels, relay subscriptions, daemon notifications, and the dashboard."
 ---
 
 # AgentHail Operations
@@ -41,7 +41,7 @@ agenthail doctor --json
 AgentHail targets macOS. Native Claude messages use local sockets and require
 the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
 uses AgentHail's local app-server bridge. Relevant overrides are
-`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CODEX_BIN`,
+`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`, `AGENTHAIL_CODEX_BIN`,
 `AGENTHAIL_CODEX_REMOTE`, `AGENTHAIL_NOTION_SPACE`, and
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
@@ -61,7 +61,7 @@ from JSON discovery output when reporting partial availability.
 |---|---:|---:|---:|
 | Find existing sessions | yes | yes | yes |
 | Send and read replies | yes | yes | yes |
-| Start a new session or thread | manual | CLI, TTY, or dashboard | CLI |
+| Start a new session or thread | CLI or dashboard background | CLI, TTY, or dashboard | CLI |
 | Stream, interrupt, steer, compact | yes | yes | no |
 | Persistent session model | yes | yes | no |
 | One-message model override | no | yes | yes |
@@ -163,9 +163,19 @@ chooses the visible title from the first message.
 Start an interactive writable Codex thread with `agenthail codex` in a human
 TTY. It uses the caller's current directory unless `--cd` is provided. The
 enabled AgentHail dashboard can also create one. `agenthail launch codex` starts
-Desktop with a writable bridge but does not itself create a thread. AgentHail
-does not expose a non-interactive CLI command for creating a Claude session.
-Open Claude manually, then discover it with `agenthail list`.
+Desktop with a writable bridge but does not itself create a thread.
+
+Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
+Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
+launch outcomes; inspect `claude agents --json --all` before retrying.
+
+Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
+Native queue adds require `--client-id <stable-id>`; reuse it only for retries
+of the same submission. Native queue commands do not enter the Agenthail outbox.
+`send` and `thread create codex` accept `--effort`, `--mode plan|default`,
+`--service-tier` and `--output-schema <file>`. Preserve these fields on retries.
+See [session operations](../../docs/maintainers/session-operations.md) for the
+complete flags, API shapes, lifecycle limits and verification boundary.
 
 ## Send, Read, And Control
 
@@ -327,7 +337,8 @@ agenthail codex
 `thread create codex` starts a managed thread without a TTY. `launch codex`
 opens Codex if needed and verifies its local connection. `agenthail codex` starts
 an interactive writable terminal session and requires a human TTY.
-Claude and Notion must be opened and signed in manually.
+Claude background sessions start with `thread create claude`; Claude authentication
+must already be configured. Notion requires a signed-in browser.
 
 ## Verification Boundary
 

@@ -25,9 +25,9 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	var result *surface.SendResult
 	var sendErr error
-	if item.Model != "" {
+	if item.Model != "" || !item.TurnOptions.Empty() {
 		if sender, ok := adapter.(surface.OptionSender); ok {
-			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID})
+			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions})
 		} else {
 			sendErr = fmt.Errorf("%s does not support per-message model selection", adapter.Name())
 		}

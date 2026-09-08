@@ -1,6 +1,8 @@
 # Unused agent capabilities
 
-Observed 2026-09-07, against the Claude peer worktree. The biggest next opportunities are native Claude session creation, richer Codex turn controls and queues, and adapters for Pi, Hermes and ZCode. This is an implementation inventory and proposed order, not a claim that all discovered interfaces have passed live integration tests.
+Historical snapshot observed 2026-09-07, before the session-operations implementation. Claude background creation/lifecycle and Codex forks, native queues, turn controls and structured output have since been implemented; see [current session operations](session-operations.md). The method counts and tables below preserve the pre-implementation evidence.
+
+Observed against the Claude peer worktree. The biggest next opportunities are native Claude session creation, richer Codex turn controls and queues, and adapters for Pi, Hermes and ZCode. This is an implementation inventory and proposed order, not a claim that all discovered interfaces have passed live integration tests.
 
 ## Evidence boundary
 

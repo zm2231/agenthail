@@ -177,7 +177,7 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 		want string
 	}{
 		{"missing action", []string{"thread"}, "usage:"},
-		{"unsupported surface", []string{"thread", "create", "claude", "hello"}, "only Codex"},
+		{"unsupported surface", []string{"thread", "create", "notion", "hello"}, "requires Codex or Claude"},
 		{"missing message", []string{"thread", "create", "codex"}, "message is required"},
 		{"two messages", []string{"thread", "create", "codex", "positional", "--message", "flag"}, "either positionally"},
 		{"bad approval", []string{"thread", "create", "codex", "hello", "--approval", "always"}, "approval must"},
@@ -195,7 +195,7 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 
 func TestThreadCreateHelpIsSuccessful(t *testing.T) {
 	output, err := captureStdout(t, func() error { return (&App{}).Run([]string{"thread", "create", "codex", "--help"}) })
-	if err != nil || !strings.Contains(output, "agenthail thread create codex") {
+	if err != nil || !strings.Contains(output, "agenthail thread create <codex|claude>") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
