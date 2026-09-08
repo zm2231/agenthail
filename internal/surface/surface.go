@@ -184,7 +184,22 @@ func DeliveryTerminalReason(err error) DeliveryTerminalKind {
 }
 
 type SendOptions struct {
-	Model string `json:"model,omitempty"`
+	Model           string `json:"model,omitempty"`
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+}
+
+type sourceSessionIDContextKey struct{}
+
+func WithSourceSessionID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, sourceSessionIDContextKey{}, id)
+}
+
+func SourceSessionID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(sourceSessionIDContextKey{}).(string)
+	return id
 }
 
 type SessionStartOptions struct {

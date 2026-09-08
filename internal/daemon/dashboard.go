@@ -118,15 +118,16 @@ type dashboardAttention struct {
 }
 
 type dashboardQueue struct {
-	ID        int64  `json:"id"`
-	SessionID string `json:"sessionId"`
-	Target    string `json:"target"`
-	Message   string `json:"message"`
-	Model     string `json:"model,omitempty"`
-	Status    string `json:"status"`
-	Attempts  int    `json:"attempts"`
-	LastError string `json:"lastError,omitempty"`
-	QueuedAt  string `json:"queuedAt"`
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	ID              int64  `json:"id"`
+	SessionID       string `json:"sessionId"`
+	Target          string `json:"target"`
+	Message         string `json:"message"`
+	Model           string `json:"model,omitempty"`
+	Status          string `json:"status"`
+	Attempts        int    `json:"attempts"`
+	LastError       string `json:"lastError,omitempty"`
+	QueuedAt        string `json:"queuedAt"`
 }
 
 type dashboardChannel struct {
@@ -539,7 +540,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
+		state.Queue = append(state.Queue, dashboardQueue{ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -651,6 +652,15 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 }
 
 func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
+	if session.Surface == surface.KindClaude && session.Transport == "uds" {
+		capabilities.Stream = false
+		capabilities.Steer = false
+		capabilities.Compact = false
+		if !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_") {
+			capabilities.Model = false
+			capabilities.Interrupt = false
+		}
+	}
 	if surface.IsReadOnlySession(&session) {
 		return surface.Capabilities{}, true, surface.ReadOnlySessionReason(&session)
 	}
@@ -735,21 +745,22 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}()
 	defer r.Body.Close()
 	var request struct {
-		Action    string `json:"action"`
-		SessionID string `json:"sessionId"`
-		Message   string `json:"message"`
-		Alias     string `json:"alias"`
-		Model     string `json:"model"`
-		QueueID   int64  `json:"queueId"`
-		Channel   string `json:"channel"`
-		TargetID  string `json:"targetId"`
-		FromID    string `json:"fromId"`
-		ToID      string `json:"toId"`
-		Pattern   string `json:"pattern"`
-		RelayID   int64  `json:"relayId"`
-		Surface   string `json:"surface"`
-		Cwd       string `json:"cwd"`
-		Approval  string `json:"approvalPolicy"`
+		Action          string `json:"action"`
+		SourceSessionID string `json:"sourceSessionId"`
+		SessionID       string `json:"sessionId"`
+		Message         string `json:"message"`
+		Alias           string `json:"alias"`
+		Model           string `json:"model"`
+		QueueID         int64  `json:"queueId"`
+		Channel         string `json:"channel"`
+		TargetID        string `json:"targetId"`
+		FromID          string `json:"fromId"`
+		ToID            string `json:"toId"`
+		Pattern         string `json:"pattern"`
+		RelayID         int64  `json:"relayId"`
+		Surface         string `json:"surface"`
+		Cwd             string `json:"cwd"`
+		Approval        string `json:"approvalPolicy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1111,7 +1122,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model})
+		if request.SourceSessionID != "" {
+			if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
+				http.Error(w, "source session not found", http.StatusBadRequest)
+				return
+			}
+		}
+		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

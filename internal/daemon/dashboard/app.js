@@ -1113,6 +1113,8 @@ async function send(requestedAction = "send") {
         ? `${command} requested.`
         : queued
         ? "This agent is busy, so your message is safely queued."
+        : result?.result?.reason === "peer_transport_accepted"
+        ? "Accepted by Claude's socket. Receiver policy and completion are pending."
         : "Message sent.",
     );
     await load();

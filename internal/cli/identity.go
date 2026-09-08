@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func (a *App) resolveDisplay(sessionID string) string {
@@ -182,6 +183,10 @@ func (a *App) cmdChannel(args []string) error {
 		if message == "" {
 			return fmt.Errorf("message is empty")
 		}
+		sourceID, err := a.sourceSessionID(ctx, fromLabel)
+		if err != nil {
+			return err
+		}
 		if fromLabel == "" {
 			fromLabel = "hail"
 		}
@@ -201,7 +206,7 @@ func (a *App) cmdChannel(args []string) error {
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
 				continue
 			}
-			receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Deliver(ctx, surf, sess, payload, "")
+			receipt, err := (delivery.Dispatcher{Registry: a.Registry}).DeliverWithOptions(ctx, surf, sess, payload, "", surface.SendOptions{SourceSessionID: sourceID})
 			if err != nil {
 				failed++
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)

@@ -22,11 +22,12 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		return
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	var result *surface.SendResult
 	var sendErr error
 	if item.Model != "" {
 		if sender, ok := adapter.(surface.OptionSender); ok {
-			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model})
+			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID})
 		} else {
 			sendErr = fmt.Errorf("%s does not support per-message model selection", adapter.Name())
 		}
@@ -74,8 +75,10 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
-		d.log.Printf("record queue delivery %d start: %s", item.ID, err)
+	if session.Surface != surface.KindClaude || session.Transport != "uds" {
+		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
+			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
+		}
 	}
 	if err := d.Registry.AckMessageWithRelayHops(item.ID, session.ID, item.RelayHops); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)

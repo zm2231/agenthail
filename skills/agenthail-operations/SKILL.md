@@ -38,7 +38,8 @@ agenthail daemon install
 agenthail doctor --json
 ```
 
-AgentHail targets macOS. Claude and Notion use a signed-in Chrome profile. Codex
+AgentHail targets macOS. Native Claude messages use local sockets and require
+the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
 uses AgentHail's local app-server bridge. Relevant overrides are
 `AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CODEX_BIN`,
 `AGENTHAIL_CODEX_REMOTE`, `AGENTHAIL_NOTION_SPACE`, and
@@ -65,6 +66,23 @@ from JSON discovery output when reporting partial availability.
 | Persistent session model | yes | yes | no |
 | One-message model override | no | yes | yes |
 | Goal tracking | no | yes | no |
+
+Claude's control capabilities depend on its transport. Native UDS messages
+cannot execute slash commands, steer a running turn, or correlate message IDs
+with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
+the transcript or native `SendMessage` for an explicit reply. Interrupt and
+model changes require a Remote Control bridge. A receipt with
+`reason: "peer_transport_accepted"` only proves socket acceptance; receiver
+policy can still hold or deny the message. Do not claim model delivery from it.
+
+The daemon registers each agent in the default Codex/Notion discovery page as
+an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
+senders register on first send to Claude. `--from` must resolve to a session
+or alias; otherwise identity comes from `AGENTHAIL_SESSION_ID`,
+`CODEX_THREAD_ID`, then `CLAUDE_SESSION_ID`. Without identity, an operator peer
+receives replies into history. Inbound messages to read-only/offline agents
+are denied rather than silently queued. Peer histories include received
+messages, rejection reasons, and asynchronous Claude receipts.
 
 Claude model changes use the session's `/model` flow and require confirmation.
 Notion supports one-message model overrides. Do not attempt streaming, steering,
@@ -254,7 +272,7 @@ agenthail channel create launch
 agenthail channel add launch @researcher
 agenthail channel add launch @builder
 agenthail channel list
-agenthail channel send launch "Keep the existing API compatible." --from operator
+agenthail channel send launch "The release is ready for review." --from @builder
 agenthail channel rm launch @researcher
 agenthail channel rm launch --all
 ```

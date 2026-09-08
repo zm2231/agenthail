@@ -65,6 +65,7 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
+	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
@@ -101,12 +102,16 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		return nil, err
 	}
 	if result.Accepted {
-		if d.Registry != nil {
+		peerTransport := session.Surface == surface.KindClaude && session.Transport == "uds"
+		if d.Registry != nil && !peerTransport {
 			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
 				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result.UUID, Error: err.Error()})
 			}
 		}
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
+		if peerTransport {
+			return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID, Reason: "peer_transport_accepted"}, nil
+		}
 		return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID}, nil
 	}
 	if !allowQueue {

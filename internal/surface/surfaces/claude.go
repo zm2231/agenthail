@@ -54,6 +54,13 @@ func (c *Claude) Capabilities() surface.Capabilities {
 }
 
 func (c *Claude) Health(ctx context.Context) error {
+	if sessions, err := c.List(ctx); err == nil {
+		for _, session := range sessions {
+			if session.Transport == "uds" {
+				return nil
+			}
+		}
+	}
 	if _, err := sidecarPath(); err != nil {
 		return err
 	}
@@ -128,7 +135,7 @@ func (c *Claude) resolveTranscript(s *surface.Session, conversationID string) st
 	if s.Cwd == "" || conversationID == "" {
 		return ""
 	}
-	return filepath.Join(projectDir(s.Cwd), conversationID+".jsonl")
+	return filepath.Join(c.home, ".claude", "projects", strings.ReplaceAll(s.Cwd, "/", "-"), conversationID+".jsonl")
 }
 
 func (c *Claude) firstUserMessage(path string) string {
@@ -204,6 +211,13 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 			continue
 		}
 		bridge, _ := m["bridgeSessionId"].(string)
+		if str(m, "agenthail") == "peer-worker" {
+			continue
+		}
+		socket := c.peerSocket(ctx, m)
+		if bridge == "" && socket != "" {
+			bridge = str(m, "sessionId")
+		}
 		if bridge == "" {
 			continue
 		}
@@ -215,6 +229,9 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		}
 		if pid, ok := m["pid"].(float64); ok {
 			sess.PID = int(pid)
+		}
+		if socket != "" {
+			sess.Transport = "uds"
 		}
 		if sess.PID > 0 {
 			err := syscall.Kill(sess.PID, 0)
@@ -267,6 +284,7 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 	for _, s := range sessions {
 		if strconv.Itoa(s.PID) == target ||
 			strings.HasPrefix(s.ID, target) ||
+			strings.TrimSuffix(filepath.Base(s.Transcript), ".jsonl") == target ||
 			strings.Contains(strings.ToLower(s.Cwd), lower) ||
 			strings.Contains(strings.ToLower(s.Name), lower) {
 			matches = append(matches, s)
@@ -337,6 +355,12 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if sess.Transport == "uds" {
+		if strings.HasPrefix(strings.TrimSpace(message), "/") {
+			return nil, surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
+		}
+		return c.sendPeer(ctx, sess, message)
+	}
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
 		return nil, err
@@ -429,6 +453,9 @@ func (c *Claude) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 }
 
 func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	if sess.Transport == "uds" {
+		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
+	}
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -513,10 +540,16 @@ func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.G
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
+	if nativeClaudeOnly(sess) {
+		return surface.ErrUnsupported
+	}
 	return c.sendCommand(ctx, sess, "/compact")
 }
 
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
+	if nativeClaudeOnly(sess) && name != "" {
+		return "", surface.ErrUnsupported
+	}
 	if name != "" {
 		result, err := c.confirmedCommand(ctx, sess, "/model", name, 5*time.Second)
 		if err != nil {
@@ -594,6 +627,9 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
+	if nativeClaudeOnly(sess) {
+		return surface.ErrUnsupported
+	}
 	current, err := c.Resolve(ctx, sess.ID)
 	if err != nil {
 		return err
@@ -630,6 +666,9 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	if sess.Transport == "uds" {
+		return fmt.Errorf("Claude peer messaging queues work; steering is not supported")
+	}
 	current, err := c.Resolve(ctx, sess.ID)
 	if err != nil {
 		return err

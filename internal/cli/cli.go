@@ -184,6 +184,9 @@ Other:
   version [--json]              Build and revision information
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
+Sender: --from resolves a session; otherwise AGENTHAIL_SESSION_ID, CODEX_THREAD_ID,
+        or CLAUDE_SESSION_ID identifies the sender. Native Claude peers require
+        the daemon and register automatically before sending.
 `)
 }
 
@@ -782,6 +785,9 @@ func (a *App) cmdSend(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
+	if surf.Name() == surface.KindClaude && sess.Transport == "uds" && (wantStream || wantReply) {
+		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
+	}
 
 	if wantStream && !surf.Capabilities().Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
@@ -797,6 +803,10 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 	options := surface.SendOptions{Model: flagVal(args, "--model")}
+	options.SourceSessionID, err = a.sourceSessionID(ctx, fromLabel)
+	if err != nil {
+		return err
+	}
 	dispatcher := delivery.Dispatcher{Registry: a.Registry}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
@@ -870,6 +880,8 @@ func (a *App) cmdSend(args []string) error {
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(receipt)
+	} else if receipt.Reason == "peer_transport_accepted" {
+		fmt.Printf("accepted by Claude socket (message %s); receiver policy and model completion are pending\n", receipt.TurnID)
 	} else {
 		fmt.Printf("sent (turn %s)\n", receipt.TurnID)
 	}

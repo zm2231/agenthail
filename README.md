@@ -56,9 +56,18 @@ Each app connects independently. If you do not use Notion, it simply stays out o
 
 ### Claude Code
 
-In Claude Code, run `/config` and turn on **Remote Control for all sessions**. You can enable a single conversation with `/rc` instead.
+Agenthail discovers open Claude Code sessions through their local messaging sockets. Native messages require the Agenthail daemon and do not need browser cookies or Remote Control. Sessions that expose only a Remote Control bridge use that transport; enable it with `/rc` in Claude when needed.
 
-Agenthail then finds the Claude Code conversations that are still open on your Mac.
+The daemon automatically registers the current/recent page of Codex and Notion agents as individual Claude peers, refreshing discovery every 30 seconds. They appear in Claude's `ListAgents` as `agenthail/<surface>: <name>`. Claude can reply to them using native `SendMessage`; Agenthail puts those messages in its durable queue. Read-only agents are discoverable, but inbound messages to them are denied and recorded in history.
+
+An older agent registers automatically when it sends to Claude. Use `--from @alias` or `--from surface:session-id` to identify it. Agenthail also recognizes `AGENTHAIL_SESSION_ID`, `CODEX_THREAD_ID`, and `CLAUDE_SESSION_ID`, in that order. Without a sender identity, messages use an operator peer whose replies are kept in history.
+
+```bash
+agenthail send claude:<session-id> "Here are the findings" --from @builder --json
+agenthail history @builder 25
+```
+
+A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, slash commands, or steering; read the transcript with `last` or receive a native `SendMessage` reply. Remote Control is still needed for interrupt and model changes.
 
 ### Codex
 
@@ -119,7 +128,7 @@ For a group that needs the same update:
 agenthail channel create launch
 agenthail channel add launch @writer
 agenthail channel add launch @builder
-agenthail channel send launch "The release date moved to Friday" --from operator
+agenthail channel send launch "The release date moved to Friday"
 ```
 
 ## Start work without opening another window
