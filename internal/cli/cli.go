@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -1625,20 +1626,13 @@ func probeCodexDesktop(codex surface.Surface) error {
 }
 
 func codexLaunchArgs() []string {
-	port := codexRemotePort()
-	if port == "" {
-		port = "9231"
-	}
+	port := codexconfig.LaunchRemoteDebuggingPort()
 	return []string{
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--remote-debugging-address=127.0.0.1",
 		"--remote-debugging-port=" + port,
 	}
-}
-
-func codexRemotePort() string {
-	return os.Getenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT")
 }
 
 func envOr(key, def string) string {

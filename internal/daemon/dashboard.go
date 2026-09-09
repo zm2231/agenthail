@@ -587,8 +587,8 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 				alias, _ := d.Registry.ReverseAlias(session.ID)
 				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
-				capabilities, readOnly, readOnlyReason := dashboardCapabilities(session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: capabilities, ReadOnly: readOnly, ReadOnlyReason: readOnlyReason})
+				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
+				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason})
 			}
 			mu.Unlock()
 		}()
@@ -648,13 +648,6 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 		}
 	}
 	return entry
-}
-
-func dashboardCapabilities(session surface.Session, capabilities surface.Capabilities) (surface.Capabilities, bool, string) {
-	if surface.IsReadOnlySession(&session) {
-		return surface.Capabilities{}, true, surface.ReadOnlySessionReason(&session)
-	}
-	return capabilities, false, ""
 }
 
 func (d *Daemon) ensureDashboardWritable(ctx context.Context, adapter surface.Surface, session *surface.Session) error {
@@ -1242,9 +1235,9 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
-		capabilities, readOnly, readOnlyReason := dashboardCapabilities(result.Session, adapter.Capabilities())
+		effective := surface.EffectiveCapabilities(&result.Session, adapter.Capabilities())
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: capabilities, ReadOnly: readOnly, ReadOnlyReason: readOnlyReason},
+			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason},
 			"snippet": result.Snippet,
 		})
 	}
@@ -1289,11 +1282,6 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
-	accessErr := d.ensureDashboardWritable(ctx, adapter, session)
-	if accessErr != nil && session.Surface == surface.KindCodex {
-		session.Transport = "readOnly"
-		_ = d.Registry.RegisterSession(*session)
-	}
 	limit := 20
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
 		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 4 && parsed <= 40 {
@@ -1307,29 +1295,24 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 	exchanges, transcript := truncateSessionExchanges(exchanges)
 	alias, _ := d.Registry.ReverseAlias(session.ID)
-	capabilities, readOnly, readOnlyReason := dashboardCapabilities(*session, adapter.Capabilities())
-	if accessErr != nil {
-		capabilities = surface.Capabilities{}
-		readOnly = true
-		readOnlyReason = accessErr.Error()
-	}
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": capabilities, "readOnly": readOnly, "readOnlyReason": readOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		if usage, usageErr := provider.ContextUsage(ctx, session); usageErr == nil && usage != nil {
 			response["context"] = usage
 		}
 	}
-	if capabilities.Goal {
+	if effective.Goal {
 		if goal, goalErr := adapter.GoalGet(ctx, session); goalErr == nil {
 			response["goal"] = goal
 		}
 	}
-	if capabilities.Model {
+	if effective.Model {
 		if model, modelErr := adapter.Model(ctx, session, ""); modelErr == nil {
 			response["model"] = model
 		}
 	}
-	if lister, ok := adapter.(surface.ModelLister); ok && capabilities.Model {
+	if lister, ok := adapter.(surface.ModelLister); ok && effective.Model {
 		if models, modelsErr := lister.Models(ctx); modelsErr == nil {
 			response["models"] = models
 		}

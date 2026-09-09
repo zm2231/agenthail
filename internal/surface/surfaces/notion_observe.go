@@ -16,7 +16,7 @@ func (n *Notion) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 		return nil, err
 	}
 	return &surface.TurnObservation{
-		Status:          surface.StatusIdle,
+		Status:          surface.StatusUnknown,
 		CompletedTurnID: messageID,
 		Reply:           reply,
 	}, nil

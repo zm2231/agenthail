@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/cli"
+	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -27,7 +28,7 @@ func main() {
 
 	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
 	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
-	codex := surfaces.NewCodex(codexRemotePort())
+	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
 	notion := surfaces.NewNotion(
 		envOr("AGENTHAIL_NOTION_SPACE", ""),
 		envOr("AGENTHAIL_NOTION_USER", ""),
@@ -57,8 +58,4 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
-}
-
-func codexRemotePort() string {
-	return os.Getenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT")
 }

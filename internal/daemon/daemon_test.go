@@ -51,6 +51,16 @@ type runtimeDaemonSurface struct {
 	ensureErr   error
 }
 
+type accessDaemonSurface struct {
+	*daemonSurface
+	ensureCalls atomic.Int32
+}
+
+func (f *accessDaemonSurface) EnsureWritable(context.Context, *surface.Session) error {
+	f.ensureCalls.Add(1)
+	return nil
+}
+
 type refreshAwareClaudeSurface struct {
 	*daemonSurface
 	liveLastActive time.Time
@@ -663,6 +673,24 @@ func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 	daemon.scanAndRelay(context.Background())
 
 	if r.QueueCount(to.ID) != 0 || len(fake.sent) != 1 || fake.sent[0] != "deliver after idle" {
+		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
+	}
+}
+
+func TestScanDoesNotDrainQueueWithUnknownStatus(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(to.ID, "wait for a known idle state"); err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusUnknown}
+
+	daemon.scanAndRelay(context.Background())
+
+	if r.QueueCount(to.ID) != 1 || len(fake.sent) != 0 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
 	}
 }

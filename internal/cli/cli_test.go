@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -45,12 +46,12 @@ type runtimeCLISurface struct {
 
 func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "")
-	if got := codexRemotePort(); got != "" {
-		t.Fatalf("codexRemotePort() = %q, want empty managed-runtime default", got)
+	if got := codexconfig.RemoteDebuggingPort(); got != "" {
+		t.Fatalf("RemoteDebuggingPort() = %q, want empty managed-runtime default", got)
 	}
 	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "9333")
-	if got := codexRemotePort(); got != "9333" {
-		t.Fatalf("codexRemotePort() = %q, want renderer override", got)
+	if got := codexconfig.RemoteDebuggingPort(); got != "9333" {
+		t.Fatalf("RemoteDebuggingPort() = %q, want renderer override", got)
 	}
 }
 

@@ -50,6 +50,31 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	}
 }
 
+func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "history", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
+	if err := registry.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &accessDaemonSurface{daemonSurface: fake}
+	d = New(registry, []surface.Surface{adapter})
+	response := httptest.NewRecorder()
+	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=history", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if adapter.ensureCalls.Load() != 0 {
+		t.Fatalf("writable access checks=%d", adapter.ensureCalls.Load())
+	}
+	stored, err := registry.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Transport != "readOnly" {
+		t.Fatalf("transport=%q", stored.Transport)
+	}
+}
+
 func TestDashboardSearchCancelsSupersededRequests(t *testing.T) {
 	source, err := os.ReadFile("dashboard/app.js")
 	if err != nil {
@@ -571,42 +596,42 @@ func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
 	}
 }
 
-func TestDashboardCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
-	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
-	if !readOnly || reason == "" || capabilities.Send || capabilities.Model {
-		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", capabilities, readOnly, reason)
+func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
+	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
+	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
+		t.Fatalf("effective=%+v", effective)
 	}
 }
 
-func TestDashboardCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
+func TestEffectiveCapabilitiesKeepUnloadedDesktopThreadWritable(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
-	got, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}, capabilities)
-	if readOnly || reason != "" || !got.Send || !got.Model {
-		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
+	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}, capabilities)
+	if effective.ReadOnly || effective.ReadOnlyReason != "" || !effective.Send || !effective.Model {
+		t.Fatalf("effective=%+v", effective)
 	}
 }
 
-func TestDashboardCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
+func TestEffectiveCapabilitiesKeepManagedDesktopThreadWritable(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Steer: true, Compact: true, Model: true}
 	session := surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "managed"}
-	got, readOnly, reason := dashboardCapabilities(session, capabilities)
-	if readOnly || reason != "" || !got.Send || !got.Steer || !got.Compact || !got.Model {
-		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
+	effective := surface.EffectiveCapabilities(&session, capabilities)
+	if effective.ReadOnly || effective.ReadOnlyReason != "" || !effective.Send || !effective.Steer || !effective.Compact || !effective.Model {
+		t.Fatalf("effective=%+v", effective)
 	}
 }
 
-func TestDashboardCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
+func TestEffectiveCapabilitiesDisableUnbridgedDesktopThread(t *testing.T) {
 	capabilities := surface.Capabilities{Send: true, Model: true}
-	got, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)
-	if !readOnly || got.Send || got.Model || !strings.Contains(reason, "agenthail launch codex") {
-		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", got, readOnly, reason)
+	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}, capabilities)
+	if !effective.ReadOnly || effective.Send || effective.Model || !strings.Contains(effective.ReadOnlyReason, "agenthail launch codex") {
+		t.Fatalf("effective=%+v", effective)
 	}
 }
 
-func TestDashboardCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
-	capabilities, readOnly, reason := dashboardCapabilities(surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
-	if !readOnly || reason == "" || capabilities.Send || capabilities.Steer || capabilities.Compact {
-		t.Fatalf("capabilities=%+v readOnly=%v reason=%q", capabilities, readOnly, reason)
+func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
+	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
+	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Steer || effective.Compact {
+		t.Fatalf("effective=%+v", effective)
 	}
 }
 

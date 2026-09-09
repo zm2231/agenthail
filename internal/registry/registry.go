@@ -17,7 +17,21 @@ type Registry struct {
 	db *sql.DB
 }
 
-const schemaVersion = 1
+const (
+	schemaVersion   = 1
+	queueMessageTTL = time.Hour
+)
+
+func queueMessageTTLLabel() string {
+	hours := queueMessageTTL / time.Hour
+	if queueMessageTTL%time.Hour == 0 {
+		if hours == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", hours)
+	}
+	return queueMessageTTL.String()
+}
 
 func Open(path string) (*Registry, error) {
 	if path == "" {
@@ -98,15 +112,15 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
-	_, err := r.db.Exec(`
+	_, err := r.db.Exec(fmt.Sprintf(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
-		UPDATE message_queue SET expires_at_ms=(CAST(strftime('%s',queued_at) AS INTEGER)*1000)+3600000
+		UPDATE message_queue SET expires_at_ms=(CAST(strftime('%%s',queued_at) AS INTEGER)*1000)+%d
 		WHERE expires_at_ms=0 AND status='pending';
 		DELETE FROM aliases WHERE rowid NOT IN (SELECT MAX(rowid) FROM aliases GROUP BY session_id);
 		CREATE UNIQUE INDEX IF NOT EXISTS message_queue_delivery_key
 		ON message_queue(delivery_key) WHERE delivery_key!='';
-		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`)
+		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`, queueMessageTTL.Milliseconds()))
 	if err != nil {
 		return err
 	}
@@ -556,7 +570,7 @@ func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, rel
 }
 
 func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int) (int64, error) {
-	expiresAt := time.Now().Add(time.Hour).UnixMilli()
+	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
 	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model, relayHops, expiresAt)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -599,13 +613,13 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 			return 0, err
 		}
 		entry.Kind = "expired"
-		entry.Result = "removed after 1 hour without delivery"
+		entry.Result = "removed after " + queueMessageTTLLabel() + " without delivery"
 		expired = append(expired, entry)
 	}
 	if err := rows.Close(); err != nil {
 		return 0, err
 	}
-	if _, err := tx.Exec(`UPDATE message_queue SET status='expired',last_error='message expired after 1 hour',updated_at=datetime('now') WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(`UPDATE message_queue SET status='expired',last_error=?,updated_at=datetime('now') WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, "message expired after "+queueMessageTTLLabel(), now.UnixMilli()); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -940,7 +954,7 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,expires_at_ms=?,delivered=0,updated_at=datetime('now') WHERE id=? AND status IN ('dead','expired')`, time.Now().Add(time.Hour).UnixMilli(), id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,expires_at_ms=?,delivered=0,updated_at=datetime('now') WHERE id=? AND status IN ('dead','expired')`, time.Now().Add(queueMessageTTL).UnixMilli(), id)
 	if err != nil {
 		return err
 	}

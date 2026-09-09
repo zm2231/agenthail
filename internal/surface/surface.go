@@ -315,6 +315,19 @@ type Capabilities struct {
 	Steer     bool `json:"steer"`
 }
 
+type SessionCapabilities struct {
+	Capabilities
+	ReadOnly       bool   `json:"readOnly"`
+	ReadOnlyReason string `json:"readOnlyReason,omitempty"`
+}
+
+func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
+	if IsReadOnlySession(session) {
+		return SessionCapabilities{ReadOnly: true, ReadOnlyReason: ReadOnlySessionReason(session)}
+	}
+	return SessionCapabilities{Capabilities: capabilities}
+}
+
 type Surface interface {
 	Name() SurfaceKind
 	List(ctx context.Context) ([]Session, error)

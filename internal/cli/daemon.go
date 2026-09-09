@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 )
 
@@ -313,7 +314,7 @@ func (a *App) daemonInstallService() error {
 		"AGENTHAIL_COOKIE_BRIDGE":               os.Getenv("AGENTHAIL_COOKIE_BRIDGE"),
 		"AGENTHAIL_PYTHON":                      os.Getenv("AGENTHAIL_PYTHON"),
 		"AGENTHAIL_CODEX_BIN":                   os.Getenv("AGENTHAIL_CODEX_BIN"),
-		"AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT": codexRemotePort(),
+		"AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT": codexconfig.RemoteDebuggingPort(),
 		"AGENTHAIL_CHROME_PROFILE":              envOr("AGENTHAIL_CHROME_PROFILE", "Default"),
 		"AGENTHAIL_NOTION_SPACE":                os.Getenv("AGENTHAIL_NOTION_SPACE"),
 		"AGENTHAIL_NOTION_USER":                 os.Getenv("AGENTHAIL_NOTION_USER"),
