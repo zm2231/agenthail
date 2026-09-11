@@ -167,7 +167,7 @@ export function createTestFlightManager({
       if (!version || !buildNumber) throw new TestFlightError("status build check requires both version and build")
       const exact = await exactBuild(version, buildNumber)
       result.buildCheck = { version, build: String(buildNumber), buildId: exact.build.id, assignedToGroup: state.buildIds.has(exact.build.id), state: state.buildStates.find(item => item.buildId === exact.build.id) || null }
-      result.ready = result.groupReady && result.buildCheck.assignedToGroup && ["READY_FOR_BETA_TESTING", "IN_BETA_TESTING"].includes(result.buildCheck.state?.internalBuildState)
+      result.ready = result.groupReady && result.autodistribution.enabled && result.counts.testers > 0 && result.buildCheck.assignedToGroup && ["READY_FOR_BETA_TESTING", "IN_BETA_TESTING"].includes(result.buildCheck.state?.internalBuildState)
     }
     return result
   }
@@ -297,12 +297,12 @@ export async function runCLI({ argv = process.argv.slice(2), env = process.env, 
   const manager = createTestFlightManager({ issuerId: env.APPLE_NOTARY_ISSUER_ID, keyId: env.APPLE_NOTARY_KEY_ID, privateKey: key, bundleId: env.AGENTHAIL_IOS_BUNDLE_ID, groupId: env.AGENTHAIL_TESTFLIGHT_GROUP_ID, fetchImpl, now })
   let result
   if (args.action === "status") {
-    result = await manager.status(args.version, args.build)
     if (args.version || args.build) {
+      if (!args.version || !args.build) throw new TestFlightError("status build check requires both version and build")
       const gate = await waitForInternalBuild({ groupId: env.AGENTHAIL_TESTFLIGHT_GROUP_ID, issuerId: env.APPLE_NOTARY_ISSUER_ID, keyId: env.APPLE_NOTARY_KEY_ID, privateKey: key, bundleId: env.AGENTHAIL_IOS_BUNDLE_ID, buildNumber: args.build, marketingVersion: args.version, fetchImpl, now, timeoutMs: Number(env.ASC_GATE_TIMEOUT_SECONDS || 60) * 1000, intervalMs: Number(env.ASC_GATE_POLL_SECONDS || 5) * 1000, onStatus: message => process.stderr.write(`${message}\n`) })
+      result = await manager.status(args.version, args.build)
       result.internalGate = { buildId: gate.build.id, internalBuildState: gate.internalBuildState, groupId: gate.groupId }
-      result.ready = true
-    }
+    } else result = await manager.status()
   }
   else if (args.action === "assign-build") result = await manager.assignBuild(args.version, args.build)
   else if (args.action === "remove-build") result = await manager.removeBuild(args.version, args.build)

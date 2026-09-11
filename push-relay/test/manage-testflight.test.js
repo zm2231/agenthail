@@ -161,3 +161,34 @@ test("an already accepted invitation is a successful no-op", async () => {
   assert.equal(result.state, "ACCEPTED")
   assert.equal(posts, 1)
 })
+
+test("CLI status reports the snapshot after the readiness gate", async () => {
+  let processed = false
+  const build = { id: "build-1", attributes: { version: "7", processingState: "VALID", expired: false } }
+  const fetchImpl = async input => {
+    const url = new URL(input)
+    switch (url.pathname) {
+      case "/v1/apps": return response(200, app)
+      case "/v1/builds":
+        if (url.searchParams.has("fields[builds]")) processed = true
+        return response(200, { data: [build] })
+      case "/v1/betaGroups/group-1": return response(200, { data: { ...group.data, attributes: { ...group.data.attributes, hasAccessToAllBuilds: true } } })
+      case "/v1/betaGroups/group-1/app":
+      case "/v1/betaGroups/group-1/relationships/app":
+      case "/v1/builds/build-1/app": return response(200, { data: { id: "app-1" } })
+      case "/v1/betaGroups/group-1/relationships/builds": return response(200, { data: processed ? [build] : [] })
+      case "/v1/betaGroups/group-1/betaTesters":
+      case "/v1/betaGroups/group-1/relationships/betaTesters": return response(200, { data: [{ id: "tester-1" }] })
+      case "/v1/builds/build-1/buildBetaDetail": return response(200, { data: { attributes: { internalBuildState: "IN_BETA_TESTING" } } })
+      case "/v1/betaTesters/tester-1": return response(200, { data: { attributes: { state: "INSTALLED" } } })
+      default: throw new Error(`unexpected path ${url.pathname}`)
+    }
+  }
+  const output = { value: "", write(value) { this.value += value } }
+  const env = { APPLE_NOTARY_KEY_BASE64: Buffer.from(cfg.privateKey).toString("base64"), APPLE_NOTARY_KEY_ID: cfg.keyId, APPLE_NOTARY_ISSUER_ID: cfg.issuerId, AGENTHAIL_IOS_BUNDLE_ID: cfg.bundleId, AGENTHAIL_TESTFLIGHT_GROUP_ID: cfg.groupId }
+  const result = await runCLI({ argv: ["status", "--version", "1.2.3", "--build", "7"], env, fetchImpl, stdout: output })
+  assert.equal(result.ready, true)
+  assert.equal(result.buildCheck.assignedToGroup, true)
+  assert.equal(result.buildCheck.state.internalBuildState, result.internalGate.internalBuildState)
+  assert.equal(JSON.parse(output.value).counts.builds, 1)
+})
