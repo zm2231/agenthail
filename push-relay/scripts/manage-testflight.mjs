@@ -41,7 +41,8 @@ async function request(url, { token, fetchImpl, method = "GET", body } = {}) {
   }
   if (!response.ok) {
     const detail = document.errors?.[0]?.code || document.errors?.[0]?.status
-    throw new TestFlightError(`App Store Connect request returned ${response.status}${detail ? ` (${detail})` : ""}`, { status: response.status, code: detail })
+    const parameter = document.errors?.[0]?.source?.parameter
+    throw new TestFlightError(`App Store Connect ${method} ${new URL(url).pathname} returned ${response.status}${detail ? ` (${detail})` : ""}${parameter ? ` parameter=${parameter}` : ""}`, { status: response.status, code: detail })
   }
   return document
 }
@@ -224,6 +225,22 @@ export function createTestFlightManager({
     return mutateLink({ relationship: "betaTesters", resourceType: "betaTesters", resourceId: tester.id, add: false, label: "remove-tester" })
   }
 
+  async function resendInvitation(email) {
+    required(email, "email")
+    const appResource = await app()
+    if (!(await groupState(appResource)).ready) throw new TestFlightError("configured TestFlight group is not an exact internal group for this app")
+    const tester = await findTester(email, appResource.id)
+    if (!(await verifyMembership("betaTesters", tester.id))) throw new TestFlightError("tester is not assigned to the configured group")
+    await request(new URL("/v1/betaTesterInvitations", root), {
+      ...options(), method: "POST", body: { data: { type: "betaTesterInvitations", relationships: {
+        app: { data: { type: "apps", id: appResource.id } },
+        betaTester: { data: { type: "betaTesters", id: tester.id } }
+      } } }
+    })
+    const readback = await request(new URL(`/v1/betaTesters/${encodeURIComponent(tester.id)}`, root), options())
+    return { action: "resend-invitation", requested: true, testerId: tester.id, state: readback.data?.attributes?.state || "UNKNOWN" }
+  }
+
   async function notes(version, buildNumber, locale, whatsNew) {
     required(locale, "locale")
     required(whatsNew, "notes")
@@ -238,7 +255,7 @@ export function createTestFlightManager({
     if (id) {
       await request(new URL(`/v1/betaBuildLocalizations/${encodeURIComponent(id)}`, root), { ...options(), method: "PATCH", body: { data: { type: "betaBuildLocalizations", id, attributes: { whatsNew } } } })
     } else {
-      const created = await request(url, { ...options(), method: "POST", body: { data: { type: "betaBuildLocalizations", attributes: { locale, whatsNew }, relationships: { build: { data: { type: "builds", id: build.id } } } } } })
+      const created = await request(new URL("/v1/betaBuildLocalizations", root), { ...options(), method: "POST", body: { data: { type: "betaBuildLocalizations", attributes: { locale, whatsNew }, relationships: { build: { data: { type: "builds", id: build.id } } } } } })
       id = created.data?.id
     }
     const readback = await request(new URL(`/v1/betaBuildLocalizations/${encodeURIComponent(id)}`, root), options())
@@ -255,7 +272,7 @@ export function createTestFlightManager({
     return { action, changed: true, buildId: build.id }
   }
 
-  return { status, assignBuild: (v, b) => assignBuild(v, b, true), removeBuild: (v, b) => assignBuild(v, b, false), inviteExistingTester, removeTester, notes, expireBuild: (v, b) => buildPatch(v, b, { expired: true }, "expire-build") }
+  return { status, assignBuild: (v, b) => assignBuild(v, b, true), removeBuild: (v, b) => assignBuild(v, b, false), inviteExistingTester, removeTester, resendInvitation, notes, expireBuild: (v, b) => buildPatch(v, b, { expired: true }, "expire-build") }
 }
 
 export async function runCLI({ argv = process.argv.slice(2), env = process.env, fetchImpl = fetch, stdout = process.stdout, now = Date.now } = {}) {
@@ -275,9 +292,10 @@ export async function runCLI({ argv = process.argv.slice(2), env = process.env, 
   else if (args.action === "remove-build") result = await manager.removeBuild(args.version, args.build)
   else if (args.action === "invite-existing-tester") result = await manager.inviteExistingTester(args.email)
   else if (args.action === "remove-tester") result = await manager.removeTester(args.email)
+  else if (args.action === "resend-invitation") result = await manager.resendInvitation(args.email)
   else if (args.action === "notes") result = await manager.notes(args.version, args.build, args.locale || "en-US", args.notes)
   else if (args.action === "expire-build") result = await manager.expireBuild(args.version, args.build)
-  else throw new TestFlightError("usage: status | assign-build | remove-build | invite-existing-tester | notes | expire-build")
+  else throw new TestFlightError("usage: status | assign-build | remove-build | invite-existing-tester | remove-tester | resend-invitation | notes | expire-build")
   stdout.write(`${JSON.stringify(result)}\n`)
   return result
 }

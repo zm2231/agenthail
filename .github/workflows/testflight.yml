@@ -7,7 +7,7 @@ on:
         description: Management operation
         required: true
         type: choice
-        options: [status, assign-build, invite-existing-tester, remove-tester, notes, expire-build]
+        options: [status, assign-build, invite-existing-tester, resend-invitation, remove-tester, notes, expire-build]
       version:
         description: Marketing version, for example 0.2.0 (required for build actions)
         required: false
@@ -17,7 +17,7 @@ on:
         required: false
         type: string
       email:
-        description: Existing internal tester email (invite-existing-tester or remove-tester)
+        description: Existing internal tester email (tester operations)
         required: false
         type: string
       locale:
@@ -70,7 +70,7 @@ jobs:
           case "$ACTION" in
             status) if [[ -n "$VERSION" || -n "$BUILD" ]]; then args+=(--version "$VERSION" --build "$BUILD"); fi ;;
             assign-build|expire-build) args+=(--version "$VERSION" --build "$BUILD") ;;
-            invite-existing-tester|remove-tester) args+=(--email "$EMAIL") ;;
+            invite-existing-tester|remove-tester|resend-invitation) args+=(--email "$EMAIL") ;;
             notes) args+=(--version "$VERSION" --build "$BUILD" --locale "$LOCALE" --notes "$NOTES") ;;
             *) echo "unsupported action" >&2; exit 2 ;;
           esac
