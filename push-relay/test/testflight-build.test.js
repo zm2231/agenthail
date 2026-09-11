@@ -118,10 +118,12 @@ async function internalRun(overrides = {}) {
     response(200, { data: { id: overrides.groupApp || "app-1" } }),
     response(200, { data: overrides.noTesters ? [] : [{ id: "tester-1" }] }),
     response(200, { data: { attributes: { internalBuildState: overrides.state || "READY_FOR_BETA_TESTING" } } }),
-    response(200, { data: [{ id: overrides.assignedGroup || "group-1" }], links: overrides.links || {} })
+    response(200, { data: [{ id: overrides.assignedBuild || "build-1" }], links: overrides.links || {} })
   ]
   const run = harness(replies)
-  return waitForInternalBuild({ ...run.options, groupId: "group-1" })
+  const result = await waitForInternalBuild({ ...run.options, groupId: "group-1" })
+  assert.equal(run.requests.at(-1), "https://api.appstoreconnect.apple.com/v1/betaGroups/group-1/relationships/builds?limit=200")
+  return result
 }
 
 test("valid processing alone does not imply internal availability", async () => {
@@ -139,7 +141,7 @@ test("ready build must be assigned to the configured group", async () => {
   const result = await internalRun()
   assert.equal(result.internalBuildState, "READY_FOR_BETA_TESTING")
   assert.equal(result.groupId, "group-1")
-  await assert.rejects(internalRun({ assignedGroup: "other-group" }), /Timed out/)
+  await assert.rejects(internalRun({ assignedBuild: "other-build" }), /Timed out/)
 })
 
 test("does not send the App Store token to pagination outside Apple", async () => {

@@ -142,14 +142,14 @@ export async function waitForInternalBuild(options) {
         throw new Error(`Internal TestFlight delivery blocked: ${state}`)
       }
       if (["READY_FOR_BETA_TESTING", "IN_BETA_TESTING"].includes(state)) {
-        let next = `${buildPath}/betaGroups?limit=200`
+        let next = `${groupPath}/relationships/builds?limit=200`
         let assigned = false
         const seen = new Set()
         while (next) {
           if (seen.has(next) || seen.size >= 100) throw new Error("Invalid TestFlight group pagination")
           seen.add(next)
           const page = await read(next)
-          assigned ||= page.data?.some(item => item.id === groupId) === true
+          assigned ||= page.data?.some(item => item.id === build.id) === true
           next = page.links?.next
         }
         if (assigned) {
