@@ -197,11 +197,14 @@ export function createTestFlightManager({
     return mutateLink({ relationship: "builds", resourceType: "builds", resourceId: build.id, add, label: add ? "assign-build" : "remove-build" })
   }
 
-  async function findTester(email, appId) {
+  async function findTester(email, appId, inGroup = false) {
     const url = new URL("/v1/betaTesters", root)
     url.searchParams.set("filter[email]", email)
+    url.searchParams.set("filter[apps]", appId)
+    if (inGroup) url.searchParams.set("filter[betaGroups]", groupId)
     url.searchParams.set("limit", "2")
     const testers = await boundedList(url)
+    if (inGroup && testers.length === 0) return null
     if (testers.length !== 1) throw new TestFlightError(`expected one existing beta tester for ${email}, found ${testers.length}`)
     const apps = await request(linkageURL(root, "betaTesters", testers[0].id, "apps"), options())
     if (!linkageIds(apps).has(appId)) throw new TestFlightError(`existing tester ${email} is not assigned to this app`)
@@ -221,7 +224,8 @@ export function createTestFlightManager({
     required(email, "email")
     const appResource = await app()
     if (!(await groupState(appResource)).ready) throw new TestFlightError("configured TestFlight group is not an exact internal group for this app")
-    const tester = await findTester(email, appResource.id)
+    const tester = await findTester(email, appResource.id, true)
+    if (!tester) return { action: "remove-tester", changed: false, already: true }
     return mutateLink({ relationship: "betaTesters", resourceType: "betaTesters", resourceId: tester.id, add: false, label: "remove-tester" })
   }
 
@@ -229,7 +233,8 @@ export function createTestFlightManager({
     required(email, "email")
     const appResource = await app()
     if (!(await groupState(appResource)).ready) throw new TestFlightError("configured TestFlight group is not an exact internal group for this app")
-    const tester = await findTester(email, appResource.id)
+    const tester = await findTester(email, appResource.id, true)
+    if (!tester) throw new TestFlightError("tester is not assigned to the configured group")
     if (!(await verifyMembership("betaTesters", tester.id))) throw new TestFlightError("tester is not assigned to the configured group")
     await request(new URL("/v1/betaTesterInvitations", root), {
       ...options(), method: "POST", body: { data: { type: "betaTesterInvitations", relationships: {
