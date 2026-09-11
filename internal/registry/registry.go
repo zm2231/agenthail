@@ -313,8 +313,18 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
-		   source=CASE WHEN sessions.surface='codex' AND sessions.transport='managed' THEN sessions.source ELSE excluded.source END,
-		   transport=CASE WHEN sessions.surface='codex' AND sessions.transport='managed' THEN sessions.transport ELSE excluded.transport END,
+		   source=CASE
+		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.source
+		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.source
+		     WHEN excluded.source<>'' THEN excluded.source
+		     ELSE sessions.source
+		   END,
+		   transport=CASE
+		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.transport
+		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.transport
+		     WHEN excluded.transport<>'' THEN excluded.transport
+		     ELSE sessions.transport
+		   END,
 		   last_active_ms=excluded.last_active_ms,
 		   updated_at=datetime('now')`,
 		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, lastActiveMS)

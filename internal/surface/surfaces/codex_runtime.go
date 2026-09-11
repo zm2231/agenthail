@@ -111,6 +111,7 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 	if desktopErr == nil {
 		return surface.RuntimeStatus{
 			Name:      "Codex Desktop bridge",
+			Detail:    "renderer read path reachable; direct input is verified per target before delivery",
 			Reachable: true,
 			Durable:   true,
 			Backend:   "desktop",

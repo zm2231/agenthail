@@ -9,7 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func applyCodexTurnOptions(ctx context.Context, client codexClient, id, model string, options surface.TurnOptions, params map[string]any) error {
+func applyCodexTurnOptions(ctx context.Context, client codexClient, session *surface.Session, model string, options surface.TurnOptions, params map[string]any) error {
 	if err := options.Validate(surface.KindCodex); err != nil {
 		return err
 	}
@@ -27,12 +27,22 @@ func applyCodexTurnOptions(ctx context.Context, client codexClient, id, model st
 	}
 	if options.Mode != "" {
 		if model == "" {
-			response, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": id}, 5*time.Second)
+			method := "thread/resume"
+			request := map[string]any{"threadId": session.ID}
+			if session.Transport == codexTransportDesktop {
+				method = "thread/read"
+				request["includeTurns"] = false
+			}
+			response, err := client.Request(ctx, method, request, 5*time.Second)
 			if err != nil {
 				return err
 			}
 			result, _ := response["result"].(map[string]any)
 			model = str(result, "model")
+			if model == "" {
+				thread, _ := result["thread"].(map[string]any)
+				model = str(thread, "model")
+			}
 			if model == "" {
 				return fmt.Errorf("cannot select collaboration mode without the session model")
 			}

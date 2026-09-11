@@ -1460,6 +1460,9 @@ func (a *App) cmdDoctor(args []string) error {
 					runtimeStatus.Remediation = ""
 				}
 				result.Runtime = &runtimeStatus
+				if runtimeStatus.Backend == "desktop" {
+					result.WritePath = "direct input verified per target before delivery"
+				}
 				if !runtimeStatus.Reachable || !runtimeStatus.Durable {
 					result.OK = false
 					if err == nil {

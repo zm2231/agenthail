@@ -272,37 +272,48 @@ func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	}
 }
 
-func TestRegisterSessionPreservesManagedCodexOwnershipAcrossDiscovery(t *testing.T) {
+func TestRegisterSessionUpdatesManagedCodexTransportFromDesktopDiscovery(t *testing.T) {
 	r := openTestRegistry(t)
 	managed := surface.Session{ID: "managed", Surface: surface.KindCodex, Name: "Started here", Status: surface.StatusBusy, Source: "agenthail", Transport: "managed"}
 	if err := r.RegisterSession(managed); err != nil {
 		t.Fatal(err)
 	}
 	discovered := managed
-	discovered.Name = "Updated title"
-	discovered.Status = surface.SessionStatus("notLoaded")
 	discovered.Source = "vscode"
 	discovered.Transport = "readOnly"
 	if err := r.RegisterSession(discovered); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.Session(managed.ID)
+	if err != nil || got.Source != "agenthail" || got.Transport != "managed" {
+		t.Fatalf("session=%+v err=%v", got, err)
+	}
+	discovered = managed
+	discovered.Name = "Updated title"
+	discovered.Status = surface.SessionStatus("notLoaded")
+	discovered.Source = "vscode"
+	discovered.Transport = "desktop"
+	if err := r.RegisterSession(discovered); err != nil {
+		t.Fatal(err)
+	}
+	got, err = r.Session(managed.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Source != "agenthail" || got.Transport != "managed" || got.Name != "Updated title" || got.Status != surface.SessionStatus("notLoaded") {
+	if got.Source != "vscode" || got.Transport != "desktop" || got.Name != "Updated title" || got.Status != surface.SessionStatus("notLoaded") {
 		t.Fatalf("session=%+v", got)
 	}
 	desktop := surface.Session{ID: "desktop", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop"}
 	if err := r.RegisterSession(desktop); err != nil {
 		t.Fatal(err)
 	}
-	desktop.Transport = "readOnly"
+	desktop.Source = "agenthail"
+	desktop.Transport = "managed"
 	if err := r.RegisterSession(desktop); err != nil {
 		t.Fatal(err)
 	}
 	got, err = r.Session(desktop.ID)
-	if err != nil || got.Transport != "readOnly" {
+	if err != nil || got.Source != "vscode" || got.Transport != "desktop" {
 		t.Fatalf("desktop=%+v err=%v", got, err)
 	}
 }

@@ -143,6 +143,7 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 }
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	source, transport := session.Source, session.Transport
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	observation, err := adapter.Observe(operationCtx, session)
 	cancel()
@@ -158,6 +159,12 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		return
 	}
 	session.Status = observation.Status
+	if session.Source != source || session.Transport != transport {
+		if err := d.Registry.RegisterSession(*session); err != nil {
+			d.log.Printf("persist refreshed session %s: %s", d.resolveDisplay(session.ID), err)
+			return
+		}
+	}
 	previous, found, err := d.Registry.RuntimeState(session.ID)
 	if err != nil {
 		d.log.Printf("runtime state %s: %s", d.resolveDisplay(session.ID), err)

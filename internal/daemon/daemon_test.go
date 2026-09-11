@@ -66,6 +66,16 @@ type refreshAwareClaudeSurface struct {
 	liveLastActive time.Time
 }
 
+type transportRefreshingSurface struct {
+	*daemonSurface
+}
+
+func (f *transportRefreshingSurface) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	session.Source = "vscode"
+	session.Transport = "desktop"
+	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
+}
+
 type failingClaudeListSurface struct {
 	*daemonSurface
 }
@@ -265,6 +275,28 @@ func daemonFixture(t *testing.T) (*Daemon, *registry.Registry, *daemonSurface, s
 	}
 	fake := &daemonSurface{sessions: map[string]surface.Session{"from": from, "to": to}, observations: map[string]*surface.TurnObservation{}, accepted: true}
 	return New(r, []surface.Surface{fake}), r, fake, from, to
+}
+
+func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
+	d, r, base, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &transportRefreshingSurface{daemonSurface: base}
+	d.Surfaces = []surface.Surface{adapter}
+	if err := r.QueueMessage(target.ID, "deliver after Desktop refresh"); err != nil {
+		t.Fatal(err)
+	}
+	d.scanAndRelay(context.Background())
+	stored, err := r.Session(target.ID)
+	if err != nil || stored.Source != "vscode" || stored.Transport != "desktop" {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	if r.QueueCount(target.ID) != 0 || len(base.sent) != 1 {
+		t.Fatalf("pending=%d sent=%v", r.QueueCount(target.ID), base.sent)
+	}
 }
 
 func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {

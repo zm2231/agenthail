@@ -368,6 +368,76 @@ func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
 	}
 }
 
+func TestCodexDesktopSendSkipsResumeAndRepairsStaleManagedTransport(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var server *httptest.Server
+	var methods []string
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+	})
+	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var request map[string]any
+			if conn.ReadJSON(&request) != nil {
+				return
+			}
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			value := any("")
+			switch {
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
+				value = "hooked"
+			case strings.Contains(expression, `"thread/read"`):
+				methods = append(methods, "thread/read")
+				value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":true,"model":"gpt-5.6-terra"}}}`
+			case strings.Contains(expression, `"thread/turns/list"`):
+				methods = append(methods, "thread/turns/list")
+				value = `{"result":{"data":[]}}`
+			case strings.Contains(expression, `"thread/resume"`):
+				methods = append(methods, "thread/resume")
+				value = `{"error":{"code":-1,"message":"must not resume Desktop-owned thread"}}`
+			case strings.Contains(expression, `"turn/start"`):
+				methods = append(methods, "turn/start")
+				value = `{"result":{"turn":{"id":"turn"}}}`
+			}
+			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+		}
+	})
+	server = httptest.NewServer(handler)
+	defer server.Close()
+
+	codex := NewCodex(server.URL)
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
+	sent, err := codex.SendWithOptions(context.Background(), session, "hello", surface.SendOptions{TurnOptions: surface.TurnOptions{Mode: "plan"}})
+	if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
+		t.Fatalf("sent=%+v err=%v", sent, err)
+	}
+	if session.Source != "vscode" || session.Transport != codexTransportDesktop {
+		t.Fatalf("session=%+v", session)
+	}
+	if strings.Join(methods, ",") != "thread/read,thread/read,thread/read,thread/turns/list,thread/read,turn/start" {
+		t.Fatalf("methods=%v", methods)
+	}
+}
+
+func TestCodexObserveRepairsStaleManagedTransport(t *testing.T) {
+	codex := NewCodex(startRendererDesktopBridge(t))
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
+	observation, err := codex.Observe(context.Background(), session)
+	if err != nil || observation == nil || observation.Status != surface.StatusIdle {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	if session.Source != "vscode" || session.Transport != codexTransportDesktop {
+		t.Fatalf("session=%+v", session)
+	}
+}
+
 func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server

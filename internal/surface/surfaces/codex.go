@@ -726,7 +726,7 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": message}},
 	}
-	if err := applyCodexTurnOptions(ctx, client, threadID, options.Model, options.TurnOptions, turnParams); err != nil {
+	if err := applyCodexTurnOptions(ctx, client, session, options.Model, options.TurnOptions, turnParams); err != nil {
 		return session, nil, err
 	}
 	turnResponse, err := client.Request(ctx, "turn/start", turnParams, 10*time.Second)
@@ -758,7 +758,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	defer conn.Close()
-	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
+	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	active, err := c.activeTurnID(ctx, conn, sess.ID)
@@ -775,7 +775,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	if options.Model != "" {
 		params["model"] = options.Model
 	}
-	if err := applyCodexTurnOptions(ctx, conn, sess.ID, options.Model, options.TurnOptions, params); err != nil {
+	if err := applyCodexTurnOptions(ctx, conn, sess, options.Model, options.TurnOptions, params); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	resp, err := conn.Request(ctx, "turn/start", params, 10*time.Second)
@@ -793,7 +793,7 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
 }
 
-func codexResumeAcceptsDirectInput(response map[string]any) bool {
+func codexDirectInputAccepted(response map[string]any, explicit bool) bool {
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
 	if thread == nil {
@@ -802,7 +802,7 @@ func codexResumeAcceptsDirectInput(response map[string]any) bool {
 	if accepts, present := thread["canAcceptDirectInput"].(bool); present {
 		return accepts
 	}
-	return true
+	return !explicit
 }
 
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
@@ -1135,7 +1135,7 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 		return surface.DeliveryUnavailable(err)
 	}
 	defer conn.Close()
-	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
+	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
@@ -1162,7 +1162,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 		return surface.DeliveryUnavailable(err)
 	}
 	defer conn.Close()
-	if err := c.requireDirectInput(ctx, conn, sess.ID); err != nil {
+	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)

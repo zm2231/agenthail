@@ -371,17 +371,20 @@ func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	}
 }
 
-func TestCodexResumeRequiresDesktopDirectInput(t *testing.T) {
-	if !codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": true}}}) {
+func TestCodexDirectInputAccepted(t *testing.T) {
+	if !codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": true}}}, true) {
 		t.Fatal("ready Desktop thread was rejected")
 	}
-	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": false}}}) {
+	if codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": false}}}, true) {
 		t.Fatal("unready Desktop thread was accepted")
 	}
-	if !codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{"thread": map[string]any{}}}) {
-		t.Fatal("Desktop resume without an explicit direct-input state was rejected")
+	if codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{}}}, true) {
+		t.Fatal("Desktop read without an explicit direct-input state was accepted")
 	}
-	if codexResumeAcceptsDirectInput(map[string]any{"result": map[string]any{}}) {
+	if !codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{}}}, false) {
+		t.Fatal("managed resume without an explicit direct-input state was rejected")
+	}
+	if codexDirectInputAccepted(map[string]any{"result": map[string]any{}}, true) {
 		t.Fatal("missing thread was accepted")
 	}
 }
@@ -427,6 +430,9 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
 	status := NewCodex(startRendererDesktopBridge(t)).RuntimeStatus(context.Background())
 	if !status.Reachable || !status.Durable || status.Backend != "desktop" || status.Name != "Codex Desktop bridge" {
+		t.Fatalf("status=%+v", status)
+	}
+	if !strings.Contains(status.Detail, "read path") || !strings.Contains(status.Detail, "per target") {
 		t.Fatalf("status=%+v", status)
 	}
 }

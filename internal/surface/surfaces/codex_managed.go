@@ -174,6 +174,16 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 		return nil, fmt.Errorf("Codex session is read only; open the session in Codex Desktop and relaunch it with 'agenthail launch codex'")
 	}
 	if sess.Transport == codexTransportManaged {
+		desktop, err := c.openDesktop(ctx)
+		if err == nil {
+			refreshed, readErr := c.readSession(ctx, desktop, sess.ID, false, true)
+			if readErr == nil && refreshed.Transport == codexTransportDesktop {
+				sess.Source = refreshed.Source
+				sess.Transport = refreshed.Transport
+				return desktop, nil
+			}
+			_ = desktop.Close()
+		}
 		return c.openManaged(ctx)
 	}
 	return c.openDesktop(ctx)
@@ -200,12 +210,18 @@ func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error
 	return nil
 }
 
-func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, threadID string) error {
-	resume, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, 5*time.Second)
-	if err != nil {
-		return fmt.Errorf("thread/resume: %w", err)
+func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess *surface.Session) error {
+	method := "thread/resume"
+	params := map[string]any{"threadId": sess.ID}
+	if sess.Transport == codexTransportDesktop {
+		method = "thread/read"
+		params["includeTurns"] = false
 	}
-	if !codexResumeAcceptsDirectInput(resume) {
+	response, err := client.Request(ctx, method, params, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("%s: %w", method, err)
+	}
+	if !codexDirectInputAccepted(response, sess.Transport == codexTransportDesktop) {
 		return fmt.Errorf("Codex session is not ready for direct input; open it in Codex Desktop and try again")
 	}
 	return nil
@@ -264,7 +280,7 @@ func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writa
 	}
 	defer client.Close()
 	if writable {
-		if err := c.requireDirectInput(ctx, client, sess.ID); err != nil {
+		if err := c.requireDirectInput(ctx, client, sess); err != nil {
 			return nil, surface.DeliveryUnavailable(err)
 		}
 	}
