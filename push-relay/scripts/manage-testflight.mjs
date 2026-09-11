@@ -240,12 +240,19 @@ export function createTestFlightManager({
     const tester = await findTester(email, appResource.id, true)
     if (!tester) throw new TestFlightError("tester is not assigned to the configured group")
     if (!(await verifyMembership("betaTesters", tester.id))) throw new TestFlightError("tester is not assigned to the configured group")
-    await request(new URL("/v1/betaTesterInvitations", root), {
-      ...options(), method: "POST", body: { data: { type: "betaTesterInvitations", relationships: {
-        app: { data: { type: "apps", id: appResource.id } },
-        betaTester: { data: { type: "betaTesters", id: tester.id } }
-      } } }
-    })
+    try {
+      await request(new URL("/v1/betaTesterInvitations", root), {
+        ...options(), method: "POST", body: { data: { type: "betaTesterInvitations", relationships: {
+          app: { data: { type: "apps", id: appResource.id } },
+          betaTester: { data: { type: "betaTesters", id: tester.id } }
+        } } }
+      })
+    } catch (error) {
+      if (error.status === 409 && error.code === "STATE_ERROR.TESTER_INVITE.ALREADY_ACCEPTED") {
+        return { action: "resend-invitation", requested: false, already: true, testerId: tester.id, state: "ACCEPTED" }
+      }
+      throw error
+    }
     const readback = await request(new URL(`/v1/betaTesters/${encodeURIComponent(tester.id)}`, root), options())
     return { action: "resend-invitation", requested: true, testerId: tester.id, state: readback.data?.attributes?.state || "UNKNOWN" }
   }

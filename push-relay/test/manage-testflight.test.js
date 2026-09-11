@@ -147,3 +147,17 @@ test("removing an absent group tester is idempotent but resending is rejected", 
   await assert.rejects(manager.resendInvitation("a@example.com"), /not assigned/)
   assert.equal(h.requests.every(item => item.startsWith("GET ")), true)
 })
+
+test("an already accepted invitation is a successful no-op", async () => {
+  let posts = 0
+  const h = harness(common({
+    "GET /v1/betaGroups/group-1/betaTesters?limit=200": response(200, { data: [{ id: "tester-1", attributes: { email: "a@example.com" } }] }),
+    "GET /v1/betaTesters/tester-1/relationships/apps": response(200, { data: [{ id: "app-1" }] }),
+    "POST /v1/betaTesterInvitations": () => { posts += 1; return response(409, { errors: [{ code: "STATE_ERROR.TESTER_INVITE.ALREADY_ACCEPTED" }] }) }
+  }))
+  const result = await createTestFlightManager({ ...cfg, fetchImpl: h.fetchImpl }).resendInvitation("a@example.com")
+  assert.equal(result.requested, false)
+  assert.equal(result.already, true)
+  assert.equal(result.state, "ACCEPTED")
+  assert.equal(posts, 1)
+})
