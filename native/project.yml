@@ -38,6 +38,7 @@ targets:
     info:
       path: iOS/Info.plist
       properties:
+        ITSAppUsesNonExemptEncryption: false
         AgenthailAPNSEnvironment: $(AGENTHAIL_APNS_ENVIRONMENT)
         NSCameraUsageDescription: Scan the pairing code shown by Agenthail on your Mac.
         UIBackgroundModes:

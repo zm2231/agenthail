@@ -107,6 +107,65 @@ export async function waitForProcessedBuild({
   throw new Error(`Timed out waiting for TestFlight build ${marketingVersion} (${buildNumber})`)
 }
 
+export async function waitForInternalBuild(options) {
+  const { groupId, baseURL = apiBase, fetchImpl = fetch, now = Date.now,
+    sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+    intervalMs = 15_000, timeoutMs = 30 * 60 * 1000,
+    onStatus = message => process.stdout.write(`${message}\n`) } = options
+  if (!groupId) throw new Error("ASC_GROUP_ID is required for internal TestFlight delivery")
+  const deadline = now() + timeoutMs
+  const build = await waitForProcessedBuild(options)
+  const read = async path => {
+    const url = new URL(path, baseURL)
+    if (url.origin !== new URL(baseURL).origin) throw new Error("App Store pagination changed origin")
+    const token = createAppStoreToken({ ...options, now: now() })
+    return fetchJSON(url, { fetchImpl, token })
+  }
+  const groupPath = `/v1/betaGroups/${encodeURIComponent(groupId)}`
+  const buildPath = `/v1/builds/${encodeURIComponent(build.id)}`
+  const group = (await read(groupPath)).data
+  if (group?.attributes?.isInternalGroup !== true || group?.attributes?.hasAccessToAllBuilds !== true) {
+    throw new Error("Configured TestFlight group must be internal with automatic distribution enabled")
+  }
+  const app = (await read(`${buildPath}/app`)).data
+  const groupApp = (await read(`${groupPath}/app`)).data
+  if (!app?.id || app.id !== groupApp?.id) throw new Error("TestFlight group belongs to a different app")
+  const testers = await read(`${groupPath}/betaTesters?limit=1`)
+  if (!testers.data?.length) throw new Error("TestFlight group has no testers")
+  let lastStatus = ""
+  while (now() < deadline) {
+    try {
+      const detail = (await read(`${buildPath}/buildBetaDetail`)).data
+      const state = detail?.attributes?.internalBuildState || "UNKNOWN"
+      if (state !== lastStatus) { onStatus(`Internal TestFlight delivery: ${state}`); lastStatus = state }
+      if (["MISSING_EXPORT_COMPLIANCE", "PROCESSING_EXCEPTION", "EXPIRED"].includes(state)) {
+        throw new Error(`Internal TestFlight delivery blocked: ${state}`)
+      }
+      if (["READY_FOR_BETA_TESTING", "IN_BETA_TESTING"].includes(state)) {
+        let next = `${buildPath}/betaGroups?limit=200`
+        let assigned = false
+        const seen = new Set()
+        while (next) {
+          if (seen.has(next) || seen.size >= 100) throw new Error("Invalid TestFlight group pagination")
+          seen.add(next)
+          const page = await read(next)
+          assigned ||= page.data?.some(item => item.id === groupId) === true
+          next = page.links?.next
+        }
+        if (assigned) {
+          onStatus(`TestFlight ${options.marketingVersion} (${options.buildNumber}) ready for internal group ${groupId}`)
+          return { build, internalBuildState: state, groupId }
+        }
+      }
+    } catch (error) {
+      if (!error.retryable) throw error
+      onStatus(`Internal delivery check will retry: ${error.message}`)
+    }
+    await sleep(Math.min(intervalMs, Math.max(0, deadline - now())))
+  }
+  throw new Error("Timed out waiting for internal TestFlight availability and group assignment")
+}
+
 async function main() {
   const keyId = process.env.ASC_KEY_ID
   const issuerId = process.env.ASC_ISSUER_ID
@@ -118,7 +177,8 @@ async function main() {
     if (!value) throw new Error(`missing ${name}`)
   }
   const privateKey = await readFile(keyPath, "utf8")
-  await waitForProcessedBuild({
+  await waitForInternalBuild({
+    groupId: process.env.ASC_GROUP_ID,
     issuerId,
     keyId,
     privateKey,

@@ -107,3 +107,59 @@ test("times out when the upload never appears", async () => {
   ])
   await assert.rejects(waitForProcessedBuild(run.options), /Timed out/)
 })
+
+async function internalRun(overrides = {}) {
+  const { waitForInternalBuild } = await import("../scripts/wait-testflight-build.mjs")
+  const replies = [
+    response(200, { data: [{ id: "app-1" }] }),
+    response(200, { data: [{ id: "build-1", attributes: { processingState: "VALID", expired: false } }] }),
+    response(200, { data: { id: "group-1", attributes: { isInternalGroup: true, hasAccessToAllBuilds: true, ...overrides.group } } }),
+    response(200, { data: { id: "app-1" } }),
+    response(200, { data: { id: overrides.groupApp || "app-1" } }),
+    response(200, { data: overrides.noTesters ? [] : [{ id: "tester-1" }] }),
+    response(200, { data: { attributes: { internalBuildState: overrides.state || "READY_FOR_BETA_TESTING" } } }),
+    response(200, { data: [{ id: overrides.assignedGroup || "group-1" }], links: overrides.links || {} })
+  ]
+  const run = harness(replies)
+  return waitForInternalBuild({ ...run.options, groupId: "group-1" })
+}
+
+test("valid processing alone does not imply internal availability", async () => {
+  await assert.rejects(internalRun({ state: "MISSING_EXPORT_COMPLIANCE" }), /blocked: MISSING_EXPORT_COMPLIANCE/)
+})
+
+test("requires automatic internal group belonging to the build app", async () => {
+  await assert.rejects(internalRun({ group: { isInternalGroup: false } }), /must be internal/)
+  await assert.rejects(internalRun({ group: { hasAccessToAllBuilds: false } }), /automatic distribution/)
+  await assert.rejects(internalRun({ groupApp: "other-app" }), /different app/)
+  await assert.rejects(internalRun({ noTesters: true }), /no testers/)
+})
+
+test("ready build must be assigned to the configured group", async () => {
+  const result = await internalRun()
+  assert.equal(result.internalBuildState, "READY_FOR_BETA_TESTING")
+  assert.equal(result.groupId, "group-1")
+  await assert.rejects(internalRun({ assignedGroup: "other-group" }), /Timed out/)
+})
+
+test("does not send the App Store token to pagination outside Apple", async () => {
+  await assert.rejects(internalRun({ links: { next: "https://evil.test/page" } }), /changed origin/)
+})
+
+test("processing and internal readiness share one timeout budget", async () => {
+  const { waitForInternalBuild } = await import("../scripts/wait-testflight-build.mjs")
+  const run = harness([
+    response(200, { data: [{ id: "app-1" }] }),
+    response(200, { data: [] }),
+    response(200, { data: [] }),
+    response(200, { data: [{ id: "build-1", attributes: { processingState: "VALID" } }] }),
+    response(200, { data: { attributes: { isInternalGroup: true, hasAccessToAllBuilds: true } } }),
+    response(200, { data: { id: "app-1" } }),
+    response(200, { data: { id: "app-1" } }),
+    response(200, { data: [{ id: "tester-1" }] }),
+    ...Array.from({ length: 10 }, () => response(200, { data: { attributes: { internalBuildState: "PROCESSING" } } }))
+  ])
+  const started = run.options.now()
+  await assert.rejects(waitForInternalBuild({ ...run.options, groupId: "group-1" }), /Timed out waiting for internal/)
+  assert.equal(run.options.now() - started, run.options.timeoutMs)
+})

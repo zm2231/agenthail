@@ -33,6 +33,6 @@ Production CI preserves the existing device namespace by exact title or by the o
 
 The release workflow probes Apple with the configured APNs identity before deploying. A valid identity returns `BadDeviceToken` for the probe's deliberately invalid device token. Authentication, topic, or key errors stop the release.
 
-After the probe passes, the workflow uploads the validated iPhone build, waits for TestFlight to accept the exact version and build, syncs the APNs identity to Cloudflare, deploys the locked Worker version, verifies `/health`, and publishes the GitHub release.
+After the probe passes, the workflow uploads the validated iPhone build, verifies that the exact version and build is ready in the configured automatic internal TestFlight group with testers, syncs the APNs identity to Cloudflare, deploys the locked Worker version, verifies `/health`, and publishes the GitHub release. See [TestFlight management](testflight.md) for group configuration and GitHub management operations.
 
 To roll back, deploy the `push-relay` directory from the last known-good tag with the same secrets, then verify `/health` before restoring or rerunning the native release.

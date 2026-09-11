@@ -1,0 +1,77 @@
+name: TestFlight management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Management operation
+        required: true
+        type: choice
+        options: [status, assign-build, invite-existing-tester, remove-tester, notes, expire-build]
+      version:
+        description: Marketing version, for example 0.2.0 (required for build actions)
+        required: false
+        type: string
+      build:
+        description: Exact CFBundleVersion (required for build actions)
+        required: false
+        type: string
+      email:
+        description: Existing internal tester email (invite-existing-tester or remove-tester)
+        required: false
+        type: string
+      locale:
+        description: Locale for TestFlight What’s New notes
+        required: false
+        default: en-US
+        type: string
+      notes:
+        description: TestFlight What’s New text
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-management
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      AGENTHAIL_IOS_BUNDLE_ID: ${{ vars.AGENTHAIL_IOS_BUNDLE_ID }}
+      AGENTHAIL_TESTFLIGHT_GROUP_ID: ${{ vars.AGENTHAIL_TESTFLIGHT_GROUP_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Manage TestFlight
+        env:
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          BUILD: ${{ inputs.build }}
+          EMAIL: ${{ inputs.email }}
+          LOCALE: ${{ inputs.locale }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          : "${APPLE_NOTARY_KEY_BASE64:?missing APPLE_NOTARY_KEY_BASE64}"
+          : "${APPLE_NOTARY_KEY_ID:?missing APPLE_NOTARY_KEY_ID}"
+          : "${APPLE_NOTARY_ISSUER_ID:?missing APPLE_NOTARY_ISSUER_ID}"
+          : "${AGENTHAIL_IOS_BUNDLE_ID:?missing AGENTHAIL_IOS_BUNDLE_ID repository variable}"
+          : "${AGENTHAIL_TESTFLIGHT_GROUP_ID:?missing AGENTHAIL_TESTFLIGHT_GROUP_ID repository variable}"
+          args=("$ACTION")
+          case "$ACTION" in
+            status) if [[ -n "$VERSION" || -n "$BUILD" ]]; then args+=(--version "$VERSION" --build "$BUILD"); fi ;;
+            assign-build|expire-build) args+=(--version "$VERSION" --build "$BUILD") ;;
+            invite-existing-tester|remove-tester) args+=(--email "$EMAIL") ;;
+            notes) args+=(--version "$VERSION" --build "$BUILD" --locale "$LOCALE" --notes "$NOTES") ;;
+            *) echo "unsupported action" >&2; exit 2 ;;
+          esac
+          node push-relay/scripts/manage-testflight.mjs "${args[@]}"
