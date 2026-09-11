@@ -119,7 +119,7 @@ sleep 2
 unrelated_pid="$(tr -d '[:space:]' <"$unrelated_marker")"
 fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
-/usr/local/bin/agenthail help | grep -q 'thread create codex'
+/usr/local/bin/agenthail help | grep -F 'thread create <codex|claude>' >/dev/null
 /usr/local/bin/agenthail help | grep -q 'update \[--check\]'
 test -L "$HOME/.codex/skills/agenthail-operations"
 
