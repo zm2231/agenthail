@@ -31,7 +31,7 @@ test("pagination refuses a next URL outside the API origin", async () => {
 })
 
 test("ambiguous tester and forbidden API errors produce bounded failures", async () => {
-  const h = harness(common({ "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&filter%5Bapps%5D=app-1&limit=2": response(200, { data: [{ id: "a" }, { id: "b" }] }) }))
+  const h = harness(common({ "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&limit=200": response(200, { data: [{ id: "a" }, { id: "b" }] }), "GET /v1/betaTesters/a/relationships/apps": response(200, { data: [{ id: "app-1" }] }), "GET /v1/betaTesters/b/relationships/apps": response(200, { data: [{ id: "app-1" }] }) }))
   await assert.rejects(createTestFlightManager({ ...cfg, fetchImpl: h.fetchImpl }).inviteExistingTester("a@example.com"), /expected one existing beta tester/)
   const forbidden = harness({ "GET /v1/apps?filter%5BbundleId%5D=com.example.app&limit=2": response(403, { errors: [{ code: "FORBIDDEN" }] }) })
   await assert.rejects(createTestFlightManager({ ...cfg, fetchImpl: forbidden.fetchImpl }).status, error => error.status === 403 && /FORBIDDEN/.test(error.message))
@@ -45,7 +45,7 @@ test("already assigned build is idempotent and does not POST", async () => {
 test("existing tester can be removed with exact email and readback", async () => {
   let assigned = true
   const h = harness(common({
-    "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&filter%5Bapps%5D=app-1&filter%5BbetaGroups%5D=group-1&limit=2": response(200, { data: [{ id: "tester-1", attributes: { inviteType: "EMAIL" } }] }),
+    "GET /v1/betaGroups/group-1/betaTesters?limit=200": response(200, { data: [{ id: "tester-1", attributes: { inviteType: "EMAIL", email: "a@example.com" } }] }),
     "GET /v1/betaTesters/tester-1/relationships/apps": response(200, { data: [{ id: "app-1" }] }),
     "GET /v1/betaGroups/group-1/relationships/betaTesters": () => response(200, { data: assigned ? [{ id: "tester-1" }] : [] }),
     "DELETE /v1/betaGroups/group-1/relationships/betaTesters": () => { assigned = false; return response(204, {}) },
@@ -106,7 +106,7 @@ test("CLI status accepts omitted optional version and build inputs", async () =>
 test("resend-invitation posts exact app and existing tester relationships and reads state", async () => {
   let invitationBody
   const h = harness({ ...common({
-    "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&filter%5Bapps%5D=app-1&filter%5BbetaGroups%5D=group-1&limit=2": response(200, { data: [{ id: "tester-1", attributes: { email: "a@example.com" } }] }),
+    "GET /v1/betaGroups/group-1/betaTesters?limit=200": response(200, { data: [{ id: "tester-1", attributes: { email: "a@example.com" } }] }),
     "GET /v1/betaTesters/tester-1/relationships/apps": response(200, { data: [{ type: "apps", id: "app-1" }] }),
     "POST /v1/betaTesterInvitations": init => { invitationBody = JSON.parse(init.body); return response(201, { data: { id: "invitation-1" } }) },
     "GET /v1/betaTesters/tester-1": response(200, { data: { attributes: { state: "ACCEPTED" } } })
@@ -119,7 +119,7 @@ test("resend-invitation posts exact app and existing tester relationships and re
 test("resend-invitation does not retry a failed POST", async () => {
   let posts = 0
   const h = harness({ ...common({
-    "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&filter%5Bapps%5D=app-1&filter%5BbetaGroups%5D=group-1&limit=2": response(200, { data: [{ id: "tester-1" }] }),
+    "GET /v1/betaGroups/group-1/betaTesters?limit=200": response(200, { data: [{ id: "tester-1", attributes: { email: "a@example.com" } }] }),
     "GET /v1/betaTesters/tester-1/relationships/apps": response(200, { data: [{ id: "app-1" }] }),
     "POST /v1/betaTesterInvitations": () => { posts += 1; return response(503, { errors: [{ code: "TEMPORARY" }] }) }
   }) })
@@ -131,7 +131,7 @@ test("resend-invitation rejects a group for another app before POST", async () =
   let posts = 0
   const h = harness(common({
     "GET /v1/betaGroups/group-1/relationships/app": response(200, { data: [{ id: "other-app" }] }),
-    "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&filter%5Bapps%5D=app-1&filter%5BbetaGroups%5D=group-1&limit=2": response(200, { data: [{ id: "tester-1" }] }),
+    "GET /v1/betaGroups/group-1/betaTesters?limit=200": response(200, { data: [{ id: "tester-1", attributes: { email: "a@example.com" } }] }),
     "POST /v1/betaTesterInvitations": () => { posts += 1; return response(201, { data: { id: "invitation-1" } }) }
   }))
   await assert.rejects(createTestFlightManager({ ...cfg, fetchImpl: h.fetchImpl }).resendInvitation("a@example.com"), /not an exact internal group/)
@@ -140,7 +140,7 @@ test("resend-invitation rejects a group for another app before POST", async () =
 
 test("removing an absent group tester is idempotent but resending is rejected", async () => {
   const h = harness(common({
-    "GET /v1/betaTesters?filter%5Bemail%5D=a%40example.com&filter%5Bapps%5D=app-1&filter%5BbetaGroups%5D=group-1&limit=2": response(200, { data: [] })
+    "GET /v1/betaGroups/group-1/betaTesters?limit=200": response(200, { data: [] })
   }))
   const manager = createTestFlightManager({ ...cfg, fetchImpl: h.fetchImpl })
   assert.equal((await manager.removeTester("a@example.com")).already, true)

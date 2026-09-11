@@ -198,16 +198,20 @@ export function createTestFlightManager({
   }
 
   async function findTester(email, appId, inGroup = false) {
-    const url = new URL("/v1/betaTesters", root)
-    url.searchParams.set("filter[email]", email)
-    url.searchParams.set("filter[apps]", appId)
-    if (inGroup) url.searchParams.set("filter[betaGroups]", groupId)
-    url.searchParams.set("limit", "2")
-    const testers = await boundedList(url)
+    const url = new URL(inGroup ? `/v1/betaGroups/${encodeURIComponent(groupId)}/betaTesters` : "/v1/betaTesters", root)
+    if (!inGroup) {
+      url.searchParams.set("filter[email]", email)
+    }
+    url.searchParams.set("limit", String(pageLimit))
+    const entries = await boundedList(url)
+    const candidates = inGroup ? entries.filter(item => item.attributes?.email?.toLowerCase() === email.toLowerCase()) : entries
+    const testers = []
+    for (const tester of candidates) {
+      const apps = await boundedList(linkageURL(root, "betaTesters", tester.id, "apps"))
+      if (apps.some(app => app.id === appId)) testers.push(tester)
+    }
     if (inGroup && testers.length === 0) return null
     if (testers.length !== 1) throw new TestFlightError(`expected one existing beta tester for ${email}, found ${testers.length}`)
-    const apps = await request(linkageURL(root, "betaTesters", testers[0].id, "apps"), options())
-    if (!linkageIds(apps).has(appId)) throw new TestFlightError(`existing tester ${email} is not assigned to this app`)
     return testers[0]
   }
 
