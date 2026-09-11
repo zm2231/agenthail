@@ -29,7 +29,7 @@ type Codex struct {
 func NewCodex(remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
 	if remoteURL == "" {
-		remoteURL = "9230"
+		remoteURL = "9231"
 	}
 	if !strings.Contains(remoteURL, "://") {
 		remoteURL = "ws://127.0.0.1:" + remoteURL
@@ -78,7 +78,7 @@ type cdpConn struct {
 }
 
 func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
-	targets, err := resolveCodexNodeEndpoint(ctx, c.desktopURL)
+	targets, err := resolveCodexRendererEndpoint(ctx, c.desktopURL)
 	if err != nil {
 		return nil, err
 	}
@@ -98,14 +98,14 @@ func (c *Codex) dial(ctx context.Context) (*cdpConn, error) {
 		}
 		_ = conn.close()
 	}
-	return nil, fmt.Errorf("connect Codex Desktop main inspector: %s", strings.Join(failures, "; "))
+	return nil, fmt.Errorf("connect Codex Desktop renderer bridge: %s", strings.Join(failures, "; "))
 }
 
 type codexCDPTarget struct {
 	wsURL string
 }
 
-func resolveCodexNodeEndpoint(ctx context.Context, endpoint string) ([]codexCDPTarget, error) {
+func resolveCodexRendererEndpoint(ctx context.Context, endpoint string) ([]codexCDPTarget, error) {
 	httpURL := strings.Replace(endpoint, "ws://", "http://", 1)
 	httpURL = strings.Replace(httpURL, "wss://", "https://", 1)
 	for _, path := range []string{"/json/list", "/json"} {
@@ -120,20 +120,29 @@ func resolveCodexNodeEndpoint(ctx context.Context, endpoint string) ([]codexCDPT
 		if resp.StatusCode != http.StatusOK || decodeErr != nil {
 			continue
 		}
-		var nodes []codexCDPTarget
+		var primary []codexCDPTarget
+		var secondary []codexCDPTarget
 		for _, value := range values {
-			if kind, _ := value["type"].(string); kind != "node" {
+			if kind, _ := value["type"].(string); kind != "page" {
 				continue
 			}
-			if wsURL, _ := value["webSocketDebuggerUrl"].(string); wsURL != "" {
-				nodes = append(nodes, codexCDPTarget{wsURL: wsURL})
+			url, _ := value["url"].(string)
+			wsURL, _ := value["webSocketDebuggerUrl"].(string)
+			if wsURL == "" || !strings.HasPrefix(url, "app://-/index.html") {
+				continue
+			}
+			target := codexCDPTarget{wsURL: wsURL}
+			if strings.Contains(url, "avatar-overlay") {
+				secondary = append(secondary, target)
+			} else {
+				primary = append(primary, target)
 			}
 		}
-		if len(nodes) > 0 {
-			return nodes, nil
+		if len(primary) > 0 {
+			return append(primary, secondary...), nil
 		}
 	}
-	return nil, fmt.Errorf("no Codex Desktop main-process inspector at %s; quit Codex and relaunch it with 'agenthail launch codex'", endpoint)
+	return nil, fmt.Errorf("no Codex Desktop renderer debug target at %s; quit Codex and relaunch it with 'agenthail launch codex'", endpoint)
 }
 
 func (c *cdpConn) close() error { return c.ws.Close() }
@@ -380,9 +389,6 @@ func (c *Codex) listRecent(ctx context.Context, conn codexClient, managed, deskt
 }
 
 func (c *Codex) listPage(ctx context.Context, conn codexClient, params map[string]any, managed, desktopReachable bool) ([]surface.Session, error) {
-	if _, desktop := conn.(*desktopCodexClient); desktop {
-		params = map[string]any{"page": map[string]any{"limit": params["limit"]}}
-	}
 	resp, err := conn.Request(ctx, "thread/list", params, 10*time.Second)
 	if err != nil {
 		return nil, err

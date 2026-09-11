@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -1576,6 +1577,7 @@ func launchCodex(codex surface.Surface) error {
 	}
 	candidates := []string{
 		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+		"/Applications/Codex.app/Contents/MacOS/ChatGPT",
 		"/Applications/Codex.app/Contents/MacOS/Codex",
 	}
 	var exe string
@@ -1618,7 +1620,7 @@ func launchCodex(codex surface.Surface) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("Codex opened but its local app-server did not become ready; run 'agenthail doctor' for details")
+	return fmt.Errorf("Codex opened but its Desktop bridge did not become ready; run 'agenthail doctor' for details")
 }
 
 const codexLaunchProbeTimeout = 5 * time.Second
@@ -1643,15 +1645,13 @@ func probeCodexDesktop(codex surface.Surface) error {
 }
 
 func codexLaunchArgs() []string {
+	port := codexconfig.LaunchRemoteDebuggingPort()
 	return []string{
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--inspect=127.0.0.1:9230",
+		"--remote-debugging-address=127.0.0.1",
+		"--remote-debugging-port=" + port,
 	}
-}
-
-func codexRemotePort() string {
-	return os.Getenv("AGENTHAIL_CODEX_INSPECT")
 }
 
 func envOr(key, def string) string {
@@ -1668,6 +1668,7 @@ func findCodexPID() int {
 	}
 	return selectCodexPID(string(output), []string{
 		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+		"/Applications/Codex.app/Contents/MacOS/ChatGPT",
 		"/Applications/Codex.app/Contents/MacOS/Codex",
 	})
 }

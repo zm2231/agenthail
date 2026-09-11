@@ -336,6 +336,28 @@ type Capabilities struct {
 	Steer     bool `json:"steer"`
 }
 
+type SessionCapabilities struct {
+	Capabilities
+	ReadOnly       bool   `json:"readOnly"`
+	ReadOnlyReason string `json:"readOnlyReason,omitempty"`
+}
+
+func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
+	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
+		capabilities.Stream = false
+		capabilities.Steer = false
+		capabilities.Compact = false
+		if !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_") {
+			capabilities.Model = false
+			capabilities.Interrupt = false
+		}
+	}
+	if IsReadOnlySession(session) {
+		return SessionCapabilities{ReadOnly: true, ReadOnlyReason: ReadOnlySessionReason(session)}
+	}
+	return SessionCapabilities{Capabilities: capabilities}
+}
+
 type Surface interface {
 	Name() SurfaceKind
 	List(ctx context.Context) ([]Session, error)

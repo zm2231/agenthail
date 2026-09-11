@@ -415,12 +415,19 @@ func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
 	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "")
 	t.Setenv("XPC_SERVICE_NAME", "")
-	status := NewCodex("").RuntimeStatus(context.Background())
+	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
 	if !status.Reachable || status.Durable || status.Backend != "pid" {
 		t.Fatalf("status=%+v", status)
 	}
 	if !strings.Contains(status.Remediation, "agenthail launch codex") {
 		t.Fatalf("remediation=%q", status.Remediation)
+	}
+}
+
+func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
+	status := NewCodex(startRendererDesktopBridge(t)).RuntimeStatus(context.Background())
+	if !status.Reachable || !status.Durable || status.Backend != "desktop" || status.Name != "Codex Desktop bridge" {
+		t.Fatalf("status=%+v", status)
 	}
 }
 
@@ -433,7 +440,7 @@ func TestCodexManagedRuntimeStatusReportsSupervisedPIDBackend(t *testing.T) {
 	}
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
 	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "homebrew")
-	status := NewCodex("").RuntimeStatus(context.Background())
+	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
 	if !status.Reachable || !status.Durable || status.Backend != "pid" {
 		t.Fatalf("status=%+v", status)
 	}
@@ -451,7 +458,7 @@ func TestCodexManagedRuntimeStatusReportsLaunchdSupervisedPIDBackend(t *testing.
 	}
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
 	t.Setenv("XPC_SERVICE_NAME", "com.agenthail.daemon")
-	status := NewCodex("").RuntimeStatus(context.Background())
+	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
 	if !status.Reachable || !status.Durable || status.Backend != "pid" {
 		t.Fatalf("status=%+v", status)
 	}
@@ -470,7 +477,7 @@ func TestCodexManagedRuntimeStatusRejectsUnknownSupervisor(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
 	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "unknown")
 	t.Setenv("XPC_SERVICE_NAME", "")
-	status := NewCodex("").RuntimeStatus(context.Background())
+	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
 	if !status.Reachable || status.Durable {
 		t.Fatalf("status=%+v", status)
 	}
@@ -484,7 +491,7 @@ func TestCodexManagedRuntimeStatusReportsDurableSupervisedBackend(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	status := NewCodex("").RuntimeStatus(context.Background())
+	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
 	if !status.Reachable || !status.Durable || status.Backend != "launchd" {
 		t.Fatalf("status=%+v", status)
 	}
@@ -643,4 +650,13 @@ func TestCodexBinaryPrefersManagedStandaloneRuntime(t *testing.T) {
 	if err != nil || path != managed {
 		t.Fatalf("path=%q err=%v", path, err)
 	}
+}
+
+func isolatedManagedRuntime(t *testing.T) *Codex {
+	t.Helper()
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	codex := NewCodex(server.URL)
+	codex.managed = true
+	return codex
 }

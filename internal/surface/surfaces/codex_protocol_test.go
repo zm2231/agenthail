@@ -1,15 +1,11 @@
 package surfaces
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -19,59 +15,54 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-var nodeInspectorURL = regexp.MustCompile(`ws://127\.0\.0\.1:(\d+)/`)
-
-func startNodeDesktopBridge(t *testing.T) string {
+func startRendererDesktopBridge(t *testing.T) string {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is required for the Desktop bridge integration test")
-	}
-	dir := t.TempDir()
-	child := dir + "/app-server.js"
-	main := dir + "/desktop-main.js"
-	if err := os.WriteFile(child, []byte(`let buffer='';process.stdin.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);if(!line)continue;const request=JSON.parse(line);if(request.params&&request.params.mode==='timeout')continue;if(request.params&&request.params.mode==='malformed')process.stdout.write('{bad json}\n');process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'turn/progress',params:{threadId:'thread'}})+'\n');const result=request.method==='thread/read'?{thread:{id:request.params.threadId,source:'vscode',status:{type:'idle'}}}:{method:request.method,params:request.params};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result})+'\n')}});`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(main, []byte(`const {spawn}=require('child_process');spawn(process.execPath,[process.argv[2]],{stdio:['pipe','pipe','inherit']});setInterval(()=>{},1000);`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(node, "--inspect=127.0.0.1:0", main, child)
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
+	upgrader := websocket.Upgrader{}
+	var server *httptest.Server
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
-	lines := make(chan string, 8)
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			lines <- scanner.Text()
+	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
 		}
-		close(lines)
-	}()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	for {
-		select {
-		case line, ok := <-lines:
-			if !ok {
-				t.Fatal("Node inspector exited before publishing its endpoint")
+		defer conn.Close()
+		for {
+			var request map[string]any
+			if conn.ReadJSON(&request) != nil {
+				return
 			}
-			matches := nodeInspectorURL.FindStringSubmatch(line)
-			if len(matches) == 2 {
-				return "http://127.0.0.1:" + matches[1]
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			value := any("")
+			switch {
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
+				value = "hooked"
+			case expression == codexEventCursorJS:
+				value = float64(1)
+			case strings.Contains(expression, "b.events.filter"):
+				value = `{"cursor":1,"events":[{"sequence":1,"method":"turn/progress","params":{"threadId":"thread"}}]}`
+			case strings.Contains(expression, `"mode":"timeout"`):
+				value = `{"error":{"code":"timeout","message":"Codex Desktop app-server request timed out"}}`
+			case strings.Contains(expression, `"thread/read"`):
+				value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"}}}}`
+			case strings.Contains(expression, `"thread/loaded/list"`):
+				value = `{"result":{"data":[]}}`
+			case strings.Contains(expression, `"thread/turns/list"`):
+				value = `{"result":{"data":[]}}`
+			case strings.Contains(expression, `"turn/start"`):
+				value = `{"result":{"method":"turn/start"}}`
+			case strings.Contains(expression, "__agenthailPayloads"):
+				value = "ok"
 			}
-		case <-deadline.C:
-			t.Fatal("timed out waiting for Node inspector")
+			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
 		}
-	}
+	})
+	server = httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server.URL
 }
 
 func TestCodexObservationUsesTurnIDsAndCompletion(t *testing.T) {
@@ -193,7 +184,7 @@ func TestCodexActiveTurnUsesBoundedReader(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeFramesChildRPC(t *testing.T) {
-	codex := NewCodex(startNodeDesktopBridge(t))
+	codex := NewCodex(startRendererDesktopBridge(t))
 	client, err := codex.openDesktop(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -265,16 +256,16 @@ func TestCodexEventCorrelationHelpers(t *testing.T) {
 	}
 }
 
-func TestResolveCodexNodeEndpointUsesMainProcessTarget(t *testing.T) {
+func TestResolveCodexRendererEndpointUsesPrimaryRendererTarget(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{
-			{"type": "page", "webSocketDebuggerUrl": "ws://ignored"},
-			{"type": "node", "webSocketDebuggerUrl": "ws://main"},
+			{"type": "page", "url": "app://-/index.html?initialRoute=%2Favatar-overlay", "webSocketDebuggerUrl": "ws://overlay"},
+			{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws://renderer"},
 		})
 	}))
 	defer server.Close()
-	targets, err := resolveCodexNodeEndpoint(context.Background(), server.URL)
-	if err != nil || len(targets) != 1 || targets[0].wsURL != "ws://main" {
+	targets, err := resolveCodexRendererEndpoint(context.Background(), server.URL)
+	if err != nil || len(targets) != 2 || targets[0].wsURL != "ws://renderer" || targets[1].wsURL != "ws://overlay" {
 		t.Fatalf("targets=%+v err=%v", targets, err)
 	}
 }
@@ -285,7 +276,7 @@ func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
 	searchCalls := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -302,7 +293,7 @@ func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			var value any = ""
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case strings.Contains(expression, `"thread/search"`):
 				searchCalls++
@@ -327,7 +318,7 @@ func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
 	listCalls := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -344,7 +335,7 @@ func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			value := any("")
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case strings.Contains(expression, `"thread/loaded/list"`):
 				value = `{"result":{"data":[]}}`
@@ -367,7 +358,7 @@ func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
 }
 
 func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
-	codex := NewCodex(startNodeDesktopBridge(t))
+	codex := NewCodex(startRendererDesktopBridge(t))
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportReadOnly}
 	if err := codex.EnsureWritable(context.Background(), session); err != nil {
 		t.Fatal(err)
@@ -383,7 +374,7 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	searchCalls := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -400,7 +391,7 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			var value any = ""
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case strings.Contains(expression, `"thread/search"`):
 				searchCalls++
@@ -428,7 +419,7 @@ func TestCodexListUsesOneBoundedStateDatabasePage(t *testing.T) {
 	loadedExpression := ""
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -445,7 +436,7 @@ func TestCodexListUsesOneBoundedStateDatabasePage(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			var value any = ""
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case strings.Contains(expression, `"thread/loaded/list"`):
 				loadedCalls++
@@ -469,14 +460,9 @@ func TestCodexListUsesOneBoundedStateDatabasePage(t *testing.T) {
 	if err != nil || len(sessions) != 2 || listCalls != 1 || loadedCalls != 1 || readCalls != 1 {
 		t.Fatalf("sessions=%v list_calls=%d loaded_calls=%d read_calls=%d err=%v", sessions, listCalls, loadedCalls, readCalls, err)
 	}
-	for _, required := range []string{`"page":{"limit":50}`} {
+	for _, required := range []string{`"limit":50`, `"useStateDbOnly":true`, `"sortKey":"recency_at"`, `"sortDirection":"desc"`} {
 		if !strings.Contains(listExpression, required) {
 			t.Fatalf("bounded list expression missing %s: %s", required, listExpression)
-		}
-	}
-	for _, unsupported := range []string{`"useStateDbOnly"`, `"sortKey"`, `"sortDirection"`} {
-		if strings.Contains(listExpression, unsupported) {
-			t.Fatalf("desktop list expression contains unsupported %s: %s", unsupported, listExpression)
 		}
 	}
 	if !strings.Contains(loadedExpression, `"limit":50`) {
@@ -492,7 +478,7 @@ func TestCodexReadyUsesLoadedListOnly(t *testing.T) {
 	readCalls := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -509,7 +495,7 @@ func TestCodexReadyUsesLoadedListOnly(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			value := any("")
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case strings.Contains(expression, `"thread/loaded/list"`):
 				loadedCalls++
@@ -533,25 +519,25 @@ func TestCodexReadyUsesLoadedListOnly(t *testing.T) {
 	}
 }
 
-func TestCodexBridgeUsesDesktopAppServerChildStdio(t *testing.T) {
+func TestCodexBridgeUsesDesktopRendererMessages(t *testing.T) {
 	for name, source := range map[string]string{
 		"hook":   codexHookJS,
 		"rpc":    codexRPCJSONJS("thread/list", `{}`, time.Second),
 		"staged": codexStagedRPCJS("payload", "turn/start", time.Second),
 	} {
-		if !strings.Contains(source, "__agenthailDesktopAppServerV1") {
-			t.Fatalf("%s does not use the Desktop app-server bridge", name)
+		if !strings.Contains(source, "__agenthailCodexDesktopRendererV1") {
+			t.Fatalf("%s does not use the Desktop renderer bridge", name)
 		}
 	}
-	for _, required := range []string{"process._getActiveHandles", "handle.stdin.write", "handle.stdout.on", "spawnargs"} {
+	for _, required := range []string{"electronBridge.sendMessageFromView", "mcp-request", "mcp-response", "mcp-notification"} {
 		if !strings.Contains(codexHookJS, required) {
-			t.Fatalf("Desktop app-server bridge missing %q", required)
+			t.Fatalf("Desktop renderer bridge missing %q", required)
 		}
 	}
 }
 
 func TestCodexBridgeUsesDedicatedRequestIDs(t *testing.T) {
-	if !strings.Contains(codexHookJS, "next: 900000") {
+	if !strings.Contains(codexHookJS, "'agenthail-' + Date.now()") {
 		t.Fatal("Desktop app-server bridge does not isolate request IDs")
 	}
 }
@@ -568,7 +554,7 @@ func TestCodexDesktopDiscoveryRetriesImmediatelyForReplacementTarget(t *testing.
 		mu.Lock()
 		current := target
 		mu.Unlock()
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/" + current}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/" + current}})
 	})
 	for _, name := range []string{"one", "two", "three", "four"} {
 		name := name
@@ -586,7 +572,7 @@ func TestCodexDesktopDiscoveryRetriesImmediatelyForReplacementTarget(t *testing.
 				mu.Lock()
 				hookCalls[name]++
 				mu.Unlock()
-				value := any("no-app-server-child")
+				value := any("no-renderer-bridge")
 				if compatible[name] {
 					value = "hooked"
 				}
@@ -653,7 +639,7 @@ func TestCodexDesktopDiscoveryRetriesSameTargetAfterBackoff(t *testing.T) {
 	var server *httptest.Server
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/desktop"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/desktop"}})
 	})
 	handler.HandleFunc("/desktop", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -668,7 +654,7 @@ func TestCodexDesktopDiscoveryRetriesSameTargetAfterBackoff(t *testing.T) {
 			}
 			mu.Lock()
 			hookCalls++
-			value := any("no-app-server-child")
+			value := any("no-renderer-bridge")
 			if ready {
 				value = "hooked"
 			}
@@ -857,7 +843,7 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 	threadReads := 0
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -874,7 +860,7 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			var value any = ""
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case expression == codexEventCursorJS:
 				value = float64(10)
@@ -920,7 +906,7 @@ func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
 	var server *httptest.Server
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "node", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
 	})
 	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -937,7 +923,7 @@ func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
 			expression, _ := params["expression"].(string)
 			var value any = ""
 			switch {
-			case strings.Contains(expression, "process._getActiveHandles"):
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
 			case strings.Contains(expression, `"thread/read"`):
 				value = `{"jsonrpc":"2.0","result":{"thread":{"id":"thread-1","status":{"type":"idle"},"turns":[{"id":"target-turn","status":{"type":"completed"},"items":[{"type":"agentMessage","text":"fast"}]}]}}}`

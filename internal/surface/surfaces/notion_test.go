@@ -20,6 +20,16 @@ func TestNotionOnlySupportsPerMessageModelSelection(t *testing.T) {
 	}
 }
 
+func TestNotionObservationIsUnknownWithoutAProvenLifecycleState(t *testing.T) {
+	observation, err := (&Notion{}).Observe(context.Background(), &surface.Session{ID: "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Status != surface.StatusUnknown {
+		t.Fatalf("status=%q", observation.Status)
+	}
+}
+
 func TestNotionMalformedConfiguredSpaceFailsWithoutPanic(t *testing.T) {
 	notion := NewNotion("not-a-uuid", "user")
 	_, err := notion.Send(context.Background(), &surface.Session{ID: "new"}, "message")

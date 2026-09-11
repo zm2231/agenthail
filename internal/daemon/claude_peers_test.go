@@ -42,8 +42,8 @@ func TestRecentPeerRegistrationIncludesLatestPageAndReadOnly(t *testing.T) {
 }
 
 func TestNativeClaudeCapabilitiesMatchSocketContract(t *testing.T) {
-	caps, readOnly, _ := dashboardCapabilities(surface.Session{ID: "local-uuid", Surface: surface.KindClaude, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
-	if readOnly || !caps.Send || !caps.Reply || caps.Stream || caps.Compact || caps.Model || caps.Interrupt || caps.Steer {
-		t.Fatalf("caps=%+v readOnly=%v", caps, readOnly)
+	caps := surface.EffectiveCapabilities(&surface.Session{ID: "local-uuid", Surface: surface.KindClaude, Transport: "uds"}, surface.Capabilities{Send: true, Stream: true, Reply: true, Compact: true, Model: true, Interrupt: true, Steer: true})
+	if caps.ReadOnly || !caps.Send || !caps.Reply || caps.Stream || caps.Compact || caps.Model || caps.Interrupt || caps.Steer {
+		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}
 }
