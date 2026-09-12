@@ -44,7 +44,9 @@ struct AgenthailIOSApp: App {
         WindowGroup {
             Group {
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--preview-session") {
+                if ProcessInfo.processInfo.arguments.contains("--preview-voice") {
+                    AgenthailVoiceOperatorSheet(model: VoiceOperatorModel(preview: true), openSession: { _ in })
+                } else if ProcessInfo.processInfo.arguments.contains("--preview-session") {
                     SessionPreview()
                 } else { connectedRoot }
 #else
@@ -55,6 +57,7 @@ struct AgenthailIOSApp: App {
     }
     private var connectedRoot: some View {
         AgenthailIOSRoot(model: model)
+            .modifier(VoiceOperatorEntry(model: model))
             .onOpenURL { model.handlePairingURL($0) }
             .onReceive(NotificationCenter.default.publisher(for: .agenthailPushToken)) { notification in
                 if let token = notification.object as? String { model.registerPushToken(token) }
@@ -72,7 +75,7 @@ struct AgenthailIOSApp: App {
 
 private var sessionPreviewEnabled: Bool {
 #if DEBUG
-    ProcessInfo.processInfo.arguments.contains("--preview-session")
+    ProcessInfo.processInfo.arguments.contains("--preview-session") || ProcessInfo.processInfo.arguments.contains("--preview-voice")
 #else
     false
 #endif

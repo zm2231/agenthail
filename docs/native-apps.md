@@ -51,6 +51,22 @@ Activity is read in bounded pages: up to 200 items and roughly 512 KiB of encode
 
 Agenthail only offers message controls when it knows a conversation is writable. Older Codex history can still be read, but it will not show a composer.
 
+## Codex Voice orchestrator
+
+With matching voice-enabled host and iOS builds, **Talk to orchestrator** opens
+a conversational Codex Voice call. Ask about your agents, discuss a plan, or ask
+the orchestrator to create an agent and send it work. It uses one persistent Codex
+Desktop thread with the packaged Agenthail Operations skill, not on-device
+dictation. Your Codex account must support native Voice and your paired phone must
+have control permission.
+
+Live conversation and expandable agent activity remain visible. **Open full
+timeline** opens the same ordinary session. **Hang up** ends audio, not agent work;
+leaving the app also ends the call. Call again to resume the same orchestrator.
+Native approvals may still need attention on your Mac.
+
+See [Voice setup, capabilities, and verification](maintainers/codex-voice.md).
+
 ## Notifications
 
 Notifications are optional. Agenthail can tell you whether a Claude Code, Codex, or Notion agent finishes or fails without putting the agent name, conversation title, or conversation text in the alert. Tapping an alert opens the related conversation.
