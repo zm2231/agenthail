@@ -55,8 +55,8 @@ struct QueueListView: View {
     @State private var reloadID = UUID()
 
     private var items: [QueueState] { queue.filter { sessionID == nil || $0.sessionId == sessionID } }
-    private var current: [QueueState] { items.filter { $0.status != "expired" && $0.status != "delivered" && $0.status != "canceled" } }
-    private var history: [QueueState] { items.filter { $0.status == "expired" || $0.status == "delivered" || $0.status == "canceled" } }
+    private var current: [QueueState] { items.filter { !$0.isHistorical } }
+    private var history: [QueueState] { items.filter { $0.isHistorical } }
 
     var body: some View {
         List {
@@ -102,17 +102,17 @@ struct QueueListView: View {
                 Button("Cancel", role: .cancel) { retryCandidate = nil }
             }
         } message: {
-            Text(retryCandidate?.status == "expired" ? "This instruction expired without being sent. Sending again creates a new delivery attempt." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
+            Text(retryCandidate?.deliveryOutcome == "unknown" && retryCandidate?.isHistorical == true ? "This delivery outcome was never confirmed and the queue entry later expired. Check the session before sending again." : retryCandidate?.status == "expired" ? "This instruction expired without being sent. Sending again creates a new delivery attempt." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
         }
     }
 
     private func queueRow(_ item: QueueState) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(item.status == "dead" ? "Delivery needs review" : item.status == "expired" ? "Expired" : item.status == "inflight" ? "Sending" : item.status.capitalized)
-                    .font(.caption.weight(.semibold)).foregroundStyle(item.status == "dead" ? .orange : .secondary)
+                Text(item.isHistorical && item.deliveryOutcome == "unknown" ? "Outcome unknown · expired" : item.isHistorical && item.deliveryOutcome == "failed" ? "Delivery failed · expired" : item.status == "dead" ? "Delivery needs review" : item.status == "expired" ? "Expired" : item.status == "inflight" ? "Sending" : item.status.capitalized)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? .orange : .secondary)
                 Spacer()
-                Text(item.queuedAt).font(.caption2).foregroundStyle(.secondary)
+                Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Button {
                 if let onOpenSession { onOpenSession(item.sessionId) }
@@ -134,15 +134,13 @@ struct QueueListView: View {
                 if let value = item.model { LabeledContent("Model", value: value).font(.footnote) }
                 if let value = item.effort { LabeledContent("Effort", value: value).font(.footnote) }
                 if let value = item.mode { LabeledContent("Mode", value: value).font(.footnote) }
-                if let value = item.serviceTier { LabeledContent("Service tier", value: value).font(.footnote) }
                 if let value = item.sourceSessionId { LabeledContent("From session", value: value).font(.footnote).textSelection(.enabled) }
-                if let schema = item.outputSchema { TranscriptCode(text: schema.formatted) }
             }.font(.footnote)
             HStack {
                 if item.status == "dead" || item.status == "expired" {
                     Button("Send again") { retryCandidate = item }.buttonStyle(.bordered)
                 }
-                if item.status == "pending" || item.status == "dead" {
+                if item.status == "pending" || (item.status == "dead" && !item.isHistorical) {
                     Button(item.status == "dead" ? "Dismiss" : "Cancel delivery", role: .destructive) { update(item, retry: false) }.buttonStyle(.bordered)
                 }
             }

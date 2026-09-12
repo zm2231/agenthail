@@ -102,6 +102,13 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let attempts: Int
     let lastError: String?
     let queuedAt: String
+    let expiresAt: Int64?
+    let historical: Bool?
+    let deliveryOutcome: String?
+
+    var isHistorical: Bool {
+        historical == true || status == "expired" || status == "delivered" || status == "canceled"
+    }
 }
 
 indirect enum RecordedJSON: Codable, Equatable {
@@ -243,6 +250,9 @@ struct ModelOption: Decodable, Identifiable {
     let displayName: String
     let description: String?
     let `default`: Bool?
+    let allowsCustom: Bool?
+    let supportedReasoningEfforts: [String]?
+    let defaultReasoningEffort: String?
 }
 
 struct SessionDetail: Decodable {

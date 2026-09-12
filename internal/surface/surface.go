@@ -244,10 +244,14 @@ func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) 
 }
 
 type ModelOption struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-	Description string `json:"description,omitempty"`
-	Default     bool   `json:"default,omitempty"`
+	ID                        string   `json:"id"`
+	DisplayName               string   `json:"displayName"`
+	Description               string   `json:"description,omitempty"`
+	Default                   bool     `json:"default,omitempty"`
+	AllowsCustom              bool     `json:"allowsCustom,omitempty"`
+	SupportedReasoningEfforts []string `json:"supportedReasoningEfforts,omitempty"`
+	DefaultReasoningEffort    string   `json:"defaultReasoningEffort,omitempty"`
+	ServiceTiers              []string `json:"serviceTiers,omitempty"`
 }
 
 type ModelLister interface {

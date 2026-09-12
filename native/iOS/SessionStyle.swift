@@ -2,8 +2,22 @@ import SwiftUI
 import Textual
 
 enum SessionStyle {
-    static let accent = Color(red: 1, green: 0.37, blue: 0.16)
+    static let accent = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 1, green: 0.37, blue: 0.16, alpha: 1)
+            : UIColor(red: 0.72, green: 0.20, blue: 0.06, alpha: 1)
+    })
+    static let readingWidth: CGFloat = 600
     static let surface = Color(uiColor: .secondarySystemBackground)
+
+    static func title(_ session: SessionState) -> String {
+        if session.displayName != session.id { return session.displayName }
+        let agent = agentName(session.surface)
+        if let cwd = session.cwd, !cwd.isEmpty {
+            return "\(agent) · \(URL(fileURLWithPath: cwd).lastPathComponent)"
+        }
+        return "\(agent) session"
+    }
 
     static func agentName(_ surface: String) -> String {
         switch surface {
@@ -21,9 +35,30 @@ struct SessionMarkdown: View {
     var body: some View {
         StructuredText(markdown: text)
             .font(.system(.body, design: readingStyle ? .serif : .default))
+            .textual.inlineStyle(.default.code(.monospaced, .fontScale(0.85)))
+            .textual.headingStyle(TranscriptHeadingStyle())
+            .textual.paragraphStyle(TranscriptParagraphStyle())
             .textual.structuredTextStyle(.gitHub)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct TranscriptHeadingStyle: StructuredText.HeadingStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .textual.fontScale(configuration.headingLevel == 1 ? 1.4 : configuration.headingLevel == 2 ? 1.2 : 1.05)
+            .fontWeight(.semibold)
+            .textual.lineSpacing(.fontScaled(0.2))
+            .textual.blockSpacing(.init(top: 12, bottom: 8))
+    }
+}
+
+private struct TranscriptParagraphStyle: StructuredText.ParagraphStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .textual.lineSpacing(.fontScaled(0.3))
+            .textual.blockSpacing(.init(top: 0, bottom: 12))
     }
 }
 

@@ -85,6 +85,7 @@ cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 	"$ROOT/native/ResponsivePairLayout.swift" \
 	"$ROOT/native/StatusRefreshPolicy.swift" \
 	"$ROOT/native/AgenthailModels.swift" \
+	"$ROOT/native/TurnSettings.swift" \
 	"$ROOT/native/AgenthailAPI.swift" \
 	"$ROOT/native/SessionSelection.swift" \
 	"$ROOT/native/EventRetryBackoff.swift" \

@@ -20,6 +20,7 @@ targets:
       - package: Textual
     sources:
       - path: AgenthailModels.swift
+      - path: TurnSettings.swift
       - path: AgenthailAPI.swift
       - path: SessionSelection.swift
       - path: EventRetryBackoff.swift

@@ -85,6 +85,9 @@ func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
 	found := false
 	for _, item := range page.Items {
 		if item.ID == id && item.Status == "expired" {
+			if !item.Historical || item.DeliveryOutcome != "expired" {
+				t.Fatalf("expired row=%+v", item)
+			}
 			found = true
 		}
 	}

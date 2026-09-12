@@ -1117,11 +1117,16 @@ func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
 		return nil, err
 	}
 	defer conn.Close()
+	return listCodexModels(ctx, conn)
+}
+
+func listCodexModels(ctx context.Context, conn codexClient) ([]surface.ModelOption, error) {
 	var models []surface.ModelOption
-	var cursor any
+	seen := make(map[string]struct{})
+	cursor := ""
 	for page := 0; page < 20; page++ {
 		params := map[string]any{"includeHidden": false, "limit": 100}
-		if cursor != nil {
+		if cursor != "" {
 			params["cursor"] = cursor
 		}
 		response, err := conn.Request(ctx, "model/list", params, 10*time.Second)
@@ -1139,14 +1144,52 @@ func (c *Codex) Models(ctx context.Context) ([]surface.ModelOption, error) {
 			if id == "" {
 				continue
 			}
-			models = append(models, surface.ModelOption{ID: id, DisplayName: str(value, "displayName"), Description: str(value, "description"), Default: value["isDefault"] == true})
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			displayName := str(value, "displayName")
+			if displayName == "" {
+				displayName = id
+			}
+			models = append(models, surface.ModelOption{
+				ID:                        id,
+				DisplayName:               displayName,
+				Description:               str(value, "description"),
+				Default:                   value["isDefault"] == true,
+				SupportedReasoningEfforts: stringList(value["supportedReasoningEfforts"], "reasoningEffort"),
+				DefaultReasoningEffort:    str(value, "defaultReasoningEffort"),
+				ServiceTiers:              stringList(value["serviceTiers"], "id"),
+			})
 		}
-		cursor = result["nextCursor"]
-		if cursor == nil {
+		nextCursor, _ := result["nextCursor"].(string)
+		if nextCursor == "" || nextCursor == cursor {
 			break
 		}
+		cursor = nextCursor
 	}
 	return models, nil
+}
+
+func stringList(value any, objectKey string) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		switch item := item.(type) {
+		case string:
+			if item != "" {
+				result = append(result, item)
+			}
+		case map[string]any:
+			if item, ok := item[objectKey].(string); ok && item != "" {
+				result = append(result, item)
+			}
+		}
+	}
+	return result
 }
 
 func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {

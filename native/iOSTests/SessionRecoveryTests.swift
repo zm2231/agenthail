@@ -46,6 +46,29 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
+    func testExpiredDeadReceiptsStopDemandingReviewButKeepUnknownTruth() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        try await sendQueuedInstruction(model)
+        RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: false, deliveryOutcome: "unknown")
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery needs review in Inbox. Check the session before sending again.")
+        RecoveryProtocol.state.configure(queueHistorical: true)
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again.")
+        XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
+    }
+
+    func testExpiredKnownFailureReceiptStopsDemandingReview() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        try await sendQueuedInstruction(model)
+        RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: true, deliveryOutcome: "failed")
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery failed; the queue entry has expired. Review it in Inbox history.")
+        XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
+    }
+
     private func sendQueuedInstruction(_ model: AgenthailIOSModel) async throws {
         await model.loadSession("demo")
         _ = await model.refresh()
@@ -67,16 +90,20 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var stale = false
         private var queueStatus = "pending"
+        private var queueHistorical: Bool?
+        private var deliveryOutcome: String?
         private var queueFailure = false
         private var reads = 0
         private var actions = 0
         var sessionReads: Int { lock.withLock { reads } }
         var actionCount: Int { lock.withLock { actions } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueFailure = false; reads = 0; actions = 0 } }
-        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueFailure: Bool? = nil) {
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; deliveryOutcome = nil; queueFailure = false; reads = 0; actions = 0 } }
+        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, deliveryOutcome: String? = nil, queueFailure: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
                 if let queueStatus { self.queueStatus = queueStatus }
+                if let queueHistorical { self.queueHistorical = queueHistorical }
+                if let deliveryOutcome { self.deliveryOutcome = deliveryOutcome }
                 if let queueFailure { self.queueFailure = queueFailure }
             }
         }
@@ -95,7 +122,10 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     return (200, #"{"ok":true,"result":{"disposition":"queued","queueId":7}}"#)
                 case "/api/v1/queue":
                     if queueFailure { return (503, #"{"error":{"message":"Queue unavailable"}}"#) }
-                    return (200, "{\"items\":[{\"id\":7,\"sessionId\":\"demo\",\"target\":\"demo\",\"message\":\"Keep the regression test\",\"status\":\"\(queueStatus)\",\"attempts\":0,\"queuedAt\":\"2026-09-12 04:00:00\"}]}")
+                    var fields = ""
+                    if let queueHistorical { fields += ",\"historical\":\(queueHistorical)" }
+                    if let deliveryOutcome { fields += ",\"deliveryOutcome\":\"\(deliveryOutcome)\"" }
+                    return (200, "{\"items\":[{\"id\":7,\"sessionId\":\"demo\",\"target\":\"demo\",\"message\":\"Keep the regression test\",\"status\":\"\(queueStatus)\",\"attempts\":0,\"queuedAt\":\"2026-09-12 04:00:00\"\(fields)}]}")
                 default: return (404, "{}")
                 }
             }

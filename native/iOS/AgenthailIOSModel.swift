@@ -37,6 +37,20 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var creatingSession = false
     @Published var creationError: String?
     @Published var pendingControls: Set<String> = []
+    @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
+
+    func turnSettings(for sessionID: String) -> TurnSettings {
+        turnSettingsDrafts[sessionID] ?? TurnSettings()
+    }
+
+    func setTurnSettings(_ settings: TurnSettings, for sessionID: String) {
+        if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) }
+        else { turnSettingsDrafts[sessionID] = settings }
+    }
+
+    func clearTurnSettings(for sessionID: String) {
+        turnSettingsDrafts.removeValue(forKey: sessionID)
+    }
 
     func queuedInstructions() async throws -> [QueueState] {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
@@ -76,12 +90,12 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         return try await api.creationModels(surface: surface)
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, claude: ClaudeCreationSettings = .init()) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil
         defer { creatingSession = false }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, claude: claude)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude)
             if receipt.unknown == true && receipt.id == nil {
                 creationError = "\(surface.capitalized) may have started without a confirmed session ID. Check the agent catalog on your Mac before retrying. \(receipt.error ?? "")"
                 return false
@@ -317,16 +331,18 @@ final class AgenthailIOSModel: ObservableObject {
                     deliveryStatus[sessionID] = "Delivery is no longer in recent history. Check the session before retrying."
                     continue
                 }
-                switch item.status {
+                switch item.isHistorical && item.deliveryOutcome == "unknown" ? "unknown-expired" : item.isHistorical && item.deliveryOutcome == "failed" ? "failed-expired" : item.status {
                 case "pending": deliveryStatus[sessionID] = "Queued for the agent"
                 case "inflight": deliveryStatus[sessionID] = "Sending to the agent"
                 case "dead": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
+                case "unknown-expired": deliveryStatus[sessionID] = "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again."
+                case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
                 case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
                 case "delivered": deliveryStatus[sessionID] = "Instruction delivered"
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled"
                 default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
                 }
-                if ["expired", "delivered", "canceled"].contains(item.status) { deliveryQueueIDs.removeValue(forKey: sessionID) }
+                if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
             }
         } catch {
             for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
@@ -386,6 +402,7 @@ final class AgenthailIOSModel: ObservableObject {
         let working = detail.session.status == "busy"
         let action = working && detail.capabilities.steer ? "steer" : "send"
         guard action == "steer" || detail.capabilities.send else { return }
+        let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
         sendingSessionIDs.insert(session.id)
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
@@ -394,12 +411,15 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
                 deliveryStatus[session.id] = response.result?.disposition == "queued" ? "Queued for the agent" : "Instruction accepted"
                 if response.result?.disposition == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[session.id] = queueID
                 }
                 await refreshSession(session.id)
+                if action == "send", turnSettingsDrafts[session.id] == turnSettings {
+                    clearTurnSettings(for: session.id)
+                }
             } catch {
                 deliveryStatus[session.id] = "Delivery unconfirmed. Draft kept; check activity before retrying."
                 operationError = error.localizedDescription

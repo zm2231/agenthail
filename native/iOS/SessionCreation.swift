@@ -13,6 +13,8 @@ struct NewSessionSheet: View {
     @State private var modelError: String?
     @State private var loading = false
     @State private var claude = ClaudeCreationSettings()
+    @State private var showingModels = false
+    @State private var turnSettings = TurnSettings()
 
     var body: some View {
         NavigationStack {
@@ -39,12 +41,16 @@ struct NewSessionSheet: View {
                             }
                         }
                         Section("Model") {
-                            Picker("Model", selection: $selectedModel) {
-                                Text("Runtime default").tag("")
-                                ForEach(models) { Text($0.displayName).tag($0.id) }
+                            Button { showingModels = true } label: {
+                                LabeledContent("Model", value: models.first(where: { $0.id == selectedModel })?.displayName ?? (selectedModel.isEmpty ? "Use default" : selectedModel))
+                                    .contentShape(Rectangle())
                             }
+                            .accessibilityIdentifier("creation-model-picker")
                             if let modelError { Text(modelError).font(.footnote).foregroundStyle(.secondary) }
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        if selectedSurface == "codex" {
+                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: true)
                         }
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
@@ -82,21 +88,35 @@ struct NewSessionSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.creatingSession) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task {
-                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, claude: claude) { dismiss() }
+                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude) { dismiss() }
                     } } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
                     }.disabled(model.creatingSession || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .interactiveDismissDisabled(model.creatingSession)
+            .sheet(isPresented: $showingModels) {
+                SearchableModelSelectionSheet(initialOptions: models, currentSelectedID: selectedModel.isEmpty ? nil : selectedModel, allowsDefault: true, onSelect: { value in
+                    selectedModel = value ?? ""
+                    turnSettings.effort = nil
+                }, reload: {
+                    let values = try await model.creationModels(surface: selectedSurface)
+                    models = values
+                    modelError = nil
+                    return values
+                })
+            }
             .task { await load() }
             .task(id: selectedSurface) {
-                models = []; selectedModel = ""; modelError = nil
+                models = []; selectedModel = ""; modelError = nil; turnSettings = .init()
                 guard !selectedSurface.isEmpty else { return }
                 do { let values = try await model.creationModels(surface: selectedSurface); try Task.checkCancellation(); models = values }
                 catch is CancellationError {} catch { modelError = "Models unavailable. You can still use the runtime default." }
             }
         }
+    }
+    private var selectedModelOption: ModelOption? {
+        models.first { $0.id == selectedModel } ?? (selectedModel.isEmpty ? models.first { $0.default == true } : nil)
     }
     private func load() async {
         loading = true; error = nil

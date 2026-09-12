@@ -81,8 +81,9 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String) async throws -> ActionReceipt {
-        try await post("/api/v1/actions", body: ["action": action, "sessionId": sessionID, "message": message])
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init()) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
+        return try await requestEncoded("/api/v1/actions", method: "POST", body: body)
     }
 
     func sessionOptions() async throws -> SessionCreationOptions { try await get("/api/v1/session-options") }
@@ -104,7 +105,11 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, claude: ClaudeCreationSettings = .init()) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async throws -> SessionCreationReceipt {
+        if surface == "codex" {
+            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings)
+            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65)
+        }
         var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
         if surface == "claude" { body.merge(claude.fields) { _, value in value } }
         return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
@@ -225,6 +230,17 @@ final class AgenthailAPI: @unchecked Sendable {
         try await request(path, method: "POST", body: body)
     }
 
+    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25) async throws -> T {
+        var request = authorizedRequest(path: path)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        request.httpBody = try JSONEncoder().encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
     private func request<T: Decodable>(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval = 25) async throws -> T {
         var request = authorizedRequest(path: path)
         request.httpMethod = method
@@ -262,6 +278,46 @@ final class AgenthailAPI: @unchecked Sendable {
         }
     }
 
+}
+
+private struct InstructionRequest: Encodable {
+    let action: String
+    let sessionID: String
+    let message: String
+    let turnSettings: TurnSettings
+
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
+        try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+    }
+}
+
+private struct SessionCreateRequest: Encodable {
+    let action: String
+    let surface: String
+    let message: String
+    let cwd: String
+    let model: String
+    let turnSettings: TurnSettings
+
+    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+        try container.encode(surface, forKey: .surface)
+        try container.encode(message, forKey: .message)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(model, forKey: .model)
+        try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
+        try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+    }
 }
 
 private struct EmptyResponse: Decodable {}

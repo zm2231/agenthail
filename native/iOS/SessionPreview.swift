@@ -14,8 +14,11 @@ struct SessionPreview: View {
         let capturedDetail = capture.flatMap { $0.detailJSON[$0.initialSessionID] }
         let detail = try! decoder.decode(SessionDetail.self, from: Data((capturedDetail ?? Self.previewDetailJSON).utf8))
         self.detail = detail
-        session = snapshot.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(id: "demo", surface: "claude", name: "Make the build reliable", alias: nil, status: "busy", lastActive: nil,
-                               queueCount: 1, open: true, current: true, currentReason: nil, capabilities: detail.capabilities, readOnly: false, readOnlyReason: nil)
+        session = snapshot.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
+            id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
+            status: detail.session.status, lastActive: nil, queueCount: 0, open: false, current: false,
+            currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly,
+            readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SessionPreviewProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)))
@@ -38,11 +41,12 @@ struct SessionPreview: View {
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
             ConversationFlow(model: model, initialSessionID: session.id).tint(SessionStyle.accent)
         } else {
-            NavigationStack { SessionScreen(model: model, session: session) }.tint(.orange)
+            NavigationStack { SessionScreen(model: model, session: session) }.tint(SessionStyle.accent)
         }
     }
     nonisolated static var previewDetailJSON: String {
-        guard ProcessInfo.processInfo.arguments.contains("--preview-app") || ProcessInfo.processInfo.arguments.contains("--preview-rich") else { return detailJSON }
+        let reading = ProcessInfo.processInfo.arguments.contains("--preview-reading")
+        guard ProcessInfo.processInfo.arguments.contains("--preview-app") || ProcessInfo.processInfo.arguments.contains("--preview-rich") || reading else { return detailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(detailJSON.utf8)) as! [String: Any]
         var timeline = detail["timeline"] as! [String: Any]
         var items = timeline["items"] as! [[String: Any]]
@@ -50,6 +54,12 @@ struct SessionPreview: View {
         items.append(["id": "5", "kind": "reasoning", "title": "Thinking", "text": "The regression test covers the reconnect boundary. The remaining check is whether the queued instruction retains its session identity.", "truncated": false])
         items.append(["id": "6", "kind": "message", "role": "assistant", "title": "assistant", "text": "## Reconnect is fixed\n\nThe pending build survives reconnecting. **All 8 regression tests pass.**\n\n- Preserved the session identity\n- Kept the queued instruction attached\n- Added coverage for interrupted delivery\n\n```swift\nawait session.restorePendingBuild()\n```\n\n| Check | Result |\n| --- | --- |\n| Reconnect | Passed |\n| Queue identity | Passed |", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])
         items.append(["id": "7", "kind": "event", "title": "Turn duration", "text": "1m55s", "timestamp": "2026-09-12T04:03:00Z", "truncated": false])
+        if reading {
+            let instructions = "# AGENTS.md instructions for /Users/demo/projects/fieldnotes\n\n" + String(repeating: "## Repository guidance\n\nRead the current implementation before editing. Preserve the session identity and include meaningful regression coverage.\n\n", count: 30)
+            items.insert(["id": "context", "kind": "message", "role": "user", "title": "user", "text": instructions, "truncated": false], at: 0)
+            items.insert(["id": "long-message", "kind": "message", "role": "user", "title": "user", "text": String(repeating: "The phone should show the actual work clearly, including commands, results and context. Keep the transcript readable while the agent works.\n\n", count: 14), "truncated": false], at: 1)
+            items[items.count - 2]["text"] = "# The session stays readable while work continues\n\nI found the reconnect boundary. The saved instruction is present, and the agent has its original session identity.\n\n## What the checks show\n\nThe regression suite passes. You can expand the recorded command above to inspect its full input and result.\n\nThe latest update is visible above the composer."
+        }
         timeline["items"] = items
         timeline["nextBefore"] = 0
         if ProcessInfo.processInfo.arguments.contains("--preview-history-only") {
@@ -114,7 +124,13 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         } else {
         switch request.url?.path {
         case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
-        case "/api/v1/models": body = #"{"models":[{"id":"demo-model","displayName":"Example model"}]}"#
+        case "/api/v1/models":
+            if ProcessInfo.processInfo.arguments.contains("--preview-models-error") {
+                status = 503
+                body = #"{"error":{"message":"Runtime model catalog unavailable"}}"#
+            } else {
+                body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
+            }
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/session":

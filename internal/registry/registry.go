@@ -863,6 +863,8 @@ type QueueRow struct {
 	LastError       string `json:"lastError,omitempty"`
 	QueuedAt        string `json:"queuedAt"`
 	ExpiresAt       int64  `json:"expiresAt,omitempty"`
+	Historical      bool   `json:"historical"`
+	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
 }
 
 type AttentionItem struct {
@@ -879,15 +881,20 @@ type AttentionItem struct {
 const uncertainDeliveryError = "delivery outcome is unknown after daemon interruption; retry explicitly if the target did not receive it"
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
-	if err := r.expireMessages(time.Now()); err != nil {
+	now := time.Now()
+	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
 	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue`
 	if !includeDelivered {
-		query += ` WHERE status NOT IN ('delivered','canceled','expired')`
+		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
 	}
 	query += ` ORDER BY id`
-	rows, err := r.db.Query(query)
+	args := []any{}
+	if !includeDelivered {
+		args = append(args, now.UnixMilli())
+	}
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -898,13 +905,16 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt); err != nil {
 			return nil, err
 		}
+		row.Historical = queueRowIsHistorical(row, now)
+		row.DeliveryOutcome = queueDeliveryOutcome(row)
 		result = append(result, row)
 	}
 	return result, rows.Err()
 }
 
 func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
-	if err := r.expireMessages(time.Now()); err != nil {
+	now := time.Now()
+	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
 	var row QueueRow
@@ -912,10 +922,39 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	row.Historical = queueRowIsHistorical(row, now)
+	row.DeliveryOutcome = queueDeliveryOutcome(row)
 	return &row, nil
 }
 
+func queueRowIsHistorical(row QueueRow, now time.Time) bool {
+	if row.Status == "delivered" || row.Status == "canceled" || row.Status == "expired" {
+		return true
+	}
+	return row.Status == "dead" && row.ExpiresAt > 0 && row.ExpiresAt <= now.UnixMilli()
+}
+
+func queueDeliveryOutcome(row QueueRow) string {
+	switch row.Status {
+	case "delivered":
+		return "delivered"
+	case "expired":
+		return "expired"
+	case "dead":
+		if strings.HasPrefix(row.LastError, "delivery outcome is unknown") {
+			return "unknown"
+		}
+		return "failed"
+	default:
+		return ""
+	}
+}
+
 func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, error) {
+	now := time.Now()
+	if err := r.expireMessages(now); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
@@ -946,18 +985,18 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Correct this message, then retry or cancel it'
 				ELSE 'Retry or cancel this message'
 			END
-		FROM message_queue WHERE status='dead'
+		FROM message_queue WHERE status='dead' AND (expires_at_ms=0 OR expires_at_ms>?)
 		ON CONFLICT(queue_id) DO UPDATE SET
 			reason=excluded.reason,
 			requested_action=excluded.requested_action
-		WHERE attention_items.resolved_at=''`)
+		WHERE attention_items.resolved_at=''`, now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
 	_, err = tx.Exec(`UPDATE attention_items SET
 		resolved_at=datetime('now'),
-		resolution=COALESCE((SELECT CASE status WHEN 'pending' THEN 'retrying' WHEN 'delivered' THEN 'delivered' WHEN 'canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
-		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead')`)
+		resolution=COALESCE((SELECT CASE WHEN status='dead' AND expires_at_ms>0 AND expires_at_ms<=? THEN 'expired' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
+		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead' AND (expires_at_ms=0 OR expires_at_ms>?))`, now.UnixMilli(), now.UnixMilli())
 	if err != nil {
 		return nil, err
 	}

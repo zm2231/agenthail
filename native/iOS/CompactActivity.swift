@@ -62,12 +62,13 @@ struct TimelineGroup: Identifiable {
 
 struct CompactActivityGroup: View {
     let group: TimelineGroup
+    var onInspect: () -> Void = {}
     @State private var expanded = false
 
     var body: some View {
         if group.isActivity {
             VStack(alignment: .leading, spacing: 10) {
-                Button { expanded.toggle() } label: {
+                Button { onInspect(); expanded.toggle() } label: {
                     HStack(spacing: 8) {
                         Text(group.summary).font(.subheadline.weight(.medium)).lineLimit(2)
                         Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption.weight(.semibold))

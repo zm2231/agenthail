@@ -3,6 +3,26 @@ import XCTest
 
 final class WorkflowParityTests: XCTestCase {
     @MainActor
+    func testCodexCreationEncodesEffortAndPlanWithoutLeakingToClaude() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let settings = TurnSettings(effort: "high", mode: .plan)
+        let created = await model.createSession(surface: "codex", message: "Plan the fix", cwd: "/project", model: "chosen", turnSettings: settings)
+        XCTAssertTrue(created)
+        let action = ParityProtocol.state.actions[0]
+        XCTAssertEqual(action["action"] as? String, "session-create")
+        XCTAssertEqual(action["model"] as? String, "chosen")
+        XCTAssertEqual(action["effort"] as? String, "high")
+        XCTAssertEqual(action["mode"] as? String, "plan")
+        XCTAssertNil(action["turnSettings"])
+        XCTAssertNil(action["outputSchema"])
+        XCTAssertNil(action["serviceTier"])
+        _ = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "", turnSettings: settings)
+        XCTAssertNil(ParityProtocol.state.actions[1]["effort"])
+        XCTAssertNil(ParityProtocol.state.actions[1]["mode"])
+    }
+
+    @MainActor
     func testClaudeCreationPreservesSettingsAndNativeIdentity() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
@@ -38,6 +58,15 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(schema["required"] as? [String], ["answer"])
         XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
     }
+
+    func testQueuePreservesExpiredUnknownOutcomeAsHistory() throws {
+        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","attempts":1,"queuedAt":"now","expiresAt":1,"historical":true,"deliveryOutcome":"unknown"}"#.utf8)
+        let queue = try JSONDecoder().decode(QueueState.self, from: data)
+        XCTAssertTrue(queue.isHistorical)
+        XCTAssertEqual(queue.deliveryOutcome, "unknown")
+        XCTAssertEqual(queue.expiresAt, 1)
+    }
+
     func testCompactGroupingPreservesOrderErrorsAndStableAnchor() throws {
         let data = #"[{"id":"u","kind":"message","role":"user","title":"You","text":"work","truncated":false},{"id":"c","kind":"toolCall","title":"Bash","text":"{\"cmd\":\"swift test\"}","callId":"a","truncated":false},{"id":"r","kind":"toolResult","title":"Result","text":"failed","status":"error","callId":"a","truncated":true},{"id":"m","kind":"message","role":"assistant","title":"Assistant","text":"result","truncated":false}]"#
         let items = try JSONDecoder().decode([TimelineItem].self, from: Data(data.utf8))

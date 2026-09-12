@@ -1,6 +1,6 @@
 import SwiftUI
 
-private let orange = Color(red: 1, green: 0.37, blue: 0.16)
+private let orange = SessionStyle.accent
 
 struct AgenthailIOSRoot: View {
     @ObservedObject var model: AgenthailIOSModel
@@ -306,6 +306,10 @@ struct SessionScreen: View {
     @State private var showingInfo = false
     @State private var activityOnly = false
     @State private var followingLatest = true
+    @State private var atLatest = true
+    @State private var userScrolling = false
+
+    private var displayTitle: String { SessionStyle.title(session) }
 
     private var detail: SessionDetail? {
         model.selectedDetail?.session.id == session.id ? model.selectedDetail : nil
@@ -319,7 +323,7 @@ struct SessionScreen: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if let error = model.connectionError {
                         Label(error, systemImage: "wifi.exclamationmark").font(.callout).foregroundStyle(.secondary)
                     } else if model.reconnecting {
@@ -351,9 +355,11 @@ struct SessionScreen: View {
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                             if activityOnly {
-                                ForEach(items) { IOSTimelineRow(item: $0).id($0.id) }
+                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false).id($0.id) }
                             } else {
-                                ForEach(TimelineGroup.make(items)) { group in CompactActivityGroup(group: group).id(group.id) }
+                                ForEach(TimelineGroup.make(items)) { group in
+                                    CompactActivityGroup(group: group) { followingLatest = false }.id(group.id)
+                                }
                             }
                             if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
                         } else {
@@ -377,23 +383,47 @@ struct SessionScreen: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
+            .defaultScrollAnchor(.top, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
-            .simultaneousGesture(DragGesture().onChanged { _ in followingLatest = false })
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting {
+                    userScrolling = true
+                    followingLatest = false
+                } else if phase == .idle && userScrolling {
+                    followingLatest = atLatest
+                    userScrolling = false
+                }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.visibleRect.maxY < 60
+            } action: { _, value in
+                atLatest = value
+            }
             .refreshable { await model.refreshSession(session.id) }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let detail { SessionSummary(detail: detail) { showingInfo = true } }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
-                    if !followingLatest {
+                    if !atLatest && detail != nil {
                         Button {
                             followingLatest = true
                             proxy.scrollTo("bottom", anchor: .bottom)
-                        } label: { Label("Jump to latest", systemImage: "arrow.down").padding(10) }
+                        } label: {
+                            Image(systemName: "arrow.down")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 44, height: 44)
+                                .background(.regularMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Jump to latest")
                     }
                     if let detail {
                         if detail.readOnly || (!detail.capabilities.send && !detail.capabilities.steer) {
@@ -404,14 +434,15 @@ struct SessionScreen: View {
                         }
                     }
                 }
+                .background(.background)
             }
             .toolbar(.hidden, for: .tabBar)
-            .navigationTitle(session.displayName)
+            .navigationTitle(displayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
-                        Text(session.displayName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
                             Text(URL(fileURLWithPath: cwd).lastPathComponent + " · Mac").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
@@ -433,6 +464,8 @@ struct SessionScreen: View {
                 if let detail { SessionInspector(model: model, session: session, detail: detail) }
             }
             .task(id: session.id) {
+                followingLatest = true
+                atLatest = true
                 await model.loadSession(session.id)
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
@@ -457,6 +490,9 @@ struct IOSComposer: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let session: SessionState
     let detail: SessionDetail
+    @State private var showingModels = false
+    @State private var showingTurnSettings = false
+    @State private var loadedModels: [ModelOption]?
 
     private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
@@ -482,17 +518,25 @@ struct IOSComposer: View {
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.top, 8)
                     .accessibilityLabel(steering ? "Instruction for the current turn" : "Message to this agent")
+                    .accessibilityIdentifier("composer-input")
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 layout {
-                    if detail.capabilities.model, let options = detail.models, !options.isEmpty {
-                        Menu {
-                            ForEach(options) { option in
-                                Button(option.displayName) { model.action("model", session: session, model: option.id) }
-                            }
-                        } label: { modelLabel }
+                    if detail.capabilities.model {
+                        Button { showingModels = true } label: { modelLabel }
+                        .buttonStyle(.plain)
                         .disabled(model.pendingControls.contains(session.id))
                         .accessibilityLabel("Change model, " + modelName)
+                        .accessibilityIdentifier("composer-model-picker")
                     } else { modelLabel }
+                    if session.surface == "codex" && detail.capabilities.send {
+                        Button { showingTurnSettings = true } label: {
+                            Image(systemName: model.turnSettings(for: session.id).isEmpty ? "slider.horizontal.3" : "slider.horizontal.3.circle.fill")
+                                .font(.body).frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Effort and plan mode")
+                        .accessibilityIdentifier("composer-turn-settings")
+                    }
                     if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                     HStack(spacing: 8) {
                         if dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
@@ -521,12 +565,43 @@ struct IOSComposer: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26))
             .overlay { RoundedRectangle(cornerRadius: 26).strokeBorder(Color.primary.opacity(0.06)) }
         }
-        .frame(maxWidth: 760)
+        .frame(maxWidth: SessionStyle.readingWidth)
         .frame(maxWidth: .infinity)
         .padding(.horizontal).padding(.vertical, 10)
+        .sheet(isPresented: $showingModels) {
+            SearchableModelSelectionSheet(initialOptions: loadedModels ?? detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
+                if let value {
+                    var settings = model.turnSettings(for: session.id)
+                    settings.effort = nil
+                    model.setTurnSettings(settings, for: session.id)
+                    model.action("model", session: session, model: value)
+                }
+            }, reload: { try await loadModels() })
+        }
+        .sheet(isPresented: $showingTurnSettings) {
+            NavigationStack {
+                Form {
+                    TurnSettingsView(settings: Binding(get: { model.turnSettings(for: session.id) }, set: { model.setTurnSettings($0, for: session.id) }), modelOption: selectedModelOption, enabled: !steering && !sending)
+                }
+                .navigationTitle("Effort and mode")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingTurnSettings = false } } }
+                .task { if selectedModelOption == nil { _ = try? await loadModels() } }
+            }
+        }
+        .onChange(of: session.id) { _, _ in loadedModels = nil }
     }
 
     private var modelName: String { detail.model ?? SessionStyle.agentName(detail.session.surface) }
+    private var selectedModelOption: ModelOption? {
+        let options = loadedModels ?? detail.models ?? []
+        return options.first { $0.id == detail.model } ?? (detail.model == nil ? options.first { $0.default == true } : nil)
+    }
+    private func loadModels() async throws -> [ModelOption] {
+        let options = try await model.creationModels(surface: session.surface)
+        loadedModels = options
+        return options
+    }
     private var modelLabel: some View {
         Text(modelName).font(.caption.weight(.medium)).lineLimit(2)
             .padding(.horizontal, 12).frame(minHeight: 44)
@@ -541,11 +616,27 @@ struct IOSMessage: View {
     let color: Color
     var timestamp: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showingFullMessage = false
     private var isUser: Bool { label == "You" }
+    private var isLongMessage: Bool { isUser && (text.count > 700 || text.components(separatedBy: .newlines).count > 10) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SessionMarkdown(text: text, readingStyle: !isUser)
+            if isUser {
+                Text(isLongMessage ? String(text.prefix(700)) : text)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .lineLimit(isLongMessage ? 6 : nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                if isLongMessage {
+                    Button("Read full message") { showingFullMessage = true }
+                        .font(.subheadline.weight(.medium))
+                        .frame(minHeight: 44)
+                }
+            } else {
+                SessionMarkdown(text: text, readingStyle: true)
+            }
             HStack {
                 Spacer(minLength: 0)
                 SessionTimestamp(value: timestamp)
@@ -553,22 +644,28 @@ struct IOSMessage: View {
         }
         .padding(isUser ? 14 : 0)
         .background(isUser ? SessionStyle.surface : .clear, in: RoundedRectangle(cornerRadius: 16))
-        .padding(.leading, isUser ? 24 : 0)
+        .padding(.leading, isUser && !dynamicTypeSize.isAccessibilitySize ? 16 : 0)
         .padding(.vertical, 4)
         .contextMenu {
             Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }
             ShareLink(item: text) { Label("Share text", systemImage: "square.and.arrow.up") }
+        }
+        .sheet(isPresented: $showingFullMessage) {
+            TranscriptDocument(title: "Your message", text: text, markdown: false)
         }
     }
 }
 
 struct IOSTimelineRow: View {
     let item: TimelineItem
+    var compactContext = true
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
 
     var body: some View {
-        if item.kind == "message" {
+        if compactContext, let title = TranscriptContext.title(for: item) {
+            ContextRecordRow(title: title, item: item)
+        } else if item.kind == "message" {
             IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp)
             if item.truncated { shortened }
         } else if item.kind == "toolCall" {
@@ -603,7 +700,7 @@ struct IOSTimelineRow: View {
                 }.buttonStyle(.plain)
                 if expanded {
                     if item.kind == "toolResult" { TranscriptCode(text: item.text) }
-                    else { SessionMarkdown(text: item.text) }
+                    else { SessionMarkdown(text: item.text, readingStyle: item.kind == "reasoning") }
                     if let id = item.callId {
                         Text("Call \(id)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -617,6 +714,7 @@ struct IOSTimelineRow: View {
 
     private var messageLabel: String {
         if item.role == "user" { return "You" }
+        if item.role == "system" || item.role == "developer" { return "Context" }
         if item.title.contains("commentary") { return "Update" }
         if item.title.contains("analysis") { return "Reasoning" }
         return "Assistant"
@@ -649,8 +747,10 @@ struct SessionSummary: View {
                     Text(detail.model ?? SessionStyle.agentName(detail.session.surface))
                 }
             }
-            .font(.caption)
+            .font(.footnote)
             .foregroundStyle(.secondary)
+            .frame(maxWidth: SessionStyle.readingWidth)
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
@@ -662,6 +762,7 @@ struct SessionSummary: View {
     private var status: some View {
         Label(detail.session.status == "busy" ? "Working" : detail.session.status.capitalized,
               systemImage: detail.session.status == "busy" ? "waveform" : "circle")
+        .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
     @ViewBuilder private var context: some View {
@@ -676,6 +777,7 @@ struct SessionInspector: View {
     let session: SessionState
     let detail: SessionDetail
     @Environment(\.dismiss) private var dismiss
+    @State private var showingModels = false
     var body: some View {
         NavigationStack {
             List {
@@ -717,10 +819,9 @@ struct SessionInspector: View {
                 Section("Controls") {
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
                     else {
-                        if detail.capabilities.model, let options = detail.models, !options.isEmpty {
-                            Menu("Change model") {
-                                ForEach(options) { option in Button(option.displayName) { model.action("model", session: session, model: option.id); dismiss() } }
-                            }
+                        if detail.capabilities.model {
+                            Button("Change model") { showingModels = true }
+                                .disabled(model.pendingControls.contains(session.id))
                         }
                         if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
                         if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
@@ -731,6 +832,17 @@ struct SessionInspector: View {
             }
             .navigationTitle("Session details").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .sheet(isPresented: $showingModels) {
+                SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in
+                    if let value {
+                        var settings = model.turnSettings(for: session.id)
+                        settings.effort = nil
+                        model.setTurnSettings(settings, for: session.id)
+                        model.action("model", session: session, model: value)
+                        dismiss()
+                    }
+                }, reload: { try await model.creationModels(surface: session.surface) })
+            }
         }
     }
 }
@@ -747,8 +859,7 @@ struct IOSSessionRow: View {
     let session: SessionState
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var title: String {
-        let name = session.displayName
-        return UUID(uuidString: name) != nil ? "\(SessionStyle.agentName(session.surface)) session" : name
+        SessionStyle.title(session)
     }
 
     var body: some View {

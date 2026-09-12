@@ -132,6 +132,9 @@ type dashboardQueue struct {
 	Attempts        int    `json:"attempts"`
 	LastError       string `json:"lastError,omitempty"`
 	QueuedAt        string `json:"queuedAt"`
+	ExpiresAt       int64  `json:"expiresAt,omitempty"`
+	Historical      bool   `json:"historical"`
+	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
 }
 
 type dashboardChannel struct {
@@ -544,7 +547,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
+		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, DeliveryOutcome: item.DeliveryOutcome})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -1288,6 +1291,10 @@ func mergeDashboardSearchResults(left, right []surface.SessionSearchResult) []su
 }
 
 func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request) {
+	d.dashboardSessionHandlerWithTimeout(w, r, surfaceOperationTimeout)
+}
+
+func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *http.Request, operationTimeout time.Duration) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -1307,7 +1314,7 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), operationTimeout)
 	defer cancel()
 	limit := 20
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
@@ -1315,17 +1322,8 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 			limit = parsed
 		}
 	}
-	exchanges, transcriptErr := adapter.Tail(ctx, session, limit)
-	if transcriptErr != nil {
-		exchanges = []surface.Exchange{}
-	}
-	exchanges, transcript := truncateSessionExchanges(exchanges)
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
-	if transcriptErr != nil {
-		response["transcriptWarning"] = "Message history could not be refreshed. Local activity is shown when available."
-	}
 	var timelineBefore int64
 	if raw := r.URL.Query().Get("timelineBefore"); raw != "" {
 		var parseErr error
@@ -1335,35 +1333,82 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	var metadata sync.WaitGroup
+	var exchanges []surface.Exchange
+	var transcriptErr error
+	var timeline *surface.SessionTimeline
+	metadata.Add(1)
+	go func() {
+		defer metadata.Done()
+		exchanges, transcriptErr = adapter.Tail(ctx, session, limit)
+	}()
 	if provider, ok := adapter.(surface.TimelineProvider); ok && r.URL.Query().Get("timeline") == "1" {
-		timelineCtx, timelineCancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
-		defer timelineCancel()
-		if timeline, timelineErr := provider.Timeline(timelineCtx, session, timelineBefore); timelineErr == nil {
-			response["timeline"] = timeline
-		} else {
-			response["timeline"] = surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: "Detailed activity could not be loaded from the local transcript. Pull to refresh to retry."}
-		}
+		metadata.Add(1)
+		go func() {
+			defer metadata.Done()
+			var timelineErr error
+			timeline, timelineErr = provider.Timeline(ctx, session, timelineBefore)
+			if timelineErr != nil {
+				timeline = &surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: "Detailed activity could not be loaded from the local transcript. Pull to refresh to retry."}
+			}
+		}()
 	}
-
+	var contextUsage *surface.ContextUsage
+	var goal *surface.GoalState
+	var model string
+	var models []surface.ModelOption
+	var contextUsageErr, goalErr, modelErr, modelsErr error
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
-		if usage, usageErr := provider.ContextUsage(ctx, session); usageErr == nil && usage != nil {
-			response["context"] = usage
-		}
+		metadata.Add(1)
+		go func() {
+			defer metadata.Done()
+			contextUsage, contextUsageErr = provider.ContextUsage(ctx, session)
+		}()
 	}
 	if effective.Goal {
-		if goal, goalErr := adapter.GoalGet(ctx, session); goalErr == nil {
-			response["goal"] = goal
-		}
+		metadata.Add(1)
+		go func() {
+			defer metadata.Done()
+			goal, goalErr = adapter.GoalGet(ctx, session)
+		}()
 	}
 	if effective.Model {
-		if model, modelErr := adapter.Model(ctx, session, ""); modelErr == nil {
-			response["model"] = model
+		metadata.Add(1)
+		go func() {
+			defer metadata.Done()
+			model, modelErr = adapter.Model(ctx, session, "")
+		}()
+		if lister, ok := adapter.(surface.ModelLister); ok {
+			metadata.Add(1)
+			go func() {
+				defer metadata.Done()
+				models, modelsErr = lister.Models(ctx)
+			}()
 		}
 	}
-	if lister, ok := adapter.(surface.ModelLister); ok && effective.Model {
-		if models, modelsErr := lister.Models(ctx); modelsErr == nil {
-			response["models"] = models
-		}
+	metadata.Wait()
+	if transcriptErr != nil {
+		exchanges = []surface.Exchange{}
+	}
+	exchanges, transcript := truncateSessionExchanges(exchanges)
+	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	if transcriptErr != nil {
+		response["transcriptWarning"] = "Message history could not be refreshed. Local activity is shown when available."
+	}
+	if timeline != nil {
+		response["timeline"] = timeline
+	}
+	if contextUsageErr == nil && contextUsage != nil {
+		response["context"] = contextUsage
+	}
+	if goalErr == nil && goal != nil {
+		response["goal"] = goal
+	}
+	if modelErr == nil && model != "" {
+		response["model"] = model
+	}
+	if modelsErr == nil && models != nil {
+		response["models"] = models
 	}
 	writeDashboardJSON(w, http.StatusOK, response)
 }

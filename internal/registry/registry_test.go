@@ -495,6 +495,117 @@ func TestQueuedMessageExpiresAndStopsWatchingSession(t *testing.T) {
 	}
 }
 
+func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	id, err := r.QueueMessageWithKey("s", "uncertain old delivery", "expired-unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.DeadLetterUnknown(item.ID, errors.New("daemon stopped")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,?,?)`, "s", id, "Delivery outcome could not be confirmed", "Retry or cancel this message"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("current rows=%+v err=%v", rows, err)
+	}
+	rows, err = r.ListQueue(true)
+	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].DeliveryOutcome != "unknown" {
+		t.Fatalf("history rows=%+v err=%v", rows, err)
+	}
+	attention, err := r.ListAttentionItems(false)
+	if err != nil || len(attention) != 0 {
+		t.Fatalf("open attention=%+v err=%v", attention, err)
+	}
+	allAttention, err := r.ListAttentionItems(true)
+	if err != nil || len(allAttention) != 1 || allAttention[0].Resolution != "expired" || allAttention[0].ResolvedAt == "" {
+		t.Fatalf("historical attention=%+v err=%v", allAttention, err)
+	}
+}
+
+func TestFutureUnknownDeliveryRemainsCurrentAttention(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item != nil {
+		t.Fatalf("empty claim=%+v err=%v", item, err)
+	}
+	id, err := r.QueueMessageWithKey("s", "uncertain active delivery", "future-unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || claimed == nil {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	if err := r.DeadLetterUnknown(id, errors.New("connection closed")); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Historical || rows[0].DeliveryOutcome != "unknown" {
+		t.Fatalf("current rows=%+v err=%v", rows, err)
+	}
+	attention, err := r.ListAttentionItems(false)
+	if err != nil || len(attention) != 1 {
+		t.Fatalf("attention=%+v err=%v", attention, err)
+	}
+}
+
+func TestInflightPastExpiryRemainsCurrentUntilFinalized(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "still sending"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	item, err := r.ClaimNextMessage("s", now)
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, now.Add(-time.Second).UnixMilli(), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Status != "inflight" || rows[0].Historical {
+		t.Fatalf("current rows=%+v err=%v", rows, err)
+	}
+	if got := r.QueueCount("s"); got != 1 {
+		t.Fatalf("queue count=%d", got)
+	}
+}
+
+func TestDeliveredOutcomeWinsOverRetainedUnknownError(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "delivered"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.AckMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET last_error=? WHERE id=?`, "delivery outcome is unknown: stale error", item.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := r.ListQueue(true)
+	if err != nil || len(rows) != 1 || rows[0].DeliveryOutcome != "delivered" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
 func TestRelayLineageSurvivesDeliveryUntilCompletion(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
