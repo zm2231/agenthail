@@ -16,6 +16,8 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
     @Published var deliveryStatus: [String: String] = [:]
+    private var deliveryQueueIDs: [String: Int64] = [:]
+    private var refreshingDeliveries = false
     @Published var olderActivity: [TimelineItem] = []
     @Published var activityCursor: Int64?
     @Published var loadingOlderActivity = false
@@ -89,7 +91,7 @@ final class AgenthailIOSModel: ObservableObject {
             requestedSessionID = id
             return true
         } catch {
-            creationError = "Creation unconfirmed. Check Saved before retrying to avoid starting twice. \(error.localizedDescription)"
+            creationError = "Creation unconfirmed. Check All sessions before retrying to avoid starting twice. \(error.localizedDescription)"
             return false
         }
     }
@@ -257,7 +259,8 @@ final class AgenthailIOSModel: ObservableObject {
             let loaded = try await api.snapshot(fresh: fresh)
             snapshot = loaded
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            connectionError = nil
+            connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The Mac could not refresh its agents.") : nil
+            await refreshDeliveries()
             return true
         } catch {
             connectionError = error.localizedDescription
@@ -298,6 +301,37 @@ final class AgenthailIOSModel: ObservableObject {
         } catch {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
             sessionError = error.localizedDescription
+        }
+        await refreshDeliveries()
+    }
+
+    private func refreshDeliveries() async {
+        guard let api, !deliveryQueueIDs.isEmpty, !refreshingDeliveries else { return }
+        refreshingDeliveries = true
+        defer { refreshingDeliveries = false }
+        let expected = deliveryQueueIDs
+        do {
+            let items = try await api.queuedInstructions()
+            for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
+                guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
+                    deliveryStatus[sessionID] = "Delivery is no longer in recent history. Check the session before retrying."
+                    continue
+                }
+                switch item.status {
+                case "pending": deliveryStatus[sessionID] = "Queued for the agent"
+                case "inflight": deliveryStatus[sessionID] = "Sending to the agent"
+                case "dead": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
+                case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
+                case "delivered": deliveryStatus[sessionID] = "Instruction delivered"
+                case "canceled": deliveryStatus[sessionID] = "Instruction canceled"
+                default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
+                }
+                if ["expired", "delivered", "canceled"].contains(item.status) { deliveryQueueIDs.removeValue(forKey: sessionID) }
+            }
+        } catch {
+            for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
+                deliveryStatus[sessionID] = "Delivery status could not be refreshed. Check Inbox before retrying."
+            }
         }
     }
 
@@ -353,6 +387,7 @@ final class AgenthailIOSModel: ObservableObject {
         let action = working && detail.capabilities.steer ? "steer" : "send"
         guard action == "steer" || detail.capabilities.send else { return }
         sendingSessionIDs.insert(session.id)
+        deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
         composer = ""
         drafts[session.id] = ""
@@ -361,6 +396,9 @@ final class AgenthailIOSModel: ObservableObject {
             do {
                 let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message)
                 deliveryStatus[session.id] = response.result?.disposition == "queued" ? "Queued for the agent" : "Instruction accepted"
+                if response.result?.disposition == "queued", let queueID = response.result?.queueId {
+                    deliveryQueueIDs[session.id] = queueID
+                }
                 await refreshSession(session.id)
             } catch {
                 deliveryStatus[session.id] = "Delivery unconfirmed. Draft kept; check activity before retrying."
@@ -376,8 +414,10 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func action(_ action: String, session: SessionState, model: String? = nil) {
-        guard let api else { return }
+        guard let api, !pendingControls.contains(session.id) else { return }
+        pendingControls.insert(session.id)
         Task {
+            defer { pendingControls.remove(session.id) }
             do {
                 try await api.action(action, sessionID: session.id, model: model)
                 await refresh(fresh: true)
@@ -432,6 +472,7 @@ final class AgenthailIOSModel: ObservableObject {
         activityCursor = nil
         searchResults = []
         deliveryStatus = [:]
+        deliveryQueueIDs = [:]
         lastEventID = 0
         connectionError = nil
         reconnecting = false
@@ -556,9 +597,10 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func eventStreamConnected() {
+    func eventStreamConnected() async {
         reconnecting = false
-        connectionError = nil
+        _ = await refresh(fresh: true)
+        if let id = selectedSessionID { await refreshSession(id) }
     }
 
     func recordStreamInterruption(probeError: Error?) {

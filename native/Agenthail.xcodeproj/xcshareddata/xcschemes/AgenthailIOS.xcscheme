@@ -50,6 +50,17 @@
                ReferencedContainer = "container:Agenthail.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4A347317802EB09FC3F6EF37"
+               BuildableName = "AgenthailIOSUITests.xctest"
+               BlueprintName = "AgenthailIOSUITests"
+               ReferencedContainer = "container:Agenthail.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

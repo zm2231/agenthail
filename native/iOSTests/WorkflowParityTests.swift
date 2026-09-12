@@ -45,10 +45,10 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertEqual(groups.count, 3)
         XCTAssertEqual(groups.flatMap(\.items).map(\.id), items.map(\.id))
         XCTAssertEqual(groups[1].callCount, 1); XCTAssertEqual(groups[1].errorCount, 1)
-        XCTAssertEqual(groups[1].summary, "swift test")
+        XCTAssertEqual(ToolPresentation(name: items[1].title, text: items[1].text).summary, "swift test")
         XCTAssertEqual(TimelineGroup.make(Array(items.prefix(2)))[1].id, groups[1].id)
-        let boundary = Array(repeating: items[1], count: 12) + [items[2]]
-        XCTAssertEqual(TimelineGroup.make(boundary).map { $0.items.count }, [13], "A call and result must not split at an arbitrary record count")
+        let separated = [items[1], items[3], items[2]]
+        XCTAssertEqual(TimelineGroup.make(separated).count, 3, "Pairing must not move a result across an assistant message")
     }
 
     @MainActor

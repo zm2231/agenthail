@@ -76,7 +76,7 @@ struct NewSessionSheet: View {
                 if let error = model.creationError { Section { Text(error).foregroundStyle(.red) } }
             }
             .disabled(model.creatingSession)
-            .navigationTitle("New conversation")
+            .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.creatingSession) }

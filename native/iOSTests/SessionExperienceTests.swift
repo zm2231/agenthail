@@ -101,6 +101,8 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 object["session"] = session; object["readOnly"] = id == "B"
                 body = String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
             }
+        } else if request.url!.path == "/api/v1/queue" {
+            body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","attempts":0,"queuedAt":"2026-09-12 04:00:00"}]}"#
         } else if request.url!.path == "/api/v1/actions" {
             var data = request.httpBody ?? Data()
             if let stream = request.httpBodyStream {

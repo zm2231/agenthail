@@ -8,16 +8,63 @@ struct ToolPresentation {
         case raw(String)
     }
     let content: Content
+    let name: String
     var summary: String {
         switch content {
         case .command(let command, _): return command
         case .edit(let path, _, _): return path
         case .plan(let steps): return steps.map { $0.0 }.joined(separator: " · ")
-        case .raw(let text): return text
+        case .raw(let text):
+            if let data = text.data(using: .utf8), let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                for key in ["description", "file_path", "path", "pattern", "query", "url", "prompt"] {
+                    if let value = input[key] as? String, !value.isEmpty { return value }
+                }
+            }
+            return text.isEmpty ? "No input parameters" : text
+        }
+    }
+
+    var title: String {
+        switch content {
+        case .command: return "Run command"
+        case .edit: return "Edit file"
+        case .plan: return "Update plan"
+        case .raw:
+            switch name {
+            case "Read", "read_file": return "Read file"
+            case "Write", "write_file": return "Write file"
+            case "Grep", "Glob": return "Search files"
+            case "WebSearch": return "Search the web"
+            case "WebFetch": return "Open webpage"
+            case "Agent", "Task": return "Delegate to agent"
+            default:
+                return name.replacingOccurrences(of: "functions.", with: "")
+                    .replacingOccurrences(of: "mcp__", with: "")
+                    .replacingOccurrences(of: "__", with: " · ")
+                    .replacingOccurrences(of: "_", with: " ")
+            }
+        }
+    }
+
+    var symbol: String {
+        switch content {
+        case .command: return "terminal"
+        case .edit: return "pencil.line"
+        case .plan: return "checklist"
+        case .raw:
+            switch name {
+            case "Read", "read_file": return "doc.text.magnifyingglass"
+            case "Write", "write_file": return "doc.badge.plus"
+            case "Grep", "Glob", "WebSearch": return "magnifyingglass"
+            case "WebFetch": return "globe"
+            case "Agent", "Task": return "person.2"
+            default: return "wrench.and.screwdriver"
+            }
         }
     }
 
     init(name: String, text: String) {
+        self.name = name
         guard let data = text.data(using: .utf8),
               let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             content = .raw(text)

@@ -35,6 +35,6 @@ struct ToolContentView: View {
         DisclosureGroup("Full recorded input") { code(item.text).padding(.top, 8) }.font(.footnote)
     }
     private func code(_ text: String) -> some View {
-        Text(text).font(.system(.callout, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        TranscriptCode(text: text)
     }
 }

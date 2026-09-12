@@ -56,10 +56,42 @@ Mimi's actual new-session sheet chooses workspace and runtime, restores selectio
 
 HAPI's grouped presentation derives compact intent labels for inspection, search, changes and commands. The transferable lesson is progressive disclosure: summarize activity without dropping the underlying records or inferring success. Agenthail now groups contiguous non-message records with tool counts, error counts and raw ordered entries underneath. It does not split an activity run at an arbitrary record count. [Pinned grouping source](https://github.com/tiann/hapi/blob/3873e58496b01ade66271ad70f2cf4c24d55d90f/web/src/components/ToolCard/groupedPresentation.ts)
 
-The second audit also traced existing Agenthail action producers against mobile consumers. Queue retry/cancel, goal set/clear and session aliasing were backend capabilities missing on phone. They are now reachable from Today or session details. This is distinct from the remaining protocol work above: those gaps could be closed through the existing authenticated API.
+The second audit also traced existing Agenthail action producers against mobile consumers. Queue retry/cancel, goal set/clear and session aliasing were backend capabilities missing on phone. They were surfaced in the September 7 client; the September 12 navigation places delivery work in Inbox and session details. This is distinct from the remaining protocol work above: those gaps could be closed through the existing authenticated API.
 
 ## Claude creation correction and integration
 
 Claude Remote Control supports on-demand local session creation in server mode, including shared-directory and worktree spawn modes. The installed `claude remote-control --help` and [official Remote Control documentation](https://code.claude.com/docs/en/remote-control#start-a-remote-control-session) confirm this. Calling Claude creation a transport limitation was incorrect: the mobile branch lacked the adapter implementation, while the sibling Claude worktree already documented and implemented native background creation.
 
 That implementation is now integrated. Agenthail starts Claude through the installed CLI’s `--bg` interface, resolves its returned identity through the native agent catalog and exposes the creation options on phone. This is a native background integration rather than an implementation of the Remote Control cloud endpoint. [Current operations](../maintainers/session-operations.md) and [historical capability audit](../maintainers/agent-capability-audit.md) document that distinction.
+
+## September 12 correction: original remote-communication references
+
+The August 30–31 references supplied by the maintainer were Agent Phone, Inkbox, Hail and Open Voice Mode. They belong to the persistent Agent Hale / Agenthail communication discussion, not Zen. The earlier comparison omitted these specific references.
+
+| Reference | Source inspected on September 12 | Application |
+|---|---|---|
+| [Agent Phone](https://github.com/CoolTao-Yang/agentphone/tree/5746a8c61c28b8671721fc5a697ee660dde893fe) | README and `static/app.js` tool-input/output rendering, lines 1070–1210 | Semantic command/edit/file content; bounded output with explicit expansion. Its README marks Claude implemented and Codex/Cursor adapters as TODO; a supported-agent list is not proof of full implementation. |
+| [Inkbox Codex plugin](https://github.com/inkbox-ai/codex-plugin/blob/f225cacc83c4f555daefaa803c033caabfdf58d7/inkbox_codex/sessions.py) | `ContactSession.handle_inbound` and `_handle_codex_request`/`_escalate` | Keep one persistent session across transports. Distinguish a reply to an outstanding approval/question from a new turn, correlate the response, and clear timed-out requests. Its next-message routing is a reference implementation, not a protocol to copy blindly into a multi-session app. |
+| [Hail](https://github.com/hail-hq/hail) | Repository-level communication/voice reference; detailed integration belongs to the voice operator task | Phone/voice transport can remain separate from the agent that owns persistent work. |
+| [Open Voice Mode](https://github.com/David-LiCause/open-voice-mode) | Historical reference supplied by the maintainer; not used as implementation evidence in this UI pass | Shortcut-driven launch of voice apps is a different workflow from a persistent operator connected to existing Agenthail sessions. |
+
+Agent Phone and Inkbox were shallow-cloned at the commits above into ignored research output. No third-party application was executed and no source copied. HAPI's native `ToolCallBlockView`/`ToolCardPresentation` and Mimi's timeline model were also read in the already pinned clones.
+
+The rebuild replaces generic nested activity groups with one plain summary for a contiguous run of tools and reasoning. Expanded runs expose semantic invocation rows and paired results. Chat preserves message boundaries; Events preserves original ordering. Empty lifecycle disclosures are removed, recorded turn duration is read from `durationMs`, long output has a bounded preview, and Markdown uses [Textual 0.5.0](https://github.com/gonzalezreal/textual/tree/0.5.0). This dependency requires iOS 18, adopted as the native client's minimum.
+
+The separate voice operator task uses a persistent Agenthail-aware operator and the native Codex realtime transport. Dictation into a selected chat or a fixed speech-command parser does not fulfill that operator request. Voice implementation and its live audio verification are tracked separately from this UI rebuild.
+
+## Native first-party comparison
+
+The maintainer explicitly set ChatGPT's Remote tab and Claude's Code/computer work surfaces as the visual and usability bar. [ChatGPT Remote](https://chatgpt.com/remote/) and [OpenAI's mobile announcement](https://openai.com/index/work-with-codex-from-anywhere/) describe ongoing work, decision requests, and live outputs in the same desktop context. [Claude Remote Control](https://code.claude.com/docs/en/remote-control) describes synchronized conversation/subagent progress and a computer indicator in the session list. Documentation establishes the workflow contract; physical mobile inspection establishes layout and interaction observations below.
+
+
+### Observed mobile flow and design decisions
+
+On September 12, physical ChatGPT mobile inspection showed Remote grouped by project, with task titles as the primary list content and a working indicator beside ongoing work. One attempted conversation displayed “Error loading messages”; that inspection does not establish a successful end-to-end ChatGPT chat path.
+
+The maintainer supplied three Claude mobile screenshots showing: assistant prose on a quiet reading surface; inset user messages; compact summaries such as “Ran 13 commands, read 9 files”; failure counts visible before expansion; inline image thumbnails; a live thinking state; and a rounded composer with model and stop controls. These screenshots establish the layout observations, not the internal implementation or transport semantics.
+
+Agenthail adopts workspace grouping, readable native Markdown with system serif assistant prose, plain semantic activity-run summaries, failure visibility, paired detail expansion, a restrained live-working indicator, and a rounded material composer. The composer says **Steer this turn** when it sends the existing steer action. It does not borrow Claude’s “queue after this turn” label for an operation with different semantics. Chat/All events live in the session menu instead of consuming a permanent row above the conversation.
+
+Image thumbnails, live permission/question replies and linked subagent navigation remain explicit gaps in this UI release. A placeholder does not satisfy the image-gallery reference. The voice task is responsible for actual operator audio and session actions; this UI does not add an inert microphone button.
