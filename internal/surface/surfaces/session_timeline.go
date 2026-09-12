@@ -246,6 +246,9 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 
 func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	payload, _ := record["payload"].(map[string]any)
+	if str(record, "type") == "realtime_item" {
+		return codexVoiceTimelineItems(payload)
+	}
 	if str(record, "type") == "compacted" {
 		return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: str(payload, "message")}}
 	}

@@ -1,0 +1,411 @@
+import AVFAudio
+import SwiftUI
+
+@MainActor
+final class VoiceOperatorModel: ObservableObject {
+    @Published var state: VoiceState?
+    @Published var detail: SessionDetail?
+    @Published var error: String?
+    @Published var activityError: String?
+    @Published var ready = false
+    @Published var working = false
+    @Published var dialing = false
+    @Published var connectionError: String?
+    @Published var muted = false
+    @Published var audioConnected = false
+    @Published var text = ""
+    let isPreview: Bool
+    let audio: any VoiceAudioClient
+    private var api: (any VoiceServiceClient)?
+    private var timelineAPI: AgenthailAPI?
+    private var polling: Task<Void, Never>?
+    private var generation = 0
+    private var attemptID: String?
+    private var appliedSDP: String?
+    private var channelOpen = false
+    private var connectedReported = false
+    private var closed = false
+
+    init(preview: Bool = false, api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
+        isPreview = preview
+        self.audio = audio ?? VoiceAudioBridge()
+#if DEBUG
+        if preview {
+            state = try? JSONDecoder().decode(VoiceState.self, from: Data(Self.previewState.utf8))
+            ready = true
+            return
+        }
+#endif
+        if let api {
+            self.api = api
+            self.audio.onMessage = { [weak self] type, value in self?.receive(type, value) }
+            return
+        }
+        do {
+            guard let endpoint = KeychainStore.get("endpoint").flatMap(URL.init(string:)),
+                  let token = KeychainStore.get("token") else { throw AgenthailAPIError.unavailable("Pair this phone with Agenthail on your Mac first.") }
+            self.api = try VoiceAPI(endpoint: endpoint, token: token)
+            timelineAPI = AgenthailAPI(baseURL: endpoint, token: token)
+        } catch { self.error = error.localizedDescription }
+        self.audio.onMessage = { [weak self] type, value in self?.receive(type, value) }
+    }
+
+#if DEBUG
+    private static let previewState = #"{"protocol":1,"phase":"ready","events":[{"sequence":1,"method":"thread/realtime/transcript/done","params":{"role":"user","text":"Let's work through the release. What should we tackle first?"}},{"sequence":2,"method":"thread/realtime/transcript/done","params":{"role":"assistant","text":"We can start with the failing tests, then review the changes together. Call when you're ready and I'll check the live sessions."}}],"truncated":false,"occupied":false}"#
+#endif
+
+    func open() {
+        guard let api, polling == nil, !closed else { return }
+        audio.load(api.request(path: "api/v1/voice/peer"))
+        polling = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.refresh()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    func refresh() async {
+        guard let api, !closed else { return }
+        let current = generation
+        do {
+            let next = try await api.state()
+            guard !closed, current == generation else { return }
+            state = next
+            connectionError = nil
+            if next.phase == "ended" || next.phase == "blocked" { audio.end(); audioConnected = false; dialing = false; attemptID = nil }
+            if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
+                appliedSDP = sdp
+                try await audio.answer(sdp)
+            }
+            if let id = next.session?.id, let timelineAPI {
+                do {
+                    let nextDetail = try await timelineAPI.sessionDetail(id: id, includeTimeline: true)
+                    guard !closed, current == generation else { return }
+                    detail = nextDetail; activityError = nil
+                }
+                catch { if !closed, current == generation { activityError = "Activity reconnecting: \(error.localizedDescription)" } }
+            }
+        } catch {
+            guard !closed, current == generation else { return }
+            connectionError = "Reconnecting: \(error.localizedDescription)"
+            if audioConnected { hangup() }
+        }
+    }
+
+    func call() async {
+        guard let api, ready, !working, !dialing, !closed, state?.hasCall != true else { return }
+        working = true; dialing = true; error = nil; generation += 1
+        let current = generation
+        defer { working = false }
+        do {
+            let next = try await api.action(VoiceAction(action: "prepare"))
+            guard !closed, generation == current else { return }
+            state = next
+            attemptID = UUID().uuidString
+            appliedSDP = nil; channelOpen = false; connectedReported = false; muted = false
+            try await audio.start()
+        } catch {
+            guard !closed, generation == current else { return }
+            if !(error is CancellationError) { self.error = error.localizedDescription }
+            dialing = false; audio.end()
+        }
+    }
+
+    private func receive(_ type: String, _ value: String) {
+        guard !closed else { return }
+        switch type {
+        case "ready": ready = true
+        case "offer":
+            guard let api, let id = attemptID else { return }
+            let current = generation
+            Task {
+                do {
+                    let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value))
+                    if closed || generation != current {
+                        _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
+                    }
+                    state = next
+                } catch {
+                    guard !closed, generation == current else { return }
+                    self.error = error.localizedDescription
+                    dialing = false
+                    audio.end()
+                    _ = try? await api.action(VoiceAction(action: "stop", attemptId: id))
+                }
+            }
+        case "connection":
+            audioConnected = value == "connected"
+            if ["failed", "disconnected", "closed"].contains(value) { error = "Audio disconnected. Hang up, then call again to resume this operator."; hangup() }
+            reportConnected()
+        case "channel": channelOpen = value == "open"; reportConnected()
+        case "error": error = value; hangup()
+        default: break
+        }
+    }
+
+    private func reportConnected() {
+        guard audioConnected, channelOpen, !connectedReported, let api, let id = attemptID else { return }
+        connectedReported = true
+        dialing = false
+        let current = generation
+        Task {
+            do {
+                let next = try await api.action(VoiceAction(action: "connected", attemptId: id))
+                if !closed, current == generation { state = next }
+            }
+            catch { if !closed, current == generation { self.error = error.localizedDescription; hangup() } }
+        }
+    }
+
+    func toggleMute() { muted.toggle(); audio.mute(muted) }
+
+    func hangup() {
+        generation += 1
+        let current = generation
+        dialing = false
+        audio.end(); audioConnected = false; channelOpen = false
+        guard let api, let id = attemptID ?? state?.attemptId, state?.occupied != true else { return }
+        attemptID = nil
+        Task {
+            do {
+                let next = try await api.action(VoiceAction(action: "stop", attemptId: id))
+                if !closed, current == generation { state = next }
+            }
+            catch { if !closed, current == generation { self.error = "Audio is off locally. Host hangup is unconfirmed: \(error.localizedDescription)" } }
+        }
+    }
+
+    func sendText() async {
+        guard let api, !working, let id = attemptID, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        working = true; defer { working = false }
+        let messageID = UUID().uuidString
+        let submitted = text; text = ""
+        do { state = try await api.action(VoiceAction(action: "text", attemptId: id, text: submitted, messageId: messageID)) }
+        catch { self.error = "Text outcome is unknown. Check the conversation before resending. \(error.localizedDescription)" }
+    }
+
+    func interrupt() async {
+        guard let api else { return }
+        do { state = try await api.action(VoiceAction(action: "interrupt")) }
+        catch { self.error = error.localizedDescription }
+    }
+
+    func close() {
+        guard !closed else { return }
+        hangup()
+        closed = true
+        polling?.cancel(); polling = nil
+        audio.close()
+    }
+}
+
+struct AgenthailVoiceOperatorSheet: View {
+    @StateObject private var model: VoiceOperatorModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var confirmInterrupt = false
+    @State private var showKeyboard = false
+    @State private var showDetails = false
+    let openSession: (String) -> Void
+
+    init(model: VoiceOperatorModel? = nil, openSession: @escaping (String) -> Void) {
+        _model = StateObject(wrappedValue: model ?? VoiceOperatorModel())
+        self.openSession = openSession
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
+                    HStack(spacing: 12) {
+                        Image(systemName: model.audioConnected ? "waveform" : "waveform.slash")
+                            .font(.title2).foregroundStyle(model.audioConnected ? Color.accentColor : Color.secondary)
+                            .frame(width: 44, height: 44).background(.quaternary, in: Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(connectionTitle).font(.headline)
+                            Text("Codex Voice").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if model.working || model.dialing { ProgressView() }
+                    }.padding(.vertical, 12)
+                    if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+                    if let connectionError = model.connectionError { Text(connectionError).foregroundStyle(.orange) }
+                    if let message = model.state?.message, !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
+                    if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
+                    if let state = model.state, !state.transcripts.isEmpty {
+                        ForEach(state.transcripts) { item in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(item.role == "user" ? "You" : "Orchestrator").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                                Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 20) {
+                            Text("What would you like to work on?").font(.title2.weight(.semibold))
+                            Text("Talk through a plan, check on your agents, or ask the orchestrator to send them work.").font(.body).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 14) {
+                                Label("What are my agents working on?", systemImage: "bubble.left")
+                                Label("Ask the builder to review the failing tests.", systemImage: "bubble.left")
+                            }.font(.subheadline).foregroundStyle(.secondary)
+                        }.padding(.vertical, 16)
+                    }
+                    if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
+                    if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
+                    if let detail = model.detail {
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
+                                if let timeline = detail.timeline {
+                                    if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
+                                    ForEach(TimelineGroup.make(timeline.items)) { CompactActivityGroup(group: $0) }
+                                    if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
+                                }
+                                Button("Open full timeline") { openSession(detail.session.id) }
+                            }.padding(.top, 12)
+                        } label: {
+                            Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
+                                .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                        }
+                    }
+                }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
+            }.safeAreaInset(edge: .bottom) { controls }
+            .background(alignment: .bottom) {
+                if let bridge = model.audio as? VoiceAudioBridge { VoiceAudioSurface(bridge: bridge).frame(width: 1, height: 1).accessibilityHidden(true) }
+            }
+            .navigationTitle("Orchestrator")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Connection details", systemImage: "info.circle") { showDetails = true } }
+            }
+            .sheet(isPresented: $showDetails) { connectionDetails }
+            .task { model.open() }
+            .onDisappear { model.close() }
+            .onChange(of: scenePhase) { _, phase in if phase == .background { model.hangup() } }
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in model.hangup() }
+            .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
+                Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 16) {
+            if showKeyboard && model.audioConnected {
+                HStack(alignment: .bottom, spacing: 12) {
+                    TextField("Message the orchestrator", text: $model.text, axis: .vertical)
+                        .lineLimit(1...5).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                    Button("Send", systemImage: "arrow.up") { Task { await model.sendText() } }
+                        .labelStyle(.iconOnly).frame(width: 44, height: 44).background(.tint, in: Circle()).foregroundStyle(.white)
+                        .disabled(model.working || model.text.isEmpty)
+                }
+            }
+            if model.state?.hasCall == true || model.audioConnected || model.dialing {
+                HStack(alignment: .top, spacing: 32) {
+                    callControl("Type", icon: "keyboard", disabled: !model.audioConnected) { showKeyboard.toggle() }
+                    callControl(model.muted ? "Unmute" : "Mute", icon: model.muted ? "mic.slash.fill" : "mic.fill", disabled: !model.audioConnected, action: model.toggleMute)
+                    callControl("Hang up", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
+                }
+                if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(.secondary) }
+            } else {
+                Button { Task { await model.call() } } label: {
+                    Label(dynamicTypeSize.isAccessibilitySize ? "Call" : "Call Codex Voice", systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                }.buttonStyle(.borderedProminent).accessibilityLabel("Call Codex Voice").disabled(!model.ready || model.working || model.state?.phase == "blocked")
+                if !dynamicTypeSize.isAccessibilitySize { Text("Your conversation and agent work stay in the same session.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+            }
+        }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: .infinity).background(.bar)
+    }
+
+    private func callControl(_ title: String, icon: String, destructive: Bool = false, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon).font(.title3).frame(width: 52, height: 52)
+                    .background(destructive ? Color.red : Color.secondary.opacity(0.12), in: Circle())
+                    .foregroundStyle(destructive ? Color.white : Color.primary)
+                Text(title).font(.caption).foregroundStyle(.primary)
+            }
+        }.disabled(disabled).accessibilityLabel(title)
+    }
+
+    private var connectionTitle: String {
+        if model.audioConnected { return model.muted ? "Microphone muted" : "Connected" }
+        if model.dialing { return "Connecting audio…" }
+        switch model.state?.phase {
+        case "starting", "negotiating": return "Connecting audio…"
+        case "stopping": return "Ending call…"
+        case "unknown": return "Connection needs attention"
+        case "blocked": return "Voice unavailable"
+        case "creating": return "Preparing orchestrator…"
+        case "connected": return "Previous call needs hangup"
+        case "ready", "idle", "ended": return "Ready to talk"
+        default: return "Connecting to your Mac…"
+        }
+    }
+
+    private var connectionDetails: some View {
+        NavigationStack {
+            List {
+                Section("Connection") {
+                    LabeledContent("Provider", value: "Codex Voice")
+                    LabeledContent("Audio", value: connectionTitle)
+                    Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
+                    Text("Leaving the app ends audio. Return and call again to continue with the same orchestrator.")
+                    if let receipt = model.state?.speechReceipt {
+                        LabeledContent("Answer submission", value: receipt.hasPrefix("accepted:") ? "Accepted by Codex" : "Unconfirmed")
+                        Text("Submission is not proof of playback. The conversation shows what Codex actually said.").font(.caption)
+                    }
+                }
+                if let session = model.state?.session {
+                    Section("Persistent orchestrator") {
+                        Text(session.name)
+                        Text(session.id).font(.caption.monospaced()).textSelection(.enabled)
+                        LabeledContent("Skill", value: "Agenthail operations")
+                        Text(model.state?.skillDigest ?? "").font(.caption.monospaced()).textSelection(.enabled)
+                        Button("Open full timeline") { showDetails = false; openSession(session.id) }
+                    }
+                }
+                if model.detail?.session.status == "busy" {
+                    Section {
+                        Button("Interrupt orchestrator turn", role: .destructive) { showDetails = false; confirmInterrupt = true }
+                            .disabled(model.detail?.readOnly == true || model.state?.occupied == true)
+                        Text("This interrupts the orchestrator only, not the agents it has already messaged.").font(.caption)
+                    }
+                }
+            }.navigationTitle("Voice details").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showDetails = false } } }
+        }
+    }
+}
+
+struct VoiceOperatorEntry: ViewModifier {
+    @ObservedObject var model: AgenthailIOSModel
+    @State private var presented = false
+    @State private var operatorID: String?
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if model.isPaired {
+                    Button("Talk to orchestrator", systemImage: "waveform") { presented = true }
+                        .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 44)
+                        .background(.bar)
+                }
+            }
+            .sheet(isPresented: $presented) {
+                AgenthailVoiceOperatorSheet { id in operatorID = id }
+                    .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {
+                        if let id = operatorID {
+                            NavigationStack {
+                                SessionRouteView(model: model, sessionID: id)
+                                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to Voice") { operatorID = nil } } }
+                            }
+                        }
+                    }
+            }
+            .onChange(of: model.isPaired) { _, paired in if !paired { presented = false } }
+    }
+}
