@@ -25,6 +25,7 @@ final class VoiceOperatorModel: ObservableObject {
     private var channelOpen = false
     private var connectedReported = false
     private var closed = false
+    var canCall: Bool { ready && !working && !dialing && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
 
     init(preview: Bool = false, api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
         isPreview = preview
@@ -74,7 +75,10 @@ final class VoiceOperatorModel: ObservableObject {
             guard !closed, current == generation else { return }
             state = next
             connectionError = nil
-            if next.phase == "ended" || next.phase == "blocked" { audio.end(); audioConnected = false; dialing = false; attemptID = nil }
+            if next.phase == "ended" || next.phase == "blocked",
+               !dialing || (attemptID != nil && next.attemptId == attemptID) {
+                audio.end(); audioConnected = false; dialing = false; attemptID = nil
+            }
             if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
                 appliedSDP = sdp
                 try await audio.answer(sdp)
@@ -95,7 +99,7 @@ final class VoiceOperatorModel: ObservableObject {
     }
 
     func call() async {
-        guard let api, ready, !working, !dialing, !closed, state?.hasCall != true else { return }
+        guard let api, canCall else { return }
         working = true; dialing = true; error = nil; generation += 1
         let current = generation
         defer { working = false }
@@ -116,7 +120,9 @@ final class VoiceOperatorModel: ObservableObject {
     private func receive(_ type: String, _ value: String) {
         guard !closed else { return }
         switch type {
+        case "loading": ready = false
         case "ready": ready = true
+        case "unavailable": ready = false; error = value; hangup()
         case "offer":
             guard let api, let id = attemptID else { return }
             let current = generation
@@ -178,18 +184,26 @@ final class VoiceOperatorModel: ObservableObject {
     }
 
     func sendText() async {
-        guard let api, !working, let id = attemptID, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let api, !closed, !working, let id = attemptID, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         working = true; defer { working = false }
+        let current = generation
         let messageID = UUID().uuidString
         let submitted = text; text = ""
-        do { state = try await api.action(VoiceAction(action: "text", attemptId: id, text: submitted, messageId: messageID)) }
-        catch { self.error = "Text outcome is unknown. Check the conversation before resending. \(error.localizedDescription)" }
+        do {
+            let next = try await api.action(VoiceAction(action: "text", attemptId: id, text: submitted, messageId: messageID))
+            if !closed, generation == current { state = next }
+        }
+        catch { if !closed, generation == current { self.error = "Text outcome is unknown. Check the conversation before resending. \(error.localizedDescription)" } }
     }
 
     func interrupt() async {
-        guard let api else { return }
-        do { state = try await api.action(VoiceAction(action: "interrupt")) }
-        catch { self.error = error.localizedDescription }
+        guard let api, !closed else { return }
+        let current = generation
+        do {
+            let next = try await api.action(VoiceAction(action: "interrupt"))
+            if !closed, generation == current { state = next }
+        }
+        catch { if !closed, generation == current { self.error = error.localizedDescription } }
     }
 
     func close() {
@@ -221,6 +235,17 @@ struct AgenthailVoiceOperatorSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
+#if DEBUG && targetEnvironment(simulator)
+                    if VoiceEvaluation.enabled {
+                        HStack {
+                            Text("Simulated microphone · Real Codex").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Speak next request") {
+                                (model.audio as? VoiceAudioBridge)?.webView.evaluateJavaScript("void window.agenthailEvaluationSpeak()", completionHandler: nil)
+                            }.font(.caption).disabled(!model.audioConnected)
+                        }
+                    }
+#endif
                     HStack(spacing: 12) {
                         Image(systemName: model.audioConnected ? "waveform" : "waveform.slash")
                             .font(.title2).foregroundStyle(model.audioConnected ? Color.accentColor : Color.secondary)
@@ -314,7 +339,7 @@ struct AgenthailVoiceOperatorSheet: View {
             } else {
                 Button { Task { await model.call() } } label: {
                     Label(dynamicTypeSize.isAccessibilitySize ? "Call" : "Call Codex Voice", systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                }.buttonStyle(.borderedProminent).accessibilityLabel("Call Codex Voice").disabled(!model.ready || model.working || model.state?.phase == "blocked")
+                }.buttonStyle(.borderedProminent).accessibilityLabel("Call Codex Voice").disabled(!model.canCall)
                 if !dynamicTypeSize.isAccessibilitySize { Text("Your conversation and agent work stay in the same session.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
             }
         }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: .infinity).background(.bar)
@@ -332,6 +357,7 @@ struct AgenthailVoiceOperatorSheet: View {
     }
 
     private var connectionTitle: String {
+        if model.connectionError != nil { return "Reconnecting to your Mac" }
         if model.audioConnected { return model.muted ? "Microphone muted" : "Connected" }
         if model.dialing { return "Connecting audio…" }
         switch model.state?.phase {

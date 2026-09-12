@@ -12,6 +12,18 @@ func TestVoiceEndpointsRequirePairedControlAndNativeBearer(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	h := d.dashboardHandler(&dashboardServer{token: "fixture-token"})
 	for _, path := range []string{"/api/v1/voice", "/api/v1/voice/peer"} {
+		for _, bearer := range []string{"", "invalid-device-token"} {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "fixture-token"})
+			if bearer != "" {
+				request.Header.Set("Authorization", "Bearer "+bearer)
+			}
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, request)
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("dashboard cookie bypassed native device authentication on %s: %d", path, response.Code)
+			}
+		}
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)

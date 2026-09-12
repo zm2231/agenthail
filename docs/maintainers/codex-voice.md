@@ -188,8 +188,9 @@ Ordinary tests do not call live models or record a microphone:
 go test ./... -race -count=1
 node --test internal/daemon/voice_peer_test.cjs
 xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-  -only-testing:AgenthailIOSTests/VoiceTests CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=iOS Simulator,id=YOUR_TEST_DEVICE_UUID' \
+  -parallel-testing-enabled NO \
+  -only-testing:AgenthailIOSTests/VoiceTests CODE_SIGN_IDENTITY=-
 ```
 
 The renderer regression executes the actual generated JavaScript in Node, including
@@ -197,7 +198,66 @@ flat notifications, target isolation, an empty event ring, and event loss. Media
 tests execute the actual peer program with fixture browser interfaces. Service
 tests exercise persistence, unknown outcomes, ownership, hangup versus interrupt,
 lease expiry, and lost-event refusal. Native tests exercise the authenticated API,
-live transcript assembly, and late asynchronous completion after dismissal.
+live transcript assembly, previous-call polling during microphone permission,
+unavailable audio, and late asynchronous completion after dismissal. Ad-hoc signing
+is intentional: unsigned Simulator app tests cannot exercise the app's Keychain
+entitlements reliably.
+
+### Actual iOS app evaluation
+
+The [2026-09-12 Simulator receipt](codex-voice-simulator-evidence.md) records a real
+Codex conversation through the native app: existing-task discovery, one existing
+worker receiving real work, executed Go tests, a verified reply, and a truthful
+spoken summary. The input microphone was simulated; Codex, the authenticated API,
+task delivery, and returned audio were live. This does not establish physical
+iPhone microphone or Bluetooth behavior.
+
+Use a dedicated Simulator and an isolated registry. Reuse a test-owned operator
+whose audio is confirmed ended; do not copy an active production call or create
+tasks as a substitute for discovery. The following opt-in host serves the ordinary
+pairing/session/voice APIs, not a mock app or browser-only UI:
+
+```bash
+export AGENTHAIL_NATIVE_VOICE=1
+export AGENTHAIL_NATIVE_VOICE_DIRECTORY="$(mktemp -d "$PWD/build/native-voice.XXXXXX")"
+export AGENTHAIL_NATIVE_VOICE_HTTPS_ORIGIN=https://YOUR_MAC.YOUR_TAILNET.ts.net:7443
+export AGENTHAIL_VOICE_SMOKE_STATE=/absolute/path/to/test-owned/voice/operator.json
+go test -tags voice_live ./internal/daemon -run '^TestNativeVoiceHost$' \
+  -v -count=1 -timeout=47m
+```
+
+In a second terminal, point a **dedicated** Tailscale HTTPS Serve port at the
+printed loopback upstream. Do not overwrite the production Serve rule. The host
+writes a private `pairing.json`; open its `pairingURL` on the test Simulator and
+confirm the normal pairing UI. Pairing links expire after 15 minutes; the host
+has a 45-minute evaluation window.
+
+Build the Debug iOS app normally. Place two user-speech WAV recordings in its
+data container at `Documents/VoiceEvaluation/request-1.wav` and `request-2.wav`.
+Launch the app with `--voice-evaluation`. The screen explicitly says **Simulated
+microphone · Real Codex**. This mode is compiled only for Debug Simulator builds:
+
+- It refuses native microphone permission and refuses to call if the recording
+  hook is missing. The WebKit media-device object is retained for the lifetime
+  of the fixture, so its capture override survives between initialization and use.
+- **Call Codex Voice** sends the first recording after the real data channel opens.
+  Wait for the spoken discovery result; **Speak next request** sends the second.
+- A continuous silent source keeps outgoing audio alive between requests.
+  **Hang up** saves the actual mixed user/Codex dialogue to the same directory;
+  `diagnostics.jsonl` includes input/output media counters and audio energy.
+
+Give the existing worker bounded, meaningful work, then independently inspect its
+actual command output and completion. Check the spoken summary against those
+results, not a predetermined phrase. Compare worktree state before and after a
+read-only request. The host test's successful exit only means the host closed;
+it is **not** the conversation's acceptance verdict.
+
+After confirmed native hangup, preserve the recording and receipts, create the
+isolated directory's `finished` marker, close its app connection, and remove only
+the dedicated test Serve rule. Confirm the production rule is unchanged. Revoke
+or discard only this isolated pairing; never reset the user's phone or host.
+
+### Browser diagnostic fallback
 
 The development-only real evaluation is explicitly opt-in and incurs native
 Codex usage. It starts a temporary loopback browser harness; the production peer
@@ -237,8 +297,8 @@ path to exercise reconnect to the same operator. The synthesized microphone must
 continue sending silence after each recording, as a live microphone would; an
 inactive Web Audio source can stall realtime output and invalidate the evaluation.
 
-Browser evaluation is not proof of physical iPhone microphone, Bluetooth routing,
-Tailscale, permissions, or interruption behavior. The final phone check must use
+Browser evaluation is not proof of the native iOS UI, physical iPhone microphone,
+Bluetooth routing, Tailscale, permissions, or interruption behavior. The final phone check must use
 the matching installed host and iOS builds: grant permission, speak a bounded
 request, inspect the target's reply, mute, hang up, reopen the same operator, and
 background the app. Installing/restarting the live host remains an explicit

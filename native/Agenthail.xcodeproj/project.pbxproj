@@ -16,6 +16,7 @@
 		35D62B0FAA562423252C2DE2 /* AgenthailIOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 352FB70958533EE6B1BD305F /* AgenthailIOSViews.swift */; };
 		393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */; };
 		3FD5F75D86A75073D68A0E5F /* StaleConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2839D66EF1BD794309CB554D /* StaleConnectionTests.swift */; };
+		443F023ACD237D2BA24AB03F /* VoiceEvaluation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */; };
 		48BA7C313A4D114D16DA93BC /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDE64B86C2BC64932A6DAD35 /* KeychainStore.swift */; };
 		4DC82E4C2D6E0E89DCE4ED84 /* VoiceOperator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */; };
 		4E9AF5C076B702CBD5DABDE9 /* SessionCreation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836598CAF0AF568C68FD23C5 /* SessionCreation.swift */; };
@@ -84,6 +85,7 @@
 		836598CAF0AF568C68FD23C5 /* SessionCreation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionCreation.swift; sourceTree = "<group>"; };
 		87937A6C5398E3EADF7ED3C0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8EACD0579E00E89E27303C55 /* AgenthailIOSTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgenthailIOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEvaluation.swift; sourceTree = "<group>"; };
 		A91AA65329AF94FEF3F821E2 /* VoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTests.swift; sourceTree = "<group>"; };
 		BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScanner.swift; sourceTree = "<group>"; };
 		BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperator.swift; sourceTree = "<group>"; };
@@ -137,6 +139,7 @@
 				E1B10C8E19670916F024A4DE /* ToolPresentation.swift */,
 				07B6960DDDB324CD27F150F5 /* VoiceAPI.swift */,
 				D95609D8EAC143A8CB37E750 /* VoiceAudioBridge.swift */,
+				9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */,
 				BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */,
 			);
 			path = iOS;
@@ -324,6 +327,7 @@
 				0E58E00EEDFBB7FED5ED93F7 /* ToolPresentation.swift in Sources */,
 				EAED6014485CC36B4CA23565 /* VoiceAPI.swift in Sources */,
 				097374B2658A5B72BFDA214A /* VoiceAudioBridge.swift in Sources */,
+				443F023ACD237D2BA24AB03F /* VoiceEvaluation.swift in Sources */,
 				4DC82E4C2D6E0E89DCE4ED84 /* VoiceOperator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
