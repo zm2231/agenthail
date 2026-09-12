@@ -498,7 +498,8 @@ struct IOSComposer: View {
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     private var canSend: Bool {
-        !sending && !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !sending && !model.pendingControls.contains(session.id)
+            && !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (steering || detail.capabilities.send)
     }
 
