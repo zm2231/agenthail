@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>AgenthailAPNSEnvironment</key>
 	<string>$(AGENTHAIL_APNS_ENVIRONMENT)</string>
 	<key>CFBundleDevelopmentRegion</key>
@@ -33,8 +31,12 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing code shown by Agenthail on your Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Talk directly to your Codex Voice orchestrator. Audio is sent to Codex, not transcribed on this device.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
