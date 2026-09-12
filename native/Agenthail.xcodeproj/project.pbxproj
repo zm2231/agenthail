@@ -17,8 +17,8 @@
 		393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */; };
 		3E9376343DD4CE44707EC1C5 /* TranscriptReadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C112D446D507CCBB273959C /* TranscriptReadingTests.swift */; };
 		3FD5F75D86A75073D68A0E5F /* StaleConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2839D66EF1BD794309CB554D /* StaleConnectionTests.swift */; };
-		4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */; };
 		443F023ACD237D2BA24AB03F /* VoiceEvaluation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */; };
+		4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */; };
 		48BA7C313A4D114D16DA93BC /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDE64B86C2BC64932A6DAD35 /* KeychainStore.swift */; };
 		4DC82E4C2D6E0E89DCE4ED84 /* VoiceOperator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */; };
 		4E9AF5C076B702CBD5DABDE9 /* SessionCreation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836598CAF0AF568C68FD23C5 /* SessionCreation.swift */; };
@@ -45,8 +45,8 @@
 		DE883C8BB5916D7DCC2A68FF /* ToolContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35D92AE806F316D43805F232 /* ToolContentView.swift */; };
 		E8913F7EAF22BEC3B06CEBB1 /* SessionExperienceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */; };
 		E8B2191C22212C7C32973327 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 87937A6C5398E3EADF7ED3C0 /* Assets.xcassets */; };
-		EE999B1E0E4CDD6CB1306FD1 /* TurnSettingsFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D9DEC8D7641FCE4A82824B /* TurnSettingsFlowTests.swift */; };
 		EAED6014485CC36B4CA23565 /* VoiceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B6960DDDB324CD27F150F5 /* VoiceAPI.swift */; };
+		EE999B1E0E4CDD6CB1306FD1 /* TurnSettingsFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D9DEC8D7641FCE4A82824B /* TurnSettingsFlowTests.swift */; };
 		F14C7562E0F31FB88DEA0961 /* SessionCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6DB02C48C8DEC1677170BC /* SessionCapture.swift */; };
 		F68975A0D32C1EA3BB0A658C /* AgenthailAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB73667A631B4855B108997 /* AgenthailAPI.swift */; };
 		FA9155E997577CAC5815DA96 /* TranscriptContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41DF0D6EBD30C6D301B896D2 /* TranscriptContext.swift */; };
@@ -100,8 +100,8 @@
 		9C7ED5DA9CEE19B4E507FE57 /* TurnSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnSettings.swift; sourceTree = "<group>"; };
 		9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEvaluation.swift; sourceTree = "<group>"; };
 		A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptReadingUITests.swift; sourceTree = "<group>"; };
-		ABDB2B82FC46DF06F8EE66BA /* TurnSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnSettingsView.swift; sourceTree = "<group>"; };
 		A91AA65329AF94FEF3F821E2 /* VoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTests.swift; sourceTree = "<group>"; };
+		ABDB2B82FC46DF06F8EE66BA /* TurnSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnSettingsView.swift; sourceTree = "<group>"; };
 		BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScanner.swift; sourceTree = "<group>"; };
 		BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperator.swift; sourceTree = "<group>"; };
 		C205C0DA5074706408587DDE /* AgenthailIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AgenthailIOS.entitlements; sourceTree = "<group>"; };
