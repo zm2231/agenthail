@@ -90,7 +90,6 @@ jobs:
         run: |
           go test ./... -race -count=1
           go vet ./...
-          xcodebuild -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: Build package
         timeout-minutes: 30
         env:
@@ -138,6 +137,8 @@ jobs:
         run: brew install xcodegen
       - name: Generate Xcode project
         run: xcodegen generate --spec native/project.yml
+      - name: Verify iOS release simulator build
+        run: xcodebuild -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: Import iOS signing assets
         env:
           SIGNING_IDENTITIES_P12: ${{ secrets.APPLE_IOS_SIGNING_IDENTITIES_P12_BASE64 }}
