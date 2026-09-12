@@ -160,6 +160,10 @@ After installing the iPhone app, install Tailscale on your Mac and iPhone, sign 
 
 Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes. Your Mac is not opened to the public internet.
 
+Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
+Voice conversation that can inspect agents, delegate work, and read replies through
+one persistent operator. [Voice setup, flow, and current limits](docs/maintainers/codex-voice.md).
+
 ## What Agenthail remembers
 
 Agenthail keeps a local record of messages it moved, work still waiting, retries, failures, and automatic handoffs. The Audit view makes it possible to come back hours later and understand what happened.
