@@ -723,7 +723,7 @@ func TestCodexBridgeUsesDesktopRendererMessages(t *testing.T) {
 		"rpc":    codexRPCJSONJS("thread/list", `{}`, time.Second),
 		"staged": codexStagedRPCJS("payload", "turn/start", time.Second),
 	} {
-		if !strings.Contains(source, "__agenthailCodexDesktopRendererV1") {
+		if !strings.Contains(source, "__agenthailCodexDesktopRendererV2") {
 			t.Fatalf("%s does not use the Desktop renderer bridge", name)
 		}
 	}

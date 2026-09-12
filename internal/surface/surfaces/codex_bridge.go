@@ -14,7 +14,7 @@ import (
 const codexHookJS = `
 (() => {
   if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
-  const current = globalThis.__agenthailCodexDesktopRendererV1;
+  const current = globalThis.__agenthailCodexDesktopRendererV2;
   if (current && typeof current.request === 'function') return 'already';
   const bridge = {
     events: [],
@@ -34,8 +34,8 @@ const codexHookJS = `
       }
       return;
     }
-    if (data.type === 'mcp-notification' && data.message && typeof data.message.method === 'string') {
-      bridge.events.push({sequence: ++bridge.sequence, method: data.message.method, params: data.message.params || {}});
+    if (data.type === 'mcp-notification' && typeof data.method === 'string') {
+      bridge.events.push({sequence: ++bridge.sequence, method: data.method, params: data.params || {}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
   });
@@ -49,13 +49,13 @@ const codexHookJS = `
       if (bridge.pending.delete(id)) { clearTimeout(timer); resolve({error:{code:'write_failed', message:String(error && error.message || error)}}); }
     });
   });
-  globalThis.__agenthailCodexDesktopRendererV1 = bridge;
+  globalThis.__agenthailCodexDesktopRendererV2 = bridge;
   return 'hooked';
 })()
 `
 
 func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV1;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
 		strconvQuote(method), paramsJSON, timeout.Milliseconds())
 }
 
@@ -72,13 +72,13 @@ func codexPayloadDeleteJS(id string) string {
 }
 
 func codexStagedRPCJS(id, method string, timeout time.Duration) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV1,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));return JSON.stringify(await b.request(%s,params,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2,p=globalThis.__agenthailPayloads;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});if(!p||typeof p[%s]!=='string')return JSON.stringify({error:{code:'missing_payload',message:'staged request payload is unavailable'}});const encoded=p[%s];delete p[%s];const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));const params=JSON.parse(new TextDecoder().decode(bytes));return JSON.stringify(await b.request(%s,params,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`, strconvQuote(id), strconvQuote(id), strconvQuote(id), strconvQuote(method), timeout.Milliseconds())
 }
 
-const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailCodexDesktopRendererV1;return b?b.sequence:0})()`
+const codexEventCursorJS = `(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;return b?b.sequence:0})()`
 
 func codexEventsJS(after int64) string {
-	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV1;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
+	return fmt.Sprintf(`(()=>{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b)return JSON.stringify({cursor:0,events:[]});return JSON.stringify({cursor:b.sequence,events:b.events.filter(x=>x.sequence>%d)})})()`, after)
 }
 
 func strconvQuote(value string) string {

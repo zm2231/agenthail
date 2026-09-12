@@ -21,6 +21,13 @@ Agenthail uses the renderer’s `mcp-request` and `mcp-notification` bridge to t
 
 ## Ownership
 
+Desktop renderer notifications carry `method` and `params` at the top level of
+the `mcp-notification` message. Responses carry the RPC response in `message`.
+The bridge accepts only `hostId: local`, retains a bounded sequence-numbered event
+ring, and uses a versioned renderer namespace so a corrected hook can be installed
+without restarting Desktop. The runtime regression executes the generated hook
+against those actual message envelopes.
+
 Every writable Codex conversation has one owner:
 
 - `desktop`: Codex Desktop owns the writer; Agenthail uses the renderer bridge.
