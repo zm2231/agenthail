@@ -64,6 +64,55 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	}
 }
 
+func TestRepairManagedCodexRuntimeRestartsConfiguredRuntime(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "args")
+	script := filepath.Join(root, "codex")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
+	if err := repairManagedCodexRuntime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.ReadFile(logPath)
+	if err != nil || strings.TrimSpace(string(output)) != "app-server daemon restart" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestRepairManagedCodexRuntimeUsesStandaloneRuntimeOverPath(t *testing.T) {
+	root := t.TempDir()
+	standalone := filepath.Join(root, "packages", "standalone", "current")
+	if err := os.MkdirAll(standalone, 0700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(root, "args")
+	standaloneBinary := filepath.Join(standalone, "codex")
+	if err := os.WriteFile(standaloneBinary, []byte("#!/bin/sh\nprintf 'standalone:%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	pathDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(pathDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pathDir, "codex"), []byte("#!/bin/sh\nprintf 'path:%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", root)
+	t.Setenv("AGENTHAIL_CODEX_BIN", "")
+	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
+	t.Setenv("PATH", pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := repairManagedCodexRuntime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.ReadFile(logPath)
+	if err != nil || strings.TrimSpace(string(output)) != "standalone:app-server daemon restart" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 type readinessCLISurface struct {
 	*cliSurface
 	readyCalls int

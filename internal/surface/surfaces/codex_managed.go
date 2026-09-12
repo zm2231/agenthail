@@ -27,6 +27,10 @@ type codexClient interface {
 	Close() error
 }
 
+type codexNotWritableError struct{ reason string }
+
+func (e *codexNotWritableError) Error() string { return e.reason }
+
 type desktopCodexClient struct {
 	owner *Codex
 	conn  *cdpConn
@@ -184,7 +188,7 @@ func (c *Codex) openSession(ctx context.Context, sess *surface.Session, writable
 			}
 			_ = desktop.Close()
 		}
-		return c.openManaged(ctx)
+		return c.openExistingManaged(ctx)
 	}
 	return c.openDesktop(ctx)
 }
@@ -198,7 +202,7 @@ func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error
 		if err == nil {
 			refreshed, readErr := c.readSession(ctx, client, sess.ID, false, true)
 			_ = client.Close()
-			if readErr == nil && refreshed.Source == "vscode" {
+			if readErr == nil {
 				sess.Source = refreshed.Source
 				sess.Transport = codexTransportDesktop
 			}
@@ -211,20 +215,50 @@ func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error
 }
 
 func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess *surface.Session) error {
-	method := "thread/resume"
-	params := map[string]any{"threadId": sess.ID}
 	if sess.Transport == codexTransportDesktop {
-		method = "thread/read"
-		params["includeTurns"] = false
+		readResponse, err := client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+		if err == nil && codexDirectInputAccepted(readResponse, true) {
+			return nil
+		}
+		if _, err := client.Request(ctx, "thread/resume", desktopResumeParams(sess), 10*time.Second); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "active writer") {
+				return &codexNotWritableError{reason: "Codex session is owned by another runtime; release that writer before delivery"}
+			}
+			return fmt.Errorf("thread/resume: %w", err)
+		}
+		readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
+		if err != nil {
+			return fmt.Errorf("thread/read after resume: %w", err)
+		}
+		if !codexDirectInputAccepted(readResponse, true) {
+			return &codexNotWritableError{reason: "Codex Desktop loaded the session without direct-input capability"}
+		}
+		result, _ := readResponse["result"].(map[string]any)
+		thread, _ := result["thread"].(map[string]any)
+		read := codexSession(thread, false, true)
+		sess.Source, sess.Transport, sess.Status = read.Source, codexTransportDesktop, read.Status
+		return nil
 	}
-	response, err := client.Request(ctx, method, params, 5*time.Second)
+	response, err := client.Request(ctx, "thread/resume", map[string]any{"threadId": sess.ID}, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf("%s: %w", method, err)
+		return fmt.Errorf("thread/resume: %w", err)
 	}
-	if !codexDirectInputAccepted(response, sess.Transport == codexTransportDesktop) {
-		return fmt.Errorf("Codex session is not ready for direct input; open it in Codex Desktop and try again")
+	if !codexDirectInputAccepted(response, false) {
+		return &codexNotWritableError{reason: "Codex managed session is not ready for direct input"}
 	}
 	return nil
+}
+
+func desktopResumeParams(sess *surface.Session) map[string]any {
+	params := map[string]any{
+		"threadId":     sess.ID,
+		"history":      nil,
+		"excludeTurns": true,
+	}
+	if sess.Cwd != "" {
+		params["cwd"] = sess.Cwd
+	}
+	return params
 }
 
 func codexWriteLockPath() string {
@@ -299,15 +333,9 @@ func codexSource(value any) string {
 	return ""
 }
 
-func codexTransport(source string, status any, managed, desktopReachable bool) string {
-	if source == "vscode" {
-		if desktopReachable {
-			return codexTransportDesktop
-		}
-		return codexTransportReadOnly
-	}
-	if source == "agenthail" && managed && codexStatus(status) != surface.SessionStatus("notLoaded") {
-		return codexTransportManaged
+func codexTransport(_ bool, desktopReachable bool) string {
+	if desktopReachable {
+		return codexTransportDesktop
 	}
 	return codexTransportReadOnly
 }

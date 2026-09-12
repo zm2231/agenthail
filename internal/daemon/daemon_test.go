@@ -660,33 +660,13 @@ func TestScanSkipsClaudeDiscoveryWithoutClaudeWork(t *testing.T) {
 	}
 }
 
-func TestScanEnsuresSurfaceRuntimeBeforeObservation(t *testing.T) {
+func TestScanDoesNotStartSurfaceRuntime(t *testing.T) {
 	daemon, _, fake, _, _ := daemonFixture(t)
 	runtimeSurface := &runtimeDaemonSurface{daemonSurface: fake}
 	daemon.Surfaces = []surface.Surface{runtimeSurface}
 	daemon.scanAndRelay(context.Background())
-	if runtimeSurface.ensureCalls.Load() != 1 {
+	if runtimeSurface.ensureCalls.Load() != 0 {
 		t.Fatalf("ensure calls=%d", runtimeSurface.ensureCalls.Load())
-	}
-}
-
-func TestScanThrottlesRepeatedRuntimeFailuresAndRecovers(t *testing.T) {
-	daemon, _, fake, _, _ := daemonFixture(t)
-	runtimeSurface := &runtimeDaemonSurface{daemonSurface: fake, ensureErr: errors.New("managed runtime unavailable")}
-	daemon.Surfaces = []surface.Surface{runtimeSurface}
-	var output bytes.Buffer
-	daemon.log = log.New(&output, "", 0)
-	daemon.scanAndRelay(context.Background())
-	daemon.scanAndRelay(context.Background())
-	if got := strings.Count(output.String(), "managed runtime unavailable"); got != 1 {
-		t.Fatalf("runtime errors=%d output=%q", got, output.String())
-	}
-	runtimeSurface.ensureErr = nil
-	daemon.scanAndRelay(context.Background())
-	runtimeSurface.ensureErr = errors.New("managed runtime unavailable")
-	daemon.scanAndRelay(context.Background())
-	if got := strings.Count(output.String(), "managed runtime unavailable"); got != 2 {
-		t.Fatalf("runtime errors after recovery=%d output=%q", got, output.String())
 	}
 }
 
@@ -775,6 +755,25 @@ func TestScanDoesNotDrainClaudeQueueWhenMetadataRefreshFails(t *testing.T) {
 
 	if r.QueueCount(session.ID) != 1 || len(base.sent) != 0 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(session.ID), base.sent)
+	}
+}
+
+func TestScanLoadsUnloadedDesktopCodexSessionForQueueDelivery(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "desktop-unloaded", Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(session.ID, "deliver after Desktop load"); err != nil {
+		t.Fatal(err)
+	}
+	fake := &daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{session.ID: session}, observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.SessionStatus("notLoaded")}}, accepted: true}
+	d.Surfaces = []surface.Surface{fake}
+
+	d.scanAndRelay(context.Background())
+
+	if len(fake.sent) != 1 || fake.sent[0] != "deliver after Desktop load" || r.QueueCount(session.ID) != 0 {
+		t.Fatalf("sent=%v pending=%d", fake.sent, r.QueueCount(session.ID))
 	}
 }
 

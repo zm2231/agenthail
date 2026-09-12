@@ -23,6 +23,7 @@ import (
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type SurfaceEntry struct {
@@ -120,6 +121,7 @@ Usage:
 
 Session commands:
   codex [args]                  Start a writable Codex terminal session
+  codex --repair-managed-runtime Restart a stale managed Codex runtime
   thread create <codex|claude> "msg"    Create a background conversation
   thread fork <target>         Fork a Codex conversation
   thread <status|stop|resume|logs> <target>  Manage a Claude background session
@@ -195,12 +197,15 @@ Sender: --from resolves a session; otherwise AGENTHAIL_SESSION_ID, CODEX_THREAD_
 }
 
 func (a *App) cmdCodex(args []string) error {
+	if len(args) == 1 && args[0] == "--repair-managed-runtime" {
+		return repairManagedCodexRuntime(context.Background())
+	}
 	for _, arg := range args {
 		if arg == "--remote" || strings.HasPrefix(arg, "--remote=") || arg == "--remote-auth-token-env" || strings.HasPrefix(arg, "--remote-auth-token-env=") {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := exec.LookPath("codex")
+	path, err := surfaces.ManagedCodexBinary()
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
@@ -217,6 +222,14 @@ func (a *App) cmdCodex(args []string) error {
 	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
 	return syscall.Exec(path, argv, os.Environ())
+}
+
+func repairManagedCodexRuntime(ctx context.Context) error {
+	if err := surfaces.RestartManagedCodexRuntime(ctx); err != nil {
+		return fmt.Errorf("restart managed Codex runtime: %w", err)
+	}
+	fmt.Println("managed Codex runtime restarted; retry the affected Desktop conversation")
+	return nil
 }
 
 func codexRemoteArgs(args []string, cwd string) []string {

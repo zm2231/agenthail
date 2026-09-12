@@ -27,17 +27,17 @@ type codexThread struct {
 }
 
 func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
-	return c.readThreadWithOptions(ctx, conn, threadID, 50, true)
+	return c.readThreadWithOptions(ctx, conn, threadID, 50, true, true)
 }
 
 func (c *Codex) readObservationThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
-	return c.readThreadWithOptions(ctx, conn, threadID, 3, false)
+	return c.readThreadWithOptions(ctx, conn, threadID, 3, false, false)
 }
 
-func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, threadID string, turnLimit int, hydrateAll bool) (*codexThread, error) {
+func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, threadID string, turnLimit int, hydrateAll, includeTurns bool) (*codexThread, error) {
 	response, err := conn.Request(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
-		"includeTurns": true,
+		"includeTurns": includeTurns,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/read: %w", err)

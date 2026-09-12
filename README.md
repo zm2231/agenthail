@@ -77,7 +77,11 @@ Start a writable Codex terminal conversation from any project folder:
 agenthail codex
 ```
 
-For Codex Desktop, start it with `agenthail launch codex`. Agenthail then uses a loopback-only Desktop bridge to communicate with the app-server that already owns your open conversations. If Codex is already open, quit it and run that command before using Desktop message controls. Agenthail never restarts Codex while conversations are attached.
+This is the only managed terminal creation path. It uses Codex remote control and remains separate from Codex Desktop's writer.
+
+For Codex Desktop, start it with `agenthail launch codex`. Agenthail then uses a loopback-only Desktop bridge to communicate with the app-server that already owns your conversations. Desktop conversations load through that owner before a message is sent; Agenthail does not acquire them through its managed runtime. If Codex is already open, quit it and run that command before using Desktop message controls. Agenthail never restarts Codex while conversations are attached.
+
+If a prior managed terminal leaves a writer lease after it exits, Agenthail reports an ownership conflict instead of retrying indefinitely. After confirming no managed `agenthail codex` terminal is active, run `agenthail codex --repair-managed-runtime`, then retry the Desktop conversation. That command restarts only the managed remote-control runtime; it does not restart Codex Desktop.
 
 ### Notion
 

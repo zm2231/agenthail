@@ -90,6 +90,13 @@ func TestCodexResolveIDKeepsManagedLoadedSessionWritable(t *testing.T) {
 func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	home := startManagedCodexFixture(t)
 	t.Setenv("CODEX_HOME", home)
+	logPath := filepath.Join(home, "managed-runtime.log")
+	script := filepath.Join(home, "codex")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
 	handler := http.NewServeMux()
@@ -129,6 +136,29 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	if err != nil || len(results) != 1 || results[0].Session.Transport != codexTransportManaged {
 		t.Fatalf("results=%+v err=%v", results, err)
 	}
+	if output, _ := os.ReadFile(logPath); len(output) != 0 {
+		t.Fatalf("history search bootstrapped managed runtime: %s", output)
+	}
+}
+
+func TestCodexDiscoveryDoesNotStartManagedRuntime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	logPath := filepath.Join(home, "managed-runtime.log")
+	script := filepath.Join(home, "codex")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
+	codex := NewCodex("")
+	codex.desktopURL = "http://127.0.0.1:1"
+	if err := codex.Ready(context.Background()); err == nil {
+		t.Fatal("Ready() succeeded without any available Codex transport")
+	}
+	if output, _ := os.ReadFile(logPath); len(output) != 0 {
+		t.Fatalf("discovery started managed runtime: %s", output)
+	}
 }
 
 func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
@@ -141,14 +171,16 @@ func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
 	}{
 		{"vscode", "idle", false, true, codexTransportDesktop},
 		{"vscode", "notLoaded", true, true, codexTransportDesktop},
+		{"cli", "idle", true, true, codexTransportDesktop},
+		{"agenthail", "idle", true, true, codexTransportDesktop},
 		{"vscode", "idle", true, false, codexTransportReadOnly},
-		{"agenthail", "idle", true, false, codexTransportManaged},
+		{"agenthail", "idle", true, false, codexTransportReadOnly},
 		{"cli", "idle", true, false, codexTransportReadOnly},
 		{"cli", "notLoaded", true, false, codexTransportReadOnly},
 		{"cli", "idle", false, false, codexTransportReadOnly},
 	}
 	for _, test := range cases {
-		if got := codexTransport(test.source, test.status, test.managed, test.desktopReachable); got != test.want {
+		if got := codexTransport(test.managed, test.desktopReachable); got != test.want {
 			t.Fatalf("source=%s status=%v managed=%v desktopReachable=%v got=%s want=%s", test.source, test.status, test.managed, test.desktopReachable, got, test.want)
 		}
 	}

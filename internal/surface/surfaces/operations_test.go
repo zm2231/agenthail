@@ -67,8 +67,8 @@ type turnOptionsClient struct {
 func (c *turnOptionsClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
 	c.methods = append(c.methods, method)
 	c.params = append(c.params, params)
-	if method == "thread/resume" {
-		return map[string]any{"result": map[string]any{"model": "active-model"}}, nil
+	if method == "thread/read" {
+		return map[string]any{"result": map[string]any{"thread": map[string]any{"model": "active-model"}}}, nil
 	}
 	if method == "thread/start" {
 		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "new"}, "cwd": "/tmp"}}, nil
@@ -83,7 +83,7 @@ func TestCodexTurnOptionsReachCreationAndPreserveActiveModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(client.methods, ",") != "thread/start,thread/resume,turn/start" {
+	if strings.Join(client.methods, ",") != "thread/start,thread/read,turn/start" {
 		t.Fatal(client.methods)
 	}
 	params := client.params[2]

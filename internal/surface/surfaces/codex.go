@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -224,14 +225,16 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	} else {
 		failures = append(failures, err.Error())
 	}
-	if client, err := c.openManaged(ctx); err == nil && c.managed {
-		clients = append(clients, struct {
-			client           codexClient
-			managed          bool
-			desktopReachable bool
-		}{client, true, desktopReachable})
-	} else if c.managed {
-		failures = append(failures, err.Error())
+	if c.managed {
+		if client, err := c.openExistingManaged(ctx); err == nil {
+			clients = append(clients, struct {
+				client           codexClient
+				managed          bool
+				desktopReachable bool
+			}{client, true, false})
+		} else if !desktopReachable {
+			failures = append(failures, err.Error())
+		}
 	}
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("Codex is unavailable: %s", strings.Join(failures, "; "))
@@ -300,7 +303,7 @@ func (c *Codex) listCurrent(ctx context.Context, conn codexClient, managed, desk
 	if err != nil {
 		return nil, err
 	}
-	recent, err := c.listRecent(ctx, conn, managed, desktopReachable)
+	recent, err := c.listRecent(ctx, conn, false, desktopReachable)
 	if err != nil {
 		return loaded, nil
 	}
@@ -412,7 +415,7 @@ func codexSession(thread map[string]any, managed, desktopReachable bool) surface
 		Cwd:       str(thread, "cwd"),
 		Status:    codexStatus(thread["status"]),
 		Source:    source,
-		Transport: codexTransport(source, thread["status"], managed, desktopReachable),
+		Transport: codexTransport(managed, desktopReachable),
 	}
 	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
 		session.LastActive = time.Unix(int64(timestamp), 0)
@@ -481,28 +484,27 @@ func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, err
 	transport := transports[id]
 	var conn codexClient
 	var err error
-	var managed, desktopReachable bool
+	var desktopReachable bool
 	switch transport {
 	case codexTransportDesktop:
 		conn, err = c.openDesktop(ctx)
 		desktopReachable = true
 	case codexTransportManaged:
-		conn, err = c.openManaged(ctx)
-		managed = true
+		conn, err = c.openExistingManaged(ctx)
 	default:
-		conn, managed, desktopReachable, err = c.openDiscovery(ctx)
+		conn, _, desktopReachable, err = c.openDiscovery(ctx)
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	session, err := c.readSession(ctx, conn, id, managed, desktopReachable)
+	session, err := c.readSession(ctx, conn, id, false, desktopReachable)
 	if err != nil && transport == "" && c.managed {
 		if _, desktop := conn.(*desktopCodexClient); desktop {
-			managed, managedErr := c.openManaged(ctx)
+			managed, managedErr := c.openExistingManaged(ctx)
 			if managedErr == nil {
 				defer managed.Close()
-				session, err = c.readSession(ctx, managed, id, true, false)
+				session, err = c.readSession(ctx, managed, id, false, false)
 			}
 		}
 	}
@@ -558,7 +560,7 @@ func (c *Codex) SearchSessions(ctx context.Context, query string, limit int) ([]
 	response, err := conn.Request(ctx, "thread/search", params, 5*time.Second)
 	if err != nil && c.managed {
 		if _, desktop := conn.(*desktopCodexClient); desktop {
-			managedConn, managedErr := c.openManaged(ctx)
+			managedConn, managedErr := c.openExistingManaged(ctx)
 			if managedErr == nil {
 				defer managedConn.Close()
 				response, err = managedConn.Request(ctx, "thread/search", params, 5*time.Second)
@@ -603,7 +605,7 @@ func (c *Codex) openDiscovery(ctx context.Context) (codexClient, bool, bool, err
 	if client, err := c.openDesktop(ctx); err == nil {
 		return client, false, true, nil
 	}
-	client, err := c.openManaged(ctx)
+	client, err := c.openExistingManaged(ctx)
 	return client, true, false, err
 }
 
@@ -620,7 +622,7 @@ func (c *Codex) loadedTransports(ctx context.Context) map[string]string {
 	if !c.managed {
 		return transports
 	}
-	if managed, err := c.openManaged(ctx); err == nil {
+	if managed, err := c.openExistingManaged(ctx); err == nil {
 		if ids, listErr := c.loadedThreadIDs(ctx, managed, 100); listErr == nil {
 			for _, id := range ids {
 				if _, desktopOwns := transports[id]; !desktopOwns {
@@ -647,13 +649,21 @@ func (c *Codex) Observe(ctx context.Context, sess *surface.Session) (*surface.Tu
 }
 
 func (c *Codex) activeTurnID(ctx context.Context, conn codexClient, threadID string) (string, error) {
-	thread, err := c.readObservationThread(ctx, conn, threadID)
+	response, err := conn.Request(ctx, "thread/turns/list", map[string]any{
+		"threadId":      threadID,
+		"page":          map[string]any{"limit": 1},
+		"sortDirection": "desc",
+	}, 5*time.Second)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("thread/turns/list: %w", err)
 	}
-	for i := len(thread.Turns) - 1; i >= 0; i-- {
-		if thread.Turns[i].Status == surface.StatusBusy {
-			return thread.Turns[i].ID, nil
+	result, _ := response["result"].(map[string]any)
+	turns, _ := result["data"].([]any)
+	for _, raw := range turns {
+		turn, _ := raw.(map[string]any)
+		status, _, _ := codexTurnState(turn["status"])
+		if status == surface.StatusBusy {
+			return str(turn, "id"), nil
 		}
 	}
 	return "", nil
@@ -669,15 +679,26 @@ func (c *Codex) StartSession(ctx context.Context, options surface.SessionStartOp
 		return nil, nil, surface.DeliveryUnavailable(err)
 	}
 	defer releaseCodexWriteLock(lock)
-	client, err := c.openManaged(ctx)
-	if err != nil {
-		return nil, nil, surface.DeliveryUnavailable(err)
+	switch options.Owner {
+	case "", codexTransportDesktop:
+		client, err := c.openDesktop(ctx)
+		if err != nil {
+			return nil, nil, surface.DeliveryUnavailable(fmt.Errorf("Codex Desktop is unavailable for Desktop-owned creation: %w", err))
+		}
+		defer client.Close()
+		return c.startSessionOnTransport(ctx, client, options, codexTransportDesktop)
+	case codexTransportManaged:
+		return nil, nil, fmt.Errorf("managed Codex conversations must be started with 'agenthail codex' so their terminal remains attached")
+	default:
+		return nil, nil, fmt.Errorf("Codex session owner must be %q or %q", codexTransportDesktop, codexTransportManaged)
 	}
-	defer client.Close()
-	return c.startSession(ctx, client, options)
 }
 
 func (c *Codex) startSession(ctx context.Context, client codexClient, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	return c.startSessionOnTransport(ctx, client, options, codexTransportManaged)
+}
+
+func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient, options surface.SessionStartOptions, transport string) (*surface.Session, *surface.SendResult, error) {
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, nil, err
 	}
@@ -716,7 +737,7 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 		Status:     surface.StatusBusy,
 		HasLocal:   true,
 		Source:     "agenthail",
-		Transport:  codexTransportManaged,
+		Transport:  transport,
 		LastActive: time.Now(),
 	}
 	if session.Cwd == "" {
@@ -759,6 +780,10 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	}
 	defer conn.Close()
 	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
+		var notWritable *codexNotWritableError
+		if errors.As(err, &notWritable) {
+			return nil, surface.DeliveryTerminal(err, surface.DeliveryOwnershipConflict)
+		}
 		return nil, surface.DeliveryUnavailable(err)
 	}
 	active, err := c.activeTurnID(ctx, conn, sess.ID)

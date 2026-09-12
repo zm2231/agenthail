@@ -128,6 +128,7 @@ const (
 	DeliveryAuthenticationNeeded DeliveryTerminalKind = "authentication_needed"
 	DeliveryAccessDenied         DeliveryTerminalKind = "access_denied"
 	DeliveryInvalidRequest       DeliveryTerminalKind = "invalid_request"
+	DeliveryOwnershipConflict    DeliveryTerminalKind = "ownership_conflict"
 )
 
 type DeliveryTerminalError struct {
@@ -152,6 +153,8 @@ func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
 		return "access denied"
 	case DeliveryInvalidRequest:
 		return "invalid request"
+	case DeliveryOwnershipConflict:
+		return "session ownership conflict"
 	default:
 		return "delivery rejected"
 	}
@@ -213,6 +216,7 @@ type SessionStartOptions struct {
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
+	Owner          string `json:"owner,omitempty"`
 }
 
 type SessionStarter interface {

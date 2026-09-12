@@ -19,21 +19,6 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 	} else if expired > 0 {
 		d.publishEvent("state.changed", "", map[string]any{"source": "queue-expired", "count": expired})
 	}
-	for _, adapter := range d.Surfaces {
-		ensurer, ok := adapter.(surface.RuntimeEnsurer)
-		if !ok {
-			continue
-		}
-		operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-		err := ensurer.EnsureRuntime(operationCtx)
-		cancel()
-		key := "runtime:" + string(adapter.Name())
-		if err != nil {
-			d.logRuntimeError(key, err)
-			continue
-		}
-		d.clearObserveError(key)
-	}
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {
 		d.log.Printf("scan watched sessions: %s", err)
@@ -221,7 +206,8 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			d.notifyPairedDevices(notificationCtx, "Agenthail", mobileMessage, sessionID, "turn.completed")
 		}(desktopNotificationMessage, mobileNotificationMessage, session.ID)
 	}
-	if observation.Status == surface.StatusIdle && observation.ActiveTurnID == "" {
+	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
+	if (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue {
 		queued := d.Registry.QueueCount(session.ID)
 		d.drainMessageQueue(ctx, adapter, session)
 		if queued > 0 {

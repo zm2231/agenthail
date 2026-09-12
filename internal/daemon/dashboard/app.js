@@ -587,6 +587,12 @@ function queueReason(item) {
   const target = app.state.sessions.find(
     (session) => session.id === item.sessionId,
   );
+  if (target?.readOnly) return target.readOnlyReason || "Target is not writable";
+  if (target?.surface === "codex" && target?.status === "notLoaded") {
+    return target.transport === "desktop"
+      ? "Loading this Codex conversation before delivery"
+      : "Codex conversation is not available to load";
+  }
   return target?.status === "busy"
     ? "Waiting for this agent to finish"
     : "Waiting for delivery";

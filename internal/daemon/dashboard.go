@@ -90,6 +90,8 @@ type dashboardSession struct {
 	Capabilities   surface.Capabilities  `json:"capabilities"`
 	ReadOnly       bool                  `json:"readOnly,omitempty"`
 	ReadOnlyReason string                `json:"readOnlyReason,omitempty"`
+	Source         string                `json:"source,omitempty"`
+	Transport      string                `json:"transport,omitempty"`
 }
 
 type dashboardState struct {
@@ -590,7 +592,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
 				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason})
+				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
 			}
 			mu.Unlock()
 		}()
@@ -781,7 +783,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode})
+		owner := ""
+		if request.Surface == string(surface.KindCodex) {
+			owner = "desktop"
+		}
+		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, Owner: owner})
 		if session != nil {
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
 				http.Error(w, fmt.Sprintf("register conversation: %s", registerErr), http.StatusInternalServerError)
@@ -1257,7 +1263,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
 		effective := surface.EffectiveCapabilities(&result.Session, adapter.Capabilities())
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason},
+			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
 			"snippet": result.Snippet,
 		})
 	}

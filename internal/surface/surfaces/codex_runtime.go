@@ -79,6 +79,15 @@ func codexBinary() (string, error) {
 	return "", fmt.Errorf("Codex standalone runtime was not found at %s; install it from https://chatgpt.com/codex/install.sh or set AGENTHAIL_CODEX_BIN", managed)
 }
 
+func ManagedCodexBinary() (string, error) {
+	return codexBinary()
+}
+
+func RestartManagedCodexRuntime(ctx context.Context) error {
+	_, err := runCodexDaemon(ctx, "restart")
+	return err
+}
+
 func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 	commandCtx := ctx
 	cancel := func() {}
@@ -194,6 +203,14 @@ func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {
 	client, err := dialManagedCodex(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("managed Codex app-server is unreachable: %w; restart it from Codex only after closing active remote sessions", err)
+	}
+	return client, nil
+}
+
+func (c *Codex) openExistingManaged(ctx context.Context) (codexClient, error) {
+	client, err := dialManagedCodex(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("managed Codex app-server is unavailable: %w", err)
 	}
 	return client, nil
 }
