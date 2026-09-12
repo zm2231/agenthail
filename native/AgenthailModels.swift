@@ -76,6 +76,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     let capabilities: Capabilities
     let readOnly: Bool?
     let readOnlyReason: String?
+    var cwd: String? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -256,6 +257,7 @@ struct SessionDetail: Decodable {
     let model: String?
     let models: [ModelOption]?
     let timeline: SessionTimeline?
+    let transcriptWarning: String?
     let transcriptTruncated: Bool?
     let transcriptOriginalBytes: Int?
     let transcriptReturnedBytes: Int?
@@ -367,7 +369,7 @@ struct SessionTimeline: Decodable {
     let unavailableReason: String?
 }
 
-struct TimelineItem: Decodable, Identifiable {
+struct TimelineItem: Decodable, Identifiable, Equatable {
     let id: String
     let kind: String
     let role: String?

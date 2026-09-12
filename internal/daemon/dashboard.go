@@ -80,6 +80,7 @@ type dashboardSession struct {
 	ID             string                `json:"id"`
 	Surface        surface.SurfaceKind   `json:"surface"`
 	Name           string                `json:"name"`
+	Cwd            string                `json:"cwd,omitempty"`
 	Alias          string                `json:"alias,omitempty"`
 	Status         surface.SessionStatus `json:"status"`
 	LastActive     time.Time             `json:"lastActive,omitempty"`
@@ -592,7 +593,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
 				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
+				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
 			}
 			mu.Unlock()
 		}()
@@ -1263,7 +1264,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
 		effective := surface.EffectiveCapabilities(&result.Session, adapter.Capabilities())
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
+			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
 			"snippet": result.Snippet,
 		})
 	}
@@ -1323,7 +1324,7 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	if transcriptErr != nil {
-		response["timeline"] = surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: fmt.Sprintf("Message history is not available yet: %s. Refreshing while this conversation is open.", transcriptErr)}
+		response["transcriptWarning"] = "Message history could not be refreshed. Local activity is shown when available."
 	}
 	var timelineBefore int64
 	if raw := r.URL.Query().Get("timelineBefore"); raw != "" {
@@ -1334,8 +1335,10 @@ func (d *Daemon) dashboardSessionHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	if provider, ok := adapter.(surface.TimelineProvider); ok && transcriptErr == nil && r.URL.Query().Get("timeline") == "1" {
-		if timeline, timelineErr := provider.Timeline(ctx, session, timelineBefore); timelineErr == nil {
+	if provider, ok := adapter.(surface.TimelineProvider); ok && r.URL.Query().Get("timeline") == "1" {
+		timelineCtx, timelineCancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+		defer timelineCancel()
+		if timeline, timelineErr := provider.Timeline(timelineCtx, session, timelineBefore); timelineErr == nil {
 			response["timeline"] = timeline
 		} else {
 			response["timeline"] = surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: "Detailed activity could not be loaded from the local transcript. Pull to refresh to retry."}

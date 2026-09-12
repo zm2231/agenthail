@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -180,8 +181,17 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	kind := str(record, "type")
 	if kind == "system" {
 		subtype := str(record, "subtype")
-		if subtype == "compact_boundary" || subtype == "turn_duration" || subtype == "local_command" {
-			return []surface.TimelineItem{{Kind: "event", Title: strings.ReplaceAll(subtype, "_", " "), Text: str(record, "content")}}
+		switch subtype {
+		case "turn_duration":
+			text := str(record, "content")
+			if milliseconds, ok := record["durationMs"].(float64); ok && milliseconds >= 0 {
+				text = (time.Duration(milliseconds) * time.Millisecond).Round(time.Second).String()
+			}
+			return []surface.TimelineItem{{Kind: "event", Title: "Turn duration", Text: text}}
+		case "compact_boundary":
+			return []surface.TimelineItem{{Kind: "event", Title: "Context compacted", Text: str(record, "content")}}
+		case "local_command":
+			return []surface.TimelineItem{{Kind: "event", Title: "Local command", Text: str(record, "content")}}
 		}
 		return nil
 	}

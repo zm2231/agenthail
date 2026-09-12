@@ -73,8 +73,8 @@ fi
 		return detail
 	}
 	pending := readSession()
-	if !strings.Contains(string(pending["timeline"]), "Message history is not available yet") {
-		t.Fatal(string(pending["timeline"]))
+	if len(pending["transcriptWarning"]) == 0 || !strings.Contains(string(pending["timeline"]), "unavailableReason") {
+		t.Fatal(string(pending["timeline"]), string(pending["transcriptWarning"]))
 	}
 	transcript := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-"), receipt.Session.ID+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(transcript), 0700); err != nil {
@@ -84,7 +84,7 @@ fi
 		t.Fatal(err)
 	}
 	ready := readSession()
-	if !strings.Contains(string(ready["exchanges"]), "First instruction") || strings.Contains(string(ready["timeline"]), "Message history is not available yet") {
+	if !strings.Contains(string(ready["exchanges"]), "First instruction") || len(ready["transcriptWarning"]) != 0 {
 		t.Fatal(string(ready["exchanges"]), string(ready["timeline"]))
 	}
 	args, _ := os.ReadFile(filepath.Join(home, "argv"))

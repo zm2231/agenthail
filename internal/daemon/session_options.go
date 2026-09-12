@@ -52,11 +52,17 @@ func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := []dashboardQueue{}
-	for _, item := range rows {
-		if item.Status != "pending" && item.Status != "inflight" && item.Status != "dead" && item.Status != "expired" {
-			continue
+	historyCount := 0
+	for index := len(rows) - 1; index >= 0; index-- {
+		item := rows[index]
+		if item.Status == "expired" || item.Status == "delivered" || item.Status == "canceled" {
+			if historyCount >= 100 {
+				continue
+			}
+			historyCount++
 		}
 		items = append(items, dashboardQueue{TurnOptions: item.TurnOptions, SourceSessionID: item.SourceSessionID, ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt})
 	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"items": items})
 }

@@ -919,7 +919,7 @@ async function selectSession(id, focus = false) {
   }
 }
 function renderChat() {
-  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning } = app.history || {};
   const session = app.selected;
   const controls = [];
   if (session.status === "busy" && capabilities.steer)
@@ -965,6 +965,7 @@ function renderChat() {
     exchanges,
     goal?.objective || "",
     Boolean(capabilities.goal),
+    transcriptWarning,
   ]);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
@@ -996,7 +997,7 @@ function renderChat() {
     })
     .join("");
   chatBody.innerHTML =
-    `${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
+    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
   renderLiveTurn();
   app.transcriptSignature = signature;
   if (app.pendingEntryScroll) {

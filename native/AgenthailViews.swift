@@ -250,6 +250,9 @@ struct TranscriptView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 30) {
+                    if let warning = detail.transcriptWarning {
+                        Label(warning, systemImage: "exclamationmark.bubble").font(.callout).foregroundStyle(.secondary)
+                    }
                     if detail.transcriptTruncated == true {
                         Label("Older or oversized transcript content was shortened for this view.", systemImage: "text.badge.ellipsis")
                             .font(.callout).foregroundStyle(.secondary)
