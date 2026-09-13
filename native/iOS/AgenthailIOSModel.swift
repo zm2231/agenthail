@@ -133,10 +133,14 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    init(api: AgenthailAPI) {
+    init(api: AgenthailAPI, paired: Bool = false) {
         networkSession = .shared
         automaticallyConnect = false
         self.api = api
+        if paired {
+            endpoint = URL(string: "https://preview.invalid")
+            token = "public-demo"
+        }
     }
 
     deinit {

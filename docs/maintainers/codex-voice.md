@@ -36,6 +36,8 @@ Only audio and WebRTC negotiation go to Codex's realtime service. The phone send
 control requests to the paired Mac over HTTPS. The audio page contains no paired
 token or Codex credentials; its native container supplies the authenticated page
 request. Codex's existing authenticated client creates the realtime call.
+The entry is a compact control above the tab bar; Sessions, Inbox, and Settings
+remain available while it is present.
 
 ## Conversation and work flow
 
@@ -114,10 +116,16 @@ not create another operator automatically: inspect Codex and the state file befo
 attempting recovery.
 
 `start` captures the Desktop event cursor before sending the microphone SDP offer.
+The peer submits the offer after `setLocalDescription`; ICE gathering may continue
+while signaling proceeds. A network that does not report `complete` gathering is
+not treated as a failed call before the host receives the offer.
 The native start request uses realtime `v3`, audio output, startup context, and
 native incoming Codex delegation and explicit response return. A matching native `started` notification binds the call;
 its SDP answer permits negotiation. Only the phone's connected peer/data-channel
 acknowledgment advances it to `connected`.
+If local setup fails before `start` is submitted, the phone tears down only its
+local audio peer. It does not send a stop request for an identity the host never
+accepted, and cleanup errors do not replace the original setup failure.
 
 ```text
 idle → creating → ready → starting → negotiating → connected

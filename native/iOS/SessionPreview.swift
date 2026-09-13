@@ -21,7 +21,10 @@ struct SessionPreview: View {
             readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd)
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SessionPreviewProtocol.self]
-        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)))
+        let model = AgenthailIOSModel(
+            api: AgenthailAPI(baseURL: URL(string: "https://preview.invalid")!, token: "public-demo", session: URLSession(configuration: config)),
+            paired: ProcessInfo.processInfo.arguments.contains("--preview-voice-entry")
+        )
         model.selectedSessionID = session.id
         model.selectedDetail = detail
         if capture == nil { model.composer = "Keep the regression check with the fix." }
@@ -33,7 +36,7 @@ struct SessionPreview: View {
     }
     var body: some View {
         if ProcessInfo.processInfo.arguments.contains("--preview-app") {
-            MainTabs(model: model)
+            MainTabs(model: model).modifier(VoiceOperatorEntry(model: model))
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {

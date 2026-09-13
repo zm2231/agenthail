@@ -2,6 +2,20 @@ import XCTest
 
 @MainActor
 final class SessionNavigationTests: XCTestCase {
+    func testVoiceEntryPreservesTabNavigation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
+        app.launch()
+        XCTAssertTrue(app.buttons["voice-entry"].waitForExistence(timeout: 10))
+        for tab in ["Sessions", "Inbox", "Settings"] {
+            XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")
+        }
+        app.tabBars.buttons["Inbox"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Inbox"].isSelected)
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].isSelected)
+    }
+
     func testEmptyActivityStillShowsSavedMessages() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-rich", "--preview-history-only"]
