@@ -19,6 +19,20 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func TestProcessStartUsesClaudeUTCIdentity(t *testing.T) {
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	expected, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TZ", "America/New_York")
+	actual, err := processStart(os.Getpid())
+	if err != nil || actual != strings.TrimSpace(string(expected)) {
+		t.Fatalf("process identity=%q want=%q err=%v", actual, strings.TrimSpace(string(expected)), err)
+	}
+}
+
 func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")

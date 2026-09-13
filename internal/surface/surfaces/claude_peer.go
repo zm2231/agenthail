@@ -32,7 +32,9 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	if started := str(record, "procStart"); started != "" {
 		processCtx, cancel := context.WithTimeout(ctx, 500000000)
 		defer cancel()
-		actual, err := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid))).Output()
+		command := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
+		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+		actual, err := command.Output()
 		if err != nil || strings.TrimSpace(string(actual)) != strings.TrimSpace(started) {
 			return ""
 		}

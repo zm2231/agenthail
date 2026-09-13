@@ -258,7 +258,9 @@ func status(s surface.Session) string {
 }
 
 func processStart(pid int) (string, error) {
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	out, err := command.Output()
 	return strings.TrimSpace(string(out)), err
 }
 

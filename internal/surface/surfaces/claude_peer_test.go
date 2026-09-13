@@ -14,6 +14,7 @@ import (
 )
 
 func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
+	t.Setenv("TZ", "America/New_York")
 	home := t.TempDir()
 	dir := filepath.Join(home, ".claude", "sessions")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -31,7 +32,9 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	start, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid())).Output()
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	start, err := command.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
