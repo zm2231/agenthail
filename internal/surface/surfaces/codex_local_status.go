@@ -88,7 +88,7 @@ func codexTranscriptStatus(path string, modified, now time.Time) surface.Session
 			break
 		}
 		if newline := bytes.IndexByte(tail, '\n'); newline >= 0 {
-			tail = tail[newline+1:]
+			tail = tail[:newline]
 		}
 	}
 	return surface.StatusUnknown
