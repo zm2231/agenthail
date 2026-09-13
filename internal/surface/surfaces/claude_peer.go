@@ -34,7 +34,7 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 		processCtx, cancel := context.WithTimeout(ctx, 500000000)
 		defer cancel()
 		actual, err := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid))).Output()
-		if err != nil || !sameClaudeProcessStart(started, string(actual)) {
+		if err != nil || !sameClaudeProcessStart(str(record, "version"), started, string(actual)) {
 			return ""
 		}
 	}
@@ -43,18 +43,21 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 
 const claudeProcessStartLayout = "Mon Jan 2 15:04:05 2006"
 
-func sameClaudeProcessStart(recorded, actual string) bool {
-	return sameClaudeProcessStartInLocations(recorded, time.UTC, actual, time.Local)
+func sameClaudeProcessStart(version, recorded, actual string) bool {
+	return sameClaudeProcessStartInLocation(version, recorded, actual, time.Local)
 }
 
-func sameClaudeProcessStartInLocations(recorded string, recordedLocation *time.Location, actual string, actualLocation *time.Location) bool {
-	recorded = strings.TrimSpace(recorded)
-	actual = strings.TrimSpace(actual)
-	if recorded == actual {
-		return true
+func sameClaudeProcessStartInLocation(version, recorded, actual string, localLocation *time.Location) bool {
+	var major, minor, patch int
+	if n, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch); err != nil || n != 3 {
+		return false
 	}
-	recordedAt, recordedErr := time.ParseInLocation(claudeProcessStartLayout, recorded, recordedLocation)
-	actualAt, actualErr := time.ParseInLocation(claudeProcessStartLayout, actual, actualLocation)
+	recordedLocation := localLocation
+	if major > 2 || major == 2 && (minor > 1 || minor == 1 && patch >= 267) {
+		recordedLocation = time.UTC
+	}
+	recordedAt, recordedErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(recorded), recordedLocation)
+	actualAt, actualErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(actual), localLocation)
 	return recordedErr == nil && actualErr == nil && recordedAt.Equal(actualAt)
 }
 

@@ -36,7 +36,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := map[string]any{"pid": os.Getpid(), "sessionId": "local-id", "name": "native", "cwd": "/fixture", "status": "idle", "procStart": string(start), "messagingSocketPath": socket}
+	record := map[string]any{"pid": os.Getpid(), "sessionId": "local-id", "name": "native", "cwd": "/fixture", "status": "idle", "version": "2.1.251", "procStart": string(start), "messagingSocketPath": socket}
 	write := func(record map[string]any) {
 		t.Helper()
 		data, _ := json.Marshal(record)
@@ -79,17 +79,32 @@ func TestClaudeProcessStartAcceptsUTCRecordForLocalPSOutput(t *testing.T) {
 	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
 	localLocation := time.FixedZone("EDT", -4*60*60)
 	local := instant.In(localLocation)
-	if !sameClaudeProcessStartInLocations(
-		instant.Format(claudeProcessStartLayout), time.UTC,
+	if !sameClaudeProcessStartInLocation(
+		"2.1.270", instant.Format(claudeProcessStartLayout),
 		local.Format(claudeProcessStartLayout), localLocation,
 	) {
 		t.Fatal("same process instant in UTC and local time was rejected")
 	}
-	if sameClaudeProcessStartInLocations(
-		instant.Format(claudeProcessStartLayout), time.UTC,
+	if sameClaudeProcessStartInLocation(
+		"2.1.270", instant.Format(claudeProcessStartLayout),
 		local.Add(time.Second).Format(claudeProcessStartLayout), localLocation,
 	) {
 		t.Fatal("different process start instant was accepted")
+	}
+}
+
+func TestClaudeProcessStartRejectsMatchingTextFromDifferentInstants(t *testing.T) {
+	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
+	localLocation := time.FixedZone("EDT", -4*60*60)
+	text := instant.Format(claudeProcessStartLayout)
+	if sameClaudeProcessStartInLocation("2.1.270", text, text, localLocation) {
+		t.Fatal("matching wall-clock text admitted a recycled PID with a different start instant")
+	}
+	if !sameClaudeProcessStartInLocation("2.1.251", text, text, localLocation) {
+		t.Fatal("legacy local process start was rejected")
+	}
+	if sameClaudeProcessStartInLocation("unrecognized", text, text, localLocation) {
+		t.Fatal("record with unknown timestamp format was admitted")
 	}
 }
 
