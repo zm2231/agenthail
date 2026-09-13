@@ -131,7 +131,7 @@ Session commands:
   send <target> "msg"|-       Send (--effort, --mode, --service-tier, --output-schema, --from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
   reply <target> [--json]       Fetch last assistant reply
-  last <target> [count] [--full] [--json]  Show last N exchanges (full text with --full)
+  last <target> [count] [--full] [--json] [--timeout 30s]  Show last N exchanges
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context (queues for active Claude sessions)
   model <target> [name]         Get or set model
@@ -362,7 +362,7 @@ func validateCommandFlags(command string, args []string) error {
 	specs := map[string]flagSpec{
 		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
-		"reply": {bools: map[string]bool{"--json": true}}, "last": {bools: map[string]bool{"--full": true, "--json": true}}, "tail": {bools: map[string]bool{"--full": true, "--json": true}},
+		"reply": {bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
@@ -422,12 +422,14 @@ func (a *App) cmdList(args []string) error {
 
 	allSessions := make([]surface.Session, 0)
 	surfaceErrors := map[string]string{}
+	successfulSurfaces := 0
 	for _, s := range a.allSurfaces() {
 		sessions, err := s.List(ctx)
 		if err != nil {
 			surfaceErrors[string(s.Name())] = err.Error()
 			continue
 		}
+		successfulSurfaces++
 		for _, sess := range sessions {
 			if a.Registry != nil {
 				if err := a.Registry.RegisterSession(sess); err != nil {
@@ -495,7 +497,7 @@ func (a *App) cmdList(args []string) error {
 		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"sessions": allSessions, "errors": surfaceErrors}); err != nil {
 			return err
 		}
-		if len(surfaceErrors) > 0 {
+		if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 			return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 		}
 		return nil
@@ -505,7 +507,7 @@ func (a *App) cmdList(args []string) error {
 	}
 	if len(allSessions) == 0 {
 		fmt.Println("no sessions found")
-		if len(surfaceErrors) > 0 {
+		if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 			return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 		}
 		return nil
@@ -535,7 +537,7 @@ func (a *App) cmdList(args []string) error {
 		fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n",
 			s.Surface, stat, truncate(agent, 14), truncate(s.Name, 28), truncate(project, 20), last)
 	}
-	if len(surfaceErrors) > 0 {
+	if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
@@ -998,9 +1000,14 @@ func (a *App) cmdReply(args []string) error {
 func (a *App) cmdLast(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail last <target> [count] [--full]")
+		return fmt.Errorf("usage: agenthail last <target> [count] [--full] [--timeout 30s]")
 	}
-	ctx := context.Background()
+	timeout, err := commandTimeout(args, a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
 	if err != nil {
 		return err
@@ -1013,7 +1020,7 @@ func (a *App) cmdLast(args []string) error {
 		}
 		n = v
 	}
-	exchanges, err := surf.Tail(ctx, sess, n)
+	exchanges, err := tailWithContext(ctx, surf, sess, n)
 	if err != nil {
 		return err
 	}
@@ -1048,6 +1055,24 @@ func (a *App) cmdLast(args []string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+func tailWithContext(ctx context.Context, adapter surface.Surface, session *surface.Session, count int) ([]surface.Exchange, error) {
+	type result struct {
+		exchanges []surface.Exchange
+		err       error
+	}
+	completed := make(chan result, 1)
+	go func() {
+		exchanges, err := adapter.Tail(ctx, session, count)
+		completed <- result{exchanges: exchanges, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case outcome := <-completed:
+		return outcome.exchanges, outcome.err
+	}
 }
 
 func (a *App) cmdStream(args []string) error {

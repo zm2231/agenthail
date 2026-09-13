@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func (a *App) sourceSessionID(ctx context.Context, selector string) (string, error) {
@@ -18,6 +19,20 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 	}
 	if selector == "" {
 		return "", nil
+	}
+	if a.Registry != nil {
+		registrySelector := strings.TrimPrefix(selector, "@")
+		expectedSurface := ""
+		if kind, target, qualified := strings.Cut(registrySelector, ":"); qualified {
+			expectedSurface = strings.ToLower(kind)
+			registrySelector = strings.TrimPrefix(target, "@")
+		}
+		if id, err := a.Registry.ResolveTarget(registrySelector); err == nil {
+			kind, _, _, sessionErr := a.Registry.GetSession(id)
+			if sessionErr == nil && (expectedSurface == "" || expectedSurface == strings.ToLower(kind)) {
+				return id, nil
+			}
+		}
 	}
 	session, _, err := a.resolveTarget(ctx, selector)
 	if err != nil {
