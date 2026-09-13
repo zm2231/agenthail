@@ -28,6 +28,27 @@ func TestCodexTranscriptStatusTracksLiveTask(t *testing.T) {
 	}
 }
 
+func TestCodexTranscriptStatusReconstructsTaskEventStraddlingChunkBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	task := `{"type":"event_msg","payload":{"type":"task_started"}}`
+	resp := `{"type":"response_item","payload":{"n":0}}` + "\n"
+	now := time.Now()
+
+	for delta := int64(-60); delta <= 5; delta++ {
+		var trailing strings.Builder
+		for int64(trailing.Len()) < codexStatusReadChunk+delta {
+			trailing.WriteString(resp)
+		}
+		content := "leadingpartialjunk\n" + task + "\n" + trailing.String()
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if got := codexTranscriptStatus(path, now, now); got != surface.StatusBusy {
+			t.Fatalf("delta=%d size=%d status=%q, want busy", delta, len(content), got)
+		}
+	}
+}
+
 func TestCodexTranscriptStatusRejectsStaleUnfinishedTask(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	if err := os.WriteFile(path, []byte(`{"type":"event_msg","payload":{"type":"task_started"}}`+"\n"), 0600); err != nil {
