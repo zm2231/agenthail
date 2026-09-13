@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -71,6 +72,24 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	sessions, err = adapter.List(context.Background())
 	if err != nil || len(sessions) != 0 {
 		t.Fatalf("stale PID admitted=%+v err=%v", sessions, err)
+	}
+}
+
+func TestClaudeProcessStartAcceptsUTCRecordForLocalPSOutput(t *testing.T) {
+	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
+	localLocation := time.FixedZone("EDT", -4*60*60)
+	local := instant.In(localLocation)
+	if !sameClaudeProcessStartInLocations(
+		instant.Format(claudeProcessStartLayout), time.UTC,
+		local.Format(claudeProcessStartLayout), localLocation,
+	) {
+		t.Fatal("same process instant in UTC and local time was rejected")
+	}
+	if sameClaudeProcessStartInLocations(
+		instant.Format(claudeProcessStartLayout), time.UTC,
+		local.Add(time.Second).Format(claudeProcessStartLayout), localLocation,
+	) {
+		t.Fatal("different process start instant was accepted")
 	}
 }
 
