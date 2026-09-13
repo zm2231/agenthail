@@ -2,6 +2,17 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
 
+`agenthail list --json` returns discovered sessions together with an `errors`
+object. A failed optional surface is a warning when at least one surface completed
+discovery; the command fails only when every configured surface failed. Codex
+rows reconcile shared database state with the local transcript's latest task
+lifecycle. Claude peer `idle` is trusted only from peers advertising idle
+notifications or from a readable transcript; otherwise the state is unknown.
+
+`agenthail last <target> [count] --timeout 30s` bounds target resolution and
+transcript retrieval. The default is the application's command timeout. A blocked
+transport or filesystem read returns a timeout error instead of waiting forever.
+
 ## Claude background sessions
 
 ```sh

@@ -249,7 +249,7 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		if ts, ok := m["updatedAt"].(float64); ok && ts > 0 {
 			sess.LastActive = time.UnixMilli(int64(ts))
 		}
-		sess.Status = claudeStatus(sess.Status)
+		sess.Status = claudePeerStatus(m)
 		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"))
 		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
 		if sess.Name == "" {
@@ -276,6 +276,20 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	default:
 		return surface.StatusUnknown
 	}
+}
+
+func claudePeerStatus(record map[string]any) surface.SessionStatus {
+	status := claudeStatus(surface.SessionStatus(str(record, "status")))
+	if status != surface.StatusIdle {
+		return status
+	}
+	features, _ := record["peerFeatures"].([]any)
+	for _, feature := range features {
+		if feature == "notify_idle" {
+			return status
+		}
+	}
+	return surface.StatusUnknown
 }
 
 func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, error) {

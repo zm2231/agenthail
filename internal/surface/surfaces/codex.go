@@ -261,6 +261,7 @@ func (c *Codex) List(ctx context.Context) ([]surface.Session, error) {
 	}
 	out := make([]surface.Session, 0, len(byID))
 	for _, session := range byID {
+		c.reconcileLocalStatus(&session)
 		out = append(out, session)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
