@@ -67,8 +67,11 @@ final class SessionNavigationTests: XCTestCase {
         app.buttons["Session details"].tap()
         let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
-        for _ in 0..<5 where !inbox.isHittable { app.swipeUp() }
-        XCTAssertTrue(inbox.isHittable)
+        for _ in 0..<5 {
+            if waitUntilHittable(inbox, timeout: 0.5) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
         inbox.tap()
         app.buttons["inbox-session-1"].tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
@@ -95,5 +98,10 @@ final class SessionNavigationTests: XCTestCase {
         if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() }
         else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.8)).tap() }
         XCTAssertTrue(app.staticTexts["Old release reminder"].exists)
+    }
+
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "hittable == true")
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 }
