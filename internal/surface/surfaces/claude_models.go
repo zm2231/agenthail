@@ -136,9 +136,9 @@ func (c *Claude) Models(ctx context.Context) ([]surface.ModelOption, error) {
 }
 
 func (c *Claude) loadModels(ctx context.Context) ([]surface.ModelOption, error) {
-	binary := os.Getenv("AGENTHAIL_CLAUDE_BIN")
-	if binary == "" {
-		binary = "claude"
+	binary, err := claudeBinary(c.home)
+	if err != nil {
+		return nil, err
 	}
 	catalogCtx, catalogCancel := context.WithTimeout(ctx, claudeModelCatalogDeadline)
 	defer catalogCancel()

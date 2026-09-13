@@ -24,9 +24,9 @@ type claudeBackground struct {
 }
 
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
-	binary := os.Getenv("AGENTHAIL_CLAUDE_BIN")
-	if binary == "" {
-		binary = "claude"
+	binary, err := claudeBinary(c.home)
+	if err != nil {
+		return nil, err
 	}
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
