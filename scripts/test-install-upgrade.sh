@@ -89,6 +89,7 @@ install_once() {
 	HOME="$home" \
 	PATH="$SOURCE_GO_BIN:$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
+	AGENTHAIL_CLAUDE_BIN="$home/custom Claude & tools/claude" \
 	AGENTHAIL_PREBUILT_BINARY="$TMP/agenthail" \
 	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
 	AGENTHAIL_SKIP_MAC_APP_LAUNCH=1 \
@@ -232,6 +233,7 @@ grep -Fq 'refusing to overwrite unmanaged executable' "$TMP/supervised-data-coll
 SUPERVISED_PLIST="$SUPERVISED_HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract ProgramArguments.0 raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/agenthail"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVISED_PLIST")" = "$PYTHON_BIN"
+test "$(plutil -extract EnvironmentVariables.AGENTHAIL_CLAUDE_BIN raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_HOME/custom Claude & tools/claude"
 
 install_from_source >"$TMP/source-install.log"
 strings "$SOURCE_DATA/agenthail" | grep -F 'https://relay.example.test' >/dev/null

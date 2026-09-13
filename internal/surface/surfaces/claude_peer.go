@@ -33,7 +33,9 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	if started := str(record, "procStart"); started != "" {
 		processCtx, cancel := context.WithTimeout(ctx, 500000000)
 		defer cancel()
-		actual, err := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid))).Output()
+		command := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
+		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+		actual, err := command.Output()
 		if err != nil || !sameClaudeProcessStart(str(record, "version"), started, string(actual)) {
 			return ""
 		}
@@ -57,7 +59,7 @@ func sameClaudeProcessStartInLocation(version, recorded, actual string, localLoc
 		recordedLocation = time.UTC
 	}
 	recordedAt, recordedErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(recorded), recordedLocation)
-	actualAt, actualErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(actual), localLocation)
+	actualAt, actualErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(actual), time.UTC)
 	return recordedErr == nil && actualErr == nil && recordedAt.Equal(actualAt)
 }
 

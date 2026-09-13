@@ -21,10 +21,9 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 
 Helpers exit on parent stdin EOF. Registration files are refreshed atomically, restored if removed, and never deliberately replace an existing foreign record. Socket permissions are 0600. Cleanup tests cover parent exit, forced child death and restart, duplicate registration, distinct per-agent PIDs, reply deduplication, read-only rejection, cancellation, and alias refresh. Sender persistence tests cover SQLite v1-to-v2 upgrades, ID merges, queue claiming, relays, dispatch and dashboard output.
 
-Native Claude 2.1.267+ records and `ps` may render the same process start in UTC
-and local time; older records use local time. Agenthail compares those values as
-instants using the record version after validating the PID, socket path, socket
-owner and socket type. A different start instant remains a
+The `ps` probe and Claude 2.1.267+ records use UTC; older native records use
+local time. Agenthail compares them as instants using the record version after
+validating the PID, socket path, socket owner and socket type. A different start instant remains a
 recycled-PID mismatch and the socket is rejected. Without that normalization, a
 valid Claude 2.1.270 peer can be misclassified as a non-UDS session and a message
 can remain queued despite the peer being idle.
