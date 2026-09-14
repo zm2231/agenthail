@@ -88,8 +88,9 @@ final class VoiceOperatorModel: ObservableObject {
             state = next
             connectionError = nil
             if terminal {
+                let hadLocalCall = dialing || audioConnected || attemptID != nil
                 audioConnected = false; dialing = false; attemptID = nil
-                audio.end()
+                if hadLocalCall { audio.end() }
             }
             if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
                 appliedSDP = sdp
@@ -184,7 +185,9 @@ final class VoiceOperatorModel: ObservableObject {
         guard let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               AVAudioSession.InterruptionType(rawValue: rawValue) == .began,
               dialing || audioConnected else { return }
-        error = "iOS interrupted the microphone. The call was ended; call again after the interruption clears."
+        let reason = (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt)
+            .map { " (iOS reason code \($0))" } ?? ""
+        error = "iOS interrupted the microphone\(reason). The call was ended; call again after the interruption clears."
         hangup()
     }
 

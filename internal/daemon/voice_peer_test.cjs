@@ -78,3 +78,15 @@ test('an old peer cannot report connection after hangup', async () => {
   peer.connectionState='connected'; peer.onconnectionstatechange(); peer.channel.onopen();
   assert.equal(f.events.length,before);
 });
+
+test('microphone capture ending is visible only for the current call', async () => {
+  const f=fixture(); await f.api.start();
+  const ended=f.tracks[0].onended;
+  ended();
+  assert.equal(f.events.at(-1).type, 'error');
+  assert.equal(f.events.at(-1).value, 'The microphone capture ended. Call again to resume.');
+  f.api.end();
+  const before=f.events.length;
+  ended();
+  assert.equal(f.events.length,before);
+});

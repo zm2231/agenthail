@@ -143,8 +143,13 @@ stop RPC alone is only a hangup request. An event-connection failure and a local
 microphone shutdown are visible separately from confirmed host closure.
 If the host ends the current attempt while the phone is still connecting, the
 phone displays that failure instead of silently returning to Ready to talk.
-An iOS microphone interruption displays its own reason; an interruption-ended
-notification alone does not hang up an active call. Voice details shows the call
+An iOS microphone interruption includes the system reason code when available;
+an interruption-ended notification alone does not hang up an active call.
+The phone does not activate a separate native audio session around WebKit's
+microphone capture: WebKit owns the call's audio session, and an ended capture
+track is reported as a call error. This avoids the two local audio sessions
+interrupting each other during capture startup. Terminal-state polling cleans
+up local audio once per call, not on every refresh. Voice details shows the call
 ID and last host-close reason/event number for a completed call. These messages
 identify the teardown path, not the cause of an earlier host-side `closed` event.
 Capture those details before attributing an instant disconnect.

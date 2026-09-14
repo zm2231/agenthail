@@ -19,7 +19,10 @@
       stream = capture;
       const connection = new RTCPeerConnection();
       peer = connection;
-      stream.getAudioTracks().forEach(track => connection.addTrack(track, stream));
+      stream.getAudioTracks().forEach(track => {
+        track.onended = () => { if (generation === current) notify("error", "The microphone capture ended. Call again to resume."); };
+        connection.addTrack(track, stream);
+      });
       connection.ontrack = event => { if (generation === current) { audio.srcObject = event.streams[0]; audio.play().catch(error => notify("error", "Audio playback: " + error.message)); } };
       connection.onconnectionstatechange = () => { if (generation === current) notify("connection", connection.connectionState); };
       channel = connection.createDataChannel("oai-events");

@@ -108,6 +108,8 @@ final class VoiceTests: XCTestCase {
         await model.refresh()
         XCTAssertFalse(model.dialing)
         XCTAssertEqual(audio.ends, 1)
+        await model.refresh()
+        XCTAssertEqual(audio.ends, 1)
         XCTAssertEqual(model.error, "The host ended this voice call before audio connected. Check Voice details before trying again.")
         XCTAssertFalse(api.actions.contains { $0.action == "stop" })
     }
@@ -151,6 +153,17 @@ final class VoiceTests: XCTestCase {
         XCTAssertFalse(model.dialing)
         XCTAssertEqual(audio.ends, 1)
         XCTAssertEqual(model.error, "iOS interrupted the microphone. The call was ended; call again after the interruption clears.")
+    }
+
+    @MainActor
+    func testAudioInterruptionIncludesSystemReasonWhenProvided() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
+                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
+                                                       AVAudioSessionInterruptionReasonKey: AVAudioSession.InterruptionReason.default.rawValue]))
+        XCTAssertEqual(model.error, "iOS interrupted the microphone (iOS reason code \(AVAudioSession.InterruptionReason.default.rawValue)). The call was ended; call again after the interruption clears.")
     }
 
     @MainActor

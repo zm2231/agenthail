@@ -45,8 +45,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
         if VoiceEvaluation.enabled {
             let ready = try await webView.evaluateJavaScript("window.agenthailEvaluationReady?.() === true")
             guard ready as? Bool == true else { throw AgenthailAPIError.unavailable("Simulator speech injection did not initialize. Native microphone capture is disabled for this evaluation.") }
-            try AVAudioSession.sharedInstance().setCategory(.playback)
-            try AVAudioSession.sharedInstance().setActive(true)
             try await webView.evaluateJavaScript("void window.agenthailVoice.start()")
             return
         }
@@ -58,8 +56,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
         }
         guard generation == permissionGeneration else { throw CancellationError() }
         guard allowed else { throw AgenthailAPIError.unavailable("Microphone access is off. Enable it for Agenthail in Settings.") }
-        try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try AVAudioSession.sharedInstance().setActive(true)
         try await webView.evaluateJavaScript("void window.agenthailVoice.start()")
     }
 
@@ -70,7 +66,6 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
 #endif
         webView.evaluateJavaScript("window.agenthailVoice?.end()", completionHandler: nil)
         webView.setMicrophoneCaptureState(.none)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func answer(_ sdp: String) async throws {
