@@ -14,8 +14,8 @@ final class TranscriptReadingUITests: XCTestCase {
         capture("Reading at latest work", app)
 
         let context = app.buttons["context-context"]
-        for _ in 0..<8 where !context.isHittable { app.swipeDown() }
-        XCTAssertTrue(context.isHittable)
+        XCTAssertTrue(context.waitForExistence(timeout: 5))
+        for _ in 0..<8 { app.swipeDown() }
         XCTAssertFalse(app.staticTexts["Repository guidance"].isHittable)
         capture("Context and long message collapsed", app)
         context.tap()
