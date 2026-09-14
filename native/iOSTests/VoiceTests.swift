@@ -1,3 +1,4 @@
+import AVFAudio
 import XCTest
 @testable import Agenthail
 
@@ -96,6 +97,63 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testCurrentCallEndingIsVisibleInsteadOfSilentlyReturningToReady() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+        let attempt = try XCTUnwrap(api.actions.first { $0.action == "start" }?.attemptId)
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"\#(attempt)","events":[],"occupied":false,"truncated":false}"#.utf8))
+        await model.refresh()
+        XCTAssertFalse(model.dialing)
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertEqual(model.error, "The host ended this voice call before audio connected. Check Voice details before trying again.")
+        XCTAssertFalse(api.actions.contains { $0.action == "stop" })
+    }
+
+    @MainActor
+    func testOldEndedSnapshotCannotEndNewConnectedCall() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+        let attempt = try XCTUnwrap(api.actions.first { $0.action == "start" }?.attemptId)
+        audio.onMessage?("connection", "connected")
+        audio.onMessage?("channel", "open")
+        XCTAssertTrue(model.audioConnected)
+        XCTAssertFalse(model.canCall)
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"old-call","events":[],"occupied":false,"truncated":false}"#.utf8))
+        await model.refresh()
+        XCTAssertTrue(model.audioConnected)
+        XCTAssertEqual(audio.ends, 0)
+        XCTAssertNotEqual(model.state?.phase, "ended")
+        XCTAssertNil(model.error)
+        XCTAssertFalse(model.canCall)
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"\#(attempt)","events":[],"occupied":false,"truncated":false}"#.utf8))
+        await model.refresh()
+        XCTAssertFalse(model.audioConnected)
+        XCTAssertEqual(model.error, "The host ended this connected voice call. Check Voice details before trying again.")
+    }
+
+    @MainActor
+    func testOnlyBegunAudioInterruptionEndsActiveCallWithVisibleReason() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
+                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]))
+        XCTAssertTrue(model.dialing)
+        XCTAssertEqual(audio.ends, 0)
+        model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
+                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue]))
+        XCTAssertFalse(model.dialing)
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertEqual(model.error, "iOS interrupted the microphone. The call was ended; call again after the interruption clears.")
+    }
+
+    @MainActor
     func testClosingDuringPreparationCannotRestartMicrophone() async throws {
         let api = VoiceFixtureAPI(); api.holdPrepare = true
         let audio = VoiceFixtureAudio()
@@ -163,6 +221,13 @@ final class VoiceTests: XCTestCase {
         XCTAssertEqual(state.transcripts.first?.text, "Ask the builder to check the tests.")
         XCTAssertTrue(state.hasCall)
         XCTAssertFalse(state.occupied)
+    }
+
+    func testVoiceCloseReasonRemainsAvailableForConnectionDetails() throws {
+        let state = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"call-a","events":[{"sequence":91,"method":"thread/realtime/closed","params":{"reason":"requested"}}],"occupied":false,"truncated":false}"#.utf8))
+        XCTAssertEqual(state.attemptId, "call-a")
+        XCTAssertEqual(state.events.last?.sequence, 91)
+        XCTAssertEqual(state.events.last?.params.reason, "requested")
     }
 }
 

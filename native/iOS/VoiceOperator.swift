@@ -26,7 +26,7 @@ final class VoiceOperatorModel: ObservableObject {
     private var connectedReported = false
     private var startSubmitted = false
     private var closed = false
-    var canCall: Bool { ready && !working && !dialing && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    var canCall: Bool { ready && !working && !dialing && !audioConnected && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
 
     init(preview: Bool = false, api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
         isPreview = preview
@@ -74,11 +74,22 @@ final class VoiceOperatorModel: ObservableObject {
         do {
             let next = try await api.state()
             guard !closed, current == generation else { return }
+            let terminal = next.phase == "ended" || next.phase == "blocked"
+            if terminal, dialing || audioConnected {
+                guard let attemptID, next.attemptId == attemptID else { return }
+                if error == nil {
+                    let fallback: String
+                    if next.phase == "blocked" { fallback = "The host blocked this voice call. Check Voice details before trying again." }
+                    else if dialing { fallback = "The host ended this voice call before audio connected. Check Voice details before trying again." }
+                    else { fallback = "The host ended this connected voice call. Check Voice details before trying again." }
+                    error = next.message.flatMap { $0.isEmpty ? nil : $0 } ?? fallback
+                }
+            }
             state = next
             connectionError = nil
-            if next.phase == "ended" || next.phase == "blocked",
-               !dialing || (attemptID != nil && next.attemptId == attemptID) {
-                audio.end(); audioConnected = false; dialing = false; attemptID = nil
+            if terminal {
+                audioConnected = false; dialing = false; attemptID = nil
+                audio.end()
             }
             if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
                 appliedSDP = sdp
@@ -169,11 +180,19 @@ final class VoiceOperatorModel: ObservableObject {
 
     func toggleMute() { muted.toggle(); audio.mute(muted) }
 
+    func audioInterrupted(_ notification: Notification) {
+        guard let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              AVAudioSession.InterruptionType(rawValue: rawValue) == .began,
+              dialing || audioConnected else { return }
+        error = "iOS interrupted the microphone. The call was ended; call again after the interruption clears."
+        hangup()
+    }
+
     func hangup() {
         generation += 1
         let current = generation
-        dialing = false
-        audio.end(); audioConnected = false; channelOpen = false
+        dialing = false; audioConnected = false; channelOpen = false
+        audio.end()
         let localAttempt = attemptID
         let id = localAttempt ?? state?.attemptId
         let shouldStopHost = startSubmitted || (localAttempt == nil && state?.hasCall == true)
@@ -321,7 +340,7 @@ struct AgenthailVoiceOperatorSheet: View {
             .task { model.open() }
             .onDisappear { model.close() }
             .onChange(of: scenePhase) { _, phase in if phase == .background { model.hangup() } }
-            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in model.hangup() }
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { model.audioInterrupted($0) }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
             }
@@ -390,6 +409,15 @@ struct AgenthailVoiceOperatorSheet: View {
                     LabeledContent("Audio", value: connectionTitle)
                     Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
                     Text("Leaving the app ends audio. Return and call again to continue with the same orchestrator.")
+                    if let state = model.state, let id = state.attemptId {
+                        LabeledContent("Call ID") { Text(id).font(.caption.monospaced()).textSelection(.enabled) }
+                    }
+                    if model.state?.phase == "ended", let closed = model.state?.events.last(where: { $0.method == "thread/realtime/closed" }) {
+                        LabeledContent("Host close") {
+                            Text("\(closed.params.reason ?? "unspecified") · event #\(closed.sequence)")
+                                .font(.caption.monospaced()).textSelection(.enabled)
+                        }
+                    }
                     if let receipt = model.state?.speechReceipt {
                         LabeledContent("Answer submission", value: receipt.hasPrefix("accepted:") ? "Accepted by Codex" : "Unconfirmed")
                         Text("Submission is not proof of playback. The conversation shows what Codex actually said.").font(.caption)

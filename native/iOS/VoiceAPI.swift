@@ -48,6 +48,7 @@ struct VoiceEvent: Decodable {
         let delta: String?
         let role: String?
         let text: String?
+        let reason: String?
     }
 }
 

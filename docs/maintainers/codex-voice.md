@@ -141,6 +141,13 @@ ends. A lost renderer event window is marked truncated and cannot silently attac
 an SDP from an untrusted window. Native `closed` is the end receipt; a successful
 stop RPC alone is only a hangup request. An event-connection failure and a local
 microphone shutdown are visible separately from confirmed host closure.
+If the host ends the current attempt while the phone is still connecting, the
+phone displays that failure instead of silently returning to Ready to talk.
+An iOS microphone interruption displays its own reason; an interruption-ended
+notification alone does not hang up an active call. Voice details shows the call
+ID and last host-close reason/event number for a completed call. These messages
+identify the teardown path, not the cause of an earlier host-side `closed` event.
+Capture those details before attributing an instant disconnect.
 
 State lives beside `registry.db` at `voice/operator.json`, with a private operator
 workspace at `voice/operator/`. The state file is atomically replaced with mode
