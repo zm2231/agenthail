@@ -2,6 +2,17 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
 
+`agenthail list --json` returns discovered sessions together with an `errors`
+object. A failed optional surface is a warning when at least one surface completed
+discovery; the command fails only when every configured surface failed. Codex
+rows reconcile shared database state with the local transcript's latest task
+lifecycle. Claude peer `idle` is trusted only from peers advertising idle
+notifications or from a readable transcript; otherwise the state is unknown.
+
+`agenthail last <target> [count] --timeout 30s` bounds target resolution and
+transcript retrieval. The default is the application's command timeout. A blocked
+transport or filesystem read returns a timeout error instead of waiting forever.
+
 ## Claude background sessions
 
 ```sh
@@ -18,7 +29,7 @@ Model discovery and background lifecycle commands share executable selection: ex
 
 Use `@alias` or `claude:<session-id>` as a target. The `claude/name` transcript heading is a display label, not a routable address. Read the session's `id` from `agenthail list --json`; do not construct an ID from a truncated table label. Duration arguments require units, such as `--timeout 8s`.
 
-For native messaging, Agenthail resolves the session first, then reads its PID registration and selects `messagingSocketPath`. It verifies session identity, a live PID, the expected `/tmp/cc-socks/<pid>.sock` path, socket ownership, and the process-start identity. Claude records that identity using `LC_ALL=C TZ=UTC`; Agenthail's verifier and peer registrations use the same format. A stale process identity is rejected. Relays store canonical session IDs and use the shared queue and adapter delivery path; they do not retain a socket path across process changes.
+For native messaging, Agenthail resolves the session first, then reads its PID registration and selects `messagingSocketPath`. It verifies session identity, a live PID, the expected `/tmp/cc-socks/<pid>.sock` path, socket ownership, and the process-start identity. Agenthail's verifier and peer registrations use `LC_ALL=C TZ=UTC`; native Claude records from 2.1.267 onward use UTC, while older records use local time. A stale process identity is rejected. Relays store canonical session IDs and use the shared queue and adapter delivery path; they do not retain a socket path across process changes.
 
 Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control bridge can use its supported control operations; steering is still unavailable when messaging uses the native socket transport. Background status, logs, stop and resume use the Claude CLI lifecycle interface. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message.
 

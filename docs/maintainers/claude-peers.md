@@ -11,7 +11,7 @@ agenthail send claude:<session-id> "Here are the findings" --from @builder --jso
 agenthail history @builder 25
 ```
 
-`--from` resolves aliases and surface-qualified IDs. Otherwise identity comes from `AGENTHAIL_SESSION_ID`, `CODEX_THREAD_ID`, then `CLAUDE_SESSION_ID`. With no identity, the operator peer stores replies in history without dispatching a model. Explicit sender identity survives durable queue retries and relay routing. The dashboard send API accepts `sourceSessionId`; normal dashboard sends use the operator peer. See `internal/cli/source.go`, `internal/delivery/delivery.go`, `internal/registry/registry.go`, `internal/daemon/outbox.go`, and `internal/daemon/dashboard.go`.
+`--from` resolves aliases and surface-qualified IDs. Otherwise identity comes from `AGENTHAIL_SESSION_ID`, `CODEX_THREAD_ID`, then `CLAUDE_SESSION_ID`. A sender already present in the registry is identity evidence; resolving it does not open or take ownership of that sender's writable transport. With no identity, the operator peer stores replies in history without dispatching a model. Explicit sender identity survives durable queue retries and relay routing. The dashboard send API accepts `sourceSessionId`; normal dashboard sends use the operator peer. See `internal/cli/source.go`, `internal/delivery/delivery.go`, `internal/registry/registry.go`, `internal/daemon/outbox.go`, and `internal/daemon/dashboard.go`.
 
 Claude sees names like `agenthail/codex: builder`. These are external peers, not native Claude agents or permission authorities. The UUID is derived from the canonical surface and session ID. Alias changes update the published name. The wrapper carries the reply socket and source UUID, with no fabricated `from-mode`. Native peer text is preserved as peer provenance when queued into the original agent. Read-only and offline destinations are rejected; registration does not make them writable.
 
@@ -20,6 +20,13 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 ## Lifecycle and verification
 
 Helpers exit on parent stdin EOF. Registration files are refreshed atomically, restored if removed, and never deliberately replace an existing foreign record. Socket permissions are 0600. Cleanup tests cover parent exit, forced child death and restart, duplicate registration, distinct per-agent PIDs, reply deduplication, read-only rejection, cancellation, and alias refresh. Sender persistence tests cover SQLite v1-to-v2 upgrades, ID merges, queue claiming, relays, dispatch and dashboard output.
+
+The `ps` probe and Claude 2.1.267+ records use UTC; older native records use
+local time. Agenthail compares them as instants using the record version after
+validating the PID, socket path, socket owner and socket type. A different start instant remains a
+recycled-PID mismatch and the socket is rejected. Without that normalization, a
+valid Claude 2.1.270 peer can be misclassified as a non-UDS session and a message
+can remain queued despite the peer being idle.
 
 Validation commands:
 

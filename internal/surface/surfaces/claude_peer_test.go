@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -38,7 +39,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := map[string]any{"pid": os.Getpid(), "sessionId": "local-id", "name": "native", "cwd": "/fixture", "status": "idle", "procStart": string(start), "messagingSocketPath": socket}
+	record := map[string]any{"pid": os.Getpid(), "sessionId": "local-id", "name": "native", "cwd": "/fixture", "status": "idle", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": socket}
 	write := func(record map[string]any) {
 		t.Helper()
 		data, _ := json.Marshal(record)
@@ -74,6 +75,45 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	sessions, err = adapter.List(context.Background())
 	if err != nil || len(sessions) != 0 {
 		t.Fatalf("stale PID admitted=%+v err=%v", sessions, err)
+	}
+}
+
+func TestClaudeProcessStartAcceptsUTCAndLegacyLocalRecords(t *testing.T) {
+	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
+	localLocation := time.FixedZone("EDT", -4*60*60)
+	local := instant.In(localLocation)
+	if !sameClaudeProcessStartInLocation(
+		"2.1.270", instant.Format(claudeProcessStartLayout),
+		instant.Format(claudeProcessStartLayout), localLocation,
+	) {
+		t.Fatal("UTC record was rejected")
+	}
+	if !sameClaudeProcessStartInLocation(
+		"2.1.251", local.Format(claudeProcessStartLayout),
+		instant.Format(claudeProcessStartLayout), localLocation,
+	) {
+		t.Fatal("legacy local record was rejected")
+	}
+	if sameClaudeProcessStartInLocation(
+		"2.1.270", instant.Format(claudeProcessStartLayout),
+		instant.Add(time.Second).Format(claudeProcessStartLayout), localLocation,
+	) {
+		t.Fatal("different process start instant was accepted")
+	}
+}
+
+func TestClaudeProcessStartRejectsMatchingTextFromDifferentInstants(t *testing.T) {
+	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
+	localLocation := time.FixedZone("EDT", -4*60*60)
+	text := instant.Format(claudeProcessStartLayout)
+	if sameClaudeProcessStartInLocation("2.1.251", text, text, localLocation) {
+		t.Fatal("matching wall-clock text admitted a recycled PID with a different start instant")
+	}
+	if !sameClaudeProcessStartInLocation("2.1.270", text, text, localLocation) {
+		t.Fatal("UTC process start was rejected")
+	}
+	if sameClaudeProcessStartInLocation("unrecognized", text, text, localLocation) {
+		t.Fatal("record with unknown timestamp format was admitted")
 	}
 }
 

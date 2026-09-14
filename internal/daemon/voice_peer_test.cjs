@@ -3,13 +3,13 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 
-function fixture(capture) {
+function fixture(capture, iceGatheringState = 'complete') {
   const events = [], peers = [], tracks = [];
   const audio = {srcObject: null, play: async () => {}};
   const track = {enabled:true, stopped:false, stop() { this.stopped = true; }};
   tracks.push(track);
   class Peer {
-    constructor() { this.iceGatheringState = 'complete'; peers.push(this); }
+    constructor() { this.iceGatheringState = iceGatheringState; peers.push(this); }
     addTrack(track, stream) { this.track = track; this.stream = stream; }
     createDataChannel(name) { this.channel = {name, close() { this.closed = true; }}; return this.channel; }
     createOffer() { return Promise.resolve({type:'offer', sdp:'v=0 fixture-offer'}); }
@@ -43,6 +43,13 @@ test('actual peer program negotiates audio and applies the Codex answer', async 
   assert.equal(f.peers[0].closed,true);
   assert.equal(f.peers[0].channel.closed,true);
   assert.equal(f.audio.srcObject,null);
+});
+
+test('offer is delivered without waiting for ICE gathering to complete', async () => {
+  const f = fixture(undefined, 'gathering');
+  await f.api.start();
+  assert.deepEqual(f.events.map(x => x.type), ['ready', 'offer']);
+  assert.equal(f.events.at(-1).value, 'v=0 fixture-offer');
 });
 
 test('hangup during microphone permission cannot revive the call', async () => {

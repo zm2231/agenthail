@@ -26,14 +26,6 @@
       channel.onopen = () => { if (generation === current) notify("channel", "open"); };
       channel.onerror = () => { if (generation === current) notify("error", "Codex voice data channel failed"); };
       await connection.setLocalDescription(await connection.createOffer());
-      if (connection.iceGatheringState !== "complete") {
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => { connection.removeEventListener("icegatheringstatechange", changed); reject(new Error("Audio network setup timed out")); }, 10000);
-          const changed = () => { if (connection.iceGatheringState === "complete") { clearTimeout(timeout); connection.removeEventListener("icegatheringstatechange", changed); resolve(); } };
-          connection.addEventListener("icegatheringstatechange", changed);
-          changed();
-        });
-      }
       if (generation === current) notify("offer", connection.localDescription.sdp);
     } catch (error) {
       if (generation === current) { end(); notify("error", error.message); }

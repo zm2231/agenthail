@@ -24,6 +24,7 @@ final class VoiceOperatorModel: ObservableObject {
     private var appliedSDP: String?
     private var channelOpen = false
     private var connectedReported = false
+    private var startSubmitted = false
     private var closed = false
     var canCall: Bool { ready && !working && !dialing && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
 
@@ -108,7 +109,7 @@ final class VoiceOperatorModel: ObservableObject {
             guard !closed, generation == current else { return }
             state = next
             attemptID = UUID().uuidString
-            appliedSDP = nil; channelOpen = false; connectedReported = false; muted = false
+            appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
             try await audio.start()
         } catch {
             guard !closed, generation == current else { return }
@@ -127,6 +128,7 @@ final class VoiceOperatorModel: ObservableObject {
             guard let api, let id = attemptID else { return }
             let current = generation
             Task {
+                startSubmitted = true
                 do {
                     let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value))
                     if closed || generation != current {
@@ -172,14 +174,22 @@ final class VoiceOperatorModel: ObservableObject {
         let current = generation
         dialing = false
         audio.end(); audioConnected = false; channelOpen = false
-        guard let api, let id = attemptID ?? state?.attemptId, state?.occupied != true else { return }
+        let localAttempt = attemptID
+        let id = localAttempt ?? state?.attemptId
+        let shouldStopHost = startSubmitted || (localAttempt == nil && state?.hasCall == true)
         attemptID = nil
+        startSubmitted = false
+        guard shouldStopHost, let api, let id, state?.occupied != true else { return }
         Task {
             do {
                 let next = try await api.action(VoiceAction(action: "stop", attemptId: id))
                 if !closed, current == generation { state = next }
             }
-            catch { if !closed, current == generation { self.error = "Audio is off locally. Host hangup is unconfirmed: \(error.localizedDescription)" } }
+            catch {
+                if !closed, current == generation, self.error == nil {
+                    self.error = "Audio is off locally. Host hangup is unconfirmed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -414,11 +424,14 @@ struct VoiceOperatorEntry: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .overlay(alignment: .bottom) {
                 if model.isPaired {
                     Button("Talk to orchestrator", systemImage: "waveform") { presented = true }
-                        .font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, minHeight: 44)
-                        .background(.bar)
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .accessibilityIdentifier("voice-entry")
+                        .padding(.bottom, 56)
                 }
             }
             .sheet(isPresented: $presented) {

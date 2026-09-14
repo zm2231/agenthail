@@ -3,6 +3,30 @@ import XCTest
 
 final class VoiceTests: XCTestCase {
     @MainActor
+    func testPreOfferAudioFailurePreservesCauseAndDoesNotStopUnknownHostCall() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("error", "Microphone route unavailable")
+        await Task.yield()
+        XCTAssertEqual(model.error, "Microphone route unavailable")
+        XCTAssertFalse(api.actions.contains { $0.action == "stop" })
+    }
+
+    @MainActor
+    func testCleanupFailureDoesNotOverwriteAudioFailure() async {
+        let api = VoiceFixtureAPI(); api.stopError = AgenthailAPIError.request(409, "call identity does not match")
+        let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+        audio.onMessage?("error", "Codex voice data channel failed")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "stop" }) { await Task.yield() }
+        XCTAssertEqual(model.error, "Codex voice data channel failed")
+    }
+
+    @MainActor
     func testUnavailableAudioAndDisconnectedHostBlockCalls() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio)
@@ -150,11 +174,13 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
     var pending: CheckedContinuation<VoiceState, Never>?
     var actions: [VoiceAction] = []
     var snapshot: VoiceState?
+    var stopError: Error?
     private var ready: VoiceState { try! JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","events":[],"occupied":false,"truncated":false}"#.utf8)) }
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
     func state() async throws -> VoiceState { snapshot ?? ready }
     func action(_ action: VoiceAction) async throws -> VoiceState {
         actions.append(action)
+        if action.action == "stop", let stopError { throw stopError }
         if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "text" && holdText) {
             return await withCheckedContinuation { pending = $0 }
         }

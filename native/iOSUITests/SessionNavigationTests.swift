@@ -2,6 +2,20 @@ import XCTest
 
 @MainActor
 final class SessionNavigationTests: XCTestCase {
+    func testVoiceEntryPreservesTabNavigation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
+        app.launch()
+        XCTAssertTrue(app.buttons["voice-entry"].waitForExistence(timeout: 10))
+        for tab in ["Sessions", "Inbox", "Settings"] {
+            XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")
+        }
+        app.tabBars.buttons["Inbox"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Inbox"].isSelected)
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Settings"].isSelected)
+    }
+
     func testEmptyActivityStillShowsSavedMessages() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-rich", "--preview-history-only"]
@@ -53,8 +67,11 @@ final class SessionNavigationTests: XCTestCase {
         app.buttons["Session details"].tap()
         let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
-        for _ in 0..<5 where !inbox.isHittable { app.swipeUp() }
-        XCTAssertTrue(inbox.isHittable)
+        for _ in 0..<5 {
+            if waitUntilHittable(inbox, timeout: 0.5) { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
         inbox.tap()
         app.buttons["inbox-session-1"].tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
@@ -81,5 +98,10 @@ final class SessionNavigationTests: XCTestCase {
         if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() }
         else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.8)).tap() }
         XCTAssertTrue(app.staticTexts["Old release reminder"].exists)
+    }
+
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "hittable == true")
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 }

@@ -32,6 +32,7 @@ type cliSurface struct {
 	sendResult    *surface.SendResult
 	reply         *surface.ReplyResult
 	sendWait      bool
+	tailBlock     <-chan struct{}
 	sent          []string
 	tail          []surface.Exchange
 	streamEvents  []surface.StreamEvent
@@ -212,7 +213,11 @@ func (f *cliSurface) Reply(context.Context, *surface.Session, int) (*surface.Rep
 	}
 	return &surface.ReplyResult{Done: true}, nil
 }
-func (f *cliSurface) Tail(context.Context, *surface.Session, int) ([]surface.Exchange, error) {
+
+func (f *cliSurface) Tail(_ context.Context, _ *surface.Session, _ int) ([]surface.Exchange, error) {
+	if f.tailBlock != nil {
+		<-f.tailBlock
+	}
 	return f.tail, nil
 }
 func (f *cliSurface) Stream(_ context.Context, _ *surface.Session, _ string, callback func(surface.StreamEvent), _ time.Duration) error {
@@ -735,6 +740,25 @@ func TestListJSONUsesDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing.T) {
+	working := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "live", Surface: surface.KindCodex}}}
+	optionalFailure := &cliSurface{kind: surface.KindNotion, listErr: errors.New("choose a Notion space")}
+	app := App{Surfaces: []SurfaceEntry{{Name: "codex", Surface: working}, {Name: "notion", Surface: optionalFailure}}}
+	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--json"}) })
+	if err != nil || !strings.Contains(output, `"id":"live"`) || !strings.Contains(output, `"notion":"choose a Notion space"`) {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+}
+
+func TestListFailsWhenEverySurfaceDiscoveryFails(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindNotion, listErr: errors.New("unavailable")}
+	app := App{Surfaces: []SurfaceEntry{{Name: "notion", Surface: fake}}}
+	_, err := captureStdout(t, func() error { return app.cmdList([]string{"--json"}) })
+	if err == nil || !strings.Contains(err.Error(), "1 surface(s) failed discovery") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestListAllIncludesSavedSessionsWithoutSurfaceDiscovery(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, registry := cliFixture(t, fake)
@@ -780,6 +804,19 @@ func TestLastEmptyJSONIsOneDocument(t *testing.T) {
 	var document map[string]any
 	if json.Unmarshal([]byte(output), &document) != nil || !strings.Contains(output, `"exchanges":[]`) {
 		t.Fatalf("output=%q", output)
+	}
+}
+
+func TestLastTimeoutBoundsTail(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindNotion}
+	blocked := make(chan struct{})
+	defer close(blocked)
+	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"s": session}, tailBlock: blocked}
+	app, _ := cliFixture(t, fake)
+	started := time.Now()
+	err := app.cmdLast([]string{"notion:s", "--timeout", "50ms"})
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
+		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/peerbridge"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -35,11 +36,31 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 		command := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
 		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
 		actual, err := command.Output()
-		if err != nil || strings.TrimSpace(string(actual)) != strings.TrimSpace(started) {
+		if err != nil || !sameClaudeProcessStart(str(record, "version"), started, string(actual)) {
 			return ""
 		}
 	}
 	return path
+}
+
+const claudeProcessStartLayout = "Mon Jan 2 15:04:05 2006"
+
+func sameClaudeProcessStart(version, recorded, actual string) bool {
+	return sameClaudeProcessStartInLocation(version, recorded, actual, time.Local)
+}
+
+func sameClaudeProcessStartInLocation(version, recorded, actual string, localLocation *time.Location) bool {
+	var major, minor, patch int
+	if n, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch); err != nil || n != 3 {
+		return false
+	}
+	recordedLocation := localLocation
+	if major > 2 || major == 2 && (minor > 1 || minor == 1 && patch >= 267) {
+		recordedLocation = time.UTC
+	}
+	recordedAt, recordedErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(recorded), recordedLocation)
+	actualAt, actualErr := time.ParseInLocation(claudeProcessStartLayout, strings.TrimSpace(actual), time.UTC)
+	return recordedErr == nil && actualErr == nil && recordedAt.Equal(actualAt)
 }
 
 func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
