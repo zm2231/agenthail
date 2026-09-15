@@ -85,6 +85,10 @@ struct CompactActivityGroup: View {
                             ToolActivityRow(call: call, results: Array(invocation.items.dropFirst()))
                         } else { ForEach(invocation.items) { IOSTimelineRow(item: $0) } }
                     }
+                    Button("Collapse activity", systemImage: "chevron.up") { expanded = false }
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .accessibilityIdentifier("collapse-activity-" + group.id)
                 }
             }
         } else {
@@ -145,6 +149,10 @@ struct ToolActivityRow: View {
                     if let id = call.callId {
                         Text("Call \(id)").font(.caption2.monospaced()).foregroundStyle(.tertiary).textSelection(.enabled)
                     }
+                    Button("Collapse tool", systemImage: "chevron.up") { expanded = false }
+                        .font(.footnote.weight(.medium))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .accessibilityIdentifier("collapse-tool-" + call.id)
                 }.padding([.horizontal, .bottom], 12)
             }
         }

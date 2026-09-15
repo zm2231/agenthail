@@ -466,23 +466,19 @@ struct AgenthailVoiceOperatorSheet: View {
     }
 }
 
-struct VoiceOperatorEntry: ViewModifier {
+struct VoiceOperatorEntry: View {
     @ObservedObject var model: AgenthailIOSModel
     @State private var presented = false
     @State private var operatorID: String?
 
-    func body(content: Content) -> some View {
-        content
-            .overlay(alignment: .bottom) {
-                if model.isPaired {
-                    Button("Talk to orchestrator", systemImage: "waveform") { presented = true }
-                        .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .accessibilityIdentifier("voice-entry")
-                        .padding(.bottom, 56)
-                }
-            }
+    var body: some View {
+        Button("Talk to orchestrator", systemImage: "waveform") { presented = true }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 56)
+            .accessibilityIdentifier("voice-entry")
             .sheet(isPresented: $presented) {
                 AgenthailVoiceOperatorSheet { id in operatorID = id }
                     .sheet(isPresented: Binding(get: { operatorID != nil }, set: { if !$0 { operatorID = nil } })) {

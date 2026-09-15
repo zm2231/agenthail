@@ -36,7 +36,7 @@ struct SessionPreview: View {
     }
     var body: some View {
         if ProcessInfo.processInfo.arguments.contains("--preview-app") {
-            MainTabs(model: model).modifier(VoiceOperatorEntry(model: model))
+            MainTabs(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {

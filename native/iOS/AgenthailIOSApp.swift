@@ -57,7 +57,6 @@ struct AgenthailIOSApp: App {
     }
     private var connectedRoot: some View {
         AgenthailIOSRoot(model: model)
-            .modifier(VoiceOperatorEntry(model: model))
             .onOpenURL { model.handlePairingURL($0) }
             .onReceive(NotificationCenter.default.publisher(for: .agenthailPushToken)) { notification in
                 if let token = notification.object as? String { model.registerPushToken(token) }
