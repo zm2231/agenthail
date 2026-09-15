@@ -56,9 +56,9 @@ iPhone microphone ⇄ Codex realtime voice
                    selected agent
                          │ receipt and reply
                          └──────► operator final answer
-                                         │ correlated turn / item
+                                         │ native delegation route
                                          ▼
-                              native appendSpeech → spoken response
+                                   spoken response
 
 iPhone call controls ── authenticated Agenthail API ── Desktop app-server
 iPhone conversation ◄─ live voice events + normal recorded session timeline
@@ -74,12 +74,11 @@ request and asks when the target or authority is unclear.
 The host supplies its own executable's absolute path in the operator instructions.
 This keeps CLI examples on the same build as the voice host even when the shell's
 `PATH` contains an older installation. Native incoming delegation runs the regular
-Codex agent. Response forwarding is explicitly client-managed: the host observes
-an operator turn start and its final-answer item, matches the turn ID, and submits
-that exact completed answer to `thread/realtime/appendSpeech`. This remains Codex's
-native voice, not a separate TTS service. Automatic response forwarding is disabled.
-An accepted speech submission is not proof that it was heard; live voice transcript
-and received audio are separate evidence. Unknown submissions are not replayed.
+Codex agent. Codex v3 routes that delegation's response back to the realtime
+conversation: analysis and commentary remain context while final output is
+speakable. This preserves the delegation target instead of reinjecting a completed
+answer as unrelated session speech. It remains Codex's native voice, not a separate
+TTS service.
 
 Agenthail's delivery semantics still apply. Accepted, queued, delivered, completed,
 failed, and unknown are different outcomes. Other agents' output is data, not
@@ -90,7 +89,7 @@ existing transport; the voice layer does not emulate them.
 
 | Surface | Behavior |
 | --- | --- |
-| Conversation | Native Codex realtime audio delegates to the backing agent; correlated completed answers return through native `appendSpeech`. No dictation-only replacement. |
+| Conversation | Native Codex realtime audio delegates to the backing agent; Codex v3 routes the delegated response back with final output speakable. No dictation-only replacement. |
 | Agent operations | The complete packaged `agenthail-operations` skill is embedded in the host binary and passed as literal developer instructions when creating the operator. Availability still depends on configured runtimes and their capabilities. |
 | Identity | One saved operator per Agenthail registry. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. |
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
@@ -120,7 +119,7 @@ The peer submits the offer after `setLocalDescription`; ICE gathering may contin
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
 The native start request uses realtime `v3`, audio output, startup context, and
-native incoming Codex delegation and explicit response return. A matching native `started` notification binds the call;
+native incoming Codex delegation with BEM-tag response routing. A matching native `started` notification binds the call;
 its SDP answer permits negotiation. Only the phone's connected peer/data-channel
 acknowledgment advances it to `connected`.
 If local setup fails before `start` is submitted, the phone tears down only its
@@ -157,8 +156,8 @@ Capture those details before attributing an instant disconnect.
 State lives beside `registry.db` at `voice/operator.json`, with a private operator
 workspace at `voice/operator/`. The state file is atomically replaced with mode
 0600. It retains the operator ID, skill digest, call attempt, hashed device owner,
-bounded recent events, text deduplication IDs, and the latest speech submission
-receipt. SDP is never persisted. A host
+bounded recent events, text deduplication IDs, and the latest text receipt. SDP is
+never persisted. A host
 restart cannot restore a physical media connection; an active saved call becomes
 unknown and requires hangup. Corrupt state blocks creation rather than discarding
 identity. Do not delete it as a generic retry strategy.
@@ -171,9 +170,9 @@ automatic migration.
 
 Recent voice events are limited to 100 records and 16 KiB per record. Normal
 session activity uses the existing bounded, paginated timeline. Large or missing
-records are labeled; neither channel is an unlimited transcript export. Spoken
-returns are limited to 16 KiB per answer and 128 answers per call. Oversized answers
-remain in the normal timeline with a visible limit message.
+records are labeled; neither channel is an unlimited transcript export. Codex owns
+the size and cadence of native spoken responses; Agenthail does not duplicate or
+truncate them through a second speech-submission path.
 
 ## Implementation and parent UI hook
 
@@ -326,14 +325,14 @@ operator action. Simulator/sample screenshots are not live voice receipts.
 
 ## References and protocol provenance
 
-The implementation was checked against Codex Desktop's bundled app-server
-0.153.4 experimental schema and the native realtime implementation at
-[Codex commit 3d2ee51](https://github.com/openai/codex/tree/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs).
-Relevant contracts are `thread/start`, `thread/realtime/start`, `appendText`, `appendSpeech`,
+The implementation was checked against Codex Desktop's bundled CLI/app-server
+0.154.0-alpha.6.2 schema and the native realtime implementation at
+[Codex commit 364b511](https://github.com/openai/codex/tree/364b511dcd60bcde3849bde4e579a5c7cad1e96a/codex-rs).
+Relevant contracts are `thread/start`, `thread/realtime/start`, `appendText`,
 `stop`, and their asynchronous notifications. Schema availability is not evidence
 that a particular account can connect; use a real call to verify it.
 
-[pi-gippity-control](https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/1892cc8f36303a0fd92a3d267fd6658e07fdf418/packages/pi-gippity-control)
+[pi-gippity-control](https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/4593f066d447925eae8e3106435f117236690f9e/packages/pi-gippity-control)
 was inspected as a concrete reference for realtime conversation plus tool-capable
 agent delegation and cancellation. Its direct call/auth transport was not copied:
 Agenthail uses the app-server that already owns its Codex Desktop thread. This
@@ -344,5 +343,5 @@ voice-agent frameworks.
 | --- | --- |
 | `conversation/session.ts`: validated `delegation.created` input | Native Codex app-server owns incoming delegation into the same persistent operator. The phone does not transcribe or parse commands. |
 | `register.ts`: `pi.sendUserMessage`, with steer when busy | Codex operator uses the embedded Operations skill and existing authenticated Agenthail transport to resolve and message the intended session. |
-| `controller.ts`: `finishAgentMessage` → `agentResult`; `handoff.ts`: speakable result return | Host observes `turn/started` and the same turn's final `item/completed`, then calls native `appendSpeech` once. No reasoning or tool payload is spoken as a final answer. |
+| `controller.ts`: `finishAgentMessage` → `agentResult`; `handoff.ts`: target-scoped speakable result return | Codex v3 automatic delegation routing keeps commentary as context and returns final output as speakable, without a second session-scoped append. |
 | LAN controller retains the host audio call across device moves | Not implemented here: the phone owns its foreground media peer. Backgrounding ends audio; the operator and work persist. Reopening explicitly starts a new call on the same operator. |

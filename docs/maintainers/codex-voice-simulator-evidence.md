@@ -63,7 +63,8 @@ fixtures. The public record omits unrelated task output and authentication data.
 7. **06:27:52 — operator completion:** turn
    `01a0944b-6423-76b1-8391-3f8c36ef6ba2`, final item
    `msg_02478eba00193a03016aa4f0e5c4a087d1a52433583bfe27cd`.
-   Native speech submission was accepted for this item.
+   The then-current manual speech-return request was accepted for this item. The
+   current implementation uses Codex's target-scoped native delegation routing.
 8. **Real returned speech:** “`@voice-smoke-test` reports the focused Go test
    passed: daemon voice endpoint auth and revocation checks are green. It also
    notes a real paired iPhone test is still required for mic permission, web-peer

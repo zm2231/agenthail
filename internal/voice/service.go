@@ -60,18 +60,17 @@ type Provider interface {
 }
 
 type State struct {
-	Protocol      int              `json:"protocol"`
-	Session       *surface.Session `json:"session,omitempty"`
-	Phase         string           `json:"phase"`
-	AttemptID     string           `json:"attemptId,omitempty"`
-	SkillDigest   string           `json:"skillDigest,omitempty"`
-	Message       string           `json:"message,omitempty"`
-	SDP           string           `json:"sdp,omitempty"`
-	Events        []Event          `json:"events"`
-	Truncated     bool             `json:"truncated"`
-	Occupied      bool             `json:"occupied"`
-	TextReceipt   string           `json:"textReceipt,omitempty"`
-	SpeechReceipt string           `json:"speechReceipt,omitempty"`
+	Protocol    int              `json:"protocol"`
+	Session     *surface.Session `json:"session,omitempty"`
+	Phase       string           `json:"phase"`
+	AttemptID   string           `json:"attemptId,omitempty"`
+	SkillDigest string           `json:"skillDigest,omitempty"`
+	Message     string           `json:"message,omitempty"`
+	SDP         string           `json:"sdp,omitempty"`
+	Events      []Event          `json:"events"`
+	Truncated   bool             `json:"truncated"`
+	Occupied    bool             `json:"occupied"`
+	TextReceipt string           `json:"textReceipt,omitempty"`
 }
 
 type Action struct {
@@ -101,8 +100,6 @@ type Service struct {
 	boundAttempt string
 	eventGap     bool
 	commandPath  string
-	spokenTurn   string
-	spokenItems  map[string]bool
 }
 
 func New(path string, provider Provider, register func(surface.Session) error, commandPath string) *Service {
@@ -279,7 +276,6 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		}
 		s.cursor = cursor
 		s.boundAttempt, s.eventGap = "", false
-		s.spokenTurn, s.spokenItems = "", make(map[string]bool)
 		s.state.Owner = owner
 		s.state.Messages = nil
 		v.AttemptID, v.Phase, v.SDP, v.Message = a.AttemptID, "starting", "", ""
@@ -375,7 +371,7 @@ func StartParams(threadID, attemptID, sdp string) map[string]any {
 		"threadId": threadID, "realtimeSessionId": attemptID,
 		"transport": map[string]any{"type": "webrtc", "sdp": sdp},
 		"version":   "v3", "outputModality": "audio", "includeStartupContext": true,
-		"clientManagedHandoffs": true, "flushTranscriptTailOnSessionEnd": true,
+		"codexResponseHandoffMode": "bemTags", "flushTranscriptTailOnSessionEnd": true,
 		"initialItems": []map[string]any{{"role": "developer", "text": "You are the voice interface to the persistent Agenthail orchestrator. Delegate environment questions and actions to Codex, which has the Agenthail Operations skill and live agent access. Discuss plans naturally; do not invent session state or delivery. Keep spoken updates concise."}},
 	}
 }
@@ -451,9 +447,6 @@ func (s *Service) poll(ctx context.Context) error {
 			v.Phase = "unknown"
 			v.Message, _ = e.Params["message"].(string)
 		}
-		if err := s.returnSpeech(ctx, e); err != nil {
-			return err
-		}
 		if e.Method == "thread/realtime/sdp" || e.Method == "thread/realtime/outputAudio/delta" {
 			continue
 		}
@@ -474,45 +467,5 @@ func (s *Service) poll(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
-}
-
-func (s *Service) returnSpeech(ctx context.Context, e Event) error {
-	v := &s.state.State
-	if s.eventGap || s.boundAttempt != v.AttemptID || v.Phase != "connected" {
-		return nil
-	}
-	if e.Method == "turn/started" {
-		turn, _ := e.Params["turn"].(map[string]any)
-		s.spokenTurn, _ = turn["id"].(string)
-		return nil
-	}
-	if e.Method != "item/completed" || s.spokenTurn == "" || e.Params["turnId"] != s.spokenTurn {
-		return nil
-	}
-	item, _ := e.Params["item"].(map[string]any)
-	if item["type"] != "agentMessage" || item["phase"] != "final_answer" {
-		return nil
-	}
-	id, _ := item["id"].(string)
-	text, _ := item["text"].(string)
-	if id == "" || strings.TrimSpace(text) == "" || s.spokenItems[id] {
-		return nil
-	}
-	if len(text) > 16<<10 || len(s.spokenItems) >= 128 {
-		v.Message = "The answer exceeds this call's spoken-return limit. Read it in the operator timeline."
-		return nil
-	}
-	s.spokenItems[id] = true
-	v.SpeechReceipt = "unknown:" + id
-	if err := s.save(); err != nil {
-		s.loadErr = err
-		return err
-	}
-	if err := s.provider.Request(ctx, v.Session, "thread/realtime/appendSpeech", map[string]any{"threadId": v.Session.ID, "text": text}); err != nil {
-		v.Message = "Spoken answer submission is unconfirmed. Read the operator timeline; it will not be replayed automatically."
-		return nil
-	}
-	v.SpeechReceipt = "accepted:" + id
 	return nil
 }

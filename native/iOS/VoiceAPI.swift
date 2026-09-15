@@ -12,7 +12,6 @@ struct VoiceState: Decodable {
     let truncated: Bool
     let occupied: Bool
     let textReceipt: String?
-    let speechReceipt: String?
 
     var hasCall: Bool { ["starting", "negotiating", "connected", "stopping", "unknown"].contains(phase) }
     var transcripts: [VoiceTranscript] {

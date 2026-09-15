@@ -214,10 +214,13 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	}
 }
 
-func TestRealtimeSettingsUseExplicitNativeSpeechReturnAndNoCredentials(t *testing.T) {
+func TestRealtimeSettingsUseNativeDelegationSpeechAndNoCredentials(t *testing.T) {
 	p := StartParams("operator", "call", "offer")
-	if p["clientManagedHandoffs"] != true || p["version"] != "v3" || p["outputModality"] != "audio" {
+	if p["codexResponseHandoffMode"] != "bemTags" || p["version"] != "v3" || p["outputModality"] != "audio" {
 		t.Fatalf("params=%v", p)
+	}
+	if _, ok := p["clientManagedHandoffs"]; ok {
+		t.Fatal("native response routing was disabled")
 	}
 	transport := p["transport"].(map[string]any)
 	if transport["type"] != "webrtc" || transport["sdp"] != "offer" {
@@ -230,35 +233,15 @@ func TestRealtimeSettingsUseExplicitNativeSpeechReturnAndNoCredentials(t *testin
 	}
 }
 
-func TestCompletedAnswerReturnsThroughNativeVoiceOnceAndOnlyForObservedTurn(t *testing.T) {
+func TestCompletedAnswersAreNotReinjectedAsSessionSpeech(t *testing.T) {
 	s, p := fixture(t)
 	startFixture(t, s)
 	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
 	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
-	answer := func(turn, id, phase string) Event {
-		return Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"id": id, "type": "agentMessage", "phase": phase, "text": "The selected task replied: receipt verified."}}}
-	}
-	observeFixture(t, s, p, answer("old-turn", "old", "final_answer"))
 	observeFixture(t, s, p, Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": "current-turn"}}})
-	observeFixture(t, s, p, answer("old-turn", "old", "final_answer"), answer("current-turn", "progress", "commentary"))
-	if len(p.requests) != 1 {
-		t.Fatal("unrelated or incomplete answer was spoken")
-	}
-	observeFixture(t, s, p, answer("current-turn", "final", "final_answer"), answer("current-turn", "final", "final_answer"))
-	if len(p.requests) != 2 || p.requests[1] != "thread/realtime/appendSpeech" || p.params[1]["text"] != "The selected task replied: receipt verified." || p.params[1]["threadId"] != "operator" {
-		t.Fatalf("native speech return: %v %v", p.requests, p.params)
-	}
-	if s.View("phone").SpeechReceipt != "accepted:final" {
-		t.Fatal("missing native submission receipt")
-	}
-	p.err = errors.New("response lost")
-	observeFixture(t, s, p, answer("current-turn", "uncertain", "final_answer"), answer("current-turn", "uncertain", "final_answer"))
-	if len(p.requests) != 3 || s.View("phone").SpeechReceipt != "unknown:uncertain" {
-		t.Fatal("unknown speech was replayed or called accepted")
-	}
-	observeFixture(t, s, p, Event{Method: "thread/realtime/closed", Params: map[string]any{}}, answer("current-turn", "after-close", "final_answer"))
-	if len(p.requests) != 3 {
-		t.Fatal("answer sent into an ended call")
+	observeFixture(t, s, p, Event{Method: "item/completed", Params: map[string]any{"turnId": "current-turn", "item": map[string]any{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": "The selected task replied."}}})
+	if len(p.requests) != 1 || p.requests[0] != "thread/realtime/start" {
+		t.Fatalf("completed answer was duplicated through a manual request: %v", p.requests)
 	}
 }
 

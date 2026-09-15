@@ -421,10 +421,6 @@ struct AgenthailVoiceOperatorSheet: View {
                                 .font(.caption.monospaced()).textSelection(.enabled)
                         }
                     }
-                    if let receipt = model.state?.speechReceipt {
-                        LabeledContent("Answer submission", value: receipt.hasPrefix("accepted:") ? "Accepted by Codex" : "Unconfirmed")
-                        Text("Submission is not proof of playback. The conversation shows what Codex actually said.").font(.caption)
-                    }
                 }
                 if let session = model.state?.session {
                     Section("Persistent orchestrator") {
