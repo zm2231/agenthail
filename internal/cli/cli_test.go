@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/codexconfig"
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -664,6 +665,42 @@ func TestSendReplyFailsClosedWhenBaselineObservationFails(t *testing.T) {
 	err := app.cmdSend([]string{"codex:s", "hello", "--reply"})
 	if err == nil || !strings.Contains(err.Error(), "establish reply cursor") || len(fake.sent) != 0 {
 		t.Fatalf("err=%v sent=%v", err, fake.sent)
+	}
+}
+
+func TestSendReplyJSONReturnsAcceptedReceiptAndObservedReply(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{
+		kind:       surface.KindCodex,
+		sessions:   map[string]surface.Session{"s": session},
+		caps:       surface.Capabilities{Send: true, Reply: true},
+		sendResult: &surface.SendResult{UUID: "turn", Accepted: true},
+		observations: []*surface.TurnObservation{
+			{Status: surface.StatusIdle, CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old reply", Done: true}},
+			{Status: surface.StatusIdle, CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old reply", Done: true}},
+			{Status: surface.StatusBusy, ActiveTurnID: "turn", CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old reply", Done: true}},
+			{Status: surface.StatusIdle, CompletedTurnID: "turn", Reply: &surface.ReplyResult{Text: "new reply", Done: true}},
+		},
+	}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error {
+		return app.cmdSend([]string{"codex:s", "hello", "--reply", "--json", "--timeout", "2s"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Delivery delivery.Receipt    `json:"delivery"`
+		Reply    surface.ReplyResult `json:"reply"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Delivery.Disposition != delivery.DispositionAccepted || result.Delivery.SessionID != "s" || result.Delivery.TurnID != "turn" || result.Reply.Text != "new reply" || !result.Reply.Done {
+		t.Fatalf("result=%+v", result)
+	}
+	if len(fake.sent) != 1 || fake.sent[0] != "hello" {
+		t.Fatalf("sent=%v", fake.sent)
 	}
 }
 
