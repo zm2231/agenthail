@@ -5,7 +5,7 @@ const fs = require('node:fs');
 
 function fixture(capture, iceGatheringState = 'complete') {
   const events = [], peers = [], tracks = [];
-  const audio = {srcObject: null, play: async () => {}};
+  const audio = {srcObject: null, paused: false, play: async () => {}, pause() { this.paused = true; }};
   const track = {enabled:true, stopped:false, stop() { this.stopped = true; }};
   tracks.push(track);
   class Peer {
@@ -42,6 +42,7 @@ test('actual peer program negotiates audio and applies the Codex answer', async 
   assert.equal(f.tracks[0].stopped,true);
   assert.equal(f.peers[0].closed,true);
   assert.equal(f.peers[0].channel.closed,true);
+  assert.equal(f.audio.paused,true);
   assert.equal(f.audio.srcObject,null);
 });
 

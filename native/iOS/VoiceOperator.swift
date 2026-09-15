@@ -13,6 +13,8 @@ final class VoiceOperatorModel: ObservableObject {
     @Published var connectionError: String?
     @Published var muted = false
     @Published var audioConnected = false
+    @Published private(set) var hostHangupPending = false
+    @Published private(set) var hostHangupUnconfirmed = false
     @Published var text = ""
     let isPreview: Bool
     let audio: any VoiceAudioClient
@@ -25,8 +27,9 @@ final class VoiceOperatorModel: ObservableObject {
     private var channelOpen = false
     private var connectedReported = false
     private var startSubmitted = false
+    private var hostHangupAttemptID: String?
     private var closed = false
-    var canCall: Bool { ready && !working && !dialing && !audioConnected && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
 
     init(preview: Bool = false, api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
         isPreview = preview
@@ -75,6 +78,7 @@ final class VoiceOperatorModel: ObservableObject {
             let next = try await api.state()
             guard !closed, current == generation else { return }
             let terminal = next.phase == "ended" || next.phase == "blocked"
+            if terminal, (hostHangupPending || hostHangupUnconfirmed), next.attemptId != hostHangupAttemptID { return }
             if terminal, dialing || audioConnected {
                 guard let attemptID, next.attemptId == attemptID else { return }
                 if error == nil {
@@ -91,6 +95,9 @@ final class VoiceOperatorModel: ObservableObject {
                 let hadLocalCall = dialing || audioConnected || attemptID != nil
                 audioConnected = false; dialing = false; attemptID = nil
                 if hadLocalCall { audio.end() }
+                hostHangupPending = false
+                hostHangupUnconfirmed = false
+                hostHangupAttemptID = nil
             }
             if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
                 appliedSDP = sdp
@@ -197,19 +204,26 @@ final class VoiceOperatorModel: ObservableObject {
         dialing = false; audioConnected = false; channelOpen = false
         audio.end()
         let localAttempt = attemptID
-        let id = localAttempt ?? state?.attemptId
-        let shouldStopHost = startSubmitted || (localAttempt == nil && state?.hasCall == true)
+        let id = localAttempt ?? hostHangupAttemptID ?? state?.attemptId
+        let shouldStopHost = startSubmitted || hostHangupUnconfirmed || (localAttempt == nil && state?.hasCall == true)
         attemptID = nil
         startSubmitted = false
         guard shouldStopHost, let api, let id, state?.occupied != true else { return }
+        hostHangupPending = true
+        hostHangupUnconfirmed = false
+        hostHangupAttemptID = id
         Task {
             do {
                 let next = try await api.action(VoiceAction(action: "stop", attemptId: id))
                 if !closed, current == generation { state = next }
             }
             catch {
-                if !closed, current == generation, self.error == nil {
-                    self.error = "Audio is off locally. Host hangup is unconfirmed: \(error.localizedDescription)"
+                if !closed, current == generation {
+                    self.hostHangupPending = false
+                    self.hostHangupUnconfirmed = true
+                    if self.error == nil {
+                        self.error = "Audio is off locally. Host hangup is unconfirmed: \(error.localizedDescription)"
+                    }
                 }
             }
         }
@@ -361,7 +375,13 @@ struct AgenthailVoiceOperatorSheet: View {
                         .disabled(model.working || model.text.isEmpty)
                 }
             }
-            if model.state?.hasCall == true || model.audioConnected || model.dialing {
+            if model.hostHangupPending {
+                Label("Audio ended locally. Confirming host hangup…", systemImage: "hourglass")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else if model.hostHangupUnconfirmed {
+                callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
+                if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(.secondary) }
+            } else if model.state?.hasCall == true || model.audioConnected || model.dialing {
                 HStack(alignment: .top, spacing: 32) {
                     callControl("Type", icon: "keyboard", disabled: !model.audioConnected) { showKeyboard.toggle() }
                     callControl(model.muted ? "Unmute" : "Mute", icon: model.muted ? "mic.slash.fill" : "mic.fill", disabled: !model.audioConnected, action: model.toggleMute)
@@ -389,6 +409,8 @@ struct AgenthailVoiceOperatorSheet: View {
     }
 
     private var connectionTitle: String {
+        if model.hostHangupPending { return "Audio off locally; confirming host hangup…" }
+        if model.hostHangupUnconfirmed { return "Audio off locally; host hangup unconfirmed" }
         if model.connectionError != nil { return "Reconnecting to your Mac" }
         if model.audioConnected { return model.muted ? "Microphone muted" : "Connected" }
         if model.dialing { return "Connecting audio…" }

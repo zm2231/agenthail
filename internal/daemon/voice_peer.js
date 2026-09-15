@@ -7,6 +7,7 @@
     if (stream) stream.getTracks().forEach(track => track.stop());
     if (channel) channel.close();
     if (peer) peer.close();
+    audio.pause();
     audio.srcObject = null;
     stream = peer = channel = null;
   };

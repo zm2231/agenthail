@@ -95,7 +95,7 @@ existing transport; the voice layer does not emulate them.
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
 | Text during a call | **Type** sends a user text item through Codex realtime. Message IDs prevent automatic replay after an uncertain response. |
 | Mute | Stops sending microphone content without stopping the call or agent work. |
-| Hang up / leave app | Stops local microphone and peer immediately, then requests native realtime stop. It does not interrupt an agent turn. Calls do not continue in the background. |
+| Hang up / leave app | Stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. It does not interrupt an agent turn. Calls do not continue in the background. |
 | Interrupt | Separate confirmed **Interrupt orchestrator turn** uses the existing native interrupt capability. It does not stop already-delegated agents. A spoken request to stop a worker is resolved to that specific worker and its capabilities. |
 | Approvals | Existing native approval policy remains in effect. The phone can display recorded activity but does not implement approval/question replies. A blocked native approval needs attention on the Mac. |
 | Multiple phones | One paired token owns an active call. Other devices see occupancy and cannot take over or read its negotiation SDP. |
@@ -140,6 +140,10 @@ ends. A lost renderer event window is marked truncated and cannot silently attac
 an SDP from an untrusted window. Native `closed` is the end receipt; a successful
 stop RPC alone is only a hangup request. An event-connection failure and a local
 microphone shutdown are visible separately from confirmed host closure.
+After Hang up, the call controls do not continue to imply active local audio while
+the host stops. The phone reports local audio termination immediately, waits for a
+matching native `closed` receipt, and makes an unconfirmed host request visible
+with a retry control.
 If the host ends the current attempt while the phone is still connecting, the
 phone displays that failure instead of silently returning to Ready to talk.
 An iOS microphone interruption includes the system reason code when available;

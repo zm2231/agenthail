@@ -25,6 +25,66 @@ final class VoiceTests: XCTestCase {
         audio.onMessage?("error", "Codex voice data channel failed")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "stop" }) { await Task.yield() }
         XCTAssertEqual(model.error, "Codex voice data channel failed")
+        XCTAssertFalse(model.hostHangupPending)
+        XCTAssertTrue(model.hostHangupUnconfirmed)
+    }
+
+    @MainActor
+    func testHangupEndsLocalAudioBeforeHostStopIsConfirmed() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+        let attempt = try! XCTUnwrap(api.actions.first { $0.action == "start" }?.attemptId)
+        audio.onMessage?("connection", "connected")
+        audio.onMessage?("channel", "open")
+        api.holdStop = true
+
+        model.hangup()
+
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertFalse(model.audioConnected)
+        XCTAssertFalse(model.dialing)
+        XCTAssertTrue(model.hostHangupPending)
+        XCTAssertFalse(model.hostHangupUnconfirmed)
+        XCTAssertFalse(model.canCall)
+        for _ in 0..<1000 where api.pending == nil { await Task.yield() }
+        XCTAssertEqual(api.actions.last?.action, "stop")
+
+        api.release()
+        for _ in 0..<1000 where model.state?.phase != "ready" { await Task.yield() }
+        XCTAssertTrue(model.hostHangupPending)
+
+        api.snapshot = try! JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"\#(attempt)","events":[{"sequence":1,"method":"thread/realtime/closed","params":{}}],"occupied":false,"truncated":false}"#.utf8))
+        await model.refresh()
+        XCTAssertFalse(model.hostHangupPending)
+        XCTAssertFalse(model.hostHangupUnconfirmed)
+        XCTAssertTrue(model.canCall)
+    }
+
+    @MainActor
+    func testUnconfirmedHostHangupKeepsLocalAudioOffAndAllowsRetry() async {
+        let api = VoiceFixtureAPI(); api.stopError = AgenthailAPIError.request(503, "host unavailable")
+        let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+
+        model.hangup()
+        for _ in 0..<1000 where !model.hostHangupUnconfirmed { await Task.yield() }
+
+        XCTAssertEqual(audio.ends, 1)
+        XCTAssertFalse(model.audioConnected)
+        XCTAssertFalse(model.hostHangupPending)
+        XCTAssertTrue(model.hostHangupUnconfirmed)
+        XCTAssertEqual(model.error, "Audio is off locally. Host hangup is unconfirmed: host unavailable")
+        api.stopError = nil
+        model.hangup()
+        for _ in 0..<1000 where api.actions.filter({ $0.action == "stop" }).count < 2 { await Task.yield() }
+        XCTAssertTrue(model.hostHangupPending)
+        XCTAssertFalse(model.hostHangupUnconfirmed)
     }
 
     @MainActor
@@ -248,6 +308,7 @@ final class VoiceTests: XCTestCase {
 private final class VoiceFixtureAPI: VoiceServiceClient {
     var holdPrepare = false
     var holdStart = false
+    var holdStop = false
     var holdText = false
     var pending: CheckedContinuation<VoiceState, Never>?
     var actions: [VoiceAction] = []
@@ -259,7 +320,7 @@ private final class VoiceFixtureAPI: VoiceServiceClient {
     func action(_ action: VoiceAction) async throws -> VoiceState {
         actions.append(action)
         if action.action == "stop", let stopError { throw stopError }
-        if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "text" && holdText) {
+        if (action.action == "prepare" && holdPrepare) || (action.action == "start" && holdStart) || (action.action == "stop" && holdStop) || (action.action == "text" && holdText) {
             return await withCheckedContinuation { pending = $0 }
         }
         return ready
