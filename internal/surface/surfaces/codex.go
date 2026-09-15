@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -202,7 +204,7 @@ func (c *cdpConn) evaluate(ctx context.Context, expr string, timeout time.Durati
 		}
 		return res["value"], nil
 	}
-	return nil, fmt.Errorf("timeout waiting for eval response")
+	return nil, fmt.Errorf("timeout waiting for eval response: %w", os.ErrDeadlineExceeded)
 }
 
 const codexRecentListLimit = 50
@@ -831,13 +833,29 @@ func codexDirectInputAccepted(response map[string]any, explicit bool) bool {
 	return !explicit
 }
 
+const codexTranscriptReadTimeout = 2 * time.Second
+
+func isCodexTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func codexTranscriptTailBounded(sess *surface.Session, limit int) ([]surface.Exchange, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), codexTranscriptReadTimeout)
+	defer cancel()
+	return codexTranscriptTail(ctx, codexTranscriptPath(sess), limit)
+}
+
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
-		if !errors.Is(err, context.DeadlineExceeded) {
+		if !isCodexTimeout(err) {
 			return nil, err
 		}
-		exchanges, transcriptErr := codexTranscriptTail(ctx, codexTranscriptPath(sess), 1)
+		exchanges, transcriptErr := codexTranscriptTailBounded(sess, 1)
 		if transcriptErr != nil || len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant == "" {
 			return nil, err
 		}
@@ -1269,8 +1287,8 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 	defer conn.Close()
 	thread, err := c.readThreadWithOptions(ctx, conn, sess.ID, n, true)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			if exchanges, transcriptErr := codexTranscriptTail(ctx, codexTranscriptPath(sess), n); transcriptErr == nil {
+		if isCodexTimeout(err) {
+			if exchanges, transcriptErr := codexTranscriptTailBounded(sess, n); transcriptErr == nil {
 				return exchanges, nil
 			}
 		}
