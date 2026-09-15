@@ -89,7 +89,7 @@ final class SessionNavigationTests: XCTestCase {
         app.launchArguments = ["--preview-session", "--preview-app"]
         app.launch()
         app.tabBars.buttons["Inbox"].tap()
-        XCTAssertTrue(app.staticTexts["Review delivery"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["inbox-session-2"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Old release reminder"].exists)
         app.segmentedControls.buttons["History"].tap()
         XCTAssertTrue(app.staticTexts["Old release reminder"].waitForExistence(timeout: 5))
