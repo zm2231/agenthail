@@ -2,9 +2,12 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestCodexTranscriptTailUsesNewestCompleteExchangeAndSkipsPartialJSONL(t *testing.T) {
@@ -26,6 +29,19 @@ func TestCodexTranscriptTailUsesNewestCompleteExchangeAndSkipsPartialJSONL(t *te
 func TestCodexTranscriptTailRequiresLocalTranscript(t *testing.T) {
 	if _, err := codexTranscriptTail(context.Background(), "", 1); err == nil {
 		t.Fatal("missing transcript accepted")
+	}
+}
+
+func TestCodexTranscriptTailFallbackHonorsCallerDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"event_msg","payload":{"type":"user_message","message":"question"}}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := codexTranscriptTailBounded(ctx, &surface.Session{Transcript: path}, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
 	}
 }
 

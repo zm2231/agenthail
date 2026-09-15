@@ -253,7 +253,7 @@ func TestCodexDesktopBridgeFramesChildRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = client.Request(context.Background(), "turn/start", map[string]any{"mode": "timeout"}, 30*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
+	if err == nil || !strings.Contains(err.Error(), "timed out") || !isCodexTimeout(err) {
 		t.Fatalf("timeout error=%v", err)
 	}
 }

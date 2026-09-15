@@ -840,11 +840,17 @@ func isCodexTimeout(err error) bool {
 		return true
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "app-server request timed out")
 }
 
-func codexTranscriptTailBounded(sess *surface.Session, limit int) ([]surface.Exchange, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), codexTranscriptReadTimeout)
+func codexTranscriptTailBounded(ctx context.Context, sess *surface.Session, limit int) ([]surface.Exchange, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, codexTranscriptReadTimeout)
 	defer cancel()
 	return codexTranscriptTail(ctx, codexTranscriptPath(sess), limit)
 }
@@ -855,7 +861,7 @@ func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*s
 		if !isCodexTimeout(err) {
 			return nil, err
 		}
-		exchanges, transcriptErr := codexTranscriptTailBounded(sess, 1)
+		exchanges, transcriptErr := codexTranscriptTailBounded(ctx, sess, 1)
 		if transcriptErr != nil || len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant == "" {
 			return nil, err
 		}
@@ -1288,7 +1294,7 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 	thread, err := c.readThreadWithOptions(ctx, conn, sess.ID, n, true)
 	if err != nil {
 		if isCodexTimeout(err) {
-			if exchanges, transcriptErr := codexTranscriptTailBounded(sess, n); transcriptErr == nil {
+			if exchanges, transcriptErr := codexTranscriptTailBounded(ctx, sess, n); transcriptErr == nil {
 				return exchanges, nil
 			}
 		}
