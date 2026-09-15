@@ -427,6 +427,9 @@ func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 		if payload["sessionId"] != from.ID {
 			t.Fatalf("sessionId=%q want=%q", payload["sessionId"], from.ID)
 		}
+		if payload["turnId"] != "turn-2" {
+			t.Fatalf("turnId=%q", payload["turnId"])
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("mobile completion notification was not sent")
 	}
