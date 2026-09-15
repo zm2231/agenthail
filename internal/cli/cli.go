@@ -24,6 +24,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/workspace"
 )
 
 type SurfaceEntry struct {
@@ -126,7 +127,8 @@ Session commands:
   thread fork <target>         Fork a Codex conversation
   thread <status|stop|resume|logs> <target>  Manage a Claude background session
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
-  list [--all]                   List current sessions (--all includes saved conversation catalog)
+  list [--all] [--cwd <path>] [--wide]
+                                 List sessions; --cwd includes that workspace and descendants
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send (--effort, --mode, --service-tier, --output-schema, --from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
@@ -360,7 +362,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -415,9 +417,17 @@ func validateCommandFlags(command string, args []string) error {
 
 func (a *App) cmdList(args []string) error {
 	if len(stripFlags(args)) != 0 {
-		return fmt.Errorf("usage: agenthail list [--all] [--json]")
+		return fmt.Errorf("usage: agenthail list [--all] [--cwd <path>] [--wide] [--json]")
 	}
 	jsonOut := hasFlag(args, "--json")
+	rootCwd := flagVal(args, "--cwd")
+	if rootCwd != "" {
+		var err error
+		rootCwd, err = workspace.NormalizeCWD(rootCwd)
+		if err != nil {
+			return fmt.Errorf("normalize --cwd: %w", err)
+		}
+	}
 	ctx := context.Background()
 
 	allSessions := make([]surface.Session, 0)
@@ -431,6 +441,12 @@ func (a *App) cmdList(args []string) error {
 		}
 		successfulSurfaces++
 		for _, sess := range sessions {
+			var normalizeErr error
+			sess, normalizeErr = normalizeSessionCwd(sess)
+			if normalizeErr != nil {
+				surfaceErrors[string(s.Name())] = fmt.Sprintf("normalize session workspace: %s", normalizeErr)
+				continue
+			}
 			if a.Registry != nil {
 				if err := a.Registry.RegisterSession(sess); err != nil {
 					surfaceErrors[string(s.Name())] = fmt.Sprintf("register session: %s", err)
@@ -460,6 +476,11 @@ func (a *App) cmdList(args []string) error {
 			seen[session.ID] = true
 		}
 		for _, session := range stored {
+			var normalizeErr error
+			session, normalizeErr = normalizeSessionCwd(session)
+			if normalizeErr != nil {
+				return fmt.Errorf("normalize saved session workspace: %w", normalizeErr)
+			}
 			if !seen[session.ID] {
 				allSessions = append(allSessions, session)
 			}
@@ -473,6 +494,19 @@ func (a *App) cmdList(args []string) error {
 				continue
 			}
 			filtered = append(filtered, s)
+		}
+		allSessions = filtered
+	}
+	if rootCwd != "" {
+		filtered := allSessions[:0]
+		for _, s := range allSessions {
+			within, err := workspace.IsWithin(rootCwd, s.Cwd)
+			if err != nil {
+				return fmt.Errorf("compare session workspace: %w", err)
+			}
+			if within {
+				filtered = append(filtered, s)
+			}
 		}
 		allSessions = filtered
 	}
@@ -513,8 +547,16 @@ func (a *App) cmdList(args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", "PROJECT", "LAST")
-	fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n", "-------", "-----", "--------------", "----------------------------", "--------------------", "----------")
+	wide := hasFlag(args, "--wide")
+	projectNames := listProjectNameCounts(allSessions)
+	projectHeading := "PROJECT"
+	projectWidth := 20
+	if wide {
+		projectHeading = "CWD"
+		projectWidth = 48
+	}
+	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", projectWidth, projectHeading, "LAST")
+	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), "----------")
 	queueCounts := map[string]int{}
 	if a.Registry != nil {
 		var err error
@@ -529,18 +571,49 @@ func (a *App) cmdList(args []string) error {
 		if alias, ok := aliased[s.ID]; ok {
 			agent = "@" + alias
 		}
-		project := filepath.Base(s.Cwd)
-		if project == "." {
-			project = "-"
-		}
+		project := listProjectLabel(s, projectNames, wide)
 		last := relTime(s.LastActive)
-		fmt.Printf("%-7s %-5s %-14s %-28s %-20s %s\n",
-			s.Surface, stat, truncate(agent, 14), truncate(s.Name, 28), truncate(project, 20), last)
+		fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n",
+			s.Surface, stat, truncate(agent, 14), truncate(s.Name, 28), projectWidth, project, last)
 	}
 	if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+func normalizeSessionCwd(session surface.Session) (surface.Session, error) {
+	if session.Cwd == "" {
+		return session, nil
+	}
+	normalized, err := workspace.NormalizeCWD(session.Cwd)
+	if err != nil {
+		return session, err
+	}
+	session.Cwd = normalized
+	return session, nil
+}
+
+func listProjectNameCounts(sessions []surface.Session) map[string]int {
+	counts := make(map[string]int, len(sessions))
+	for _, session := range sessions {
+		name := filepath.Base(session.Cwd)
+		if session.Cwd != "" && name != "." {
+			counts[name]++
+		}
+	}
+	return counts
+}
+
+func listProjectLabel(session surface.Session, names map[string]int, wide bool) string {
+	name := filepath.Base(session.Cwd)
+	if session.Cwd == "" || name == "." {
+		return "-"
+	}
+	if wide || names[name] > 1 {
+		return session.Cwd
+	}
+	return name
 }
 
 func (a *App) cmdSearch(args []string) error {
