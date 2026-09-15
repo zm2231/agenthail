@@ -17,6 +17,12 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 
 `peer_transport_accepted` means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, slash commands and steering are rejected. Transcript reads remain available. Interrupt/model control requires a Remote Control bridge. A socket failure does not trigger a second send through HTTP.
 
+### Claude inbound policy for cross-session messages
+
+In the **receiving Claude session**, run `/config`, search for **messages from your other sessions** (`crossSessionInbound`), and set it to **Accept** if you intend that session to receive Agenthail peer messages without an interactive approval prompt. Review any already-held message in full and confirm its disposition; changing the policy does not itself prove an earlier message was delivered. Check the receiving session's effective setting even if `~/.claude/settings.json` says `"crossSessionInbound": "accept"`; a running session may not have picked up a later global change. This is Claude's own inbound trust setting, not an Agenthail `--from` permission mode or an Agenthail delivery override.
+
+For example, a Claude notification reported a peer at `uds:/tmp/cc-socks/84034.sock` with a verified PID, but held an `[agenthail relay hops=1 id=40 source=@agent-hands-fixes turn=…]` message because the sender did not attest a permission mode and the receiver bypassed prompts. The socket/PID and sender name establish peer provenance, not that the full message is safe or delivered. Do not count the preview or `peer_transport_accepted` as a Claude read/reply; inspect the full message and history/status before retransmitting or acting on it. Do not automatically switch the policy for every Claude session just to clear a hold.
+
 ## Lifecycle and verification
 
 Helpers exit on parent stdin EOF. Registration files are refreshed atomically, restored if removed, and never deliberately replace an existing foreign record. Socket permissions are 0600. Cleanup tests cover parent exit, forced child death and restart, duplicate registration, distinct per-agent PIDs, reply deduplication, read-only rejection, cancellation, and alias refresh. Sender persistence tests cover SQLite v1-to-v2 upgrades, ID merges, queue claiming, relays, dispatch and dashboard output.

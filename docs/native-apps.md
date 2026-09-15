@@ -65,6 +65,10 @@ timeline** opens the same ordinary session. **Hang up** ends audio, not agent wo
 leaving the app also ends the call. Call again to resume the same orchestrator.
 Native approvals may still need attention on your Mac.
 
+When the orchestrator messages a Claude session and Claude holds the peer
+message, check that receiving session's `/config` setting for **messages from
+your other sessions** before treating the send as delivered. [Claude peer setup](maintainers/claude-peers.md#claude-inbound-policy-for-cross-session-messages)
+
 See [Voice setup, capabilities, and verification](maintainers/codex-voice.md).
 
 ## Notifications

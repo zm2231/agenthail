@@ -327,6 +327,19 @@ request, inspect the target's reply, mute, hang up, reopen the same operator, an
 background the app. Installing/restarting the live host remains an explicit
 operator action. Simulator/sample screenshots are not live voice receipts.
 
+### Physical-phone field check (user report, 2026-09-15)
+
+The user reported a successful call after asking the orchestrator to check
+something that required an interim update and a final answer. Both updates were
+spoken on the phone, and pressing **Hang up** stopped audio immediately. This
+addresses the earlier field reports of consecutive visible answers with only the
+first spoken and a 5–10-second perceived hangup delay for that tested call. It is
+a real-device observation, not an instrumented host `closed` receipt or proof
+that every network/audio route and subsequent call behaves identically. Retain
+the call ID, build numbers, audio route, and native close event when a later
+failure needs attribution. [September field observations](field-observations-2026-09.md)
+tracks this check alongside separate unresolved delivery and status reports.
+
 ## References and protocol provenance
 
 The implementation was checked against Codex Desktop's bundled CLI/app-server
