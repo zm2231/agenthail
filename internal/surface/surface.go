@@ -292,12 +292,14 @@ type ReplyResult struct {
 	UserText string `json:"userText"` // last user message (for context)
 	Done     bool   `json:"done"`
 	Error    string `json:"error"`
+	Source   string `json:"source,omitempty"`
 }
 
 type Exchange struct {
 	User      string    `json:"user"`
 	Assistant string    `json:"assistant"`
 	Timestamp time.Time `json:"timestamp"`
+	Source    string    `json:"source,omitempty"`
 }
 
 type GoalState struct {

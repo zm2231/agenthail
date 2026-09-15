@@ -834,12 +834,22 @@ func codexDirectInputAccepted(response map[string]any, explicit bool) bool {
 func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		exchanges, transcriptErr := codexTranscriptTail(ctx, codexTranscriptPath(sess), 1)
+		if transcriptErr != nil || len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant == "" {
+			return nil, err
+		}
+		last := exchanges[len(exchanges)-1]
+		return &surface.ReplyResult{Text: last.Assistant, UserText: last.User, Done: true, Source: "local-transcript"}, nil
 	}
 	if observation.Reply == nil {
-		return &surface.ReplyResult{Done: false}, nil
+		return &surface.ReplyResult{Done: false, Source: "rpc"}, nil
 	}
-	return observation.Reply, nil
+	reply := *observation.Reply
+	reply.Source = "rpc"
+	return &reply, nil
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -1257,15 +1267,20 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 		return nil, err
 	}
 	defer conn.Close()
-	thread, err := c.readThread(ctx, conn, sess.ID)
+	thread, err := c.readThreadWithOptions(ctx, conn, sess.ID, n, true)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			if exchanges, transcriptErr := codexTranscriptTail(ctx, codexTranscriptPath(sess), n); transcriptErr == nil {
+				return exchanges, nil
+			}
+		}
 		return nil, err
 	}
 
 	var exchanges []surface.Exchange
 	for _, turn := range thread.Turns {
 		if turn.User != "" || turn.Assistant != "" {
-			exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant})
+			exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Source: "rpc"})
 		}
 	}
 

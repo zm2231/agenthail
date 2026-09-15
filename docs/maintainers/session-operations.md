@@ -12,6 +12,9 @@ notifications or from a readable transcript; otherwise the state is unknown.
 `agenthail last <target> [count] --timeout 30s` bounds target resolution and
 transcript retrieval. The default is the application's command timeout. A blocked
 transport or filesystem read returns a timeout error instead of waiting forever.
+`agenthail reply <target> --timeout 30s` uses the same deadline. Codex `last` and
+`reply` identify whether the result came from the paginated RPC or a bounded local
+transcript fallback; a missing local transcript leaves the RPC timeout visible.
 
 ## Claude background sessions
 
