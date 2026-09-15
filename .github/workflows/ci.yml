@@ -64,7 +64,7 @@ jobs:
           device="$(xcrun simctl list devicetypes --json | jq -r '.devicetypes | map(select(.name | startswith("iPhone"))) | first | .identifier')"
           udid="$(xcrun simctl create Agenthail-CI "$device" "$runtime")"
           trap 'xcrun simctl delete "$udid"' EXIT
-          xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived"
+          xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived" -parallel-testing-enabled NO
           plist="$derived/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
