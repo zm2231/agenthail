@@ -31,6 +31,7 @@ type cliSurface struct {
 	observeErr    error
 	sendResult    *surface.SendResult
 	reply         *surface.ReplyResult
+	replyWait     bool
 	sendWait      bool
 	tailBlock     <-chan struct{}
 	sent          []string
@@ -207,7 +208,11 @@ func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message strin
 	}
 	return f.sendResult, nil
 }
-func (f *cliSurface) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
+func (f *cliSurface) Reply(ctx context.Context, _ *surface.Session, _ int) (*surface.ReplyResult, error) {
+	if f.replyWait {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.reply != nil {
 		return f.reply, nil
 	}
@@ -804,6 +809,37 @@ func TestLastEmptyJSONIsOneDocument(t *testing.T) {
 	var document map[string]any
 	if json.Unmarshal([]byte(output), &document) != nil || !strings.Contains(output, `"exchanges":[]`) {
 		t.Fatalf("output=%q", output)
+	}
+}
+
+func TestLastLabelsTranscriptSourceInTextAndJSON(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "local-transcript"}}}
+	app, _ := cliFixture(t, fake)
+	text, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s"}) })
+	if err != nil || !strings.Contains(text, "[local-transcript]") {
+		t.Fatalf("text=%q err=%v", text, err)
+	}
+	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	if err != nil || !strings.Contains(output, `"source":"local-transcript"`) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, reply: &surface.ReplyResult{Text: "answer", Done: true, Source: "rpc"}}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdReply([]string{"codex:s", "--json", "--timeout", "50ms"}) })
+	if err != nil || !strings.Contains(output, `"source":"rpc"`) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	blocked := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, replyWait: true}
+	app, _ = cliFixture(t, blocked)
+	started := time.Now()
+	err = app.cmdReply([]string{"codex:s", "--timeout", "50ms"})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
+		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
 	}
 }
 

@@ -27,17 +27,9 @@ type codexThread struct {
 }
 
 func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
-	return c.readThreadWithOptions(ctx, conn, threadID, 50, true, true)
-}
-
-func (c *Codex) readObservationThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
-	return c.readThreadWithOptions(ctx, conn, threadID, 3, false, false)
-}
-
-func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, threadID string, turnLimit int, hydrateAll, includeTurns bool) (*codexThread, error) {
 	response, err := conn.Request(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
-		"includeTurns": includeTurns,
+		"includeTurns": true,
 	}, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("thread/read: %w", err)
@@ -50,23 +42,55 @@ func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, thr
 	if !ok {
 		return nil, fmt.Errorf("thread/read response missing thread")
 	}
-	thread := &codexThread{
-		ID:     str(value, "id"),
-		Name:   surface.DeriveName(str(value, "name"), str(value, "preview"), 60),
-		Cwd:    str(value, "cwd"),
-		Status: codexStatus(value["status"]),
-	}
+	thread := &codexThread{ID: str(value, "id"), Name: surface.DeriveName(str(value, "name"), str(value, "preview"), 60), Cwd: str(value, "cwd"), Status: codexStatus(value["status"])}
 	if thread.ID == "" {
 		thread.ID = threadID
 	}
 	turns, _ := value["turns"].([]any)
 	if len(turns) == 0 {
-		page, pageErr := c.listThreadTurns(ctx, conn, thread.ID, turnLimit)
+		var pageErr error
+		turns, pageErr = c.listThreadTurns(ctx, conn, thread.ID, 50)
 		if pageErr != nil {
 			return nil, pageErr
 		}
-		turns = page
 	}
+	hydrate := codexHydrationCandidates(turns, true)
+	for index, rawTurn := range turns {
+		entry, _ := rawTurn.(map[string]any)
+		status, done, turnError := codexTurnState(entry["status"])
+		turn := codexTurn{ID: str(entry, "id"), Status: status, Done: done, Error: turnError}
+		items, _ := entry["items"].([]any)
+		if len(items) == 0 && turn.ID != "" && hydrate[index] {
+			page, pageErr := c.listThreadItems(ctx, conn, thread.ID, turn.ID)
+			if pageErr != nil {
+				return nil, pageErr
+			}
+			items = page
+		}
+		for _, rawItem := range items {
+			item, _ := rawItem.(map[string]any)
+			switch item["type"] {
+			case "userMessage", "user":
+				turn.User = codexItemText(item)
+			case "agentMessage", "assistant":
+				turn.Assistant = codexItemText(item)
+			}
+		}
+		thread.Turns = append(thread.Turns, turn)
+	}
+	return thread, nil
+}
+
+func (c *Codex) readObservationThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
+	return c.readThreadWithOptions(ctx, conn, threadID, 3, false)
+}
+
+func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, threadID string, turnLimit int, hydrateAll bool) (*codexThread, error) {
+	turns, err := c.listThreadTurns(ctx, conn, threadID, turnLimit)
+	if err != nil {
+		return nil, err
+	}
+	thread := &codexThread{ID: threadID, Status: surface.StatusUnknown}
 	hydrate := codexHydrationCandidates(turns, hydrateAll)
 	for index, rawTurn := range turns {
 		entry, _ := rawTurn.(map[string]any)
@@ -92,6 +116,15 @@ func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, thr
 			}
 		}
 		thread.Turns = append(thread.Turns, turn)
+	}
+	for _, turn := range thread.Turns {
+		if turn.Status == surface.StatusBusy {
+			thread.Status = surface.StatusBusy
+			break
+		}
+		if turn.Done && thread.Status == surface.StatusUnknown {
+			thread.Status = surface.StatusIdle
+		}
 	}
 	return thread, nil
 }

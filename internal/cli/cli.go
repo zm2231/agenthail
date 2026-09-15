@@ -130,7 +130,7 @@ Session commands:
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send (--effort, --mode, --service-tier, --output-schema, --from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
-  reply <target> [--json]       Fetch last assistant reply
+  reply <target> [--json] [--timeout 30s]  Fetch last assistant reply
   last <target> [count] [--full] [--json] [--timeout 30s]  Show last N exchanges
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context (queues for active Claude sessions)
@@ -362,7 +362,7 @@ func validateCommandFlags(command string, args []string) error {
 	specs := map[string]flagSpec{
 		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
-		"reply": {bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
+		"reply": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
@@ -969,9 +969,14 @@ func commandTimeout(args []string, fallback time.Duration) (time.Duration, error
 func (a *App) cmdReply(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
-		return fmt.Errorf("usage: agenthail reply <target>")
+		return fmt.Errorf("usage: agenthail reply <target> [--json] [--timeout 30s]")
 	}
-	ctx := context.Background()
+	timeout, err := commandTimeout(args, a.DefaultTimeout)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
 	if err != nil {
 		return err
@@ -990,8 +995,11 @@ func (a *App) cmdReply(args []string) error {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": reply.Source})
 	} else {
+		if reply.Source != "" {
+			fmt.Printf("[%s]\n", reply.Source)
+		}
 		fmt.Println(reply.Text)
 	}
 	return nil
@@ -1026,16 +1034,25 @@ func (a *App) cmdLast(args []string) error {
 	}
 	if len(exchanges) == 0 {
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "exchanges": []surface.Exchange{}})
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": "", "exchanges": []surface.Exchange{}})
 		}
 		fmt.Println("(no conversation history)")
 		return nil
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "exchanges": exchanges})
+		source := ""
+		if len(exchanges) > 0 {
+			source = exchanges[len(exchanges)-1].Source
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": source, "exchanges": exchanges})
 	}
 	label := a.resolveDisplay(sess.ID)
-	fmt.Printf("── %s ──\n", label)
+	source := exchanges[len(exchanges)-1].Source
+	if source != "" {
+		fmt.Printf("── %s [%s] ──\n", label, source)
+	} else {
+		fmt.Printf("── %s ──\n", label)
+	}
 	full := hasFlag(args, "--full")
 	for _, ex := range exchanges {
 		if ex.User != "" {
