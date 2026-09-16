@@ -53,6 +53,8 @@ func startRendererDesktopBridge(t *testing.T) string {
 			case strings.Contains(expression, `"thread/loaded/list"`):
 				value = `{"result":{"data":[]}}`
 			case strings.Contains(expression, `"thread/turns/list"`):
+				value = `{"result":{"data":[{"id":"completed","status":{"type":"completed"}}]}}`
+			case strings.Contains(expression, `"thread/items/list"`):
 				value = `{"result":{"data":[]}}`
 			case strings.Contains(expression, `"thread/start"`):
 				value = `{"result":{"cwd":"/tmp/project","thread":{"id":"desktop-new","name":"Desktop conversation","source":"vscode"}}}`
@@ -200,6 +202,9 @@ func TestCodexObservationHydratesOnlyLatestCandidates(t *testing.T) {
 	if client.itemCalls != 2 {
 		t.Fatalf("item calls=%d, want 2", client.itemCalls)
 	}
+	if got := strings.Join(client.methods, ","); got != "thread/turns/list,thread/items/list,thread/items/list" {
+		t.Fatalf("observation hydrated deprecated full history: methods=%s", got)
+	}
 	if page, _ := client.turnParams["page"].(map[string]any); page["limit"] != 3 {
 		t.Fatalf("turn params=%v", client.turnParams)
 	}
@@ -248,7 +253,7 @@ func TestCodexDesktopBridgeFramesChildRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = client.Request(context.Background(), "turn/start", map[string]any{"mode": "timeout"}, 30*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
+	if err == nil || !strings.Contains(err.Error(), "timed out") || !isCodexTimeout(err) {
 		t.Fatalf("timeout error=%v", err)
 	}
 }
@@ -1070,13 +1075,15 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 				}
 				batch, _ := json.Marshal(codexEventBatch{Cursor: int64(10 + eventReads), Events: []codexEvent{{Sequence: int64(10 + eventReads), Method: "turn/completed", Params: map[string]any{"threadId": "thread-1", "turnId": turnID}}}})
 				value = string(batch)
-			case strings.Contains(expression, `"thread/read"`):
+			case strings.Contains(expression, `"thread/turns/list"`):
 				threadReads++
 				status := "running"
 				if threadReads > 1 {
 					status = "completed"
 				}
-				value = fmt.Sprintf(`{"jsonrpc":"2.0","result":{"thread":{"id":"thread-1","status":{"type":"idle"},"turns":[{"id":"target-turn","status":{"type":"%s"},"items":[{"type":"agentMessage","text":"done"}]}]}}}`, status)
+				value = fmt.Sprintf(`{"result":{"data":[{"id":"target-turn","status":{"type":"%s"}}]}}`, status)
+			case strings.Contains(expression, `"thread/items/list"`):
+				value = `{"result":{"data":[{"item":{"type":"agentMessage","text":"done"}}]}}`
 			}
 			response := map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}}
 			if conn.WriteJSON(response) != nil {
@@ -1123,8 +1130,10 @@ func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
 			switch {
 			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "already"
-			case strings.Contains(expression, `"thread/read"`):
-				value = `{"jsonrpc":"2.0","result":{"thread":{"id":"thread-1","status":{"type":"idle"},"turns":[{"id":"target-turn","status":{"type":"completed"},"items":[{"type":"agentMessage","text":"fast"}]}]}}}`
+			case strings.Contains(expression, `"thread/turns/list"`):
+				value = `{"result":{"data":[{"id":"target-turn","status":{"type":"completed"}}]}}`
+			case strings.Contains(expression, `"thread/items/list"`):
+				value = `{"result":{"data":[{"item":{"type":"agentMessage","text":"fast"}}]}}`
 			}
 			conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
 		}
