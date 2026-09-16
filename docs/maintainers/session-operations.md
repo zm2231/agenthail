@@ -13,6 +13,13 @@ notifications or from a readable transcript; otherwise the state is unknown.
 transcript retrieval. The default is the application's command timeout. A blocked
 transport or filesystem read returns a timeout error instead of waiting forever.
 
+Busy-target behavior is explicit: `send` delivers immediately when idle and queues
+when busy; `send --no-queue` refuses delayed delivery. `queue` always creates the
+durable pending item, and `agenthail daemon start` is the runnable continuation
+when the daemon is down. `steer` affects an active turn only; use `send` for an
+idle target. Read-only targets fail before dispatch. An unknown delivery outcome
+must be inspected before an explicit retry; it is never resent automatically.
+
 ## Claude background sessions
 
 ```sh
