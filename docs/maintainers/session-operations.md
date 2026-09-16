@@ -9,6 +9,13 @@ rows reconcile shared database state with the local transcript's latest task
 lifecycle. Claude peer `idle` is trusted only from peers advertising idle
 notifications or from a readable transcript; otherwise the state is unknown.
 
+`agenthail list --cwd <path>` retains sessions whose normalized workspace is that
+directory or a descendant. Existing symlinks resolve before comparison, and path
+components—not string prefixes—define ancestry. `--wide` prints each full normalized
+workspace; ordinary table output also uses the full path when multiple sessions share
+a workspace basename. JSON always retains the complete `cwd` field. CWD narrows
+discovery; it never selects a caller identity.
+
 `agenthail last <target> [count] --timeout 30s` bounds target resolution and
 transcript retrieval. The default is the application's command timeout. A blocked
 transport or filesystem read returns a timeout error instead of waiting forever.

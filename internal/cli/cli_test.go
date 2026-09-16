@@ -745,6 +745,84 @@ func TestListJSONUsesDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestListAcceptsOnlyItsWorkspaceFlags(t *testing.T) {
+	if err := validateCommandFlags("list", []string{"--all", "--cwd", "/work/project", "--wide", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCommandFlags("list", []string{"--cwd"}); err == nil || !strings.Contains(err.Error(), "requires a value") {
+		t.Fatalf("err=%v", err)
+	}
+	if err := validateCommandFlags("list", []string{"--project", "/work/project"}); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListCwdFiltersByCanonicalAncestryInTextAndJSON(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	nested := filepath.Join(project, "nested")
+	other := filepath.Join(root, "project-other")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(project, alias); err != nil {
+		t.Fatal(err)
+	}
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
+		{ID: "root", Surface: surface.KindCodex, Name: "root", Cwd: project},
+		{ID: "nested", Surface: surface.KindCodex, Name: "nested", Cwd: nested},
+		{ID: "other", Surface: surface.KindCodex, Name: "other", Cwd: other},
+	}}
+	app, _ := cliFixture(t, fake)
+	text, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", alias}) })
+	if err != nil || !strings.Contains(text, "root") || !strings.Contains(text, "nested") || strings.Contains(text, "other") {
+		t.Fatalf("text=%q err=%v", text, err)
+	}
+	jsonText, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", alias, "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Sessions []surface.Session `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Sessions) != 2 || document.Sessions[0].ID == "other" || document.Sessions[1].ID == "other" {
+		t.Fatalf("sessions=%+v", document.Sessions)
+	}
+	canonicalProject, err := filepath.EvalSymlinks(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range document.Sessions {
+		if session.ID == "root" && session.Cwd != canonicalProject {
+			t.Fatalf("root cwd=%q want=%q", session.Cwd, canonicalProject)
+		}
+	}
+}
+
+func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
+		{ID: "one", Surface: surface.KindCodex, Name: "one", Cwd: "/work/one/agenthail"},
+		{ID: "two", Surface: surface.KindCodex, Name: "two", Cwd: "/work/two/agenthail"},
+		{ID: "three", Surface: surface.KindCodex, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
+	}}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdList(nil) })
+	if err != nil || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail") || strings.Contains(output, "/work/three/other") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	wide, err := captureStdout(t, func() error { return app.cmdList([]string{"--wide"}) })
+	if err != nil || !strings.Contains(wide, "CWD") || !strings.Contains(wide, fake.listed[2].Cwd) {
+		t.Fatalf("wide=%q err=%v", wide, err)
+	}
+}
+
 func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing.T) {
 	working := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "live", Surface: surface.KindCodex}}}
 	optionalFailure := &cliSurface{kind: surface.KindNotion, listErr: errors.New("choose a Notion space")}
