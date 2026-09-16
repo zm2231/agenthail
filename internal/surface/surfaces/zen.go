@@ -97,6 +97,9 @@ func (*Zen) command(ctx context.Context, session *surface.Session, action, promp
 	if prompt != "" {
 		request["prompt"] = prompt
 	}
+	if sourceSessionID := surface.SourceSessionID(ctx); sourceSessionID != "" {
+		request["sourceSessionId"] = sourceSessionID
+	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
