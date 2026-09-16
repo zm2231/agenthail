@@ -54,7 +54,13 @@ type ReadinessChecker interface {
 }
 
 func IsReadOnlySession(session *Session) bool {
-	if session == nil || session.Surface != KindCodex {
+	if session == nil {
+		return false
+	}
+	if session.Surface == KindZen {
+		return strings.TrimSpace(session.Transport) == ""
+	}
+	if session.Surface != KindCodex {
 		return false
 	}
 	return session.Transport == "readOnly" || session.Transport == ""
@@ -63,6 +69,9 @@ func IsReadOnlySession(session *Session) bool {
 func ReadOnlySessionReason(session *Session) string {
 	if !IsReadOnlySession(session) {
 		return ""
+	}
+	if session.Surface == KindZen {
+		return "ZEN workflow sessions stream through Agenthail but have no live control lease"
 	}
 	if session.Source == "vscode" {
 		return "Codex Desktop is not available through Agenthail's Desktop bridge; quit Codex and run 'agenthail launch codex'"
