@@ -21,10 +21,24 @@ type claudeTurn struct {
 	MessageID   string
 	User        string
 	Assistant   string
+	Reasoning   string
+	Tools       []claudeTool
+	ToolResults []claudeToolResult
 	Model       string
 	TerminalAt  time.Time
 	Done        bool
 	Interrupted bool
+}
+
+type claudeTool struct {
+	ID    string
+	Name  string
+	Input any
+}
+
+type claudeToolResult struct {
+	ID     string
+	Output any
 }
 
 type claudeRecord struct {
@@ -91,7 +105,13 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 			}
 			return turns
 		}
-		if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
+		if record.Message.ToolUseID != "" {
+			if len(turns) > 0 {
+				turns[len(turns)-1].ToolResults = append(turns[len(turns)-1].ToolResults, claudeToolResult{ID: record.Message.ToolUseID, Output: record.Message.Content})
+			}
+			return turns
+		}
+		if !isHumanTranscriptText(text) {
 			return turns
 		}
 		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)})
@@ -112,13 +132,18 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		if record.Message.Model != "" {
 			turn.Model = record.Message.Model
 		}
-		if text := strings.TrimSpace(transcriptText(record.Message.Content)); text != "" {
+		text, reasoning, tools := claudeContent(record.Message.Content)
+		if text = strings.TrimSpace(text); text != "" {
 			if turn.Assistant == "" {
 				turn.Assistant = text
 			} else if turn.Assistant != text && !strings.Contains(turn.Assistant, text) {
 				turn.Assistant += "\n" + text
 			}
 		}
+		if reasoning = strings.TrimSpace(reasoning); reasoning != "" {
+			turn.Reasoning = reasoning
+		}
+		turn.Tools = tools
 		turn.Done = record.Message.StopReason == "end_turn"
 		turn.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
 		if turn.Done || turn.Interrupted {
@@ -265,24 +290,46 @@ func readClaudeCommandResult(path string, offset int64, commandName, commandArgs
 }
 
 func transcriptText(content any) string {
+	text, _, _ := claudeContent(content)
+	return text
+}
+
+func claudeContent(content any) (string, string, []claudeTool) {
 	switch value := content.(type) {
 	case string:
-		return value
+		return value, "", nil
 	case []any:
-		var parts []string
+		var textParts, reasoningParts []string
+		tools := make([]claudeTool, 0)
 		for _, item := range value {
 			entry, ok := item.(map[string]any)
-			if !ok || entry["type"] != "text" {
+			if !ok {
 				continue
 			}
-			if text, _ := entry["text"].(string); text != "" {
-				parts = append(parts, text)
+			switch entry["type"] {
+			case "text":
+				if text, _ := entry["text"].(string); text != "" {
+					textParts = append(textParts, text)
+				}
+			case "thinking", "reasoning":
+				if text, _ := entry["thinking"].(string); text != "" {
+					reasoningParts = append(reasoningParts, text)
+				} else if text, _ := entry["text"].(string); text != "" {
+					reasoningParts = append(reasoningParts, text)
+				}
+			case "tool_use":
+				tools = append(tools, claudeTool{ID: stringValue(entry["id"]), Name: stringValue(entry["name"]), Input: entry["input"]})
 			}
 		}
-		return strings.Join(parts, "\n")
+		return strings.Join(textParts, "\n"), strings.Join(reasoningParts, "\n"), tools
 	default:
-		return ""
+		return "", "", nil
 	}
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
 }
 
 func isHumanTranscriptText(text string) bool {

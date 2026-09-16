@@ -78,7 +78,13 @@ func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 			}
 			return
 		}
-		if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
+		if record.Message.ToolUseID != "" {
+			if s.hasCurrent {
+				s.current.ToolResults = append(s.current.ToolResults, claudeToolResult{ID: record.Message.ToolUseID, Output: record.Message.Content})
+			}
+			return
+		}
+		if !isHumanTranscriptText(text) {
 			return
 		}
 		s.current = claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)}
@@ -98,13 +104,18 @@ func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 		if record.Message.Model != "" {
 			s.current.Model = record.Message.Model
 		}
-		if text := strings.TrimSpace(transcriptText(record.Message.Content)); text != "" {
+		text, reasoning, tools := claudeContent(record.Message.Content)
+		if text = strings.TrimSpace(text); text != "" {
 			if s.current.Assistant == "" {
 				s.current.Assistant = text
 			} else if s.current.Assistant != text && !strings.Contains(s.current.Assistant, text) {
 				s.current.Assistant += "\n" + text
 			}
 		}
+		if reasoning = strings.TrimSpace(reasoning); reasoning != "" {
+			s.current.Reasoning = reasoning
+		}
+		s.current.Tools = tools
 		s.current.Done = record.Message.StopReason == "end_turn"
 		s.current.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
 		if s.current.Done || s.current.Interrupted {

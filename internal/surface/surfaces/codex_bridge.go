@@ -234,6 +234,52 @@ func codexEventTool(value any) string {
 	return ""
 }
 
+func codexEventID(value any) string {
+	if current, ok := value.(map[string]any); ok {
+		for _, key := range []string{"toolCallId", "tool_call_id", "toolUseId", "id"} {
+			if id, ok := current[key].(string); ok && id != "" {
+				return id
+			}
+		}
+		for _, child := range current {
+			if id := codexEventID(child); id != "" {
+				return id
+			}
+		}
+	}
+	if current, ok := value.([]any); ok {
+		for _, child := range current {
+			if id := codexEventID(child); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+func codexEventValue(value any, keys ...string) any {
+	if current, ok := value.(map[string]any); ok {
+		for _, key := range keys {
+			if found, ok := current[key]; ok {
+				return found
+			}
+		}
+		for _, child := range current {
+			if found := codexEventValue(child, keys...); found != nil {
+				return found
+			}
+		}
+	}
+	if current, ok := value.([]any); ok {
+		for _, child := range current {
+			if found := codexEventValue(child, keys...); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
 func codexCompletionMethod(method string) bool {
 	lower := strings.ToLower(method)
 	return strings.Contains(lower, "turn/completed") || strings.Contains(lower, "turn/completion") || strings.Contains(lower, "turn.completed")

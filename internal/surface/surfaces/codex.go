@@ -946,15 +946,24 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				continue
 			}
 			method := event.Method
+			lowerMethod := strings.ToLower(method)
 			switch {
+			case strings.Contains(lowerMethod, "reasoning") || strings.Contains(lowerMethod, "thought"):
+				if text := codexEventText(event.Params); text != "" {
+					onEvent(surface.StreamEvent{Kind: "reasoning", ID: codexEventID(event.Params), Text: text})
+				}
 			case strings.Contains(strings.ToLower(method), "agentmessage"):
 				if txt := codexEventText(event.Params); txt != "" {
 					emittedText += txt
 					onEvent(surface.StreamEvent{Kind: "text", Text: txt})
 				}
-			case strings.Contains(strings.ToLower(method), "tool"):
+			case strings.Contains(lowerMethod, "tool") && (strings.Contains(lowerMethod, "result") || strings.Contains(lowerMethod, "complete")):
+				name := codexEventTool(event.Params)
+				output := codexEventValue(event.Params, "output", "result", "content")
+				onEvent(surface.StreamEvent{Kind: "tool_result", ID: codexEventID(event.Params), Name: name, Output: output})
+			case strings.Contains(lowerMethod, "tool"):
 				if name := codexEventTool(event.Params); name != "" {
-					onEvent(surface.StreamEvent{Kind: "tool_use", Text: name})
+					onEvent(surface.StreamEvent{Kind: "tool_use", ID: codexEventID(event.Params), Name: name, Input: codexEventValue(event.Params, "input", "arguments", "params"), Text: name})
 				}
 			case codexCompletionMethod(method):
 				thread, readErr := c.readObservationThread(ctx, client, sess.ID)

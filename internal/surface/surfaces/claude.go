@@ -495,6 +495,9 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 		targetID = state.current.UserID
 	}
 	lastText := ""
+	lastReasoning := ""
+	emittedTools := map[string]bool{}
+	emittedToolResults := map[string]bool{}
 	var lastContext surface.ContextUsage
 	var nextContextPoll time.Time
 	for time.Now().Before(deadline) {
@@ -532,6 +535,31 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 			if text != "" {
 				onEvent(surface.StreamEvent{Kind: "text", Text: text})
 			}
+		}
+		if turn.Reasoning != "" && turn.Reasoning != lastReasoning {
+			reasoning := turn.Reasoning
+			if strings.HasPrefix(reasoning, lastReasoning) {
+				reasoning = strings.TrimPrefix(reasoning, lastReasoning)
+			}
+			lastReasoning = turn.Reasoning
+			if reasoning != "" {
+				onEvent(surface.StreamEvent{Kind: "reasoning", Text: reasoning})
+			}
+		}
+		for _, tool := range turn.Tools {
+			key := tool.ID + ":" + tool.Name
+			if key == ":" || emittedTools[key] {
+				continue
+			}
+			emittedTools[key] = true
+			onEvent(surface.StreamEvent{Kind: "tool_use", ID: tool.ID, Name: tool.Name, Input: tool.Input, Text: tool.Name})
+		}
+		for _, result := range turn.ToolResults {
+			if result.ID == "" || emittedToolResults[result.ID] {
+				continue
+			}
+			emittedToolResults[result.ID] = true
+			onEvent(surface.StreamEvent{Kind: "tool_result", ID: result.ID, Output: result.Output})
 		}
 		if turn.Done {
 			onEvent(surface.StreamEvent{Kind: "done"})
