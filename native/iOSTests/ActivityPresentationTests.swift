@@ -11,6 +11,9 @@ final class ActivityPresentationTests: XCTestCase {
         XCTAssertEqual(groups.flatMap(\.items), items)
         XCTAssertEqual(groups[0].invocations.map { $0.items.map(\.id) }, [["a", "e"], ["b", "c"], ["d"]])
         XCTAssertEqual(TimelineGroup.make(Array(items.prefix(2)))[0].id, groups[0].id)
+        let newestFirst = TimelineGroup.newestFirst(items)
+        XCTAssertEqual(newestFirst.map(\.id), ["f", "a"])
+        XCTAssertEqual(newestFirst.last?.invocations.map { $0.items.map(\.id) }, [["a", "e"], ["b", "c"], ["d"]])
     }
 
     func testWorkspaceSurvivesSnapshotAndSearchDecoding() throws {

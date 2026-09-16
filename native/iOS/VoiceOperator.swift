@@ -30,6 +30,11 @@ final class VoiceOperatorModel: ObservableObject {
     private var hostHangupAttemptID: String?
     private var closed = false
     var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    var canStartNewConversation: Bool {
+        state != nil && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed
+            && !closed && state?.hasCall != true && state?.occupied != true
+            && state?.phase != "creating" && state?.phase != "blocked"
+    }
 
     init(preview: Bool = false, api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
         isPreview = preview
@@ -56,7 +61,19 @@ final class VoiceOperatorModel: ObservableObject {
     }
 
 #if DEBUG
-    private static let previewState = #"{"protocol":1,"phase":"ready","events":[{"sequence":1,"method":"thread/realtime/transcript/done","params":{"role":"user","text":"Let's work through the release. What should we tackle first?"}},{"sequence":2,"method":"thread/realtime/transcript/done","params":{"role":"assistant","text":"We can start with the failing tests, then review the changes together. Call when you're ready and I'll check the live sessions."}}],"truncated":false,"occupied":false}"#
+    private static var previewState: String {
+        var events: [[String: Any]] = []
+        for sequence in 1...10 {
+            events.append([
+                "sequence": sequence,
+                "method": "thread/realtime/transcript/done",
+                "params": ["role": sequence.isMultiple(of: 2) ? "assistant" : "user",
+                           "text": sequence == 10 ? "Newest voice update" : "Conversation update \(sequence). This keeps enough history on screen to exercise follow-latest behavior."],
+            ])
+        }
+        let value: [String: Any] = ["protocol": 1, "phase": "ready", "events": events, "truncated": false, "occupied": false]
+        return String(data: try! JSONSerialization.data(withJSONObject: value), encoding: .utf8)!
+    }
 #endif
 
     func open() {
@@ -252,6 +269,23 @@ final class VoiceOperatorModel: ObservableObject {
         catch { if !closed, generation == current { self.error = error.localizedDescription } }
     }
 
+    func startNewConversation() async {
+        guard let api, canStartNewConversation else { return }
+        working = true; error = nil; generation += 1
+        let current = generation
+        defer { working = false }
+        do {
+            let next = try await api.action(VoiceAction(action: "new"))
+            guard !closed, generation == current else { return }
+            state = next
+            detail = nil
+            activityError = nil
+        } catch {
+            guard !closed, generation == current else { return }
+            self.error = error.localizedDescription
+        }
+    }
+
     func close() {
         guard !closed else { return }
         hangup()
@@ -267,8 +301,12 @@ struct AgenthailVoiceOperatorSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmInterrupt = false
+    @State private var confirmNewConversation = false
     @State private var showKeyboard = false
     @State private var showDetails = false
+    @State private var followingLatest = true
+    @State private var atLatest = true
+    @State private var userScrolling = false
     let openSession: (String) -> Void
 
     init(model: VoiceOperatorModel? = nil, openSession: @escaping (String) -> Void) {
@@ -278,8 +316,9 @@ struct AgenthailVoiceOperatorSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
                     if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
 #if DEBUG && targetEnvironment(simulator)
                     if VoiceEvaluation.enabled {
@@ -332,7 +371,7 @@ struct AgenthailVoiceOperatorSheet: View {
                                 if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
                                 if let timeline = detail.timeline {
                                     if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
-                                    ForEach(TimelineGroup.make(timeline.items)) { CompactActivityGroup(group: $0) }
+                                    ForEach(TimelineGroup.newestFirst(timeline.items)) { CompactActivityGroup(group: $0) }
                                     if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
                                 }
                                 Button("Open full timeline") { openSession(detail.session.id) }
@@ -342,8 +381,53 @@ struct AgenthailVoiceOperatorSheet: View {
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                         }
                     }
+                    Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
-            }.safeAreaInset(edge: .bottom) { controls }
+                }
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
+                .defaultScrollAnchor(.top, for: .alignment)
+                .onScrollPhaseChange { _, phase in
+                    if phase == .interacting {
+                        userScrolling = true
+                        followingLatest = false
+                    } else if phase == .idle && userScrolling {
+                        followingLatest = atLatest
+                        userScrolling = false
+                    }
+                }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentSize.height - geometry.visibleRect.maxY < 80
+                } action: { _, value in
+                    atLatest = value
+                }
+                .onChange(of: latestContentMarker) { _, _ in
+                    if followingLatest { proxy.scrollTo("voice-bottom", anchor: .bottom) }
+                }
+                .onChange(of: model.state?.session?.id) { _, _ in
+                    followingLatest = true
+                    atLatest = true
+                    proxy.scrollTo("voice-bottom", anchor: .bottom)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    VStack(spacing: 0) {
+                        if !atLatest {
+                            Button {
+                                followingLatest = true
+                                proxy.scrollTo("voice-bottom", anchor: .bottom)
+                            } label: {
+                                Image(systemName: "arrow.down")
+                                    .font(.body.weight(.semibold))
+                                    .frame(width: 44, height: 44)
+                                    .background(.regularMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Jump to latest voice activity")
+                        }
+                        controls
+                    }
+                }
+            }
             .background(alignment: .bottom) {
                 if let bridge = model.audio as? VoiceAudioBridge { VoiceAudioSurface(bridge: bridge).frame(width: 1, height: 1).accessibilityHidden(true) }
             }
@@ -351,7 +435,12 @@ struct AgenthailVoiceOperatorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) { Button("Connection details", systemImage: "info.circle") { showDetails = true } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("New conversation", systemImage: "square.and.pencil") { confirmNewConversation = true }
+                        .disabled(!model.canStartNewConversation)
+                        .accessibilityIdentifier("new-voice-conversation")
+                    Button("Connection details", systemImage: "info.circle") { showDetails = true }
+                }
             }
             .sheet(isPresented: $showDetails) { connectionDetails }
             .task { model.open() }
@@ -361,7 +450,22 @@ struct AgenthailVoiceOperatorSheet: View {
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
             }
+            .confirmationDialog("Start a new orchestrator conversation?", isPresented: $confirmNewConversation, titleVisibility: .visible) {
+                Button("Start new conversation") {
+                    followingLatest = true
+                    Task { await model.startNewConversation() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This creates a separate Codex thread. The current conversation remains available in Sessions.")
+            }
         }
+    }
+
+    private var latestContentMarker: String {
+        let event = model.state?.events.last?.sequence ?? 0
+        let item = model.detail?.timeline?.items.last?.id ?? ""
+        return "\(event):\(item)"
     }
 
     private var controls: some View {
