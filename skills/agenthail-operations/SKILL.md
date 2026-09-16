@@ -224,14 +224,16 @@ Persistent agent-to-agent subscription:
 ```bash
 agenthail relay add @researcher @builder
 agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
-agenthail relay list
+agenthail relay list [--json]
 agenthail relay rm <id>
 ```
 
 The first target is the completion source. The second receives each matching
 completed reply. The optional filter is a regular expression. Relays reject
 self-routes and cycles, remember delivered completion IDs across restarts, and
-require the daemon.
+require the daemon. `relay list` derives per-route firing evidence from that
+delivery ledger, reporting each rule's fire count and last-fired timestamp in
+both text and `--json` output.
 
 Human completion notifications:
 
@@ -354,7 +356,7 @@ agenthail queue list --json
 agenthail history 10 --json
 agenthail identify list
 agenthail channel list
-agenthail relay list
+agenthail relay list --json
 agenthail dashboard status
 ```
 
