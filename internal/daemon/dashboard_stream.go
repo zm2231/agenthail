@@ -93,13 +93,15 @@ func (d *Daemon) dashboardZenStream(w http.ResponseWriter, r *http.Request, sess
 		if event.Type != "harness.runtime" || event.EntityID != session.ID {
 			return
 		}
-		var payload struct {
-			Event json.RawMessage `json:"event"`
-		}
-		if json.Unmarshal(event.Data, &payload) != nil || len(payload.Event) == 0 {
+		var payload surface.StreamEvent
+		if json.Unmarshal(event.Data, &payload) != nil || payload.Kind == "" {
 			return
 		}
-		fmt.Fprintf(w, "event: delta\ndata: %s\n\n", payload.Event)
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: delta\ndata: %s\n\n", encoded)
 		flusher.Flush()
 	}
 	for _, event := range backlog {

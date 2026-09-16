@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -65,6 +66,57 @@ func (d *Daemon) zenSessionEventHandler(w http.ResponseWriter, r *http.Request) 
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "A structured runtime event is required.")
 		return
 	}
-	d.publishEvent("harness.runtime", sessionID, map[string]any{"sessionId": sessionID, "event": request.Event})
+	event, err := zenStreamEvent(request.Event)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	d.publishEvent("harness.runtime", sessionID, event)
 	writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
+func zenStreamEvent(raw json.RawMessage) (surface.StreamEvent, error) {
+	var event struct {
+		Type    string        `json:"type"`
+		ID      string        `json:"id"`
+		Name    string        `json:"name"`
+		Text    string        `json:"text"`
+		Input   any           `json:"input"`
+		Output  any           `json:"output"`
+		Error   string        `json:"error"`
+		Message string        `json:"message"`
+		Reason  string        `json:"reason"`
+		Usage   *runtimeUsage `json:"usage"`
+	}
+	if err := json.Unmarshal(raw, &event); err != nil || strings.TrimSpace(event.Type) == "" {
+		return surface.StreamEvent{}, fmt.Errorf("A typed ZEN runtime event is required.")
+	}
+	var data any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return surface.StreamEvent{}, fmt.Errorf("A typed ZEN runtime event is required.")
+	}
+	stream := surface.StreamEvent{Kind: event.Type, ID: event.ID, Name: event.Name, Text: event.Text, Input: event.Input, Output: event.Output, Error: event.Error, Data: data}
+	if stream.Error == "" {
+		stream.Error = event.Message
+	}
+	if stream.Text == "" {
+		stream.Text = event.Reason
+	}
+	if event.Type == "usage" {
+		var usage runtimeUsage
+		if err := json.Unmarshal(raw, &usage); err != nil {
+			return surface.StreamEvent{}, fmt.Errorf("A typed ZEN runtime event is required.")
+		}
+		stream.Context = &surface.ContextUsage{UsedTokens: usage.Total, CumulativeTokens: usage.Total, InputTokens: usage.Input, OutputTokens: usage.Output}
+	}
+	if event.Usage != nil {
+		stream.Context = &surface.ContextUsage{UsedTokens: event.Usage.Total, CumulativeTokens: event.Usage.Total, InputTokens: event.Usage.Input, OutputTokens: event.Usage.Output}
+	}
+	return stream, nil
+}
+
+type runtimeUsage struct {
+	Input  int64 `json:"input"`
+	Output int64 `json:"output"`
+	Total  int64 `json:"total"`
 }

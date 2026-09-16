@@ -317,6 +317,7 @@ type StreamEvent struct {
 	Output  any           `json:"output,omitempty"`
 	Error   string        `json:"error,omitempty"`
 	Context *ContextUsage `json:"context,omitempty"`
+	Data    any           `json:"data,omitempty"`
 }
 
 type ContextUsage struct {
