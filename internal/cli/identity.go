@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -274,20 +275,30 @@ func (a *App) cmdRelay(args []string) error {
 			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern)
 		return nil
 	case "list":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: agenthail relay list")
+		if len(stripFlags(args)) != 1 {
+			return fmt.Errorf("usage: agenthail relay list [--json]")
 		}
 		routes, err := a.Registry.ListRoutes()
 		if err != nil {
 			return err
 		}
 		if len(routes) == 0 {
+			if hasFlag(args, "--json") {
+				return json.NewEncoder(os.Stdout).Encode(map[string]any{"relays": routes})
+			}
 			fmt.Println("(no relays; use: agenthail relay add <from> <to> [regex])")
 			return nil
 		}
+		if hasFlag(args, "--json") {
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"relays": routes})
+		}
 		for _, r := range routes {
-			fmt.Printf("#%-3d %s -> %s /%s/\n",
-				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern)
+			lastFired := "never"
+			if r.LastFiredAt != "" {
+				lastFired = r.LastFiredAt
+			}
+			fmt.Printf("#%-3d %s -> %s /%s/ fires=%d last-fired=%s\n",
+				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, r.FireCount, lastFired)
 		}
 		return nil
 	case "rm", "remove", "delete":

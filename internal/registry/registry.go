@@ -1356,14 +1356,20 @@ func (r *Registry) RemoveRoute(id int64) error {
 }
 
 type RouteRow struct {
-	ID          int64
-	FromSession string
-	ToSession   string
-	Pattern     string
+	ID          int64  `json:"id"`
+	FromSession string `json:"fromSession"`
+	ToSession   string `json:"toSession"`
+	Pattern     string `json:"pattern"`
+	FireCount   int64  `json:"fireCount"`
+	LastFiredAt string `json:"lastFiredAt,omitempty"`
 }
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
-	rows, err := r.db.Query(`SELECT id, from_session, to_session, pattern FROM routes ORDER BY id`)
+	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern,
+		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), '')
+		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
+		GROUP BY r.id, r.from_session, r.to_session, r.pattern
+		ORDER BY r.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1371,7 +1377,7 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	var out []RouteRow
 	for rows.Next() {
 		var r RouteRow
-		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern); err == nil {
+		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &r.FireCount, &r.LastFiredAt); err == nil {
 			out = append(out, r)
 		}
 	}

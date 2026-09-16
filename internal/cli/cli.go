@@ -158,7 +158,7 @@ Channels:
 
 Automatic handoffs:
   relay add <from> <to> [regex] Send-to-on-completion rule
-  relay list                    Show routing rules
+  relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
 Background service:
@@ -376,6 +376,9 @@ func validateCommandFlags(command string, args []string) error {
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
 		spec.bools = map[string]bool{"--all": true, "--json": true}
+	}
+	if command == "relay" && len(args) > 0 && args[0] == "list" {
+		spec.bools = map[string]bool{"--json": true}
 	}
 	if command == "channel" && len(args) > 0 {
 		switch args[0] {
