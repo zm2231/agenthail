@@ -165,8 +165,23 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			text = observation.Reply.Text
 		}
 		if text != "" {
-			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
+			if allowed, reason := d.relayGoalAllows(ctx, adapter, session); allowed {
+				if err := d.Registry.ClearRelayHolds(session.ID); err != nil {
+					d.log.Printf("clear held relays %s: %s", d.resolveDisplay(session.ID), err)
+				}
+				d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
+			} else {
+				d.holdRelays(session, observation.CompletedTurnID, previous.RelayHops, text, reason)
+			}
 		}
+	} else if holds, holdsErr := d.Registry.RelayHolds(session.ID); holdsErr != nil {
+		d.log.Printf("load held relays %s: %s", d.resolveDisplay(session.ID), holdsErr)
+	} else if len(holds) > 0 {
+		if allowed, _ := d.relayGoalAllows(ctx, adapter, session); allowed {
+			d.releaseHeldRelays(session, holds)
+		}
+	}
+	if completionChanged {
 		terminalCompletion := observation.ActiveTurnID == ""
 		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done {
 			desktopNotificationMessage = fmt.Sprintf("%s finished", d.resolveDisplay(session.ID))
@@ -213,6 +228,63 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		if queued > 0 {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}
+	}
+}
+
+func (d *Daemon) relayGoalAllows(ctx context.Context, adapter surface.Surface, session *surface.Session) (bool, string) {
+	if !adapter.Capabilities().Goal {
+		return true, ""
+	}
+	goalCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	goal, err := adapter.GoalGet(goalCtx, session)
+	cancel()
+	if err != nil {
+		return false, "source goal state is unavailable: " + err.Error()
+	}
+	if goal == nil || goal.Status == "" || goal.Status == "complete" {
+		return true, ""
+	}
+	if goal.Status == "active" {
+		return false, "source goal is active"
+	}
+	return false, "source goal has unknown status: " + goal.Status
+}
+
+func (d *Daemon) holdRelays(from *surface.Session, completionID string, hops int, text, reason string) {
+	routes, err := d.Registry.ListRoutes()
+	if err != nil {
+		d.log.Printf("list relays: %s", err)
+		return
+	}
+	for _, route := range routes {
+		if route.FromSession != from.ID || !matchPattern(route.Pattern, text) {
+			continue
+		}
+		if err := d.Registry.HoldRelay(route.ID, from.ID, completionID, hops, text); err != nil {
+			d.log.Printf("hold relay %d: %s", route.ID, err)
+			continue
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-suppressed", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})
+	}
+}
+
+func (d *Daemon) releaseHeldRelays(from *surface.Session, holds []registry.RelayHold) {
+	routes, err := d.Registry.ListRoutes()
+	if err != nil {
+		d.log.Printf("list relays: %s", err)
+		return
+	}
+	byID := make(map[int64]registry.RouteRow, len(routes))
+	for _, route := range routes {
+		byID[route.ID] = route
+	}
+	for _, hold := range holds {
+		if route, found := byID[hold.RouteID]; found && route.FromSession == from.ID {
+			d.fireRelay(from, route, hold.CompletionID, hold.RelayHops, hold.Message)
+		}
+	}
+	if err := d.Registry.ClearRelayHolds(from.ID); err != nil {
+		d.log.Printf("clear released relays %s: %s", d.resolveDisplay(from.ID), err)
 	}
 }
 

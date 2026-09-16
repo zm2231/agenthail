@@ -124,7 +124,7 @@ Then connect them:
 agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 ```
 
-When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
+When the investigation finishes with something the builder needs, Agenthail passes it across. For a goal-capable source, intermediate completions are held while its goal is active; when the goal reports complete, Agenthail releases only the latest matching completion for each relay. If Agenthail cannot read that goal state, it keeps the handoff held and records `relay-suppressed` in history. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
 
 For a group that needs the same update:
 

@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 3
+	schemaVersion   = 4
 	queueMessageTTL = time.Hour
 )
 
@@ -234,6 +234,14 @@ CREATE TABLE IF NOT EXISTS relay_deliveries (
 	completion_id TEXT NOT NULL,
 	delivered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	PRIMARY KEY (route_id, completion_id)
+);
+CREATE TABLE IF NOT EXISTS relay_holds (
+	route_id INTEGER PRIMARY KEY REFERENCES routes(id) ON DELETE CASCADE,
+	source_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	completion_id TEXT NOT NULL,
+	relay_hops INTEGER NOT NULL,
+	message TEXT NOT NULL,
+	held_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS delivery_history (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1302,6 +1310,41 @@ func (r *Registry) RecordRelayDelivery(routeID int64, completionID string) (bool
 	}
 	n, err := res.RowsAffected()
 	return n == 1, err
+}
+
+type RelayHold struct {
+	RouteID         int64
+	SourceSessionID string
+	CompletionID    string
+	RelayHops       int
+	Message         string
+}
+
+func (r *Registry) HoldRelay(routeID int64, sourceSessionID, completionID string, relayHops int, message string) error {
+	_, err := r.db.Exec(`INSERT INTO relay_holds(route_id,source_session_id,completion_id,relay_hops,message,held_at) VALUES(?,?,?,?,?,datetime('now')) ON CONFLICT(route_id) DO UPDATE SET source_session_id=excluded.source_session_id,completion_id=excluded.completion_id,relay_hops=excluded.relay_hops,message=excluded.message,held_at=datetime('now')`, routeID, sourceSessionID, completionID, relayHops, message)
+	return err
+}
+
+func (r *Registry) RelayHolds(sourceSessionID string) ([]RelayHold, error) {
+	rows, err := r.db.Query(`SELECT route_id,source_session_id,completion_id,relay_hops,message FROM relay_holds WHERE source_session_id=? ORDER BY held_at,route_id`, sourceSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var holds []RelayHold
+	for rows.Next() {
+		var hold RelayHold
+		if err := rows.Scan(&hold.RouteID, &hold.SourceSessionID, &hold.CompletionID, &hold.RelayHops, &hold.Message); err != nil {
+			return nil, err
+		}
+		holds = append(holds, hold)
+	}
+	return holds, rows.Err()
+}
+
+func (r *Registry) ClearRelayHolds(sourceSessionID string) error {
+	_, err := r.db.Exec(`DELETE FROM relay_holds WHERE source_session_id=?`, sourceSessionID)
+	return err
 }
 
 func (r *Registry) ForgetRelayDelivery(routeID int64, completionID string) error {

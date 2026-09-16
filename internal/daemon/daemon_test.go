@@ -43,6 +43,9 @@ type daemonSurface struct {
 	contextUsage  *surface.ContextUsage
 	searchResults []surface.SessionSearchResult
 	searchErr     error
+	goal          *surface.GoalState
+	goalErr       error
+	goalCalls     atomic.Int32
 }
 
 type runtimeDaemonSurface struct {
@@ -241,8 +244,9 @@ func (f *daemonSurface) Stream(_ context.Context, _ *surface.Session, _ string, 
 }
 func (*daemonSurface) GoalSet(context.Context, *surface.Session, string) error { return nil }
 func (*daemonSurface) GoalClear(context.Context, *surface.Session) error       { return nil }
-func (*daemonSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
-	return nil, nil
+func (f *daemonSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
+	f.goalCalls.Add(1)
+	return f.goal, f.goalErr
 }
 func (*daemonSurface) Compact(context.Context, *surface.Session) error { return nil }
 func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, error) {
@@ -319,6 +323,58 @@ func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {
 	daemon.observeSession(context.Background(), fake, &from)
 	if len(fake.sent) != 0 || r.QueueCount("to") != 1 {
 		t.Fatalf("duplicate: sent=%v pending=%d", fake.sent, r.QueueCount("to"))
+	}
+}
+
+func TestObservationSuppressesRelaysUntilGoalCompletes(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps.Goal = true
+	fake.goal = &surface.GoalState{Objective: "ship", Status: "active"}
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline", Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "progress", Reply: &surface.ReplyResult{Text: "progress", Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	if count := r.QueueCount("to"); count != 0 {
+		t.Fatalf("active-goal completion relayed: queued=%d", count)
+	}
+	history, err := r.ListHistory(10, "to")
+	if err != nil || len(history) == 0 || history[0].Kind != "relay-suppressed" || history[0].Error != "source goal is active" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "latest", Reply: &surface.ReplyResult{Text: "latest", Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.goal = &surface.GoalState{Objective: "ship", Status: "complete"}
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "latest"}
+	daemon.observeSession(context.Background(), fake, &from)
+	if count := r.QueueCount("to"); count != 1 {
+		t.Fatalf("completed-goal hold not relayed: queued=%d", count)
+	}
+	items, err := r.ListQueue(false)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Message, "latest") || strings.Contains(items[0].Message, "progress") {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
+
+func TestObservationSuppressesRelaysWhenGoalStateIsUnavailable(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps.Goal = true
+	fake.goalErr = errors.New("bridge unavailable")
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline", Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "next", Reply: &surface.ReplyResult{Text: "progress", Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	if count := r.QueueCount("to"); count != 0 {
+		t.Fatalf("unreadable-goal completion relayed: queued=%d", count)
+	}
+	history, err := r.ListHistory(10, "to")
+	if err != nil || len(history) == 0 || history[0].Kind != "relay-suppressed" || !strings.Contains(history[0].Error, "goal state is unavailable") {
+		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
 

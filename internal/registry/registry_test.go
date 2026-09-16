@@ -88,6 +88,30 @@ func TestOpenRunsMigrationsOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestOpenAddsRelayHoldsForVersionThreeRegistry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.Exec(`DROP TABLE relay_holds; PRAGMA user_version=3`); err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var table string
+	if err := second.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='relay_holds'`).Scan(&table); err != nil || table != "relay_holds" {
+		t.Fatalf("relay holds table=%q err=%v", table, err)
+	}
+}
+
 func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
@@ -397,6 +421,35 @@ func TestAddRouteValidatesPatternAndCycles(t *testing.T) {
 	}
 	if _, err := r.AddRoute("c", "a", ".*"); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("cycle accepted: %v", err)
+	}
+}
+
+func TestRelayHoldKeepsOnlyLatestCompletionAndCascadesWithRoute(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "from", "to")
+	routeID, err := r.AddRoute("from", "to", ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HoldRelay(routeID, "from", "turn-1", 1, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HoldRelay(routeID, "from", "turn-2", 2, "latest"); err != nil {
+		t.Fatal(err)
+	}
+	holds, err := r.RelayHolds("from")
+	if err != nil || len(holds) != 1 {
+		t.Fatalf("holds=%+v err=%v", holds, err)
+	}
+	if got := holds[0]; got.CompletionID != "turn-2" || got.RelayHops != 2 || got.Message != "latest" {
+		t.Fatalf("hold=%+v", got)
+	}
+	if err := r.RemoveRoute(routeID); err != nil {
+		t.Fatal(err)
+	}
+	holds, err = r.RelayHolds("from")
+	if err != nil || len(holds) != 0 {
+		t.Fatalf("holds after route removal=%+v err=%v", holds, err)
 	}
 }
 
