@@ -25,6 +25,10 @@ func (d *Daemon) dashboardStreamHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	adapter := d.surfaceForKind(session.Surface)
+	if session.Surface == surface.KindZen {
+		d.dashboardZenStream(w, r, session)
+		return
+	}
 	if adapter == nil || !adapter.Capabilities().Stream {
 		http.Error(w, "this session does not support live streaming", http.StatusConflict)
 		return
@@ -65,6 +69,53 @@ func (d *Daemon) dashboardStreamHandler(w http.ResponseWriter, r *http.Request) 
 			payload, _ := json.Marshal(event)
 			fmt.Fprintf(w, "event: delta\ndata: %s\n\n", payload)
 			flusher.Flush()
+		case <-keepalive.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (d *Daemon) dashboardZenStream(w http.ResponseWriter, r *http.Request, session *surface.Session) {
+	flusher, ok := w.(http.Flusher)
+	if !ok || d.events == nil {
+		http.Error(w, "streaming is unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	fmt.Fprint(w, "event: ready\ndata: {}\n\n")
+	flusher.Flush()
+	backlog, events, _, cancel := d.events.subscribe(0)
+	defer cancel()
+	write := func(event apiEvent) {
+		if event.Type != "harness.runtime" || event.EntityID != session.ID {
+			return
+		}
+		var payload struct {
+			Event json.RawMessage `json:"event"`
+		}
+		if json.Unmarshal(event.Data, &payload) != nil || len(payload.Event) == 0 {
+			return
+		}
+		fmt.Fprintf(w, "event: delta\ndata: %s\n\n", payload.Event)
+		flusher.Flush()
+	}
+	for _, event := range backlog {
+		write(event)
+	}
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, open := <-events:
+			if !open {
+				return
+			}
+			write(event)
 		case <-keepalive.C:
 			fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()
