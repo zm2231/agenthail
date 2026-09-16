@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,7 +32,11 @@ func (p *fixtureProvider) Create(_ context.Context, cwd, instructions string) (*
 	defer p.mu.Unlock()
 	p.creates++
 	p.instructions = instructions
-	return &surface.Session{ID: "operator", Surface: surface.KindCodex, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, p.createErr
+	id := "operator"
+	if p.creates > 1 {
+		id = fmt.Sprintf("operator-%d", p.creates)
+	}
+	return &surface.Session{ID: id, Surface: surface.KindCodex, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, p.createErr
 }
 func (p *fixtureProvider) Cursor(context.Context) (Cursor, error) {
 	return Cursor{Source: "fixture", Position: 10}, nil
@@ -106,6 +111,51 @@ func TestPersistentOperatorLoadsLiteralSkillWithoutStartingTurn(t *testing.T) {
 	info, err := os.Stat(s.path)
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("private state: %v %v", info, err)
+	}
+}
+
+func TestNewOperatorCreatesDistinctPersistentThreadAndRetainsOldThread(t *testing.T) {
+	p := &fixtureProvider{}
+	var registered []string
+	path := filepath.Join(t.TempDir(), "voice", "operator.json")
+	s := New(path, p, func(session surface.Session) error {
+		registered = append(registered, session.ID)
+		return nil
+	}, "/fixture/agenthail")
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	first := apply(t, s, Action{Action: "prepare"})
+	first.Events = []Event{{Sequence: 1, Method: "thread/realtime/transcript/done"}}
+	s.state.State = first
+	second := apply(t, s, Action{Action: "new"})
+	if first.Session.ID == second.Session.ID || second.Session.ID != "operator-2" || p.creates != 2 {
+		t.Fatalf("new operator was not distinct: first=%+v second=%+v creates=%d", first.Session, second.Session, p.creates)
+	}
+	if len(second.Events) != 0 || second.Phase != "ready" {
+		t.Fatalf("new operator inherited prior conversation state: %+v", second)
+	}
+	if !reflect.DeepEqual(registered, []string{"operator", "operator-2"}) {
+		t.Fatalf("old and new operators were not both registered: %v", registered)
+	}
+	reopened := New(s.path, p, nil, "/fixture/agenthail")
+	if got := reopened.View("phone"); got.Session == nil || got.Session.ID != "operator-2" || len(got.Events) != 0 {
+		t.Fatalf("new operator identity was not durable: %+v", got)
+	}
+}
+
+func TestNewOperatorFailsClosedAcrossActiveAndUnknownCreation(t *testing.T) {
+	s, p := fixture(t)
+	first := apply(t, s, Action{Action: "prepare"})
+	startFixture(t, s)
+	if _, err := s.Apply(context.Background(), "phone", Action{Action: "new"}); err == nil || p.creates != 1 {
+		t.Fatal("active call allowed operator replacement")
+	}
+	s.state.State.Phase = "ended"
+	p.createErr = surface.DeliveryOutcomeUnknown(errors.New("lost replacement reply"))
+	if got, err := s.Apply(context.Background(), "phone", Action{Action: "new"}); err == nil || got.Session.ID != first.Session.ID || got.Phase != "creating" {
+		t.Fatalf("unknown replacement discarded the inspectable prior thread: got=%+v err=%v", got, err)
+	}
+	if _, err := s.Apply(context.Background(), "phone", Action{Action: "new"}); err == nil || p.creates != 2 {
+		t.Fatal("unknown replacement was retried")
 	}
 }
 

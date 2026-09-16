@@ -16,6 +16,7 @@
 		35D62B0FAA562423252C2DE2 /* AgenthailIOSViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 352FB70958533EE6B1BD305F /* AgenthailIOSViews.swift */; };
 		393C0A7758CA9D4C05A55E0A /* QRCodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAB7D6CA7902276BFF459B0 /* QRCodeScanner.swift */; };
 		3E9376343DD4CE44707EC1C5 /* TranscriptReadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C112D446D507CCBB273959C /* TranscriptReadingTests.swift */; };
+		3F469EFA3A39C2186C2C4C1D /* VoiceOperatorUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */; };
 		3FD5F75D86A75073D68A0E5F /* StaleConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2839D66EF1BD794309CB554D /* StaleConnectionTests.swift */; };
 		443F023ACD237D2BA24AB03F /* VoiceEvaluation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D93FC20A131403B2AA5DC86 /* VoiceEvaluation.swift */; };
 		4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */; };
@@ -70,6 +71,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOperatorUITests.swift; sourceTree = "<group>"; };
 		07B6960DDDB324CD27F150F5 /* VoiceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAPI.swift; sourceTree = "<group>"; };
 		0864D478BAA6B9611ABCBF30 /* AgenthailIOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgenthailIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0B89C776F58E3976CA85343C /* SessionExperienceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionExperienceTests.swift; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 				4DC0A396F7D55A3DC08160AB /* ModelSelectionUITests.swift */,
 				2615CE29223F7FB746D9F8B2 /* SessionNavigationTests.swift */,
 				A6ED9926A8FF2A500F79D3FA /* TranscriptReadingUITests.swift */,
+				023B7A26F85ABD5C04B517BE /* VoiceOperatorUITests.swift */,
 			);
 			path = iOSUITests;
 			sourceTree = "<group>";
@@ -368,6 +371,7 @@
 				DE482C687A1CCC594999D2F0 /* ModelSelectionUITests.swift in Sources */,
 				070A9882E55DDEE16B0D1592 /* SessionNavigationTests.swift in Sources */,
 				4745ED34D458BE5684C88ABF /* TranscriptReadingUITests.swift in Sources */,
+				3F469EFA3A39C2186C2C4C1D /* VoiceOperatorUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

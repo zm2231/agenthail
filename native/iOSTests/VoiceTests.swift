@@ -118,6 +118,18 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testNewConversationUsesServerActionAndClearsLoadedTimeline() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","session":{"id":"old","surface":"codex","name":"Old operator","status":"idle","lastActive":"now","cwd":"/operator","source":"agenthail","transport":"desktop"},"events":[{"sequence":1,"method":"thread/realtime/transcript/done","params":{"role":"assistant","text":"Old history"}}],"occupied":false,"truncated":false}"#.utf8))
+        let model = VoiceOperatorModel(api: api, audio: audio)
+        await model.refresh()
+        XCTAssertTrue(model.canStartNewConversation)
+        await model.startNewConversation()
+        XCTAssertEqual(api.actions.last?.action, "new")
+        XCTAssertNil(model.detail)
+    }
+
+    @MainActor
     func testLateTextResponseCannotReplaceClosedScreenState() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true

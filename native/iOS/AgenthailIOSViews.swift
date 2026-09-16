@@ -200,6 +200,7 @@ struct ConversationListView: View {
     @State private var scope = SessionScope.recent
     @State private var showingNewSession = false
     @State private var search = ""
+    @State private var collapsedWorkspaces: Set<String> = []
 
     private enum SessionScope: String, CaseIterable {
         case running = "Running", recent = "Recent", all = "All"
@@ -234,15 +235,41 @@ struct ConversationListView: View {
             }
             .pickerStyle(.segmented)
             .listRowSeparator(.hidden)
+            if model.isPaired {
+                VoiceOperatorEntry(model: model)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(workspaces, id: \.self) { workspace in
                 Section {
-                    ForEach(sessions.filter { ($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
-                } header: {
-                    if !workspace.isEmpty {
-                        Label(URL(fileURLWithPath: workspace).lastPathComponent, systemImage: "folder")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).textCase(nil)
-                            .accessibilityLabel("Workspace \(workspace)")
+                    if !collapsedWorkspaces.contains(workspace) {
+                        ForEach(sessions.filter { ($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
                     }
+                } header: {
+                    Button {
+                        if !collapsedWorkspaces.insert(workspace).inserted { collapsedWorkspaces.remove(workspace) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(workspace.isEmpty ? "Other locations" : URL(fileURLWithPath: workspace).lastPathComponent)
+                                    .font(.subheadline.weight(.semibold))
+                                if !workspace.isEmpty {
+                                    Text(workspace).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: collapsedWorkspaces.contains(workspace) ? "chevron.right" : "chevron.down")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+                    .accessibilityLabel("Workspace \(workspace.isEmpty ? "Other locations" : workspace)")
+                    .accessibilityValue(collapsedWorkspaces.contains(workspace) ? "Collapsed" : "Expanded")
+                    .accessibilityIdentifier("workspace-" + workspace)
                 }
             }
             if sessions.isEmpty && !model.searching {
@@ -379,7 +406,6 @@ struct SessionScreen: View {
                                 ContentUnavailableView("No messages yet", systemImage: "bubble.left", description: Text("Messages will appear here as the agent works."))
                             }
                         }
-                        if detail.session.status == "busy" { LiveSessionActivity(items: items) }
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }

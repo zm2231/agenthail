@@ -7,6 +7,15 @@ final class SessionNavigationTests: XCTestCase {
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
         app.launch()
         XCTAssertTrue(app.buttons["voice-entry"].waitForExistence(timeout: 10))
+        let workspace = app.buttons["workspace-/Users/demo/projects/fieldnotes"]
+        XCTAssertTrue(workspace.waitForExistence(timeout: 5))
+        workspace.tap()
+        XCTAssertFalse(app.buttons["session-demo"].exists)
+        workspace.tap()
+        XCTAssertTrue(app.buttons["session-demo"].waitForExistence(timeout: 5))
+        app.buttons["voice-entry"].tap()
+        XCTAssertTrue(app.navigationBars["Orchestrator"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
         for tab in ["Sessions", "Inbox", "Settings"] {
             XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")
         }
@@ -14,6 +23,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Inbox"].isSelected)
         app.tabBars.buttons["Settings"].tap()
         XCTAssertTrue(app.tabBars.buttons["Settings"].isSelected)
+        XCTAssertFalse(app.buttons["voice-entry"].exists)
     }
 
     func testEmptyActivityStillShowsSavedMessages() {
@@ -31,6 +41,8 @@ final class SessionNavigationTests: XCTestCase {
         let session = app.buttons["session-demo"]
         XCTAssertTrue(session.waitForExistence(timeout: 10))
         session.tap()
+        XCTAssertFalse(app.buttons["voice-entry"].exists)
+        XCTAssertFalse(app.staticTexts["Working on your Mac"].exists)
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.tabBars.buttons["Inbox"].isHittable)

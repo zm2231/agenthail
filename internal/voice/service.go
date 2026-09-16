@@ -218,45 +218,24 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 	v := &s.state.State
 	switch a.Action {
 	case "prepare":
+		if v.Phase == "creating" {
+			return errors.New("operator creation outcome is unknown; inspect Codex before creating another operator")
+		}
 		if v.Session != nil {
 			if s.register != nil {
 				return s.register(*v.Session)
 			}
 			return nil
 		}
+		return s.createOperator(ctx)
+	case "new":
+		if s.active() {
+			return errors.New("end the current voice call before starting a new orchestrator conversation")
+		}
 		if v.Phase == "creating" {
 			return errors.New("operator creation outcome is unknown; inspect Codex before creating another operator")
 		}
-		v.Phase = "creating"
-		instructions := OperatorInstructions(s.commandPath)
-		v.SkillDigest = fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
-		if err := s.save(); err != nil {
-			v.Phase = "idle"
-			return err
-		}
-		cwd := filepath.Join(filepath.Dir(s.path), "operator")
-		if err := os.MkdirAll(cwd, 0700); err != nil {
-			v.Phase = "idle"
-			return err
-		}
-		session, err := s.provider.Create(ctx, cwd, instructions)
-		if err != nil {
-			if surface.IsDeliveryUnavailable(err) {
-				v.Phase = "idle"
-			}
-			v.Message = err.Error()
-			_ = s.save()
-			return err
-		}
-		v.Session, v.Phase, v.Message = session, "ready", ""
-		if err := s.save(); err != nil {
-			s.loadErr = err
-			return err
-		}
-		if s.register != nil {
-			return s.register(*session)
-		}
-		return nil
+		return s.createOperator(ctx)
 	case "start":
 		if v.Session == nil {
 			return errors.New("prepare the operator first")
@@ -362,6 +341,47 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 	if err := s.save(); err != nil {
 		s.loadErr = err
 		return err
+	}
+	return nil
+}
+
+func (s *Service) createOperator(ctx context.Context) error {
+	previous := s.state
+	instructions := OperatorInstructions(s.commandPath)
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
+	s.state.State.Phase = "creating"
+	s.state.State.Message = "Creating a new orchestrator conversation."
+	if err := s.save(); err != nil {
+		s.state = previous
+		return err
+	}
+	cwd := filepath.Join(filepath.Dir(s.path), "operator")
+	if err := os.MkdirAll(cwd, 0700); err != nil {
+		s.state = previous
+		_ = s.save()
+		return err
+	}
+	session, err := s.provider.Create(ctx, cwd, instructions)
+	if err != nil {
+		if surface.IsDeliveryUnavailable(err) {
+			s.state = previous
+			_ = s.save()
+		} else {
+			s.state.State.Message = err.Error()
+			_ = s.save()
+		}
+		return err
+	}
+	s.state = diskState{State: State{
+		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, Events: []Event{},
+	}}
+	s.cursor, s.boundAttempt, s.eventGap = Cursor{}, "", false
+	if err := s.save(); err != nil {
+		s.loadErr = err
+		return err
+	}
+	if s.register != nil {
+		return s.register(*session)
 	}
 	return nil
 }

@@ -91,7 +91,7 @@ existing transport; the voice layer does not emulate them.
 | --- | --- |
 | Conversation | Native Codex realtime audio delegates to the backing agent; Codex v3 routes the delegated response back with final output speakable. No dictation-only replacement. |
 | Agent operations | The complete packaged `agenthail-operations` skill is embedded in the host binary and passed as literal developer instructions when creating the operator. Availability still depends on configured runtimes and their capabilities. |
-| Identity | One saved operator per Agenthail registry. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. |
+| Identity | One saved operator per Agenthail registry at a time. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. The explicit **New conversation** action deliberately creates a distinct new operator thread and makes it the saved operator; the previous operator stays discoverable in the normal Sessions timeline. It is refused while a call is active or while a creation outcome is still unknown. |
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
 | Text during a call | **Type** sends a user text item through Codex realtime. Message IDs prevent automatic replay after an uncertain response. |
 | Mute | Stops sending microphone content without stopping the call or agent work. |
@@ -113,6 +113,11 @@ skill, saves its returned identity, and registers it for normal session discover
 No bootstrap turn runs during preparation. Creation with an unknown outcome does
 not create another operator automatically: inspect Codex and the state file before
 attempting recovery.
+
+`new` creates a distinct fresh operator through the same creation path and replaces
+the saved state (identity, cursor, and recorded events reset). It is refused while a
+call is active or while a prior creation outcome is unknown. The previous operator is
+not deleted; it remains discoverable in the normal Sessions timeline.
 
 `start` captures the Desktop event cursor before sending the microphone SDP offer.
 The peer submits the offer after `setLocalDescription`; ICE gathering may continue
