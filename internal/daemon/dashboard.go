@@ -602,6 +602,26 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		}()
 	}
 	wait.Wait()
+	registered, err := d.Registry.ListSessions(0)
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("list registered sessions: %w", err)
+	}
+	for _, session := range registered {
+		if session.Surface != surface.KindZen {
+			continue
+		}
+		adapter := d.surfaceForKind(session.Surface)
+		if adapter == nil {
+			continue
+		}
+		effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
+		state.Sessions = append(state.Sessions, dashboardSession{
+			ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd,
+			Status: session.Status, LastActive: session.LastActive, Capabilities: effective.Capabilities,
+			ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason,
+			Source: session.Source, Transport: session.Transport,
+		})
+	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	sort.Slice(state.Sessions, func(i, j int) bool {
 		if state.Sessions[i].Status == surface.StatusBusy && state.Sessions[j].Status != surface.StatusBusy {
