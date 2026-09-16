@@ -59,6 +59,8 @@ func (a *App) Run(args []string) error {
 	switch cmd {
 	case "list", "ls":
 		return a.cmdList(rest)
+	case "whoami":
+		return a.cmdWhoami(rest)
 	case "search":
 		return a.cmdSearch(rest)
 	case "send":
@@ -127,6 +129,7 @@ Session commands:
   thread <status|stop|resume|logs> <target>  Manage a Claude background session
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
   list [--all]                   List current sessions (--all includes saved conversation catalog)
+  whoami [--json]                Show the caller session bound to this process
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send (--effort, --mode, --service-tier, --output-schema, --from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
   stream <target>               Tail live activity
@@ -360,7 +363,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {bools: map[string]bool{"--all": true, "--json": true}}, "ls": {bools: map[string]bool{"--all": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
