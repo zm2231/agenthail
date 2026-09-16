@@ -306,6 +306,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var showDetails = false
     @State private var followingLatest = true
     @State private var atLatest = true
+    @State private var activityExpanded = false
     @State private var userScrolling = false
     let openSession: (String) -> Void
 
@@ -366,12 +367,12 @@ struct AgenthailVoiceOperatorSheet: View {
                     if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
                     if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
                     if let detail = model.detail {
-                        DisclosureGroup {
+                        DisclosureGroup(isExpanded: $activityExpanded) {
                             VStack(alignment: .leading, spacing: 12) {
                                 if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
                                 if let timeline = detail.timeline {
                                     if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
-                                    ForEach(TimelineGroup.newestFirst(timeline.items)) { CompactActivityGroup(group: $0) }
+                                    ForEach(TimelineGroup.newestFirst(timeline.items)) { CompactActivityGroup(group: $0) { followingLatest = false } }
                                     if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
                                 }
                                 Button("Open full timeline") { openSession(detail.session.id) }
@@ -400,6 +401,9 @@ struct AgenthailVoiceOperatorSheet: View {
                     geometry.contentSize.height - geometry.visibleRect.maxY < 80
                 } action: { _, value in
                     atLatest = value
+                }
+                .onChange(of: activityExpanded) { _, expanded in
+                    if expanded { followingLatest = false }
                 }
                 .onChange(of: latestContentMarker) { _, _ in
                     if followingLatest { proxy.scrollTo("voice-bottom", anchor: .bottom) }
