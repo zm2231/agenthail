@@ -400,6 +400,65 @@ func TestAddRouteValidatesPatternAndCycles(t *testing.T) {
 	}
 }
 
+func TestListRoutesIncludesDerivedFiringEvidence(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "from", "first", "second")
+	first, err := r.AddRoute("from", "first", ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.AddRoute("from", "second", ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved, err := r.RecordRelayDelivery(first, "turn-one"); err != nil || !reserved {
+		t.Fatalf("first record reserved=%v err=%v", reserved, err)
+	}
+	if reserved, err := r.RecordRelayDelivery(first, "turn-two"); err != nil || !reserved {
+		t.Fatalf("second record reserved=%v err=%v", reserved, err)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 2 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	if routes[0].ID != first || routes[0].FireCount != 2 || routes[0].LastFiredAt == "" {
+		t.Fatalf("first route=%+v", routes[0])
+	}
+	if routes[1].ID != second || routes[1].FireCount != 0 || routes[1].LastFiredAt != "" {
+		t.Fatalf("second route=%+v", routes[1])
+	}
+}
+
+func TestRouteFiringEvidenceSurvivesRegistryReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, first, "from", "to")
+	routeID, err := first.AddRoute("from", "to", ".*")
+	if err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if reserved, err := first.RecordRelayDelivery(routeID, "completion"); err != nil || !reserved {
+		first.Close()
+		t.Fatalf("reserved=%v err=%v", reserved, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	routes, err := second.ListRoutes()
+	if err != nil || len(routes) != 1 || routes[0].FireCount != 1 || routes[0].LastFiredAt == "" {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+}
+
 func TestAddRouteConcurrentOppositeEdgesNeverCommitCycle(t *testing.T) {
 	r := openTestRegistry(t)
 	for iteration := 0; iteration < 200; iteration++ {

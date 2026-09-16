@@ -616,6 +616,39 @@ func TestRoutingRejectsReadOnlyCodexTerminalDestination(t *testing.T) {
 	}
 }
 
+func TestRelayListShowsDerivedFiringEvidence(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, r := cliFixture(t, fake)
+	register := func(id string) {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register("from")
+	register("to")
+	id, err := r.AddRoute("from", "to", ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved, err := r.RecordRelayDelivery(id, "turn-one"); err != nil || !reserved {
+		t.Fatalf("reserved=%v err=%v", reserved, err)
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"relay", "list"}) })
+	if err != nil || !strings.Contains(text, "fires=1") || !strings.Contains(text, "last-fired=") {
+		t.Fatalf("text=%q err=%v", text, err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"relay", "list", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Relays []registry.RouteRow `json:"relays"`
+	}
+	if err := json.Unmarshal([]byte(output), &document); err != nil || len(document.Relays) != 1 || document.Relays[0].FireCount != 1 || document.Relays[0].LastFiredAt == "" {
+		t.Fatalf("document=%+v err=%v", document, err)
+	}
+}
+
 func TestNotionNewRegistersPersistedThreadInsteadOfSyntheticTarget(t *testing.T) {
 	const threadID = "3978aba0-0606-80ac-a1ae-00a9eb229fc0"
 	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, Name: "launch-notes", Status: surface.StatusIdle}
