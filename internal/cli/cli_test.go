@@ -57,6 +57,21 @@ func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
 	}
 }
 
+func TestHelpExplainsBusyTargetContinuations(t *testing.T) {
+	output, err := captureStdout(t, func() error {
+		(&App{}).usage()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"queue when busy", "--no-queue", "use send when idle", "start daemon to deliver queued work"} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("help missing %q: %s", fragment, output)
+		}
+	}
+}
+
 func (f *runtimeCLISurface) RuntimeStatus(context.Context) surface.RuntimeStatus { return f.status }
 
 func TestCodexCommandRejectsCustomRemote(t *testing.T) {

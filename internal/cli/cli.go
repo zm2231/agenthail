@@ -133,7 +133,7 @@ Session commands:
                                  List sessions; --cwd includes that workspace and descendants
   whoami [--json]                Show the caller session bound to this process
   search codex <query>           Search older Codex conversation history on demand
-  send <target> "msg"|-       Send (--effort, --mode, --service-tier, --output-schema, --from, --model, --stream, --reply, --json, --timeout, --no-queue; - reads stdin)
+  send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
   reply <target> [--json] [--timeout 30s]  Fetch last assistant reply
   last <target> [count] [--full] [--json] [--timeout 30s]  Show last N exchanges
@@ -141,8 +141,8 @@ Session commands:
   compact <target>              Compress context (queues for active Claude sessions)
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
-  steer <target> "message"      Inject guidance into the running turn
-  queue <target> "msg"|-        Hold until target is ready, then deliver
+  steer <target> "message"      Inject guidance into a running turn; use send when idle
+  queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
   queue list [--json] [--all]   Inspect waiting, sending, and failed messages
   queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
