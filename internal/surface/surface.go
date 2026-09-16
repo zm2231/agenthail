@@ -14,6 +14,7 @@ const (
 	KindClaude SurfaceKind = "claude"
 	KindCodex  SurfaceKind = "codex"
 	KindNotion SurfaceKind = "notion"
+	KindZen    SurfaceKind = "zen"
 )
 
 type SessionStatus string
@@ -309,7 +310,12 @@ type GoalState struct {
 
 type StreamEvent struct {
 	Kind    string        `json:"kind"`
-	Text    string        `json:"text"`
+	ID      string        `json:"id,omitempty"`
+	Name    string        `json:"name,omitempty"`
+	Text    string        `json:"text,omitempty"`
+	Input   any           `json:"input,omitempty"`
+	Output  any           `json:"output,omitempty"`
+	Error   string        `json:"error,omitempty"`
 	Context *ContextUsage `json:"context,omitempty"`
 }
 

@@ -48,6 +48,7 @@ func main() {
 		envOr("AGENTHAIL_NOTION_SPACE", ""),
 		envOr("AGENTHAIL_NOTION_USER", ""),
 	)
+	zen := surfaces.NewZen()
 
 	app := cli.App{
 		Registry: reg,
@@ -55,6 +56,7 @@ func main() {
 			{Name: "claude", Surface: claude},
 			{Name: "codex", Surface: codex},
 			{Name: "notion", Surface: notion},
+			{Name: "zen", Surface: zen},
 		},
 		DefaultTimeout: 2 * time.Minute,
 		Version:        version,
