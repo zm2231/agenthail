@@ -82,7 +82,17 @@ const replay = await transport.command(id, 'interact', prompt, undefined, key);
 if (JSON.stringify(receipt) !== JSON.stringify(replay)) throw new Error('idempotency replay changed receipt');
 if (receipt.disposition === 'failed' || receipt.disposition === 'unknown') throw new Error('native delivery was not confirmed: ' + JSON.stringify(receipt));
 const item = await observed;
-console.log(JSON.stringify({receipt, replay, cursor:item.cursor, event:item.event}));
+let idle = false;
+for (let attempt = 0; attempt < 40; attempt++) {
+  if ((await adapter.inspect(id)).state === 'idle') { idle = true; break; }
+  await new Promise(resolve => setTimeout(resolve, 250));
+}
+if (!idle) throw new Error('native task did not return to idle before rejection check');
+const rejectedKey = 'gateway-rejected:' + marker;
+const rejected = await transport.command(id, 'steer', 'This idle turn must not receive a steer', undefined, rejectedKey);
+const rejectedReplay = await transport.command(id, 'steer', 'This idle turn must not receive a steer', undefined, rejectedKey);
+if (rejected.disposition !== 'failed' || JSON.stringify(rejected) !== JSON.stringify(rejectedReplay)) throw new Error('known native rejection did not round-trip as a stable failed receipt: ' + JSON.stringify({rejected,rejectedReplay}));
+console.log(JSON.stringify({receipt, replay, rejected, rejectedReplay, cursor:item.cursor, event:item.event}));
 `
 	command := exec.CommandContext(ctx, "bun", "-e", script)
 	command.Env = append(os.Environ(),

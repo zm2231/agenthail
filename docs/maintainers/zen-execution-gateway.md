@@ -78,7 +78,8 @@ go test -tags gateway_live ./internal/daemon -run TestZENLiveCodexGateway -v
 The proof checks native session discovery, writable and streamable capability
 projection, an accepted interaction receipt, identical idempotency replay, and
 the assistant response arriving through the structured SSE stream with a
-cursor. It does not start the installed daemon. It does not prove Claude
+cursor. It also checks that an idle `steer` becomes a stable failed receipt in
+ZEN without another native write. It does not start the installed daemon. It does not prove Claude
 native execution or installed-daemon behavior.
 
 If the initial timeline scan fails, session-stream establishment returns HTTP
