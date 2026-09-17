@@ -53,7 +53,7 @@ func (d *Daemon) handleZENAction(w http.ResponseWriter, r *http.Request, request
 		return
 	}
 	if request.Action != "send" && request.Action != "steer" && request.Action != "interrupt" {
-		writeZENError(w, zenGatewayError{Status: http.StatusBadRequest, Code: "unsupported_action", Err: fmt.Errorf("action %q is not supported", request.Action)})
+		writeZENError(w, zenGatewayError{Status: http.StatusUnprocessableEntity, Code: "unsupported_action", Err: fmt.Errorf("action %q is not supported", request.Action)})
 		return
 	}
 	if request.Action != "interrupt" && strings.TrimSpace(request.Message) == "" {
@@ -65,6 +65,22 @@ func (d *Daemon) handleZENAction(w http.ResponseWriter, r *http.Request, request
 			writeZENError(w, zenGatewayError{Status: http.StatusForbidden, Code: "source_not_authorized", Err: errors.New("ZEN source attribution requires read, control, and zen scopes")})
 			return
 		}
+	} else if request.SourceSessionID != "" {
+		if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
+			writeZENError(w, zenGatewayError{Status: http.StatusNotFound, Code: "source_session_not_found", Err: fmt.Errorf("source session %q was not found", request.SourceSessionID)})
+			return
+		}
+	}
+	if reservation, err := d.Registry.APIAction(request.IdempotencyKey); err != nil {
+		writeZENError(w, zenGatewayError{Status: http.StatusInternalServerError, Code: "reservation_failed", Err: fmt.Errorf("load action reservation: %w", err)})
+		return
+	} else if reservation != nil {
+		if !sameZENEnvelope(reservation, request) {
+			writeZENError(w, zenGatewayError{Status: http.StatusConflict, Code: "idempotency_conflict", Err: errors.New("idempotencyKey was already used for a different action")})
+			return
+		}
+		writeZENReceipt(w, replayZENReceipt(reservation))
+		return
 	}
 	session, err := d.Registry.Session(request.SessionID)
 	if err != nil {
@@ -81,15 +97,15 @@ func (d *Daemon) handleZENAction(w http.ResponseWriter, r *http.Request, request
 		return
 	}
 	if request.Action == "send" && !adapter.Capabilities().Send {
-		writeZENError(w, zenGatewayError{Status: http.StatusConflict, Code: "unsupported_action", Err: errors.New("this session cannot receive messages")})
+		writeZENError(w, zenGatewayError{Status: http.StatusUnprocessableEntity, Code: "unsupported_action", Err: errors.New("this session cannot receive messages")})
 		return
 	}
 	if request.Action == "steer" && !adapter.Capabilities().Steer {
-		writeZENError(w, zenGatewayError{Status: http.StatusConflict, Code: "unsupported_action", Err: errors.New("this session cannot be steered")})
+		writeZENError(w, zenGatewayError{Status: http.StatusUnprocessableEntity, Code: "unsupported_action", Err: errors.New("this session cannot be steered")})
 		return
 	}
 	if request.Action == "interrupt" && !adapter.Capabilities().Interrupt {
-		writeZENError(w, zenGatewayError{Status: http.StatusConflict, Code: "unsupported_action", Err: errors.New("this session cannot be interrupted")})
+		writeZENError(w, zenGatewayError{Status: http.StatusUnprocessableEntity, Code: "unsupported_action", Err: errors.New("this session cannot be interrupted")})
 		return
 	}
 	reservation, created, err := d.Registry.ReserveAPIAction(request.IdempotencyKey, request.SessionID, request.Action, request.Message, request.SourceSessionID)
@@ -98,7 +114,7 @@ func (d *Daemon) handleZENAction(w http.ResponseWriter, r *http.Request, request
 		return
 	}
 	if !created {
-		if reservation.SessionID != request.SessionID || reservation.Action != request.Action || reservation.Message != request.Message || reservation.SourceSessionID != request.SourceSessionID {
+		if !sameZENEnvelope(reservation, request) {
 			writeZENError(w, zenGatewayError{Status: http.StatusConflict, Code: "idempotency_conflict", Err: errors.New("idempotencyKey was already used for a different action")})
 			return
 		}
@@ -129,6 +145,10 @@ func (d *Daemon) handleZENAction(w http.ResponseWriter, r *http.Request, request
 		return
 	}
 	writeZENReceipt(w, receipt)
+}
+
+func sameZENEnvelope(reservation *registry.APIActionReservation, request zenActionRequest) bool {
+	return reservation != nil && reservation.SessionID == request.SessionID && reservation.Action == request.Action && reservation.Message == request.Message && reservation.SourceSessionID == request.SourceSessionID
 }
 
 func (d *Daemon) executeZENAction(ctx context.Context, adapter surface.Surface, session *surface.Session, request zenActionRequest) (zenReceipt, error) {
@@ -206,7 +226,8 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	adapter := d.surfaceForKind(session.Surface)
-	if adapter == nil || !adapter.Capabilities().Stream {
+	_, providerOK := adapter.(surface.TimelineProvider)
+	if !providerOK || !surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
 		writeAPIError(w, http.StatusConflict, "stream_unsupported", "this session does not expose a replayable structured stream")
 		return
 	}
@@ -215,10 +236,15 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusConflict, "stream_gap", "Last-Event-ID is invalid or unavailable; request a full replay")
 		return
 	}
+	initialCtx, initialCancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+	if err := d.publishTimelineEvents(initialCtx, adapter, session); err != nil {
+		d.logRuntimeError("publish timeline "+sessionID, err)
+	}
+	initialCancel()
 	backlog, events, reset, cancel := d.events.subscribe(after)
 	defer cancel()
 	if reset || (after > d.events.cursor() && after != 0) {
-		writeAPIError(w, http.StatusConflict, "stream_gap", "Last-Event-ID is no longer retained; request a full replay")
+		writeZENError(w, zenGatewayError{Status: http.StatusConflict, Code: "stream_gap", Err: errors.New("Last-Event-ID is no longer retained; request a full replay")})
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -230,6 +256,9 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	for _, event := range backlog {
+		if !d.apiEventStreamAuthorized(r) {
+			return
+		}
 		if runtime, ok := sessionRuntimeEvent(event, sessionID); ok {
 			writeRuntimeSSEEvent(w, event.ID, runtime)
 		}
@@ -237,6 +266,8 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 	flusher.Flush()
 	keepalive := time.NewTicker(eventKeepalivePeriod)
 	defer keepalive.Stop()
+	activityPoll := time.NewTicker(time.Second)
+	defer activityPoll.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
@@ -245,13 +276,28 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 			if !open {
 				return
 			}
+			if !d.apiEventStreamAuthorized(r) {
+				return
+			}
 			if runtime, ok := sessionRuntimeEvent(event, sessionID); ok {
 				writeRuntimeSSEEvent(w, event.ID, runtime)
 				flusher.Flush()
 			}
 		case <-keepalive.C:
+			if !d.apiEventStreamAuthorized(r) {
+				return
+			}
 			fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()
+		case <-activityPoll.C:
+			if !d.apiEventStreamAuthorized(r) {
+				return
+			}
+			pollCtx, pollCancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+			if err := d.publishTimelineEvents(pollCtx, adapter, session); err != nil {
+				d.logRuntimeError("publish timeline "+sessionID, err)
+			}
+			pollCancel()
 		}
 	}
 }
@@ -277,17 +323,42 @@ func sessionRuntimeEvent(event apiEvent, sessionID string) (map[string]any, bool
 		return nil, false
 	}
 	switch event.Type {
+	case "message", "thought", "tool_start", "tool_done":
+		var runtime canonicalRuntimeEvent
+		if json.Unmarshal(event.Data, &runtime) != nil || runtime.Type != event.Type {
+			return nil, false
+		}
+		data := map[string]any{}
+		encoded, _ := json.Marshal(runtime)
+		if json.Unmarshal(encoded, &data) != nil {
+			return nil, false
+		}
+		return data, true
 	case "session.updated":
-		data["type"] = "session"
+		data = map[string]any{"type": "phase", "phase": runtimePhase(strValue(data["status"])), "reason": "observed", "sessionId": sessionID}
 		data["sessionId"] = sessionID
 	case "turn.completed":
-		data["type"] = "turn_end"
-		data["sessionId"] = sessionID
-		data["reason"] = "completed"
+		data = map[string]any{"type": "phase", "phase": "idle", "reason": "completed", "sessionId": sessionID}
 	default:
 		return nil, false
 	}
 	return data, true
+}
+
+func strValue(value any) string {
+	result, _ := value.(string)
+	return result
+}
+
+func runtimePhase(status string) string {
+	switch status {
+	case "busy", "starting", "running":
+		return "running"
+	case "offline", "stopped", "failed":
+		return "stopped"
+	default:
+		return "idle"
+	}
 }
 
 func writeRuntimeSSEEvent(w interface{ Write([]byte) (int, error) }, id uint64, event map[string]any) {

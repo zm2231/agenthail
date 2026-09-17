@@ -44,6 +44,21 @@ Clients resume with `Last-Event-ID`. If the cursor is malformed or no longer
 available in the retained event journal, the gateway returns HTTP `409` with
 error code `stream_gap`; the client must perform its full-replay/reconciliation
 path. Keepalive comments are transport heartbeats and are not journal events.
+With no cursor, the gateway replays the retained session tail. A nonzero cursor
+older than that retained tail returns `stream_gap`, after which the no-cursor
+replay is the explicit recovery path.
+
+For Claude and Codex sessions, the daemon observes the native transcript through
+`TimelineProvider` and pages until it reaches the durable item boundary. Complete
+message, thought, tool-start, and tool-done items become canonical runtime events;
+stored transcript truncation is marked `truncated: true`, not with the streaming
+`chunk` field.
+Per-item durable receipts prevent old transcript items from being republished
+after the rolling 1024-event journal has pruned their frames. Sources without a
+timeline provider or effective stream capability return `stream_unsupported`.
+Observed busy, idle, and offline transitions are emitted as canonical `phase`
+events (`running`, `idle`, and `stopped`); a turn completion without a native
+turn index remains a phase transition rather than an invented `turn_end`.
 
 This slice verifies the authenticated action path, durable replay, source
 namespace authorization, stable SSE IDs, and stream response shape with fake
