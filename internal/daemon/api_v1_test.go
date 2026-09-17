@@ -721,6 +721,25 @@ func TestAPIV1ZENSessionStreamFailsClosedOnInitialTimelineError(t *testing.T) {
 	assertAPIV1Error(t, response, http.StatusServiceUnavailable, "stream_unavailable")
 }
 
+func TestAPIV1ZENSessionStreamFailsClosedOnUnavailableTimeline(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	d.Surfaces = []surface.Surface{&timelineDaemonSurface{
+		daemonSurface: fake,
+		pages:         map[int64]*surface.SessionTimeline{0: {UnavailableReason: "no local transcript"}},
+	}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusServiceUnavailable, "stream_unavailable")
+}
+
 func TestAPIV1ZENSessionStreamTerminatesOnTimelinePollError(t *testing.T) {
 	d, r, fake, _, target := daemonFixture(t)
 	target.Source = "agenthail"

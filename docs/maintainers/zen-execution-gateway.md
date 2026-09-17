@@ -82,7 +82,8 @@ cursor. It does not start the installed daemon. It does not prove Claude
 native execution or installed-daemon behavior.
 
 If the initial timeline scan fails, session-stream establishment returns HTTP
-503 with `stream_unavailable` and does not open an incomplete stream. If a
+503 with `stream_unavailable` and does not open an incomplete stream. A provider
+reporting that its timeline is unavailable is a failure, not an empty history. If a
 later timeline poll fails, the gateway emits a terminal `stream_error` SSE
 frame containing the typed error and closes the stream. If the retained daemon
 event journal cannot be loaded, both event-stream endpoints return HTTP 503

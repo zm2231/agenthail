@@ -40,7 +40,7 @@ func (d *Daemon) publishTimelineEvents(ctx context.Context, adapter surface.Surf
 			return fmt.Errorf("timeline provider returned no result")
 		}
 		if timeline.UnavailableReason != "" {
-			return nil
+			return fmt.Errorf("timeline unavailable: %s", timeline.UnavailableReason)
 		}
 		pages = append(pages, timeline)
 		pageHasProcessedItem := false
