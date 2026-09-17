@@ -271,7 +271,7 @@ func normalizeDeviceScopes(scopes []string) ([]string, error) {
 	set := map[string]bool{}
 	for _, scope := range scopes {
 		scope = strings.TrimSpace(scope)
-		if scope != "read" && scope != "control" && scope != "settings" {
+		if scope != "read" && scope != "control" && scope != "settings" && scope != "zen" {
 			return nil, fmt.Errorf("unsupported device scope %q", scope)
 		}
 		set[scope] = true

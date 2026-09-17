@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 3
+	schemaVersion   = 4
 	queueMessageTTL = time.Hour
 )
 
@@ -71,6 +71,23 @@ func (r *Registry) migrate() error {
 	}
 	if version >= schemaVersion {
 		return nil
+	}
+	if version >= 3 {
+		if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS api_action_reservations (
+			idempotency_key TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			action TEXT NOT NULL,
+			message TEXT NOT NULL DEFAULT '',
+			source_session_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'reserved',
+			receipt TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`); err != nil {
+			return err
+		}
+		_, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+		return err
 	}
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
@@ -295,6 +312,17 @@ CREATE TABLE IF NOT EXISTS daemon_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS api_action_reservations (
+	idempotency_key TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	action TEXT NOT NULL,
+	message TEXT NOT NULL DEFAULT '',
+	source_session_id TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'reserved',
+	receipt TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {

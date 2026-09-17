@@ -1143,3 +1143,22 @@ func TestClaimDeadLettersStaleInflightWithoutAutomaticRedelivery(t *testing.T) {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }
+
+func TestAPIActionReservationReplaysDurableReceipt(t *testing.T) {
+	r := openTestRegistry(t)
+	reservation, created, err := r.ReserveAPIAction("key", "session", "send", "hello", "zen:source")
+	if err != nil || !created || reservation.Status != "reserved" {
+		t.Fatalf("reservation=%+v created=%v err=%v", reservation, created, err)
+	}
+	if err := r.CompleteAPIAction("key", "queued", map[string]any{"disposition": "queued", "queueId": 7}); err != nil {
+		t.Fatal(err)
+	}
+	replayed, created, err := r.ReserveAPIAction("key", "session", "send", "hello", "zen:source")
+	if err != nil || created || replayed.Status != "queued" || string(replayed.Receipt) != `{"disposition":"queued","queueId":7}` {
+		t.Fatalf("replayed=%+v created=%v err=%v", replayed, created, err)
+	}
+	conflict, created, err := r.ReserveAPIAction("key", "other", "send", "hello", "zen:source")
+	if err != nil || created || conflict.SessionID != "session" {
+		t.Fatalf("conflict=%+v created=%v err=%v", conflict, created, err)
+	}
+}
