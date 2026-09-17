@@ -58,9 +58,6 @@ func (d *Daemon) publishTimelineEvents(ctx context.Context, adapter surface.Surf
 			break
 		}
 		if timeline.NextBefore == 0 {
-			if timeline.Truncated {
-				return fmt.Errorf("timeline provider returned truncated activity without a pagination cursor")
-			}
 			break
 		}
 		if timeline.NextBefore >= before && before != 0 {
