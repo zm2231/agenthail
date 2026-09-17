@@ -50,6 +50,7 @@ type eventHub struct {
 	subscribers map[uint64]chan apiEvent
 	nextSubID   uint64
 	store       *registry.Registry
+	startupErr  error
 }
 
 func newEventHub(store *registry.Registry) *eventHub {
@@ -59,6 +60,7 @@ func newEventHub(store *registry.Registry) *eventHub {
 	}
 	persisted, err := store.RecentDaemonEvents(eventHistoryLimit)
 	if err != nil {
+		hub.startupErr = fmt.Errorf("load daemon event history: %w", err)
 		return hub
 	}
 	for _, event := range persisted {
@@ -68,6 +70,12 @@ func newEventHub(store *registry.Registry) *eventHub {
 		}
 	}
 	return hub
+}
+
+func (h *eventHub) journalError() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.startupErr
 }
 
 func (h *eventHub) publish(eventType, entityID string, value any) (apiEvent, error) {

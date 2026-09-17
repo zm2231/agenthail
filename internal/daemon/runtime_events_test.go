@@ -14,17 +14,27 @@ type timelineDaemonSurface struct {
 	*daemonSurface
 	mu    sync.Mutex
 	pages map[int64]*surface.SessionTimeline
+	err   error
 }
 
 func (s *timelineDaemonSurface) Timeline(_ context.Context, _ *surface.Session, before int64) (*surface.SessionTimeline, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.pages[before], nil
 }
 
 func (s *timelineDaemonSurface) SetPage(before int64, page *surface.SessionTimeline) {
 	s.mu.Lock()
 	s.pages[before] = page
+	s.mu.Unlock()
+}
+
+func (s *timelineDaemonSurface) SetError(err error) {
+	s.mu.Lock()
+	s.err = err
 	s.mu.Unlock()
 }
 

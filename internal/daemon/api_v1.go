@@ -94,6 +94,10 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
+	if err := d.events.journalError(); err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "event_journal_unavailable", err.Error())
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "stream_unavailable", "Streaming is unavailable.")

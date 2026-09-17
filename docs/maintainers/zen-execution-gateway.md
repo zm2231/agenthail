@@ -60,7 +60,28 @@ Observed busy, idle, and offline transitions are emitted as canonical `phase`
 events (`running`, `idle`, and `stopped`); a turn completion without a native
 turn index remains a phase transition rather than an invented `turn_end`.
 
-This slice verifies the authenticated action path, durable replay, source
-namespace authorization, stable SSE IDs, and stream response shape with fake
-surfaces. It does not prove live native execution, installed-daemon behavior,
-or producer-to-consumer ZEN E2E.
+## Optional live proof
+
+The committed `gateway_live` test proves the Codex producer-to-consumer path
+with a real dedicated Codex task, an isolated temporary registry, an ephemeral
+HTTP server, and the ZEN Bun transport. Run it from this checkout with an
+absolute ZEN checkout and the dedicated task ID:
+
+```sh
+AGENTHAIL_ZEN_LIVE_THREAD_ID=01a0b111... \
+AGENTHAIL_ZEN_LIVE_ROOT=/Volumes/4/GitHub/zen \
+go test -tags gateway_live ./internal/daemon -run TestZENLiveCodexGateway -v
+```
+
+The proof checks native session discovery, writable and streamable capability
+projection, an accepted interaction receipt, identical idempotency replay, and
+the assistant response arriving through the structured SSE stream with a
+cursor. It does not start the installed daemon. It does not prove Claude
+native execution or installed-daemon behavior.
+
+If the initial timeline scan fails, session-stream establishment returns HTTP
+503 with `stream_unavailable` and does not open an incomplete stream. If a
+later timeline poll fails, the gateway emits a terminal `stream_error` SSE
+frame containing the typed error and closes the stream. If the retained daemon
+event journal cannot be loaded, both event-stream endpoints return HTTP 503
+with `event_journal_unavailable`; they never present an empty history as valid.

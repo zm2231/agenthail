@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -649,6 +650,80 @@ func TestAPIV1ZENSessionStreamRejectsInvalidCursor(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assertAPIV1Error(t, response, http.StatusConflict, "stream_gap")
+}
+
+func TestAPIV1ZENSessionStreamFailsClosedOnInitialTimelineError(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	timeline := &timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {}}, err: errors.New("native transcript unavailable")}
+	d.Surfaces = []surface.Surface{timeline}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusServiceUnavailable, "stream_unavailable")
+}
+
+func TestAPIV1ZENSessionStreamTerminatesOnTimelinePollError(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	timeline := &timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {}}}
+	d.Surfaces = []surface.Surface{timeline}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d line=%q err=%v", response.StatusCode, line, err)
+	}
+	timeline.SetError(errors.New("native transcript failed"))
+	var body strings.Builder
+	deadline := time.After(3 * time.Second)
+	for !strings.Contains(body.String(), `"code":"stream_unavailable"`) {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatalf("body=%q err=%v", body.String(), readErr)
+		}
+		body.WriteString(line)
+		select {
+		case <-deadline:
+			t.Fatalf("poll error was not surfaced: body=%q", body.String())
+		default:
+		}
+	}
+}
+
+func TestAPIV1EventStreamFailsClosedWhenJournalCannotLoad(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d.events = newEventHub(r)
+	if d.events.journalError() == nil {
+		t.Fatal("journal failure was discarded")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusServiceUnavailable, "event_journal_unavailable")
 }
 
 func TestAPIV1ZENSessionStreamStopsAfterDeviceRevocation(t *testing.T) {
