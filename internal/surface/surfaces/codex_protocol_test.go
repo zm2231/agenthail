@@ -18,6 +18,10 @@ import (
 )
 
 func startRendererDesktopBridge(t *testing.T) string {
+	return startRendererDesktopBridgeForInput(t, false)
+}
+
+func startRendererDesktopBridgeForInput(t *testing.T, directInput bool) string {
 	t.Helper()
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
@@ -49,7 +53,7 @@ func startRendererDesktopBridge(t *testing.T) string {
 			case strings.Contains(expression, `"mode":"timeout"`):
 				value = `{"error":{"code":"timeout","message":"Codex Desktop app-server request timed out"}}`
 			case strings.Contains(expression, `"thread/read"`):
-				value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"}}}}`
+				value = fmt.Sprintf(`{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":%t}}}`, directInput)
 			case strings.Contains(expression, `"thread/loaded/list"`):
 				value = `{"result":{"data":[]}}`
 			case strings.Contains(expression, `"thread/turns/list"`):
@@ -69,6 +73,24 @@ func startRendererDesktopBridge(t *testing.T) string {
 	server = httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	return server.URL
+}
+
+func TestCodexIdleDirectActionsAreTerminalRejections(t *testing.T) {
+	codex := NewCodex(startRendererDesktopBridgeForInput(t, true))
+	for _, action := range []string{"steer", "interrupt"} {
+		t.Run(action, func(t *testing.T) {
+			session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "vscode", Transport: codexTransportDesktop}
+			var err error
+			if action == "steer" {
+				err = codex.Steer(context.Background(), session, "continue")
+			} else {
+				err = codex.Interrupt(context.Background(), session)
+			}
+			if !surface.IsDeliveryTerminal(err) || !strings.Contains(err.Error(), "session idle") {
+				t.Fatalf("expected terminal idle rejection, got %v", err)
+			}
+		})
+	}
 }
 
 func TestCodexStartSessionPrefersDesktopOwner(t *testing.T) {

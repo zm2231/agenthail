@@ -166,16 +166,23 @@ func (d *Daemon) executeZENAction(ctx context.Context, adapter surface.Surface, 
 	ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
 	if request.Action == "steer" {
 		if err := adapter.Steer(ctx, session, request.Message); err != nil {
-			return zenReceipt{}, err
+			return zenDirectActionError(err)
 		}
 	} else if err := adapter.Interrupt(ctx, session); err != nil {
-		return zenReceipt{}, err
+		return zenDirectActionError(err)
 	}
 	return zenReceipt{Disposition: "accepted"}, nil
 }
 
+func zenDirectActionError(err error) (zenReceipt, error) {
+	if surface.IsDeliveryTerminal(err) || errors.Is(err, surface.ErrUnsupported) {
+		return zenReceipt{Disposition: "failed", Detail: err.Error()}, err
+	}
+	return zenReceipt{}, err
+}
+
 func replayZENReceipt(reservation *registry.APIActionReservation) zenReceipt {
-	if reservation.Status == "complete" || reservation.Status == "accepted" || reservation.Status == "queued" {
+	if reservation.Status == "complete" || reservation.Status == "accepted" || reservation.Status == "queued" || reservation.Status == "failed" {
 		var receipt zenReceipt
 		if json.Unmarshal(reservation.Receipt, &receipt) == nil && receipt.Disposition != "" {
 			return receipt

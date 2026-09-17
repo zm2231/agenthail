@@ -555,6 +555,58 @@ func TestAPIV1ZENActionReplaysWhenTargetBecomesUnavailable(t *testing.T) {
 	}
 }
 
+type rejectingZENActionSurface struct {
+	*daemonSurface
+	err   error
+	calls int
+}
+
+func (s *rejectingZENActionSurface) Steer(context.Context, *surface.Session, string) error {
+	s.calls++
+	return s.err
+}
+
+func (s *rejectingZENActionSurface) Interrupt(context.Context, *surface.Session) error {
+	s.calls++
+	return s.err
+}
+
+func TestAPIV1ZENIdleDirectActionsFailAndReplayWithoutNativeRetry(t *testing.T) {
+	for _, action := range []string{"steer", "interrupt"} {
+		t.Run(action, func(t *testing.T) {
+			d, r, fake, _, target := daemonFixture(t)
+			target.Source = "agenthail"
+			target.Transport = "managed"
+			if err := r.RegisterSession(target); err != nil {
+				t.Fatal(err)
+			}
+			fake.caps = surface.Capabilities{Steer: true, Interrupt: true}
+			adapter := &rejectingZENActionSurface{daemonSurface: fake, err: surface.DeliveryTerminal(errors.New("session idle; no active turn"), surface.DeliveryInvalidRequest)}
+			d.Surfaces = []surface.Surface{adapter}
+			handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+			body := fmt.Sprintf(`{"action":%q,"sessionId":"to","idempotencyKey":%q,"message":"continue"}`, action, "idle-"+action)
+			request := func() *http.Request {
+				r := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(body))
+				r.Header.Set("Authorization", "Bearer secret")
+				return r
+			}
+			first := httptest.NewRecorder()
+			handler.ServeHTTP(first, request())
+			assertAPIV1Error(t, first, http.StatusConflict, "delivery_rejected")
+			reservation, err := r.APIAction("idle-" + action)
+			if err != nil || reservation == nil || reservation.Status != "failed" {
+				t.Fatalf("reservation=%+v err=%v", reservation, err)
+			}
+			d.Surfaces = nil
+			second := httptest.NewRecorder()
+			handler.ServeHTTP(second, request())
+			if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"disposition":"failed"`) || !strings.Contains(second.Body.String(), "session idle; no active turn") || adapter.calls != 1 {
+				t.Fatalf("replay status=%d body=%s native calls=%d", second.Code, second.Body.String(), adapter.calls)
+			}
+		})
+	}
+}
+
 func TestAPIV1ZENActionQueuesAndRequiresZENSourceScope(t *testing.T) {
 	d, r, fake, _, target := daemonFixture(t)
 	target.Source = "agenthail"

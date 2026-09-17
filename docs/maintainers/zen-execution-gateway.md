@@ -16,9 +16,11 @@ reaches this endpoint.
 The idempotency key is reserved in the Agenthail registry before a native
 write or durable queue insert. Reusing a key with the same action envelope
 replays the stored receipt; reusing it with different session, action, message,
-or source attribution returns `idempotency_conflict`. A failed native delivery
-is a typed `delivery_rejected` error. A non-terminal failure is recorded as an
-`unknown` receipt and must be reconciled before retrying.
+or source attribution returns `idempotency_conflict`. A known native rejection,
+including `steer` or `interrupt` against an idle session, records a durable
+`failed` receipt and returns typed `delivery_rejected` without issuing that
+native action again on replay. An ambiguous transport failure is recorded as
+an `unknown` receipt and must be reconciled before retrying.
 
 Receipts are truthful at the boundary:
 

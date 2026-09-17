@@ -645,7 +645,7 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 		return err
 	}
 	if current.Status != surface.StatusBusy {
-		return fmt.Errorf("session idle; nothing to interrupt")
+		return surface.DeliveryTerminal(fmt.Errorf("session idle; nothing to interrupt"), surface.DeliveryInvalidRequest)
 	}
 	sess = current
 	cse := toCse(sess.ID)
@@ -677,14 +677,14 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
 	if sess.Transport == "uds" {
-		return fmt.Errorf("Claude peer messaging queues work; steering is not supported")
+		return surface.DeliveryTerminal(fmt.Errorf("Claude peer messaging queues work; steering is not supported"), surface.DeliveryInvalidRequest)
 	}
 	current, err := c.Resolve(ctx, sess.ID)
 	if err != nil {
 		return err
 	}
 	if current.Status != surface.StatusBusy {
-		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+		return surface.DeliveryTerminal(fmt.Errorf("session idle; nothing to steer (use 'send' instead)"), surface.DeliveryInvalidRequest)
 	}
 	_, err = c.postMessage(ctx, current, message)
 	return err
