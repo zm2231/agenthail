@@ -69,6 +69,22 @@ func TestPublishTimelineEventsPaginatesAndDeduplicatesAcrossRestart(t *testing.T
 	}
 }
 
+func TestPublishTimelineEventsAcceptsTruncatedItemWithoutMorePages(t *testing.T) {
+	d, _, _, _, target := daemonFixture(t)
+	adapter := &timelineDaemonSurface{
+		daemonSurface: &daemonSurface{kind: surface.KindCodex, caps: surface.Capabilities{Stream: true}},
+		pages: map[int64]*surface.SessionTimeline{
+			0: {Truncated: true, Items: []surface.TimelineItem{{ID: "message-1", Kind: "message", Role: "assistant", Text: "shortened", Truncated: true}}},
+		},
+	}
+	if err := d.publishTimelineEvents(context.Background(), adapter, &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.events.history) != 1 || d.events.history[0].Type != "message" {
+		t.Fatalf("published events=%v", d.events.history)
+	}
+}
+
 func TestPublishTimelineEventsMarksStoredTruncationWithoutChunkSemantics(t *testing.T) {
 	d, r, _, _, target := daemonFixture(t)
 	target.Source = "agenthail"
