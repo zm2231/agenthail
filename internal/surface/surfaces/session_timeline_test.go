@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -86,6 +87,39 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	second, _ := readSessionTimeline(context.Background(), path, "codex", 0)
 	if first.Items[len(first.Items)-1].ID != second.Items[len(second.Items)-2].ID {
 		t.Fatal("identity changed on append")
+	}
+}
+
+func TestCodexTimelineSkipsOversizedRecordAndAdvancesCursor(t *testing.T) {
+	message := func(text string) string {
+		return fmt.Sprintf(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}}`, text)
+	}
+	path := timelineFixture(t, message("before")+"\n"+message(strings.Repeat("x", 2*timelineReadBudget))+"\n"+message("after")+"\n")
+
+	var cursor int64
+	var texts []string
+	truncated := false
+	finished := false
+	for pageIndex := 0; pageIndex < 8; pageIndex++ {
+		page, err := readSessionTimeline(context.Background(), path, "codex", cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		truncated = truncated || page.Truncated
+		for _, item := range page.Items {
+			texts = append(texts, item.Text)
+		}
+		if page.NextBefore == 0 {
+			finished = true
+			break
+		}
+		if cursor != 0 && page.NextBefore >= cursor {
+			t.Fatalf("pagination stalled at %d", cursor)
+		}
+		cursor = page.NextBefore
+	}
+	if !finished || !truncated || !slices.Contains(texts, "before") || !slices.Contains(texts, "after") {
+		t.Fatalf("incomplete paging: finished=%t truncated=%t texts=%v", finished, truncated, texts)
 	}
 }
 
