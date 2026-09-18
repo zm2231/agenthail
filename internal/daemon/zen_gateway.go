@@ -166,16 +166,23 @@ func (d *Daemon) executeZENAction(ctx context.Context, adapter surface.Surface, 
 	ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
 	if request.Action == "steer" {
 		if err := adapter.Steer(ctx, session, request.Message); err != nil {
-			return zenReceipt{}, err
+			return zenDirectActionError(err)
 		}
 	} else if err := adapter.Interrupt(ctx, session); err != nil {
-		return zenReceipt{}, err
+		return zenDirectActionError(err)
 	}
 	return zenReceipt{Disposition: "accepted"}, nil
 }
 
+func zenDirectActionError(err error) (zenReceipt, error) {
+	if surface.IsDeliveryTerminal(err) || errors.Is(err, surface.ErrUnsupported) {
+		return zenReceipt{Disposition: "failed", Detail: err.Error()}, err
+	}
+	return zenReceipt{}, err
+}
+
 func replayZENReceipt(reservation *registry.APIActionReservation) zenReceipt {
-	if reservation.Status == "complete" || reservation.Status == "accepted" || reservation.Status == "queued" {
+	if reservation.Status == "complete" || reservation.Status == "accepted" || reservation.Status == "queued" || reservation.Status == "failed" {
 		var receipt zenReceipt
 		if json.Unmarshal(reservation.Receipt, &receipt) == nil && receipt.Disposition != "" {
 			return receipt
@@ -219,6 +226,10 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
+	if err := d.events.journalError(); err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "event_journal_unavailable", err.Error())
+		return
+	}
 	sessionID := strings.TrimSpace(r.URL.Query().Get("id"))
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
@@ -238,7 +249,9 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 	}
 	initialCtx, initialCancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	if err := d.publishTimelineEvents(initialCtx, adapter, session); err != nil {
-		d.logRuntimeError("publish timeline "+sessionID, err)
+		initialCancel()
+		writeZENError(w, zenGatewayError{Status: http.StatusServiceUnavailable, Code: "stream_unavailable", Err: fmt.Errorf("initial timeline replay failed: %w", err)})
+		return
 	}
 	initialCancel()
 	backlog, events, reset, cancel := d.events.subscribe(after)
@@ -295,7 +308,10 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 			}
 			pollCtx, pollCancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 			if err := d.publishTimelineEvents(pollCtx, adapter, session); err != nil {
-				d.logRuntimeError("publish timeline "+sessionID, err)
+				writeRuntimeSSEError(w, "stream_unavailable", fmt.Sprintf("timeline replay failed: %s", err))
+				flusher.Flush()
+				pollCancel()
+				return
 			}
 			pollCancel()
 		}
@@ -364,4 +380,9 @@ func runtimePhase(status string) string {
 func writeRuntimeSSEEvent(w interface{ Write([]byte) (int, error) }, id uint64, event map[string]any) {
 	payload, _ := json.Marshal(map[string]any{"event": event})
 	fmt.Fprintf(w, "id: %d\nevent: runtime_event\ndata: %s\n\n", id, payload)
+}
+
+func writeRuntimeSSEError(w interface{ Write([]byte) (int, error) }, code, message string) {
+	payload, _ := json.Marshal(map[string]any{"error": map[string]string{"code": code, "message": message}})
+	fmt.Fprintf(w, "event: stream_error\ndata: %s\n\n", payload)
 }

@@ -1246,7 +1246,7 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
-		return fmt.Errorf("session idle; nothing to interrupt")
+		return surface.DeliveryTerminal(fmt.Errorf("session idle; nothing to interrupt"), surface.DeliveryInvalidRequest)
 	}
 	_, err = conn.Request(ctx, "turn/interrupt", map[string]any{
 		"threadId": sess.ID,
@@ -1273,7 +1273,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
-		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+		return surface.DeliveryTerminal(fmt.Errorf("session idle; nothing to steer (use 'send' instead)"), surface.DeliveryInvalidRequest)
 	}
 	_, err = conn.Request(ctx, "turn/steer", map[string]any{
 		"threadId":       sess.ID,
