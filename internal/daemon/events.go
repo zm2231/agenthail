@@ -71,17 +71,24 @@ func newEventHub(store *registry.Registry) *eventHub {
 }
 
 func (h *eventHub) publish(eventType, entityID string, value any) (apiEvent, error) {
+	return h.publishWithKey(eventType, entityID, value, "")
+}
+
+func (h *eventHub) publishWithKey(eventType, entityID string, value any, dedupeKey string) (apiEvent, error) {
 	payload, _ := json.Marshal(value)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := time.Now().UTC()
 	var event apiEvent
 	if h.store != nil {
-		persisted, err := h.store.AppendDaemonEvent(eventType, entityID, payload, now, eventHistoryLimit)
+		persisted, created, err := h.store.AppendDaemonEventWithKey(eventType, entityID, payload, now, eventHistoryLimit, dedupeKey)
 		if err != nil {
 			return apiEvent{}, fmt.Errorf("persist daemon event: %w", err)
 		}
 		event = apiEvent{ID: persisted.ID, Type: persisted.Type, Timestamp: persisted.CreatedAt, EntityID: persisted.EntityID, Data: append(json.RawMessage(nil), persisted.Payload...)}
+		if !created {
+			return event, nil
+		}
 		h.nextID = persisted.ID
 	} else {
 		h.nextID++

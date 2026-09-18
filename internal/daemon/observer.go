@@ -143,6 +143,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("observe %s: empty observation", d.resolveDisplay(session.ID))
 		return
 	}
+	timelineCtx, timelineCancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+	if err := d.publishTimelineEvents(timelineCtx, adapter, session); err != nil {
+		d.logRuntimeError("publish timeline "+session.ID, err)
+	}
+	timelineCancel()
 	session.Status = observation.Status
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
