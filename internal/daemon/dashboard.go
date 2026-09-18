@@ -77,22 +77,26 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	ID             string                `json:"id"`
-	Surface        surface.SurfaceKind   `json:"surface"`
-	Name           string                `json:"name"`
-	Cwd            string                `json:"cwd,omitempty"`
-	Alias          string                `json:"alias,omitempty"`
-	Status         surface.SessionStatus `json:"status"`
-	LastActive     time.Time             `json:"lastActive,omitempty"`
-	QueueCount     int                   `json:"queueCount"`
-	Open           bool                  `json:"open"`
-	Current        bool                  `json:"current"`
-	CurrentReason  string                `json:"currentReason,omitempty"`
-	Capabilities   surface.Capabilities  `json:"capabilities"`
-	ReadOnly       bool                  `json:"readOnly,omitempty"`
-	ReadOnlyReason string                `json:"readOnlyReason,omitempty"`
-	Source         string                `json:"source,omitempty"`
-	Transport      string                `json:"transport,omitempty"`
+	ID              string                `json:"id"`
+	Surface         surface.SurfaceKind   `json:"surface"`
+	Name            string                `json:"name"`
+	Cwd             string                `json:"cwd,omitempty"`
+	Alias           string                `json:"alias,omitempty"`
+	Status          surface.SessionStatus `json:"status"`
+	LastActive      time.Time             `json:"lastActive,omitempty"`
+	QueueCount      int                   `json:"queueCount"`
+	Open            bool                  `json:"open"`
+	Current         bool                  `json:"current"`
+	CurrentReason   string                `json:"currentReason,omitempty"`
+	Capabilities    surface.Capabilities  `json:"capabilities"`
+	ReadOnly        bool                  `json:"readOnly,omitempty"`
+	ReadOnlyReason  string                `json:"readOnlyReason,omitempty"`
+	Source          string                `json:"source,omitempty"`
+	Transport       string                `json:"transport,omitempty"`
+	Origin          string                `json:"origin"`
+	ExecutionOwner  string                `json:"executionOwner"`
+	ControlPlane    string                `json:"controlPlane"`
+	ObservationHost string                `json:"observationHost"`
 }
 
 type dashboardState struct {
@@ -108,6 +112,30 @@ type dashboardState struct {
 	History          []dashboardHistory   `json:"history"`
 	Attention        []dashboardAttention `json:"attention"`
 	CodexRecentHours int                  `json:"codexRecentHours"`
+}
+
+func dashboardSessionAuthority(session *surface.Session, adapter surface.Surface) map[string]string {
+	origin := "native"
+	if session != nil && session.Source != "" {
+		origin = session.Source
+	}
+	observationHost := "native"
+	if session != nil {
+		_, providerOK := adapter.(surface.TimelineProvider)
+		if providerOK && surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+			observationHost = "agenthail"
+		}
+	}
+	return map[string]string{"origin": origin, "executionOwner": "agenthail", "controlPlane": "agenthail", "observationHost": observationHost}
+}
+
+func projectDashboardSession(session *surface.Session, adapter surface.Surface) dashboardSession {
+	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	if _, ok := adapter.(surface.TimelineProvider); !ok {
+		effective.Stream = false
+	}
+	authority := dashboardSessionAuthority(session, adapter)
+	return dashboardSession{Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, Origin: authority["origin"], ExecutionOwner: authority["executionOwner"], ControlPlane: authority["controlPlane"], ObservationHost: authority["observationHost"]}
 }
 
 type dashboardAttention struct {
@@ -595,8 +623,10 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 				alias, _ := d.Registry.ReverseAlias(session.ID)
 				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
-				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
+				projected := projectDashboardSession(&session, adapter)
+				projected.ID, projected.Surface, projected.Name, projected.Cwd, projected.Alias = session.ID, session.Surface, session.Name, session.Cwd, alias
+				projected.Status, projected.LastActive, projected.QueueCount, projected.Open, projected.Current, projected.CurrentReason = session.Status, session.LastActive, counts[session.ID], open, current, reason
+				state.Sessions = append(state.Sessions, projected)
 			}
 			mu.Unlock()
 		}()
@@ -1270,9 +1300,11 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
-		effective := surface.EffectiveCapabilities(&result.Session, adapter.Capabilities())
+		projected := projectDashboardSession(&result.Session, adapter)
+		projected.ID, projected.Surface, projected.Name, projected.Cwd, projected.Alias = result.Session.ID, result.Session.Surface, result.Session.Name, result.Session.Cwd, alias
+		projected.Status, projected.LastActive = result.Session.Status, result.Session.LastActive
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
+			"session": projected,
 			"snippet": result.Snippet,
 		})
 	}
@@ -1329,6 +1361,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	if _, ok := adapter.(surface.TimelineProvider); !ok {
+		effective.Stream = false
+	}
 	var timelineBefore int64
 	if raw := r.URL.Query().Get("timelineBefore"); raw != "" {
 		var parseErr error
@@ -1396,7 +1431,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		exchanges = []surface.Exchange{}
 	}
 	exchanges, transcript := truncateSessionExchanges(exchanges)
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	response := map[string]any{"session": session, "authority": dashboardSessionAuthority(session, adapter), "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	if transcriptErr != nil {
 		response["transcriptWarning"] = "Message history could not be refreshed. Local activity is shown when available."
 	}

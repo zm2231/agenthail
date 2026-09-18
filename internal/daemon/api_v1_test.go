@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -523,6 +524,36 @@ func TestAPIV1ZENActionReservesAndReplaysReceipt(t *testing.T) {
 	}
 }
 
+func TestAPIV1ZENActionReplaysWhenTargetBecomesUnavailable(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true}
+	fake.accepted = true
+	fake.turnID = "turn-1"
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body := `{"action":"send","sessionId":"to","idempotencyKey":"replay-key","message":"hello"}`
+	first := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(first, request)
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"turnId":"turn-1"`) {
+		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
+	}
+	fake.caps = surface.Capabilities{}
+	d.Surfaces = nil
+	second := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer secret")
+	handler.ServeHTTP(second, request)
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"disposition":"accepted"`) || !strings.Contains(second.Body.String(), `"turnId":"turn-1"`) || len(fake.sent) != 1 {
+		t.Fatalf("replay status=%d body=%s writes=%v", second.Code, second.Body.String(), fake.sent)
+	}
+}
+
 func TestAPIV1ZENActionQueuesAndRequiresZENSourceScope(t *testing.T) {
 	d, r, fake, _, target := daemonFixture(t)
 	target.Source = "agenthail"
@@ -539,6 +570,13 @@ func TestAPIV1ZENActionQueuesAndRequiresZENSourceScope(t *testing.T) {
 	handler.ServeHTTP(queuedResponse, queued)
 	if queuedResponse.Code != http.StatusAccepted || !strings.Contains(queuedResponse.Body.String(), `"disposition":"queued"`) || !strings.Contains(queuedResponse.Body.String(), `"queueId":1`) {
 		t.Fatalf("queued status=%d body=%s", queuedResponse.Code, queuedResponse.Body.String())
+	}
+	unknownSource := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"send","sessionId":"to","idempotencyKey":"source-missing","message":"hello","sourceSessionId":"missing"}`))
+	unknownSource.Header.Set("Authorization", "Bearer secret")
+	unknownSourceResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unknownSourceResponse, unknownSource)
+	if unknownSourceResponse.Code != http.StatusNotFound || !strings.Contains(unknownSourceResponse.Body.String(), `"source_session_not_found"`) {
+		t.Fatalf("missing source status=%d body=%s", unknownSourceResponse.Code, unknownSourceResponse.Body.String())
 	}
 	_, deviceToken, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
 	if err != nil {
@@ -561,6 +599,7 @@ func TestAPIV1ZENSessionStreamReplaysStableRuntimeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Stream: true}
+	d.Surfaces = []surface.Surface{&timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {}}}}
 	first, err := d.events.publish("session.updated", target.ID, map[string]any{"status": "busy"})
 	if err != nil {
 		t.Fatal(err)
@@ -582,14 +621,14 @@ func TestAPIV1ZENSessionStreamReplaysStableRuntimeEvents(t *testing.T) {
 	defer response.Body.Close()
 	reader := bufio.NewReader(io.LimitReader(response.Body, 2048))
 	var body strings.Builder
-	for !strings.Contains(body.String(), `"type":"turn_end"`) {
+	for !strings.Contains(body.String(), `"phase":"idle"`) {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			t.Fatalf("status=%d body=%q err=%v", response.StatusCode, body.String(), err)
 		}
 		body.WriteString(line)
 	}
-	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "id: "+strconv.FormatUint(first.ID, 10)) || !strings.Contains(body.String(), "id: "+strconv.FormatUint(second.ID, 10)) || !strings.Contains(body.String(), `event: runtime_event`) || !strings.Contains(body.String(), `"type":"turn_end"`) {
+	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "id: "+strconv.FormatUint(first.ID, 10)) || !strings.Contains(body.String(), "id: "+strconv.FormatUint(second.ID, 10)) || !strings.Contains(body.String(), `event: runtime_event`) || !strings.Contains(body.String(), `"type":"phase"`) || !strings.Contains(body.String(), `"phase":"idle"`) {
 		t.Fatalf("status=%d body=%q", response.StatusCode, body.String())
 	}
 }
@@ -602,6 +641,7 @@ func TestAPIV1ZENSessionStreamRejectsInvalidCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.caps = surface.Capabilities{Stream: true}
+	d.Surfaces = []surface.Surface{&timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {}}}}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id=to", nil)
 	request.Header.Set("Authorization", "Bearer secret")
@@ -609,6 +649,194 @@ func TestAPIV1ZENSessionStreamRejectsInvalidCursor(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assertAPIV1Error(t, response, http.StatusConflict, "stream_gap")
+}
+
+func TestAPIV1ZENSessionStreamStopsAfterDeviceRevocation(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	d.Surfaces = []surface.Surface{&timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {}}}}
+	device, token, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.events.publish("session.updated", target.ID, map[string]string{"status": "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if line == "\n" {
+			break
+		}
+	}
+	if err := r.RevokeDevice(device.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.events.publish("session.updated", target.ID, map[string]string{"status": "busy"}); err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan error, 1)
+	go func() {
+		_, readErr := reader.ReadString('\n')
+		closed <- readErr
+	}()
+	select {
+	case readErr := <-closed:
+		if readErr == nil {
+			t.Fatal("revoked stream delivered another event")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("revoked stream remained open")
+	}
+}
+
+func TestAPIV1ZENSessionStreamPublishesUnwatchedTranscriptActivity(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	timeline := &timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {}}}
+	d.Surfaces = []surface.Surface{timeline}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	reader := bufio.NewReader(response.Body)
+	timeline.SetPage(0, &surface.SessionTimeline{Items: []surface.TimelineItem{
+		{ID: "assistant-1", Kind: "message", Role: "assistant", Text: "answer"},
+		{ID: "tool-1", Kind: "toolCall", Title: "shell", CallID: "tool-1", Text: `{"cmd":"pwd"}`},
+		{ID: "tool-1-result", Kind: "toolResult", Title: "shell", CallID: "tool-1", Text: `{"code":0}`},
+	}})
+	var body strings.Builder
+	for !strings.Contains(body.String(), `"type":"tool_done"`) {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatalf("body=%q err=%v", body.String(), readErr)
+		}
+		body.WriteString(line)
+	}
+	if !strings.Contains(body.String(), `"type":"message"`) || !strings.Contains(body.String(), `"type":"tool_start"`) {
+		t.Fatalf("body=%q", body.String())
+	}
+}
+
+func TestAPIV1ZENSessionStreamReplaysRetainedTailAndRecoversFromExpiredCursor(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	items := make([]surface.TimelineItem, 65)
+	for i := range items {
+		items[i] = surface.TimelineItem{ID: fmt.Sprintf("message-%d", i), Kind: "message", Role: "assistant", Text: "complete"}
+	}
+	d.Surfaces = []surface.Surface{&timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {Items: items}}}}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(response.Body)
+	var body strings.Builder
+	for !strings.Contains(body.String(), `"id":"message-64"`) {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatalf("initial status=%d body=%q err=%v", response.StatusCode, body.String(), readErr)
+		}
+		body.WriteString(line)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), `"id":"message-0"`) {
+		t.Fatalf("initial status=%d body=%q", response.StatusCode, body.String())
+	}
+	large := make([]surface.TimelineItem, eventHistoryLimit+1)
+	for i := range large {
+		large[i] = surface.TimelineItem{ID: fmt.Sprintf("large-%d", i), Kind: "message", Role: "assistant", Text: "complete"}
+	}
+	d.Surfaces = []surface.Surface{&timelineDaemonSurface{daemonSurface: fake, pages: map[int64]*surface.SessionTimeline{0: {Items: large}}}}
+	request, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err = server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader = bufio.NewReader(response.Body)
+	body.Reset()
+	for !strings.Contains(body.String(), `"id":"large-1024"`) {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatalf("large status=%d body=%q err=%v", response.StatusCode, body.String(), readErr)
+		}
+		body.WriteString(line)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), `"id":"large-1"`) || strings.Contains(body.String(), `"id":"large-0"`) {
+		t.Fatalf("large status=%d body prefix=%q", response.StatusCode, body.String()[:min(len(body.String()), 200)])
+	}
+	request, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Last-Event-ID", "1")
+	response, err = server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gapBody, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusConflict || !strings.Contains(string(gapBody), `"stream_gap"`) {
+		t.Fatalf("expired cursor status=%d body=%s", response.StatusCode, gapBody)
+	}
+	request, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err = server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader = bufio.NewReader(response.Body)
+	body.Reset()
+	for !strings.Contains(body.String(), `"id":"large-1024"`) {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatalf("recovery status=%d body=%q err=%v", response.StatusCode, body.String(), readErr)
+		}
+		body.WriteString(line)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("recovery status=%d", response.StatusCode)
+	}
 }
 
 func TestAPIV1DeviceCanRevokeItself(t *testing.T) {
