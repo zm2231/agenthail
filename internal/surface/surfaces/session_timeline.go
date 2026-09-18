@@ -54,6 +54,7 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 		end = before
 	}
 	start := max(int64(0), end-timelineReadBudget)
+	windowStart := start
 	data := make([]byte, end-start)
 	if _, err := file.ReadAt(data, start); err != nil && err != io.EOF {
 		return nil, err
@@ -158,7 +159,12 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 		budget -= len(encoded)
 	}
 	if result.NextBefore == 0 && start > 0 {
-		result.NextBefore = start
+		if start == end {
+			result.Truncated = true
+			result.NextBefore = windowStart
+		} else {
+			result.NextBefore = start
+		}
 	}
 	for i := len(groups) - 1; i >= 0; i-- {
 		result.Items = append(result.Items, groups[i]...)
