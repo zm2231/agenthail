@@ -750,6 +750,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Alias           string                     `json:"alias"`
 		Model           string                     `json:"model"`
 		QueueID         int64                      `json:"queueId"`
+		IdempotencyKey  string                     `json:"idempotencyKey"`
 		Channel         string                     `json:"channel"`
 		TargetID        string                     `json:"targetId"`
 		FromID          string                     `json:"fromId"`
@@ -762,6 +763,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(request.IdempotencyKey) != "" {
+		d.handleZENAction(w, r, zenActionRequest{Action: request.Action, SessionID: request.SessionID, IdempotencyKey: request.IdempotencyKey, Message: request.Message, SourceSessionID: request.SourceSessionID})
 		return
 	}
 	if request.Action == "session-create" {

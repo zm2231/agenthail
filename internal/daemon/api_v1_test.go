@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
@@ -71,7 +74,7 @@ esac
 	versionRequest.Header.Set("Authorization", "Bearer "+completed.Token)
 	versionResponse := httptest.NewRecorder()
 	handler.ServeHTTP(versionResponse, versionRequest)
-	if versionResponse.Code != http.StatusOK || !strings.Contains(versionResponse.Body.String(), `"protocol":1`) {
+	if versionResponse.Code != http.StatusOK || !strings.Contains(versionResponse.Body.String(), `"protocol":2`) || !strings.Contains(versionResponse.Body.String(), `"minimumProtocol":1`) || !strings.Contains(versionResponse.Body.String(), `"maximumProtocol":2`) {
 		t.Fatalf("version status=%d body=%s", versionResponse.Code, versionResponse.Body.String())
 	}
 	pushBody, _ := json.Marshal(map[string]string{"installationId": "installation", "credential": "credential"})
@@ -492,6 +495,120 @@ func TestAPIV1RejectsMutationWithoutPublishingChange(t *testing.T) {
 	if len(d.events.history) != before {
 		t.Fatalf("rejected mutation published %d event(s)", len(d.events.history)-before)
 	}
+}
+
+func TestAPIV1ZENActionReservesAndReplaysReceipt(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true, Stream: true, Interrupt: true, Steer: true}
+	fake.accepted = true
+	fake.turnID = "turn-1"
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body := `{"action":"send","sessionId":"to","idempotencyKey":"zen-key","message":"hello"}`
+	for i := 0; i < 2; i++ {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"disposition":"accepted"`) || !strings.Contains(response.Body.String(), `"turnId":"turn-1"`) {
+			t.Fatalf("attempt=%d status=%d body=%s", i, response.Code, response.Body.String())
+		}
+	}
+	if len(fake.sent) != 1 {
+		t.Fatalf("native writes=%v", fake.sent)
+	}
+}
+
+func TestAPIV1ZENActionQueuesAndRequiresZENSourceScope(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true}
+	fake.accepted = false
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	queued := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"send","sessionId":"to","idempotencyKey":"queue-key","message":"hello"}`))
+	queued.Header.Set("Authorization", "Bearer secret")
+	queuedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(queuedResponse, queued)
+	if queuedResponse.Code != http.StatusAccepted || !strings.Contains(queuedResponse.Body.String(), `"disposition":"queued"`) || !strings.Contains(queuedResponse.Body.String(), `"queueId":1`) {
+		t.Fatalf("queued status=%d body=%s", queuedResponse.Code, queuedResponse.Body.String())
+	}
+	_, deviceToken, err := d.Registry.CompleteDevicePairing(mustCreatePairing(t, d), "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":"send","sessionId":"to","idempotencyKey":"source-key","message":"hello","sourceSessionId":"zen:source"}`))
+	unauthorized.Header.Set("Authorization", "Bearer "+deviceToken)
+	unauthorizedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusForbidden || !strings.Contains(unauthorizedResponse.Body.String(), `"source_not_authorized"`) {
+		t.Fatalf("source status=%d body=%s", unauthorizedResponse.Code, unauthorizedResponse.Body.String())
+	}
+}
+
+func TestAPIV1ZENSessionStreamReplaysStableRuntimeEvents(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	first, err := d.events.publish("session.updated", target.ID, map[string]any{"status": "busy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := d.events.publish("turn.completed", target.ID, map[string]string{"turnId": "turn-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	streamContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request, _ := http.NewRequestWithContext(streamContext, http.MethodGet, server.URL+"/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(io.LimitReader(response.Body, 2048))
+	var body strings.Builder
+	for !strings.Contains(body.String(), `"type":"turn_end"`) {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("status=%d body=%q err=%v", response.StatusCode, body.String(), err)
+		}
+		body.WriteString(line)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "id: "+strconv.FormatUint(first.ID, 10)) || !strings.Contains(body.String(), "id: "+strconv.FormatUint(second.ID, 10)) || !strings.Contains(body.String(), `event: runtime_event`) || !strings.Contains(body.String(), `"type":"turn_end"`) {
+		t.Fatalf("status=%d body=%q", response.StatusCode, body.String())
+	}
+}
+
+func TestAPIV1ZENSessionStreamRejectsInvalidCursor(t *testing.T) {
+	d, r, fake, _, target := daemonFixture(t)
+	target.Source = "agenthail"
+	target.Transport = "managed"
+	if err := r.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Stream: true}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-stream?id=to", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Last-Event-ID", "not-a-number")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusConflict, "stream_gap")
 }
 
 func TestAPIV1DeviceCanRevokeItself(t *testing.T) {

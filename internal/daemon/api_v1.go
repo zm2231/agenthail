@@ -19,7 +19,7 @@ import (
 type apiDeviceTokenContextKey struct{}
 
 const (
-	apiProtocolVersion   = 1
+	apiProtocolVersion   = 2
 	pairingLifetime      = 5 * time.Minute
 	apiRequestBodyLimit  = 140 << 10
 	eventKeepalivePeriod = 15 * time.Second
@@ -27,12 +27,13 @@ const (
 )
 
 type apiVersionResponse struct {
-	Protocol        int    `json:"protocol"`
-	MinimumProtocol int    `json:"minimumProtocol"`
-	MaximumProtocol int    `json:"maximumProtocol"`
-	Authentication  string `json:"authentication"`
-	EventTransport  string `json:"eventTransport"`
-	PushRelayURL    string `json:"pushRelayUrl"`
+	Protocol        int      `json:"protocol"`
+	MinimumProtocol int      `json:"minimumProtocol"`
+	MaximumProtocol int      `json:"maximumProtocol"`
+	Features        []string `json:"features"`
+	Authentication  string   `json:"authentication"`
+	EventTransport  string   `json:"eventTransport"`
+	PushRelayURL    string   `json:"pushRelayUrl"`
 }
 
 func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
@@ -40,6 +41,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/version", d.apiV1Guard(dashboard, "read", d.apiVersionHandler))
 	mux.HandleFunc("/api/v1/snapshot", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) })))
 	mux.HandleFunc("/api/v1/events", d.apiV1Guard(dashboard, "read", d.apiEventsHandler))
+	mux.HandleFunc("/api/v1/session-stream", d.apiV1Guard(dashboard, "read", d.apiSessionStreamHandler))
 	mux.HandleFunc("/api/v1/session", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSessionHandler)))
 	mux.HandleFunc("/api/v1/search", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSearchHandler)))
 	mux.HandleFunc("/api/v1/models", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardModelsHandler)))
@@ -84,7 +86,7 @@ func (d *Daemon) apiVersionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
 		return
 	}
-	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: apiProtocolVersion, MaximumProtocol: apiProtocolVersion, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL()})
+	writeDashboardJSON(w, http.StatusOK, apiVersionResponse{Protocol: apiProtocolVersion, MinimumProtocol: 1, MaximumProtocol: apiProtocolVersion, Features: []string{"snapshot", "actions", "session_stream"}, Authentication: "bearer", EventTransport: "sse", PushRelayURL: PushRelayURL()})
 }
 
 func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
