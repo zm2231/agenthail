@@ -460,14 +460,14 @@ func (c *Claude) sendCommand(ctx context.Context, sess *surface.Session, cmd str
 }
 
 func (c *Claude) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
-	observation, err := c.Observe(ctx, sess)
+	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: max(1, limit)})
 	if err != nil {
 		return nil, err
 	}
-	if observation.Reply == nil {
-		return &surface.ReplyResult{Done: false}, nil
+	if read.Reply == nil {
+		return &surface.ReplyResult{Done: false, Source: read.Source}, nil
 	}
-	return observation.Reply, nil
+	return read.Reply, nil
 }
 
 func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -701,27 +701,9 @@ func fileExists(path string) bool {
 }
 
 func (c *Claude) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	if path == "" || !fileExists(path) {
-		return nil, fmt.Errorf("no local transcript")
-	}
-	turns, err := readClaudeTailTurns(ctx, path)
+	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: n})
 	if err != nil {
 		return nil, err
 	}
-	var exchanges []surface.Exchange
-	for _, turn := range turns {
-		if turn.User == "" && turn.Assistant == "" {
-			continue
-		}
-		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant})
-	}
-
-	if len(exchanges) > n {
-		exchanges = exchanges[len(exchanges)-n:]
-	}
-	return exchanges, nil
+	return read.Exchanges, nil
 }

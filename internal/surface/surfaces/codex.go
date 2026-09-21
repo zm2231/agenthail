@@ -833,8 +833,6 @@ func codexDirectInputAccepted(response map[string]any, explicit bool) bool {
 	return !explicit
 }
 
-const codexTranscriptReadTimeout = 2 * time.Second
-
 func isCodexTimeout(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
 		return true
@@ -846,34 +844,15 @@ func isCodexTimeout(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "app-server request timed out")
 }
 
-func codexTranscriptTailBounded(ctx context.Context, sess *surface.Session, limit int) ([]surface.Exchange, error) {
-	if err := ctx.Err(); err != nil {
+func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
+	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: max(1, limit)})
+	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, codexTranscriptReadTimeout)
-	defer cancel()
-	return codexTranscriptTail(ctx, codexTranscriptPath(sess), limit)
-}
-
-func (c *Codex) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
-	observation, err := c.Observe(ctx, sess)
-	if err != nil {
-		if !isCodexTimeout(err) {
-			return nil, err
-		}
-		exchanges, transcriptErr := codexTranscriptTailBounded(ctx, sess, 1)
-		if transcriptErr != nil || len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant == "" {
-			return nil, err
-		}
-		last := exchanges[len(exchanges)-1]
-		return &surface.ReplyResult{Text: last.Assistant, UserText: last.User, Done: true, Source: "local-transcript"}, nil
+	if read.Reply == nil {
+		return &surface.ReplyResult{Done: false, Source: read.Source}, nil
 	}
-	if observation.Reply == nil {
-		return &surface.ReplyResult{Done: false, Source: "rpc"}, nil
-	}
-	reply := *observation.Reply
-	reply.Source = "rpc"
-	return &reply, nil
+	return read.Reply, nil
 }
 
 func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -1286,6 +1265,14 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 var localHTTPClient = &http.Client{Timeout: 5 * time.Second}
 
 func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surface.Exchange, error) {
+	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: n})
+	if err != nil {
+		return nil, err
+	}
+	return read.Exchanges, nil
+}
+
+func (c *Codex) readSessionFromRPC(ctx context.Context, sess *surface.Session, n int) (*surface.SessionReadResult, error) {
 	conn, err := c.openSession(ctx, sess, false)
 	if err != nil {
 		return nil, err
@@ -1293,11 +1280,6 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 	defer conn.Close()
 	thread, err := c.readThreadWithOptions(ctx, conn, sess.ID, n, true)
 	if err != nil {
-		if isCodexTimeout(err) {
-			if exchanges, transcriptErr := codexTranscriptTailBounded(ctx, sess, n); transcriptErr == nil {
-				return exchanges, nil
-			}
-		}
 		return nil, err
 	}
 
@@ -1311,5 +1293,20 @@ func (c *Codex) Tail(ctx context.Context, sess *surface.Session, n int) ([]surfa
 	if len(exchanges) > n {
 		exchanges = exchanges[len(exchanges)-n:]
 	}
-	return exchanges, nil
+	return &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: exchanges, Reply: latestRPCReply(sess, exchanges, thread), Source: "rpc"}, nil
+}
+
+func latestRPCReply(session *surface.Session, exchanges []surface.Exchange, thread *codexThread) *surface.ReplyResult {
+	for index := len(thread.Turns) - 1; index >= 0; index-- {
+		turn := thread.Turns[index]
+		if turn.Assistant != "" || turn.Error != "" || turn.Status == surface.StatusBusy {
+			return &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: turn.Done, Error: turn.Error, Source: "rpc"}
+		}
+	}
+	for index := len(exchanges) - 1; index >= 0; index-- {
+		if exchanges[index].Assistant != "" {
+			return &surface.ReplyResult{Text: exchanges[index].Assistant, UserText: exchanges[index].User, Done: session == nil || session.Status != surface.StatusBusy, Source: "rpc"}
+		}
+	}
+	return &surface.ReplyResult{Done: false, Source: "rpc"}
 }

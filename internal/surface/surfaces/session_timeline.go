@@ -24,11 +24,43 @@ func (c *Claude) Timeline(ctx context.Context, session *surface.Session, before 
 	if path == "" {
 		path = c.transcriptPath(session)
 	}
-	return readSessionTimeline(ctx, path, "claude", before)
+	timeline, err := readSessionTimeline(ctx, path, "claude", before)
+	if timeline != nil {
+		timeline.Source = "local-transcript"
+	}
+	return timeline, err
+}
+
+func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	timeline, err := c.Timeline(ctx, session, request.Before)
+	if err != nil {
+		return nil, err
+	}
+	return surface.SessionReadFromTimeline(session, timeline, request.Limit), nil
 }
 
 func (c *Codex) Timeline(ctx context.Context, session *surface.Session, before int64) (*surface.SessionTimeline, error) {
-	return readSessionTimeline(ctx, codexTranscriptPath(session), "codex", before)
+	timeline, err := readSessionTimeline(ctx, codexTranscriptPath(session), "codex", before)
+	if timeline != nil {
+		timeline.Source = "local-transcript"
+	}
+	return timeline, err
+}
+
+func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	timeline, err := c.Timeline(ctx, session, request.Before)
+	if err != nil {
+		return nil, err
+	}
+	result := surface.SessionReadFromTimeline(session, timeline, request.Limit)
+	if result.UnavailableReason == "" || request.Before > 0 {
+		return result, nil
+	}
+	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
+	if remoteErr != nil {
+		return result, nil
+	}
+	return remote, nil
 }
 
 func readSessionTimeline(ctx context.Context, path, source string, before int64) (*surface.SessionTimeline, error) {
@@ -39,6 +71,10 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 	}
 	file, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			result.UnavailableReason = "Detailed activity is unavailable because the local transcript has not been created yet."
+			return result, nil
+		}
 		return nil, fmt.Errorf("local activity transcript is unavailable")
 	}
 	defer file.Close()
