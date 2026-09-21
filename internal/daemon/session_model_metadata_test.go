@@ -37,7 +37,7 @@ func (s *timedOutTailSurface) Timeline(context.Context, *surface.Session, int64)
 	return &surface.SessionTimeline{Items: []surface.TimelineItem{{ID: "tool-1", Kind: "toolCall", Title: "Read", Text: "capture"}}}, nil
 }
 
-func TestDashboardSessionRetainsMetadataAfterTailTimeout(t *testing.T) {
+func TestDashboardSessionUsesOneActivityReadAndRetainsMetadata(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	adapter := &timedOutTailSurface{daemonSurface: fake}
 	adapter.caps.Model = true
@@ -62,8 +62,8 @@ func TestDashboardSessionRetainsMetadataAfterTailTimeout(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.TranscriptWarning == "" || len(body.Timeline.Items) != 1 || body.Model != "claude-opus-5[1m]" || len(body.Models) != 1 {
-		t.Fatalf("metadata was lost after Tail timeout: %+v", body)
+	if body.TranscriptWarning != "" || len(body.Timeline.Items) != 1 || body.Model != "claude-opus-5[1m]" || len(body.Models) != 1 {
+		t.Fatalf("metadata was lost during the activity read: %+v", body)
 	}
 	if body.Models[0].DefaultReasoningEffort != "high" || len(body.Models[0].SupportedReasoningEfforts) != 2 {
 		t.Fatalf("model capability metadata was lost: %+v", body.Models[0])
@@ -97,20 +97,18 @@ func (s *slowSessionReads) Models(ctx context.Context) ([]surface.ModelOption, e
 func TestDashboardSessionReadsShareOneDeadline(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	fake.caps.Model = true
-	adapter := &slowSessionReads{timedOutTailSurface: &timedOutTailSurface{daemonSurface: fake}, deadlines: make(chan time.Time, 3)}
+	adapter := &slowSessionReads{timedOutTailSurface: &timedOutTailSurface{daemonSurface: fake}, deadlines: make(chan time.Time, 2)}
 	d := New(registry, []surface.Surface{adapter})
 	response := httptest.NewRecorder()
 	d.dashboardSessionHandlerWithTimeout(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil), 20*time.Millisecond)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if len(adapter.deadlines) != 3 {
-		t.Fatalf("expected transcript, activity and model reads; got %d", len(adapter.deadlines))
+	if len(adapter.deadlines) != 2 {
+		t.Fatalf("expected one activity read and one model-catalog read; got %d", len(adapter.deadlines))
 	}
 	deadline := <-adapter.deadlines
-	for range 2 {
-		if actual := <-adapter.deadlines; !actual.Equal(deadline) {
-			t.Fatalf("session read extended request budget from %s to %s", deadline, actual)
-		}
+	if actual := <-adapter.deadlines; !actual.Equal(deadline) {
+		t.Fatalf("session read extended request budget from %s to %s", deadline, actual)
 	}
 }

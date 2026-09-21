@@ -32,7 +32,7 @@ func TestLocalTimelineSurvivesMessageHistoryFailure(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if response.Code != http.StatusOK || len(body.Timeline.Items) != 1 || body.Timeline.UnavailableReason != "" || body.TranscriptWarning == "" || len(body.Exchanges) != 0 {
+	if response.Code != http.StatusOK || len(body.Timeline.Items) != 1 || body.Timeline.UnavailableReason != "" || body.TranscriptWarning != "" || len(body.Exchanges) != 0 {
 		t.Fatalf("readable local activity was lost: %s", response.Body.String())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -64,7 +65,7 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 		Timeline surface.SessionTimeline `json:"timeline"`
 	}
 	json.Unmarshal(response.Body.Bytes(), &body)
-	if response.Code != 200 || body.Timeline.UnavailableReason == "" || len(body.Timeline.Items) != 0 {
+	if response.Code != 200 || body.Timeline.UnavailableReason == "" || len(body.Timeline.Items) != 0 || strings.Contains(response.Body.String(), "private local path") {
 		t.Fatal(response.Body.String())
 	}
 }

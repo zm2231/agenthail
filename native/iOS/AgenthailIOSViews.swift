@@ -815,6 +815,8 @@ struct SessionInspector: View {
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
                     if let value = detail.session.transport { LabeledContent("Connection", value: value) }
+                    if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
+                    if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
                 }
                 Section("Context") {

@@ -1334,25 +1334,13 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	var metadata sync.WaitGroup
-	var exchanges []surface.Exchange
-	var transcriptErr error
-	var timeline *surface.SessionTimeline
+	var sessionRead *surface.SessionReadResult
+	var sessionReadErr error
 	metadata.Add(1)
 	go func() {
 		defer metadata.Done()
-		exchanges, transcriptErr = adapter.Tail(ctx, session, limit)
+		sessionRead, sessionReadErr = surface.ReadSession(ctx, adapter, session, surface.SessionReadRequest{Limit: limit, Before: timelineBefore})
 	}()
-	if provider, ok := adapter.(surface.TimelineProvider); ok && r.URL.Query().Get("timeline") == "1" {
-		metadata.Add(1)
-		go func() {
-			defer metadata.Done()
-			var timelineErr error
-			timeline, timelineErr = provider.Timeline(ctx, session, timelineBefore)
-			if timelineErr != nil {
-				timeline = &surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: "Detailed activity could not be loaded from the local transcript. Pull to refresh to retry."}
-			}
-		}()
-	}
 	var contextUsage *surface.ContextUsage
 	var goal *surface.GoalState
 	var model string
@@ -1387,16 +1375,23 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	metadata.Wait()
-	if transcriptErr != nil {
-		exchanges = []surface.Exchange{}
+	if sessionRead == nil {
+		sessionRead = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "unavailable"}
 	}
-	exchanges, transcript := truncateSessionExchanges(exchanges)
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
-	if transcriptErr != nil {
-		response["transcriptWarning"] = "Message history could not be refreshed. Local activity is shown when available."
+	if sessionReadErr != nil {
+		sessionRead.UnavailableReason = "Detailed activity could not be loaded. Pull to refresh to retry."
 	}
-	if timeline != nil {
-		response["timeline"] = timeline
+	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
+	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	if sessionReadErr != nil {
+		response["readError"] = sessionRead.UnavailableReason
+		response["transcriptWarning"] = "Session activity could not be refreshed. Pull to refresh to retry."
+	} else if sessionRead.UnavailableReason != "" {
+		response["readError"] = sessionRead.UnavailableReason
+		response["transcriptWarning"] = sessionRead.UnavailableReason
+	}
+	if r.URL.Query().Get("timeline") == "1" {
+		response["timeline"] = &surface.SessionTimeline{Items: sessionRead.Items, NextBefore: sessionRead.NextBefore, Source: sessionRead.Source, Truncated: sessionRead.Truncated, UnavailableReason: sessionRead.UnavailableReason}
 	}
 	if contextUsageErr == nil && contextUsage != nil {
 		response["context"] = contextUsage

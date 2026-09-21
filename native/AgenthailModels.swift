@@ -267,6 +267,8 @@ struct SessionDetail: Decodable {
     let model: String?
     let models: [ModelOption]?
     let timeline: SessionTimeline?
+    let readSource: String?
+    let readError: String?
     let transcriptWarning: String?
     let transcriptTruncated: Bool?
     let transcriptOriginalBytes: Int?
