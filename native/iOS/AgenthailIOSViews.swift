@@ -542,10 +542,15 @@ struct SessionScreen: View {
                 if let detail { SessionInspector(model: model, session: session, detail: detail) }
             }
             .task(id: session.id) {
-                followingLatest = true
-                atLatest = true
+                let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
+                followingLatest = !startsAtOldest
+                atLatest = !startsAtOldest
                 await model.loadSession(session.id)
-                proxy.scrollTo("bottom", anchor: .bottom)
+                if startsAtOldest, let first = items.first {
+                    proxy.scrollTo(first.id, anchor: .top)
+                } else {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
             }
             .task(id: "activity-" + session.id) {
 #if DEBUG
