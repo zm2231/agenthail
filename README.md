@@ -67,7 +67,7 @@ agenthail send claude:<session-id> "Here are the findings" --from @builder --jso
 agenthail history @builder 25
 ```
 
-A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, slash commands, or steering; read the transcript with `last` or receive a native `SendMessage` reply. Remote Control is still needed for interrupt and model changes.
+A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to advertise a separate Remote Control identity and are never placed in the ordinary message queue.
 
 ### Codex
 

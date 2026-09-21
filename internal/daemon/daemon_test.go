@@ -43,6 +43,7 @@ type daemonSurface struct {
 	contextUsage  *surface.ContextUsage
 	searchResults []surface.SessionSearchResult
 	searchErr     error
+	compactCalls  atomic.Int32
 }
 
 type runtimeDaemonSurface struct {
@@ -244,7 +245,10 @@ func (*daemonSurface) GoalClear(context.Context, *surface.Session) error       {
 func (*daemonSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
 	return nil, nil
 }
-func (*daemonSurface) Compact(context.Context, *surface.Session) error { return nil }
+func (f *daemonSurface) Compact(context.Context, *surface.Session) error {
+	f.compactCalls.Add(1)
+	return nil
+}
 func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "", nil
 }

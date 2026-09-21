@@ -39,6 +39,7 @@ type cliSurface struct {
 	streamEvents  []surface.StreamEvent
 	searchResults []surface.SessionSearchResult
 	searchErr     error
+	compactCalls  int
 }
 
 type runtimeCLISurface struct {
@@ -263,7 +264,10 @@ func (*cliSurface) GoalClear(context.Context, *surface.Session) error       { re
 func (*cliSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
 	return &surface.GoalState{Objective: "ship", Status: "active"}, nil
 }
-func (*cliSurface) Compact(context.Context, *surface.Session) error { return nil }
+func (f *cliSurface) Compact(context.Context, *surface.Session) error {
+	f.compactCalls++
+	return nil
+}
 func (*cliSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "model", nil
 }
@@ -526,23 +530,20 @@ func TestRegisteredTargetRefreshesResolvedMetadata(t *testing.T) {
 	}
 }
 
-func TestCompactQueuesWorkingClaudeSession(t *testing.T) {
+func TestCompactUsesTypedControlForWorkingClaudeSession(t *testing.T) {
 	session := surface.Session{ID: "busy", Surface: surface.KindClaude, Name: "busy", Status: surface.StatusBusy}
 	fake := &cliSurface{
-		kind:        surface.KindClaude,
-		sessions:    map[string]surface.Session{"busy": session},
-		caps:        surface.Capabilities{Compact: true},
-		observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"},
-		sendResult:  &surface.SendResult{Accepted: false},
+		kind:     surface.KindClaude,
+		sessions: map[string]surface.Session{"busy": session},
+		caps:     surface.Capabilities{Compact: true},
 	}
 	app, registry := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"busy"}) })
-	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("busy") != 1 {
+	if err != nil || !strings.Contains(output, "compact requested") || registry.QueueCount("busy") != 0 {
 		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("busy"), err)
 	}
-	rows, err := registry.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Message != "/compact" {
-		t.Fatalf("rows=%+v err=%v", rows, err)
+	if fake.compactCalls != 1 || len(fake.sent) != 0 {
+		t.Fatalf("compactCalls=%d sent=%v", fake.compactCalls, fake.sent)
 	}
 }
 
@@ -560,8 +561,8 @@ func TestCompactRequestsIdleClaudeSessionWithoutWaiting(t *testing.T) {
 	if err != nil || !strings.Contains(output, "compact requested") || registry.QueueCount("idle") != 0 {
 		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("idle"), err)
 	}
-	if len(fake.sent) != 1 || fake.sent[0] != "/compact" {
-		t.Fatalf("sent=%v", fake.sent)
+	if fake.compactCalls != 1 || len(fake.sent) != 0 {
+		t.Fatalf("compactCalls=%d sent=%v", fake.compactCalls, fake.sent)
 	}
 }
 

@@ -1119,6 +1119,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -1141,37 +1142,37 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		result = receipt
 	case "steer":
-		if !adapter.Capabilities().Steer || strings.TrimSpace(request.Message) == "" {
+		if !effective.Steer || strings.TrimSpace(request.Message) == "" {
 			http.Error(w, "this session cannot be steered", http.StatusBadRequest)
 			return
 		}
 		err = adapter.Steer(ctx, session, request.Message)
 	case "interrupt":
-		if !adapter.Capabilities().Interrupt {
+		if !effective.Interrupt {
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
 			return
 		}
 		err = adapter.Interrupt(ctx, session)
 	case "compact":
-		if !adapter.Capabilities().Compact {
+		if !effective.Compact {
 			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
 			return
 		}
 		result, err = (delivery.Dispatcher{Registry: d.Registry}).Compact(ctx, adapter, session)
 	case "goal-set":
-		if !adapter.Capabilities().Goal || strings.TrimSpace(request.Message) == "" {
+		if !effective.Goal || strings.TrimSpace(request.Message) == "" {
 			http.Error(w, "this session cannot accept a goal", http.StatusBadRequest)
 			return
 		}
 		err = adapter.GoalSet(ctx, session, request.Message)
 	case "goal-clear":
-		if !adapter.Capabilities().Goal {
+		if !effective.Goal {
 			http.Error(w, "this session does not support goals", http.StatusBadRequest)
 			return
 		}
 		err = adapter.GoalClear(ctx, session)
 	case "model":
-		if !adapter.Capabilities().Model {
+		if !effective.Model {
 			http.Error(w, "this session does not support model switching", http.StatusBadRequest)
 			return
 		}

@@ -676,8 +676,8 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	if sess.Transport == "uds" {
-		return fmt.Errorf("Claude peer messaging queues work; steering is not supported")
+	if nativeClaudeOnly(sess) {
+		return surface.ErrUnsupported
 	}
 	current, err := c.Resolve(ctx, sess.ID)
 	if err != nil {

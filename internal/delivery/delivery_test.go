@@ -136,7 +136,7 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	}
 }
 
-func TestDispatcherCompactUsesClaudeCommandDeliveryAndCodexNativeOperation(t *testing.T) {
+func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -150,18 +150,13 @@ func TestDispatcherCompactUsesClaudeCommandDeliveryAndCodexNativeOperation(t *te
 		}
 	}
 	dispatcher := Dispatcher{Registry: r}
-	claude := &fakeSurface{
-		kind:    surface.KindClaude,
-		observe: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "active"},
-		result:  &surface.SendResult{Accepted: false},
-	}
+	claude := &fakeSurface{kind: surface.KindClaude}
 	receipt, err := dispatcher.Compact(context.Background(), claude, claudeSession)
-	if err != nil || receipt.Disposition != DispositionQueued || receipt.QueueID == 0 {
+	if err != nil || receipt.Disposition != DispositionAccepted || receipt.QueueID != 0 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
-	item, err := r.QueueItem(receipt.QueueID)
-	if err != nil || item.Message != "/compact" || claude.compactCalls != 0 || len(claude.sent) != 1 || claude.sent[0] != "/compact" {
-		t.Fatalf("item=%+v sent=%v compactCalls=%d err=%v", item, claude.sent, claude.compactCalls, err)
+	if r.QueueCount(claudeSession.ID) != 0 || claude.compactCalls != 1 || len(claude.sent) != 0 {
+		t.Fatalf("sent=%v compactCalls=%d queued=%d", claude.sent, claude.compactCalls, r.QueueCount(claudeSession.ID))
 	}
 	codex := &fakeSurface{kind: surface.KindCodex}
 	receipt, err = dispatcher.Compact(context.Background(), codex, codexSession)
@@ -170,11 +165,11 @@ func TestDispatcherCompactUsesClaudeCommandDeliveryAndCodexNativeOperation(t *te
 	}
 }
 
-func TestDispatcherCompactRejectsUnobservableClaudeSession(t *testing.T) {
+func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 	session := &surface.Session{ID: "claude", Surface: surface.KindClaude}
-	adapter := &fakeSurface{kind: surface.KindClaude, observeErr: errors.New("transcript unavailable")}
+	adapter := &fakeSurface{kind: surface.KindClaude, err: errors.New("control unavailable")}
 	receipt, err := (Dispatcher{}).Compact(context.Background(), adapter, session)
-	if err == nil || !strings.Contains(err.Error(), "observe before compact") || receipt != nil || len(adapter.sent) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "control unavailable") || receipt != nil || len(adapter.sent) != 0 || adapter.compactCalls != 1 {
 		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
 	}
 }

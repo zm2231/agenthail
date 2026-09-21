@@ -1280,22 +1280,15 @@ func (a *App) cmdCompact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Compact {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
+	_, err = (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
 	if err != nil {
 		return err
-	}
-	if receipt.Disposition == delivery.DispositionQueued {
-		if _, ok := daemon.IsRunning(); !ok {
-			fmt.Fprintln(os.Stderr, "warning: daemon is not running; compact will not run until you start it (agenthail daemon start)")
-		}
-		fmt.Printf("target is active; compact queued for %s and will run when the current turn finishes\n", a.resolveDisplay(sess.ID))
-		return nil
 	}
 	fmt.Printf("compact requested for %s\n", a.resolveDisplay(sess.ID))
 	return nil
@@ -1311,7 +1304,7 @@ func (a *App) cmdModel(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Model {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Model {
 		return fmt.Errorf("%s does not support model switching", surf.Name())
 	}
 	name := ""
@@ -1341,7 +1334,7 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Interrupt {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -1360,7 +1353,7 @@ func (a *App) cmdSteer(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Steer {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {

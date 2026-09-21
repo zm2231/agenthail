@@ -46,21 +46,11 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		return nil, err
 	}
-	if adapter.Name() == surface.KindClaude {
-		observation, err := adapter.Observe(ctx, session)
-		if err != nil {
-			return nil, fmt.Errorf("observe before compact: %w", err)
-		}
-		if observation != nil {
-			session.Status = observation.Status
-		}
-		return d.Deliver(ctx, adapter, session, "/compact", "")
-	}
 	if err := adapter.Compact(ctx, session); err != nil {
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: "/compact", Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: "control-failed", SessionID: session.ID, Message: "compact", Error: err.Error()})
 		return nil, err
 	}
-	d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: "/compact"})
+	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "compact"})
 	return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID}, nil
 }
 
