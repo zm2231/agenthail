@@ -15,7 +15,7 @@ concurrency:
 jobs:
   verify:
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
