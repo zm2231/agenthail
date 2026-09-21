@@ -2,6 +2,24 @@ import XCTest
 @testable import Agenthail
 
 final class SessionExperienceTests: XCTestCase {
+    func testWorkspaceHierarchyNestsComponentAncestorsAndKeepsFullPaths() {
+        let groups = WorkspaceHierarchy.groups(for: [
+            "/Volumes/4/GitHub/agenthail",
+            "/Volumes/4/GitHub/zen",
+            "/Volumes/4/GitHub",
+            "/Volumes/4/GitHub/agenthail/native",
+            "/Volumes/4/GitHubish/unrelated",
+            "/Volumes/4/GitHub/agenthail",
+        ])
+        XCTAssertEqual(groups, [
+            WorkspaceGroup(path: "/Volumes/4/GitHub", depth: 0),
+            WorkspaceGroup(path: "/Volumes/4/GitHub/agenthail", depth: 1),
+            WorkspaceGroup(path: "/Volumes/4/GitHub/agenthail/native", depth: 2),
+            WorkspaceGroup(path: "/Volumes/4/GitHub/zen", depth: 1),
+            WorkspaceGroup(path: "/Volumes/4/GitHubish/unrelated", depth: 0),
+        ])
+    }
+
     func testRichSessionDecodesContextTimelineAndTools() throws {
         let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
         XCTAssertEqual(detail.timeline?.items.count, 5)
