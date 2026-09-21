@@ -265,6 +265,9 @@ func TestCodexReadFallsBackToTranscriptAndReportsNativeFailure(t *testing.T) {
 	if read.Source != "local-transcript" || read.UnavailableReason != "" || !strings.Contains(read.Warning, "native session read failed") || len(read.Exchanges) != 1 || read.Exchanges[0].Assistant != "hello" || read.Exchanges[0].Source != "local-transcript" {
 		t.Fatalf("%+v", read)
 	}
+	if strings.Contains(read.Warning, "127.0.0.1") || strings.Contains(read.Warning, "ws://") || strings.Contains(read.Warning, "dial") {
+		t.Fatalf("warning must not leak the transport error: %q", read.Warning)
+	}
 	missing := &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: filepath.Join(t.TempDir(), "absent.jsonl")}
 	read, err = codex.ReadSession(context.Background(), missing, surface.SessionReadRequest{Limit: 5})
 	if err != nil {

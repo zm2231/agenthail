@@ -64,7 +64,7 @@ func codexNativeReadFailure(err error) string {
 	if isCodexTimeout(err) {
 		return "Codex Desktop did not answer the native session read in time."
 	}
-	return "Codex Desktop native session read failed: " + strings.SplitN(err.Error(), "\n", 2)[0] + "."
+	return "Codex Desktop native session read failed."
 }
 
 type transcriptRecord struct {
