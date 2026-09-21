@@ -2,6 +2,8 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
 
+Delivery state has one evidence vocabulary in CLI JSON, dashboard/mobile APIs, Inbox, and history: `queued`, `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, and `canceled`. `transport_accepted` is deliberately weaker than `delivered`; for a Claude peer it means the authenticated socket accepted the frame, while receiver policy and model completion remain pending. `reply_observed` is emitted only after Agenthail reads the completed reply. User interfaces must not relabel either state as a completed delivery.
+
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
 discovery; the command fails only when every configured surface failed. Codex
@@ -16,12 +18,27 @@ workspace; ordinary table output also uses the full path when multiple sessions 
 a workspace basename. JSON always retains the complete `cwd` field. CWD narrows
 discovery; it never selects a caller identity.
 
-`agenthail last <target> [count] --timeout 30s` bounds target resolution and
-transcript retrieval. The default is the application's command timeout. A blocked
-transport or filesystem read returns a timeout error instead of waiting forever.
-`agenthail reply <target> --timeout 30s` uses the same deadline. Codex `last` and
-`reply` identify whether the result came from the paginated RPC or a bounded local
-transcript fallback; a missing local transcript leaves the RPC timeout visible.
+`agenthail last <target> [count] --timeout 30s` and
+`agenthail reply <target> --timeout 30s` use one bounded session reader. The
+newest page is returned first, text and JSON identify the source, and JSON
+includes `nextBefore`. A page holds at most `count` exchanges and the activity
+recorded alongside them, and `nextBefore` addresses the record before the oldest
+exchange on the page, so `--before <nextBefore>` reads the preceding page with
+no gap.
+Claude reads the bounded local transcript page and groups exchanges by turn, so
+a reply that spans several text blocks around tool calls is one exchange with
+its full text. Codex reads the newest page from the native app-server RPC
+first; when that bounded read fails it falls back to the local transcript page
+and reports the RPC failure as a `warning`, and when no transcript exists either
+the RPC failure is part of `readError`. Phone session detail uses the same
+reader and cursor; timeline items always come from the local transcript. A read
+failure never resends a message.
+
+The daemon's retained event journal is the single live-update producer.
+`/api/v1/events` is a replayable SSE view over that journal; consumers use an
+event as an invalidation signal and fetch the bounded session page they need.
+Agenthail does not run a second per-connection session poller or publish a
+separate `/session-stream` contract.
 
 Busy-target behavior is explicit: `send` delivers immediately when idle and queues
 when busy; `send --no-queue` refuses delayed delivery. `queue` always creates the
@@ -48,7 +65,7 @@ Use `@alias` or `claude:<session-id>` as a target. The `claude/name` transcript 
 
 For native messaging, Agenthail resolves the session first, then reads its PID registration and selects `messagingSocketPath`. It verifies session identity, a live PID, the expected `/tmp/cc-socks/<pid>.sock` path, socket ownership, and the process-start identity. Agenthail's verifier and peer registrations use `LC_ALL=C TZ=UTC`; native Claude records from 2.1.267 onward use UTC, while older records use local time. A stale process identity is rejected. Relays store canonical session IDs and use the shared queue and adapter delivery path; they do not retain a socket path across process changes.
 
-Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control bridge can use its supported control operations; steering is still unavailable when messaging uses the native socket transport. Background status, logs, stop and resume use the Claude CLI lifecycle interface. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message.
+Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control identity can use those typed controls even when ordinary messages use the native socket. Controls are never encoded as queued slash-text messages. Background status, logs, stop and resume use the Claude CLI lifecycle interface. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message.
 
 Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
 

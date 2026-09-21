@@ -67,7 +67,7 @@ agenthail send claude:<session-id> "Here are the findings" --from @builder --jso
 agenthail history @builder 25
 ```
 
-A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, slash commands, or steering; read the transcript with `last` or receive a native `SendMessage` reply. Remote Control is still needed for interrupt and model changes.
+A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to advertise a separate Remote Control identity and are never placed in the ordinary message queue.
 
 ### Codex
 
@@ -122,6 +122,7 @@ Then connect them:
 
 ```bash
 agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
+agenthail relay add @investigator @builder 'READY' --once
 ```
 
 When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
@@ -170,6 +171,8 @@ Agenthail keeps a local record of messages it moved, work still waiting, retries
 
 ```bash
 agenthail queue list
+agenthail queue list --mine
+agenthail queue list --cwd /workspace/agenthail
 agenthail queue retry 12
 agenthail queue rm 12
 agenthail history --json

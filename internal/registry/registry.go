@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 3
+	schemaVersion   = 5
 	queueMessageTTL = time.Hour
 )
 
@@ -75,11 +75,23 @@ func (r *Registry) migrate() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
+		return err
+	}
 	if version >= 1 {
 		if err := r.ensureColumn("message_queue", "turn_options", `TEXT NOT NULL DEFAULT '{}'`); err != nil {
 			return err
 		}
 		if err := r.ensureColumn("message_queue", "source_session_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		if err := r.ensureColumn("message_queue", "evidence", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 			return err
 		}
 		_, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
@@ -101,6 +113,7 @@ func (r *Registry) migrate() error {
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
 		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
+		{"evidence", `TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, column := range columns {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
@@ -204,6 +217,8 @@ CREATE TABLE IF NOT EXISTS routes (
 	to_session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
 	pattern TEXT NOT NULL DEFAULT '.*',
+	once_only INTEGER NOT NULL DEFAULT 0,
+	active INTEGER NOT NULL DEFAULT 1,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS message_queue (
@@ -216,8 +231,9 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	inflight_at_ms INTEGER NOT NULL DEFAULT 0, delivery_key TEXT NOT NULL DEFAULT '',
 	model TEXT NOT NULL DEFAULT '', relay_hops INTEGER NOT NULL DEFAULT 0,
 	source_session_id TEXT NOT NULL DEFAULT '',
- turn_options TEXT NOT NULL DEFAULT '{}',
+	turn_options TEXT NOT NULL DEFAULT '{}',
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
+	evidence TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
@@ -541,6 +557,10 @@ func (r *Registry) AddToChannel(channelName, sessionID string) error {
 }
 
 func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
+	return r.AddRouteWithOptions(from, to, pattern, false)
+}
+
+func (r *Registry) AddRouteWithOptions(from, to, pattern string, once bool) (int64, error) {
 	if _, err := regexp.Compile(pattern); err != nil {
 		return 0, fmt.Errorf("invalid relay pattern: %w", err)
 	}
@@ -555,9 +575,9 @@ func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
 	var cycle int
 	err = tx.QueryRow(`
 		WITH RECURSIVE reachable(id) AS (
-			SELECT to_session FROM routes WHERE from_session=?
+			SELECT to_session FROM routes WHERE from_session=? AND active=1
 			UNION
-			SELECT routes.to_session FROM routes JOIN reachable ON routes.from_session=reachable.id
+			SELECT routes.to_session FROM routes JOIN reachable ON routes.from_session=reachable.id WHERE routes.active=1
 		)
 		SELECT COUNT(*) FROM reachable WHERE id=?`, to, from).Scan(&cycle)
 	if err != nil {
@@ -566,7 +586,7 @@ func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
 	if cycle > 0 {
 		return 0, fmt.Errorf("relay route would create a cycle")
 	}
-	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern) VALUES (?,?,?)`, from, to, pattern)
+	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern,once_only) VALUES (?,?,?,?)`, from, to, pattern, b2i(once))
 	if err != nil {
 		return 0, err
 	}
@@ -712,17 +732,18 @@ const (
 // the daemon. It intentionally stores bounded message/result text so a single
 // verbose agent cannot grow the registry without limit.
 type HistoryEntry struct {
-	ID              int64  `json:"id"`
-	CreatedAt       string `json:"createdAt"`
-	Kind            string `json:"kind"`
-	SessionID       string `json:"sessionId,omitempty"`
-	SourceSessionID string `json:"sourceSessionId,omitempty"`
-	RouteID         int64  `json:"routeId,omitempty"`
-	QueueID         int64  `json:"queueId,omitempty"`
-	CompletionID    string `json:"completionId,omitempty"`
-	Message         string `json:"message,omitempty"`
-	Result          string `json:"result,omitempty"`
-	Error           string `json:"error,omitempty"`
+	ID              int64                    `json:"id"`
+	CreatedAt       string                   `json:"createdAt"`
+	Kind            string                   `json:"kind"`
+	SessionID       string                   `json:"sessionId,omitempty"`
+	SourceSessionID string                   `json:"sourceSessionId,omitempty"`
+	RouteID         int64                    `json:"routeId,omitempty"`
+	QueueID         int64                    `json:"queueId,omitempty"`
+	CompletionID    string                   `json:"completionId,omitempty"`
+	Message         string                   `json:"message,omitempty"`
+	Result          string                   `json:"result,omitempty"`
+	Error           string                   `json:"error,omitempty"`
+	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
 }
 
 func boundHistoryText(value string) string {
@@ -776,6 +797,7 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error); err != nil {
 			return nil, err
 		}
+		entry.Evidence = historyEvidence(entry)
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
@@ -822,6 +844,7 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 		if err := rows.Scan(&entry.ID, &entry.CreatedAt, &entry.Kind, &entry.SessionID, &entry.SourceSessionID, &entry.RouteID, &entry.QueueID, &entry.CompletionID, &entry.Message, &entry.Result, &entry.Error); err != nil {
 			return nil, false, err
 		}
+		entry.Evidence = historyEvidence(entry)
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
@@ -832,6 +855,41 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 		entries = entries[:limit]
 	}
 	return entries, hasMore, nil
+}
+
+func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
+	switch entry.Kind {
+	case "queued":
+		return surface.EvidenceQueued
+	case "peer_sent", "peer_received", "transport-accepted":
+		return surface.EvidenceTransportAccepted
+	case "peer_receipt":
+		status := strings.ToLower(strings.TrimSpace(strings.SplitN(entry.Result, ":", 2)[0]))
+		switch status {
+		case "held":
+			return surface.EvidenceHeld
+		case "delivered", "received", "accepted":
+			return surface.EvidenceDelivered
+		case "denied", "failed", "rejected":
+			return surface.EvidenceFailed
+		default:
+			return surface.EvidenceUnknown
+		}
+	case "sent", "delivered", "control-accepted":
+		return surface.EvidenceDelivered
+	case "reply", "completed":
+		return surface.EvidenceReplyObserved
+	case "unknown", "ack-error":
+		return surface.EvidenceUnknown
+	case "failed", "peer_rejected", "control-failed":
+		return surface.EvidenceFailed
+	case "expired":
+		return surface.EvidenceExpired
+	case "canceled":
+		return surface.EvidenceCanceled
+	default:
+		return ""
+	}
 }
 
 func (r *Registry) ListHistoryKinds() ([]string, error) {
@@ -853,18 +911,18 @@ func (r *Registry) ListHistoryKinds() ([]string, error) {
 
 type QueueRow struct {
 	surface.TurnOptions
-	ID              int64  `json:"id"`
-	SessionID       string `json:"sessionId"`
-	Message         string `json:"message"`
-	Model           string `json:"model,omitempty"`
-	SourceSessionID string `json:"sourceSessionId,omitempty"`
-	Status          string `json:"status"`
-	Attempts        int    `json:"attempts"`
-	LastError       string `json:"lastError,omitempty"`
-	QueuedAt        string `json:"queuedAt"`
-	ExpiresAt       int64  `json:"expiresAt,omitempty"`
-	Historical      bool   `json:"historical"`
-	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
+	ID              int64                    `json:"id"`
+	SessionID       string                   `json:"sessionId"`
+	Message         string                   `json:"message"`
+	Model           string                   `json:"model,omitempty"`
+	SourceSessionID string                   `json:"sourceSessionId,omitempty"`
+	Status          string                   `json:"status"`
+	Attempts        int                      `json:"attempts"`
+	LastError       string                   `json:"lastError,omitempty"`
+	QueuedAt        string                   `json:"queuedAt"`
+	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
+	Historical      bool                     `json:"historical"`
+	Evidence        surface.DeliveryEvidence `json:"evidence"`
 }
 
 type AttentionItem struct {
@@ -885,7 +943,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
-	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue`
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
 	}
@@ -902,11 +960,12 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	result := make([]QueueRow, 0)
 	for rows.Next() {
 		var row QueueRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt); err != nil {
+		var evidence string
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence); err != nil {
 			return nil, err
 		}
 		row.Historical = queueRowIsHistorical(row, now)
-		row.DeliveryOutcome = queueDeliveryOutcome(row)
+		row.Evidence = queueEvidence(row, surface.DeliveryEvidence(evidence))
 		result = append(result, row)
 	}
 	return result, rows.Err()
@@ -918,12 +977,13 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 		return nil, err
 	}
 	var row QueueRow
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt)
+	var evidence string
+	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence)
 	if err != nil {
 		return nil, err
 	}
 	row.Historical = queueRowIsHistorical(row, now)
-	row.DeliveryOutcome = queueDeliveryOutcome(row)
+	row.Evidence = queueEvidence(row, surface.DeliveryEvidence(evidence))
 	return &row, nil
 }
 
@@ -934,17 +994,24 @@ func queueRowIsHistorical(row QueueRow, now time.Time) bool {
 	return row.Status == "dead" && row.ExpiresAt > 0 && row.ExpiresAt <= now.UnixMilli()
 }
 
-func queueDeliveryOutcome(row QueueRow) string {
+func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.DeliveryEvidence {
+	if recorded != "" {
+		return recorded
+	}
 	switch row.Status {
+	case "pending", "inflight":
+		return surface.EvidenceQueued
 	case "delivered":
-		return "delivered"
+		return surface.EvidenceDelivered
 	case "expired":
-		return "expired"
+		return surface.EvidenceExpired
+	case "canceled":
+		return surface.EvidenceCanceled
 	case "dead":
 		if strings.HasPrefix(row.LastError, "delivery outcome is unknown") {
-			return "unknown"
+			return surface.EvidenceUnknown
 		}
-		return "failed"
+		return surface.EvidenceFailed
 	default:
 		return ""
 	}
@@ -1135,7 +1202,7 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 }
 
 func (r *Registry) AckMessage(id int64) error {
-	res, err := r.db.Exec(`UPDATE message_queue SET status='delivered',delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, surface.EvidenceDelivered, id)
 	if err != nil {
 		return err
 	}
@@ -1146,12 +1213,19 @@ func (r *Registry) AckMessage(id int64) error {
 }
 
 func (r *Registry) AckMessageWithRelayHops(id int64, sessionID string, relayHops int) error {
+	return r.AckMessageWithEvidence(id, sessionID, relayHops, surface.EvidenceDelivered)
+}
+
+func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops int, evidence surface.DeliveryEvidence) error {
+	if evidence == "" {
+		return fmt.Errorf("delivery evidence is required")
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET status='delivered',delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND session_id=? AND status='inflight'`, id, sessionID)
+	res, err := tx.Exec(`UPDATE message_queue SET status='delivered',evidence=?,delivered=1,last_error='',inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND session_id=? AND status='inflight'`, evidence, id, sessionID)
 	if err != nil {
 		return err
 	}
@@ -1322,8 +1396,8 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
 		WHERE s.id IN (
-			SELECT from_session FROM routes
-			UNION SELECT to_session FROM routes
+			SELECT from_session FROM routes WHERE active=1
+			UNION SELECT to_session FROM routes WHERE active=1
 			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
 		)
 		ORDER BY s.surface,s.id`)
@@ -1360,15 +1434,17 @@ type RouteRow struct {
 	FromSession string `json:"fromSession"`
 	ToSession   string `json:"toSession"`
 	Pattern     string `json:"pattern"`
+	Once        bool   `json:"once"`
+	Active      bool   `json:"active"`
 	FireCount   int64  `json:"fireCount"`
 	LastFiredAt string `json:"lastFiredAt,omitempty"`
 }
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
-	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern,
+	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
 		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), '')
 		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
-		GROUP BY r.id, r.from_session, r.to_session, r.pattern
+		GROUP BY r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active
 		ORDER BY r.id`)
 	if err != nil {
 		return nil, err
@@ -1377,11 +1453,25 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	var out []RouteRow
 	for rows.Next() {
 		var r RouteRow
-		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &r.FireCount, &r.LastFiredAt); err == nil {
+		var once, active int
+		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &once, &active, &r.FireCount, &r.LastFiredAt); err == nil {
+			r.Once = once != 0
+			r.Active = active != 0
 			out = append(out, r)
 		}
 	}
 	return out, rows.Err()
+}
+
+func (r *Registry) DeactivateRoute(id int64) error {
+	res, err := r.db.Exec(`UPDATE routes SET active=0 WHERE id=? AND active=1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("active relay route %d does not exist", id)
+	}
+	return nil
 }
 
 type AliasRow struct {

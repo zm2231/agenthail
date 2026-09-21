@@ -11,19 +11,12 @@ import (
 
 var ErrTargetBusy = errors.New("target is active and queuing is disabled")
 
-type Disposition string
-
-const (
-	DispositionAccepted Disposition = "accepted"
-	DispositionQueued   Disposition = "queued"
-)
-
 type Receipt struct {
-	Disposition Disposition `json:"disposition"`
-	SessionID   string      `json:"sessionId"`
-	TurnID      string      `json:"turnId,omitempty"`
-	QueueID     int64       `json:"queueId,omitempty"`
-	Reason      string      `json:"reason,omitempty"`
+	Evidence  surface.DeliveryEvidence `json:"evidence"`
+	SessionID string                   `json:"sessionId"`
+	TurnID    string                   `json:"turnId,omitempty"`
+	QueueID   int64                    `json:"queueId,omitempty"`
+	Detail    string                   `json:"detail,omitempty"`
 }
 
 type Dispatcher struct {
@@ -46,22 +39,32 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		return nil, err
 	}
-	if adapter.Name() == surface.KindClaude {
-		observation, err := adapter.Observe(ctx, session)
-		if err != nil {
-			return nil, fmt.Errorf("observe before compact: %w", err)
-		}
-		if observation != nil {
-			session.Status = observation.Status
-		}
-		return d.Deliver(ctx, adapter, session, "/compact", "")
-	}
 	if err := adapter.Compact(ctx, session); err != nil {
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: "/compact", Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "compact", Error: err.Error()})
 		return nil, err
 	}
-	d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: "/compact"})
-	return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID}, nil
+	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "compact"})
+	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
+}
+
+func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string) (*Receipt, error) {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return nil, err
+	}
+	if err := adapter.Steer(ctx, session, message); err != nil {
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
+		return nil, err
+	}
+	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
+	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
+}
+
+// failureKind keeps an uncertain outcome distinct from a confirmed failure so every surface shows the same evidence.
+func failureKind(err error, fallback string) string {
+	if surface.IsDeliveryOutcomeUnknown(err) {
+		return "unknown"
+	}
+	return fallback
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
@@ -96,7 +99,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		result, err = adapter.Send(ctx, session, message)
 	}
 	if err != nil {
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result == nil {
@@ -111,11 +114,12 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result.UUID, Error: err.Error()})
 			}
 		}
-		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		if peerTransport {
-			return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID, Reason: "peer_transport_accepted"}, nil
+			d.record(registry.HistoryEntry{Kind: "transport-accepted", SessionID: session.ID, Message: message, Result: result.UUID})
+			return &Receipt{Evidence: surface.EvidenceTransportAccepted, SessionID: session.ID, TurnID: result.UUID, Detail: "receiver policy and model completion are pending"}, nil
 		}
-		return &Receipt{Disposition: DispositionAccepted, SessionID: session.ID, TurnID: result.UUID}, nil
+		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
+		return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID, TurnID: result.UUID}, nil
 	}
 	if !allowQueue {
 		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
@@ -130,7 +134,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err != nil {
 		return nil, err
 	}
-	return &Receipt{Disposition: DispositionQueued, SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, Reason: "target_busy"}, nil
+	return &Receipt{Evidence: surface.EvidenceQueued, SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, Detail: "target busy"}, nil
 }
 
 func (d Dispatcher) record(entry registry.HistoryEntry) {

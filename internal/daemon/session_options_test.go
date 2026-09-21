@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestMobileCreationOptionsAndAuthorizedCreation(t *testing.T) {
@@ -85,7 +87,7 @@ func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
 	found := false
 	for _, item := range page.Items {
 		if item.ID == id && item.Status == "expired" {
-			if !item.Historical || item.DeliveryOutcome != "expired" {
+			if !item.Historical || item.Evidence != surface.EvidenceExpired {
 				t.Fatalf("expired row=%+v", item)
 			}
 			found = true

@@ -429,6 +429,32 @@ func TestListRoutesIncludesDerivedFiringEvidence(t *testing.T) {
 	}
 }
 
+func TestOneShotRouteRetainsEvidenceAfterDeactivation(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "from", "to")
+	id, err := r.AddRouteWithOptions("from", "to", ".*", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved, err := r.RecordRelayDelivery(id, "turn-one"); err != nil || !reserved {
+		t.Fatalf("reserved=%v err=%v", reserved, err)
+	}
+	if err := r.DeactivateRoute(id); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 1 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	if !routes[0].Once || routes[0].Active || routes[0].FireCount != 1 || routes[0].LastFiredAt == "" {
+		t.Fatalf("route=%+v", routes[0])
+	}
+	watched, err := r.WatchedSessions()
+	if err != nil || len(watched) != 0 {
+		t.Fatalf("watched=%+v err=%v", watched, err)
+	}
+}
+
 func TestRouteFiringEvidenceSurvivesRegistryReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	first, err := Open(path)
@@ -579,7 +605,7 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
 	rows, err = r.ListQueue(true)
-	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].DeliveryOutcome != "unknown" {
+	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("history rows=%+v err=%v", rows, err)
 	}
 	attention, err := r.ListAttentionItems(false)
@@ -611,7 +637,7 @@ func TestFutureUnknownDeliveryRemainsCurrentAttention(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Historical || rows[0].DeliveryOutcome != "unknown" {
+	if err != nil || len(rows) != 1 || rows[0].Historical || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
 	attention, err := r.ListAttentionItems(false)
@@ -660,8 +686,27 @@ func TestDeliveredOutcomeWinsOverRetainedUnknownError(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(true)
-	if err != nil || len(rows) != 1 || rows[0].DeliveryOutcome != "delivered" {
+	if err != nil || len(rows) != 1 || rows[0].Evidence != surface.EvidenceDelivered {
 		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestQueueRetainsTransportAcceptanceEvidence(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "peer delivery"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.AckMessageWithEvidence(item.ID, "s", 0, surface.EvidenceTransportAccepted); err != nil {
+		t.Fatal(err)
+	}
+	row, err := r.QueueItem(item.ID)
+	if err != nil || row.Evidence != surface.EvidenceTransportAccepted {
+		t.Fatalf("row=%+v err=%v", row, err)
 	}
 }
 

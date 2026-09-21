@@ -80,11 +80,17 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}
 	}
-	if err := d.Registry.AckMessageWithRelayHops(item.ID, session.ID, item.RelayHops); err != nil {
+	evidence := surface.EvidenceDelivered
+	historyKind := "delivered"
+	if session.Surface == surface.KindClaude && session.Transport == "uds" {
+		evidence = surface.EvidenceTransportAccepted
+		historyKind = "transport-accepted"
+	}
+	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, evidence); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
 		return
 	}
 	d.log.Printf("delivered queue item %d to %s", item.ID, d.resolveDisplay(session.ID))
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
 }

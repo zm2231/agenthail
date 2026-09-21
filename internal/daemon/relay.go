@@ -28,7 +28,7 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 		return
 	}
 	for _, route := range routes {
-		if route.FromSession != from.ID || !matchPattern(route.Pattern, text) {
+		if !route.Active || route.FromSession != from.ID || !matchPattern(route.Pattern, text) {
 			continue
 		}
 		target, targetErr := d.Registry.Session(route.ToSession)
@@ -71,6 +71,11 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 		}
 		if !reserved {
 			continue
+		}
+		if route.Once {
+			if err := d.Registry.DeactivateRoute(route.ID); err != nil {
+				d.log.Printf("deactivate one-shot relay %d: %s", route.ID, err)
+			}
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, QueueID: queueID, CompletionID: completionID, Message: text, Result: "queued"})
 		d.log.Printf("relay %d %s -> %s (queued #%d)", route.ID, d.resolveDisplay(from.ID), d.resolveDisplay(route.ToSession), queueID)

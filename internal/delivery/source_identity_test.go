@@ -69,7 +69,7 @@ func TestPeerTransportAcceptanceDoesNotInventActiveTurn(t *testing.T) {
 	}
 	adapter := &sourceCheckingSurface{fakeSurface: fakeSurface{kind: surface.KindClaude, result: &surface.SendResult{UUID: "message-id", Accepted: true}}}
 	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "message", "")
-	if err != nil || receipt.Reason != "peer_transport_accepted" {
+	if err != nil || receipt.Evidence != surface.EvidenceTransportAccepted {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	state, found, err := r.RuntimeState(session.ID)

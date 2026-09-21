@@ -23,6 +23,70 @@ type SessionTimeline struct {
 	UnavailableReason string         `json:"unavailableReason,omitempty"`
 }
 
-type TimelineProvider interface {
-	Timeline(context.Context, *Session, int64) (*SessionTimeline, error)
+type SessionReadRequest struct {
+	Limit  int
+	Before int64
+}
+
+type SessionReadResult struct {
+	Items             []TimelineItem `json:"items"`
+	Exchanges         []Exchange     `json:"exchanges"`
+	Reply             *ReplyResult   `json:"reply,omitempty"`
+	NextBefore        int64          `json:"nextBefore"`
+	Source            string         `json:"source"`
+	Truncated         bool           `json:"truncated"`
+	UnavailableReason string         `json:"unavailableReason,omitempty"`
+	Warning           string         `json:"warning,omitempty"`
+}
+
+type SessionReader interface {
+	ReadSession(context.Context, *Session, SessionReadRequest) (*SessionReadResult, error)
+}
+
+func ReadSession(ctx context.Context, adapter Surface, session *Session, request SessionReadRequest) (*SessionReadResult, error) {
+	if request.Limit < 1 {
+		request.Limit = 1
+	}
+	if reader, ok := adapter.(SessionReader); ok {
+		return reader.ReadSession(ctx, session, request)
+	}
+	exchanges, err := adapter.Tail(ctx, session, request.Limit)
+	if err != nil {
+		return nil, err
+	}
+	source := string(adapter.Name()) + "-remote"
+	if len(exchanges) > 0 && exchanges[len(exchanges)-1].Source != "" {
+		source = exchanges[len(exchanges)-1].Source
+	}
+	return BoundSessionRead(session, &SessionReadResult{Exchanges: exchanges, Items: []TimelineItem{}, Source: source}), nil
+}
+
+// BoundSessionRead stamps the exchange source and derives the latest reply when the reader did not.
+func BoundSessionRead(session *Session, result *SessionReadResult) *SessionReadResult {
+	if result.Items == nil {
+		result.Items = []TimelineItem{}
+	}
+	if result.Exchanges == nil {
+		result.Exchanges = []Exchange{}
+	}
+	for index := range result.Exchanges {
+		if result.Exchanges[index].Source == "" {
+			result.Exchanges[index].Source = result.Source
+		}
+	}
+	if result.Reply == nil {
+		result.Reply = latestReply(session, result.Exchanges, result.Source)
+	}
+	return result
+}
+
+func latestReply(session *Session, exchanges []Exchange, source string) *ReplyResult {
+	for index := len(exchanges) - 1; index >= 0; index-- {
+		if exchanges[index].Assistant == "" {
+			continue
+		}
+		done := session == nil || session.Status != StatusBusy
+		return &ReplyResult{Text: exchanges[index].Assistant, UserText: exchanges[index].User, Done: done, Source: source}
+	}
+	return &ReplyResult{Done: false, Source: source}
 }

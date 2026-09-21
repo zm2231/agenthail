@@ -77,11 +77,11 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	dispatcher := Dispatcher{Registry: r}
 
 	receipt, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{UUID: "turn", Accepted: true}}, session, "one", "")
-	if err != nil || receipt.Disposition != DispositionAccepted || receipt.TurnID != "turn" {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != "turn" {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt, err = dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
-	if err != nil || receipt.Disposition != DispositionQueued || receipt.QueueID == 0 || r.QueueCount("s") != 1 {
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 || r.QueueCount("s") != 1 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt2, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
@@ -136,7 +136,7 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	}
 }
 
-func TestDispatcherCompactUsesClaudeCommandDeliveryAndCodexNativeOperation(t *testing.T) {
+func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -150,31 +150,59 @@ func TestDispatcherCompactUsesClaudeCommandDeliveryAndCodexNativeOperation(t *te
 		}
 	}
 	dispatcher := Dispatcher{Registry: r}
-	claude := &fakeSurface{
-		kind:    surface.KindClaude,
-		observe: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "active"},
-		result:  &surface.SendResult{Accepted: false},
-	}
+	claude := &fakeSurface{kind: surface.KindClaude}
 	receipt, err := dispatcher.Compact(context.Background(), claude, claudeSession)
-	if err != nil || receipt.Disposition != DispositionQueued || receipt.QueueID == 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.QueueID != 0 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
-	item, err := r.QueueItem(receipt.QueueID)
-	if err != nil || item.Message != "/compact" || claude.compactCalls != 0 || len(claude.sent) != 1 || claude.sent[0] != "/compact" {
-		t.Fatalf("item=%+v sent=%v compactCalls=%d err=%v", item, claude.sent, claude.compactCalls, err)
+	if r.QueueCount(claudeSession.ID) != 0 || claude.compactCalls != 1 || len(claude.sent) != 0 {
+		t.Fatalf("sent=%v compactCalls=%d queued=%d", claude.sent, claude.compactCalls, r.QueueCount(claudeSession.ID))
 	}
 	codex := &fakeSurface{kind: surface.KindCodex}
 	receipt, err = dispatcher.Compact(context.Background(), codex, codexSession)
-	if err != nil || receipt.Disposition != DispositionAccepted || codex.compactCalls != 1 || len(codex.sent) != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || codex.compactCalls != 1 || len(codex.sent) != 0 {
 		t.Fatalf("receipt=%+v sent=%v compactCalls=%d err=%v", receipt, codex.sent, codex.compactCalls, err)
 	}
 }
 
-func TestDispatcherCompactRejectsUnobservableClaudeSession(t *testing.T) {
+func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 	session := &surface.Session{ID: "claude", Surface: surface.KindClaude}
-	adapter := &fakeSurface{kind: surface.KindClaude, observeErr: errors.New("transcript unavailable")}
+	adapter := &fakeSurface{kind: surface.KindClaude, err: errors.New("control unavailable")}
 	receipt, err := (Dispatcher{}).Compact(context.Background(), adapter, session)
-	if err == nil || !strings.Contains(err.Error(), "observe before compact") || receipt != nil || len(adapter.sent) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "control unavailable") || receipt != nil || len(adapter.sent) != 0 || adapter.compactCalls != 1 {
 		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
+	}
+}
+
+func TestDispatcherRecordsUnknownOutcomeAsUnknownEvidence(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, Status: surface.StatusIdle}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	unknown := surface.DeliveryOutcomeUnknown(errors.New("sidecar not found"))
+	adapter := &fakeSurface{kind: surface.KindClaude, err: unknown}
+	dispatcher := Dispatcher{Registry: r}
+	if _, err := dispatcher.Deliver(context.Background(), adapter, session, "hello", ""); !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+	if _, err := dispatcher.Compact(context.Background(), adapter, session); !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+	entries, err := r.ListHistory(10, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries=%+v", entries)
+	}
+	for _, entry := range entries {
+		if entry.Evidence != surface.EvidenceUnknown {
+			t.Fatalf("entry %+v must carry unknown evidence", entry)
+		}
 	}
 }

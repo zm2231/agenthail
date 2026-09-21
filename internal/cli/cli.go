@@ -135,15 +135,16 @@ Session commands:
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
-  reply <target> [--json] [--timeout 30s]  Fetch last assistant reply
-  last <target> [count] [--full] [--json] [--timeout 30s]  Show last N exchanges
+  reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
+  last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
   goal <target> [text|clear]    Set or clear a goal
-  compact <target>              Compress context (queues for active Claude sessions)
+  compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
   steer <target> "message"      Inject guidance into a running turn; use send when idle
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
-  queue list [--json] [--all]   Inspect waiting, sending, and failed messages
+  queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]
+                                 Inspect queued work scoped to a session or workspace
   queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
@@ -162,7 +163,7 @@ Channels:
   channel send <name> "msg"     Broadcast to all members (--from <name>)
 
 Automatic handoffs:
-  relay add <from> <to> [regex] Send-to-on-completion rule
+  relay add <from> <to> [regex] [--once]  Send-to-on-completion rule
   relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
@@ -335,7 +336,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--alias": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -367,7 +368,7 @@ func validateCommandFlags(command string, args []string) error {
 	specs := map[string]flagSpec{
 		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
-		"reply": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
+		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
@@ -380,7 +381,11 @@ func validateCommandFlags(command string, args []string) error {
 		return nil
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
-		spec.bools = map[string]bool{"--all": true, "--json": true}
+		spec.values = map[string]bool{"--target": true, "--cwd": true}
+		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
+	}
+	if command == "relay" && len(args) > 0 && args[0] == "add" {
+		spec.bools = map[string]bool{"--once": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "list" {
 		spec.bools = map[string]bool{"--json": true}
@@ -928,7 +933,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 
-	if receipt.Disposition == delivery.DispositionQueued {
+	if receipt.Evidence == surface.EvidenceQueued {
 		if _, ok := daemon.IsRunning(); !ok {
 			fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 		}
@@ -972,6 +977,14 @@ func (a *App) cmdSend(args []string) error {
 		if err != nil {
 			return err
 		}
+		receipt.Evidence = surface.EvidenceReplyObserved
+		if a.Registry != nil {
+			text := ""
+			if reply != nil {
+				text = reply.Text
+			}
+			_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: "reply", SessionID: sess.ID, CompletionID: receipt.TurnID, Result: text})
+		}
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(map[string]any{"delivery": receipt, "reply": reply})
 		}
@@ -982,7 +995,7 @@ func (a *App) cmdSend(args []string) error {
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(receipt)
-	} else if receipt.Reason == "peer_transport_accepted" {
+	} else if receipt.Evidence == surface.EvidenceTransportAccepted {
 		fmt.Printf("accepted by Claude socket (message %s); receiver policy and model completion are pending\n", receipt.TurnID)
 	} else {
 		fmt.Printf("sent (turn %s)\n", receipt.TurnID)
@@ -1045,10 +1058,22 @@ func commandTimeout(args []string, fallback time.Duration) (time.Duration, error
 	return timeout, nil
 }
 
+func sessionReadBefore(args []string) (int64, error) {
+	value := flagVal(args, "--before")
+	if value == "" {
+		return 0, nil
+	}
+	cursor, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || cursor <= 0 {
+		return 0, fmt.Errorf("--before must be a positive activity cursor")
+	}
+	return cursor, nil
+}
+
 func (a *App) cmdReply(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
-		return fmt.Errorf("usage: agenthail reply <target> [--json] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail reply <target> [--before cursor] [--json] [--timeout 30s]")
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -1063,10 +1088,18 @@ func (a *App) cmdReply(args []string) error {
 	if !surf.Capabilities().Reply {
 		return fmt.Errorf("%s does not support reply", surf.Name())
 	}
-	reply, err := surf.Reply(ctx, sess, 50)
+	before, err := sessionReadBefore(args)
 	if err != nil {
 		return err
 	}
+	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
+	if err != nil {
+		return err
+	}
+	if read.UnavailableReason != "" && len(read.Exchanges) == 0 {
+		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
+	}
+	reply := read.Reply
 	if reply == nil {
 		return fmt.Errorf("%s returned an empty reply result", surf.Name())
 	}
@@ -1074,12 +1107,16 @@ func (a *App) cmdReply(args []string) error {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": reply.Source})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
 	} else {
-		if reply.Source != "" {
-			fmt.Printf("[%s]\n", reply.Source)
+		printSessionReadWarning(read)
+		if read.Source != "" {
+			fmt.Printf("[%s]\n", read.Source)
 		}
 		fmt.Println(reply.Text)
+		if read.NextBefore > 0 {
+			fmt.Printf("older cursor: %d\n", read.NextBefore)
+		}
 	}
 	return nil
 }
@@ -1087,7 +1124,7 @@ func (a *App) cmdReply(args []string) error {
 func (a *App) cmdLast(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail last <target> [count] [--full] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]")
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -1107,26 +1144,31 @@ func (a *App) cmdLast(args []string) error {
 		}
 		n = v
 	}
-	exchanges, err := tailWithContext(ctx, surf, sess, n)
+	before, err := sessionReadBefore(args)
 	if err != nil {
 		return err
 	}
+	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: n, Before: before})
+	if err != nil {
+		return err
+	}
+	exchanges := read.Exchanges
+	if exchanges == nil {
+		exchanges = []surface.Exchange{}
+	}
+	if read.UnavailableReason != "" && len(exchanges) == 0 {
+		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
+	}
+	printSessionReadWarning(read)
 	if len(exchanges) == 0 {
-		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": "", "exchanges": []surface.Exchange{}})
-		}
 		fmt.Println("(no conversation history)")
 		return nil
 	}
-	if hasFlag(args, "--json") {
-		source := ""
-		if len(exchanges) > 0 {
-			source = exchanges[len(exchanges)-1].Source
-		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": source, "exchanges": exchanges})
-	}
 	label := a.resolveDisplay(sess.ID)
-	source := exchanges[len(exchanges)-1].Source
+	source := read.Source
 	if source != "" {
 		fmt.Printf("── %s [%s] ──\n", label, source)
 	} else {
@@ -1150,24 +1192,36 @@ func (a *App) cmdLast(args []string) error {
 		}
 		fmt.Println()
 	}
+	if read.NextBefore > 0 {
+		fmt.Printf("older cursor: %d\n", read.NextBefore)
+	}
 	return nil
 }
 
-func tailWithContext(ctx context.Context, adapter surface.Surface, session *surface.Session, count int) ([]surface.Exchange, error) {
+func printSessionReadWarning(read *surface.SessionReadResult) {
+	if read.Warning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", read.Warning)
+	}
+	if read.UnavailableReason != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", read.UnavailableReason)
+	}
+}
+
+func readSessionWithContext(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	type result struct {
-		exchanges []surface.Exchange
-		err       error
+		read *surface.SessionReadResult
+		err  error
 	}
 	completed := make(chan result, 1)
 	go func() {
-		exchanges, err := adapter.Tail(ctx, session, count)
-		completed <- result{exchanges: exchanges, err: err}
+		read, err := surface.ReadSession(ctx, adapter, session, request)
+		completed <- result{read: read, err: err}
 	}()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case outcome := <-completed:
-		return outcome.exchanges, outcome.err
+		return outcome.read, outcome.err
 	}
 }
 
@@ -1250,22 +1304,15 @@ func (a *App) cmdCompact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Compact {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
+	_, err = (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
 	if err != nil {
 		return err
-	}
-	if receipt.Disposition == delivery.DispositionQueued {
-		if _, ok := daemon.IsRunning(); !ok {
-			fmt.Fprintln(os.Stderr, "warning: daemon is not running; compact will not run until you start it (agenthail daemon start)")
-		}
-		fmt.Printf("target is active; compact queued for %s and will run when the current turn finishes\n", a.resolveDisplay(sess.ID))
-		return nil
 	}
 	fmt.Printf("compact requested for %s\n", a.resolveDisplay(sess.ID))
 	return nil
@@ -1281,7 +1328,7 @@ func (a *App) cmdModel(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Model {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Model {
 		return fmt.Errorf("%s does not support model switching", surf.Name())
 	}
 	name := ""
@@ -1311,7 +1358,7 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Interrupt {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -1330,13 +1377,18 @@ func (a *App) cmdSteer(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Steer {
+	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	return surf.Steer(ctx, sess, strings.Join(positional[1:], " "))
+	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, strings.Join(positional[1:], " "))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("steer %s for %s\n", receipt.Evidence, a.resolveDisplay(sess.ID))
+	return nil
 }
 
 func (a *App) cmdQueue(args []string) error {
@@ -1344,7 +1396,22 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("queue requires the registry")
 	}
 	if len(args) > 0 && args[0] == "list" {
+		if hasFlag(args, "--help") {
+			fmt.Println("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
+			fmt.Println("  --target  show messages for one destination")
+			fmt.Println("  --mine    show messages sent by or addressed to the caller session")
+			fmt.Println("  --cwd     show messages for targets in a workspace and its descendants")
+			fmt.Println("  --all     include terminal queue history")
+			return nil
+		}
+		if len(stripFlags(args)) != 1 {
+			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
+		}
 		rows, err := a.Registry.ListQueue(hasFlag(args, "--all"))
+		if err != nil {
+			return err
+		}
+		rows, err = a.filterQueueRows(context.Background(), rows, flagVal(args, "--target"), hasFlag(args, "--mine"), flagVal(args, "--cwd"))
 		if err != nil {
 			return err
 		}
@@ -1356,7 +1423,7 @@ func (a *App) cmdQueue(args []string) error {
 			return nil
 		}
 		for _, row := range rows {
-			fmt.Printf("#%-4d %-9s attempts=%d target=%s %s\n", row.ID, row.Status, row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
+			fmt.Printf("#%-4d %-18s attempts=%d target=%s %s\n", row.ID, row.Evidence, row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
 			if row.LastError != "" {
 				fmt.Printf("      last error: %s\n", row.LastError)
 			}
@@ -1462,6 +1529,66 @@ func (a *App) cmdQueue(args []string) error {
 	return nil
 }
 
+func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, cwd string) ([]registry.QueueRow, error) {
+	targetID := ""
+	if targetSelector != "" {
+		session, _, err := a.resolveTarget(ctx, targetSelector)
+		if err != nil {
+			return nil, fmt.Errorf("resolve --target: %w", err)
+		}
+		targetID = session.ID
+	}
+	mineID := ""
+	if mine {
+		var err error
+		mineID, err = a.sourceSessionID(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if mineID == "" {
+			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_SESSION_ID")
+		}
+	}
+	root := ""
+	if cwd != "" {
+		var err error
+		root, err = workspace.NormalizeCWD(cwd)
+		if err != nil {
+			return nil, fmt.Errorf("normalize --cwd: %w", err)
+		}
+	}
+	filtered := make([]registry.QueueRow, 0, len(rows))
+	sessions := make(map[string]*surface.Session)
+	for _, row := range rows {
+		if targetID != "" && row.SessionID != targetID {
+			continue
+		}
+		if mineID != "" && row.SessionID != mineID && row.SourceSessionID != mineID {
+			continue
+		}
+		if root != "" {
+			session := sessions[row.SessionID]
+			if session == nil {
+				var err error
+				session, err = a.Registry.Session(row.SessionID)
+				if err != nil {
+					return nil, fmt.Errorf("read queue target %s: %w", row.SessionID, err)
+				}
+				sessions[row.SessionID] = session
+			}
+			within, err := workspace.IsWithin(root, session.Cwd)
+			if err != nil {
+				return nil, fmt.Errorf("compare queue target workspace: %w", err)
+			}
+			if !within {
+				continue
+			}
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered, nil
+}
+
 func (a *App) cmdHistory(args []string) error {
 	if a.Registry == nil {
 		return fmt.Errorf("history requires the registry")
@@ -1515,9 +1642,9 @@ func (a *App) cmdHistory(args []string) error {
 			target = a.resolveDisplay(target)
 		}
 		if entry.SourceSessionID != "" {
-			fmt.Printf("%s %-9s %s -> %s", entry.CreatedAt, entry.Kind, a.resolveDisplay(entry.SourceSessionID), target)
+			fmt.Printf("%s %-18s %s -> %s", entry.CreatedAt, historyEvidenceLabel(entry), a.resolveDisplay(entry.SourceSessionID), target)
 		} else {
-			fmt.Printf("%s %-9s %s", entry.CreatedAt, entry.Kind, target)
+			fmt.Printf("%s %-18s %s", entry.CreatedAt, historyEvidenceLabel(entry), target)
 		}
 		if entry.Message != "" {
 			fmt.Printf(" %s", truncate(strings.ReplaceAll(entry.Message, "\n", " "), 140))
@@ -1528,6 +1655,13 @@ func (a *App) cmdHistory(args []string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+func historyEvidenceLabel(entry registry.HistoryEntry) string {
+	if entry.Evidence != "" {
+		return string(entry.Evidence)
+	}
+	return entry.Kind
 }
 
 func (a *App) cmdDoctor(args []string) error {

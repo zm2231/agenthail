@@ -122,19 +122,19 @@ type dashboardAttention struct {
 
 type dashboardQueue struct {
 	surface.TurnOptions
-	SourceSessionID string `json:"sourceSessionId,omitempty"`
-	ID              int64  `json:"id"`
-	SessionID       string `json:"sessionId"`
-	Target          string `json:"target"`
-	Message         string `json:"message"`
-	Model           string `json:"model,omitempty"`
-	Status          string `json:"status"`
-	Attempts        int    `json:"attempts"`
-	LastError       string `json:"lastError,omitempty"`
-	QueuedAt        string `json:"queuedAt"`
-	ExpiresAt       int64  `json:"expiresAt,omitempty"`
-	Historical      bool   `json:"historical"`
-	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
+	SourceSessionID string                   `json:"sourceSessionId,omitempty"`
+	ID              int64                    `json:"id"`
+	SessionID       string                   `json:"sessionId"`
+	Target          string                   `json:"target"`
+	Message         string                   `json:"message"`
+	Model           string                   `json:"model,omitempty"`
+	Status          string                   `json:"status"`
+	Attempts        int                      `json:"attempts"`
+	LastError       string                   `json:"lastError,omitempty"`
+	QueuedAt        string                   `json:"queuedAt"`
+	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
+	Historical      bool                     `json:"historical"`
+	Evidence        surface.DeliveryEvidence `json:"evidence"`
 }
 
 type dashboardChannel struct {
@@ -149,24 +149,29 @@ type dashboardChannelMember struct {
 }
 
 type dashboardRelay struct {
-	ID      int64  `json:"id"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Pattern string `json:"pattern"`
+	ID          int64  `json:"id"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Pattern     string `json:"pattern"`
+	Once        bool   `json:"once"`
+	Active      bool   `json:"active"`
+	FireCount   int64  `json:"fireCount"`
+	LastFiredAt string `json:"lastFiredAt,omitempty"`
 }
 
 type dashboardHistory struct {
-	ID              int64  `json:"id"`
-	CreatedAt       string `json:"createdAt"`
-	Kind            string `json:"kind"`
-	SessionID       string `json:"sessionId,omitempty"`
-	SourceSessionID string `json:"sourceSessionId,omitempty"`
-	Target          string `json:"target,omitempty"`
-	Source          string `json:"source,omitempty"`
-	QueueID         int64  `json:"queueId,omitempty"`
-	Message         string `json:"message,omitempty"`
-	Result          string `json:"result,omitempty"`
-	Error           string `json:"error,omitempty"`
+	ID              int64                    `json:"id"`
+	CreatedAt       string                   `json:"createdAt"`
+	Kind            string                   `json:"kind"`
+	SessionID       string                   `json:"sessionId,omitempty"`
+	SourceSessionID string                   `json:"sourceSessionId,omitempty"`
+	Target          string                   `json:"target,omitempty"`
+	Source          string                   `json:"source,omitempty"`
+	QueueID         int64                    `json:"queueId,omitempty"`
+	Message         string                   `json:"message,omitempty"`
+	Result          string                   `json:"result,omitempty"`
+	Error           string                   `json:"error,omitempty"`
+	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
@@ -389,7 +394,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHistory {
-	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error}
+	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence}
 }
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
@@ -547,7 +552,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, DeliveryOutcome: item.DeliveryOutcome})
+		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -560,7 +565,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		state.Channels = append(state.Channels, dashboardChannel{Name: channel.Name, Members: members, MemberDetails: memberDetails})
 	}
 	for _, route := range routes {
-		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern})
+		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern, Once: route.Once, Active: route.Active, FireCount: route.FireCount, LastFiredAt: route.LastFiredAt})
 	}
 	for _, entry := range history {
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
@@ -755,6 +760,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		FromID          string                     `json:"fromId"`
 		ToID            string                     `json:"toId"`
 		Pattern         string                     `json:"pattern"`
+		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
 		Surface         string                     `json:"surface"`
 		Cwd             string                     `json:"cwd"`
@@ -947,7 +953,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			if receipt.Disposition == delivery.DispositionQueued {
+			if receipt.Evidence == surface.EvidenceQueued {
 				queued++
 			} else {
 				sent++
@@ -1030,7 +1036,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if pattern == "" {
 			pattern = ".*"
 		}
-		if _, err := d.Registry.AddRoute(fromID, toID, pattern); err != nil {
+		if _, err := d.Registry.AddRouteWithOptions(fromID, toID, pattern, request.Once); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1119,6 +1125,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
 	ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 	defer cancel()
 	var result any
@@ -1141,37 +1148,37 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		result = receipt
 	case "steer":
-		if !adapter.Capabilities().Steer || strings.TrimSpace(request.Message) == "" {
+		if !effective.Steer || strings.TrimSpace(request.Message) == "" {
 			http.Error(w, "this session cannot be steered", http.StatusBadRequest)
 			return
 		}
-		err = adapter.Steer(ctx, session, request.Message)
+		result, err = (delivery.Dispatcher{Registry: d.Registry}).Steer(ctx, adapter, session, request.Message)
 	case "interrupt":
-		if !adapter.Capabilities().Interrupt {
+		if !effective.Interrupt {
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
 			return
 		}
 		err = adapter.Interrupt(ctx, session)
 	case "compact":
-		if !adapter.Capabilities().Compact {
+		if !effective.Compact {
 			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
 			return
 		}
 		result, err = (delivery.Dispatcher{Registry: d.Registry}).Compact(ctx, adapter, session)
 	case "goal-set":
-		if !adapter.Capabilities().Goal || strings.TrimSpace(request.Message) == "" {
+		if !effective.Goal || strings.TrimSpace(request.Message) == "" {
 			http.Error(w, "this session cannot accept a goal", http.StatusBadRequest)
 			return
 		}
 		err = adapter.GoalSet(ctx, session, request.Message)
 	case "goal-clear":
-		if !adapter.Capabilities().Goal {
+		if !effective.Goal {
 			http.Error(w, "this session does not support goals", http.StatusBadRequest)
 			return
 		}
 		err = adapter.GoalClear(ctx, session)
 	case "model":
-		if !adapter.Capabilities().Model {
+		if !effective.Model {
 			http.Error(w, "this session does not support model switching", http.StatusBadRequest)
 			return
 		}
@@ -1334,25 +1341,13 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	var metadata sync.WaitGroup
-	var exchanges []surface.Exchange
-	var transcriptErr error
-	var timeline *surface.SessionTimeline
+	var sessionRead *surface.SessionReadResult
+	var sessionReadErr error
 	metadata.Add(1)
 	go func() {
 		defer metadata.Done()
-		exchanges, transcriptErr = adapter.Tail(ctx, session, limit)
+		sessionRead, sessionReadErr = surface.ReadSession(ctx, adapter, session, surface.SessionReadRequest{Limit: limit, Before: timelineBefore})
 	}()
-	if provider, ok := adapter.(surface.TimelineProvider); ok && r.URL.Query().Get("timeline") == "1" {
-		metadata.Add(1)
-		go func() {
-			defer metadata.Done()
-			var timelineErr error
-			timeline, timelineErr = provider.Timeline(ctx, session, timelineBefore)
-			if timelineErr != nil {
-				timeline = &surface.SessionTimeline{Items: []surface.TimelineItem{}, UnavailableReason: "Detailed activity could not be loaded from the local transcript. Pull to refresh to retry."}
-			}
-		}()
-	}
 	var contextUsage *surface.ContextUsage
 	var goal *surface.GoalState
 	var model string
@@ -1387,16 +1382,26 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	metadata.Wait()
-	if transcriptErr != nil {
-		exchanges = []surface.Exchange{}
+	if sessionRead == nil {
+		sessionRead = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "unavailable"}
 	}
-	exchanges, transcript := truncateSessionExchanges(exchanges)
-	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "transcriptTruncated": transcript.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
-	if transcriptErr != nil {
-		response["transcriptWarning"] = "Message history could not be refreshed. Local activity is shown when available."
+	if sessionReadErr != nil {
+		sessionRead.UnavailableReason = "Detailed activity could not be loaded. Pull to refresh to retry."
 	}
-	if timeline != nil {
-		response["timeline"] = timeline
+	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
+	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	if sessionReadErr != nil {
+		response["readError"] = sessionRead.UnavailableReason
+		response["transcriptWarning"] = "Session activity could not be refreshed. Pull to refresh to retry."
+	} else if sessionRead.UnavailableReason != "" {
+		response["readError"] = sessionRead.UnavailableReason
+		response["transcriptWarning"] = sessionRead.UnavailableReason
+	} else if sessionRead.Warning != "" {
+		response["readError"] = sessionRead.Warning
+		response["transcriptWarning"] = sessionRead.Warning
+	}
+	if r.URL.Query().Get("timeline") == "1" {
+		response["timeline"] = &surface.SessionTimeline{Items: sessionRead.Items, NextBefore: sessionRead.NextBefore, Source: sessionRead.Source, Truncated: sessionRead.Truncated, UnavailableReason: sessionRead.UnavailableReason}
 	}
 	if contextUsageErr == nil && contextUsage != nil {
 		response["context"] = contextUsage

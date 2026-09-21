@@ -70,10 +70,11 @@ from JSON discovery output when reporting partial availability.
 Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
-the transcript or native `SendMessage` for an explicit reply. Interrupt and
-model changes require a Remote Control bridge. A receipt with
-`reason: "peer_transport_accepted"` only proves socket acceptance; receiver
-policy can still hold or deny the message. Do not claim model delivery from it.
+the transcript or native `SendMessage` for an explicit reply. Compact, model,
+interrupt, and steer are typed controls that require a Remote Control identity.
+A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
+receiver policy can still hold or deny the message. Do not claim model delivery
+from it.
 
 The daemon registers each agent in the default Codex/Notion discovery page as
 an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
@@ -198,7 +199,7 @@ agenthail goal @builder "Ship the verified fix."
 agenthail goal @builder clear
 ```
 
-`compact` runs immediately for an idle target. For a working Claude session it creates a durable `/compact` queue item and returns without waiting; the daemon delivers it when the current turn finishes. Codex uses its native compact operation.
+`compact` is a typed control, never a queued message. Claude sessions with a Remote Control identity compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
 
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is
@@ -224,6 +225,7 @@ Persistent agent-to-agent subscription:
 ```bash
 agenthail relay add @researcher @builder
 agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
+agenthail relay add @researcher @builder 'READY' --once
 agenthail relay list [--json]
 agenthail relay rm <id>
 ```
@@ -233,7 +235,8 @@ completed reply. The optional filter is a regular expression. Relays reject
 self-routes and cycles, remember delivered completion IDs across restarts, and
 require the daemon. `relay list` derives per-route firing evidence from that
 delivery ledger, reporting each rule's fire count and last-fired timestamp in
-both text and `--json` output.
+both text and `--json` output. `--once` deactivates the rule after its first
+matching completion while retaining that firing evidence.
 
 Human completion notifications:
 
@@ -263,6 +266,9 @@ live stream, a persistent relay to another agent, or a human notification.
 agenthail queue @builder "Then add focused tests."
 agenthail queue list --json
 agenthail queue list --all --json
+agenthail queue list --target @builder --json
+agenthail queue list --mine --json
+agenthail queue list --cwd /workspace/agenthail --json
 agenthail queue retry <id>
 agenthail queue rm <id>
 agenthail queue clear @builder
@@ -275,7 +281,10 @@ ordered per session. Known pre-dispatch failures retry with bounded backoff.
 Repeated failures become dead letters. An `unknown` outcome means delivery may
 already have happened; inspect history and the target before retrying. Pending
 messages expire after one hour. Expired items leave the active queue, appear in
-history, and remain available through `queue list --all`.
+history, and remain available through `queue list --all`. `--target` filters by
+destination, `--mine` includes messages sent by or addressed to the caller
+session, and `--cwd` includes target sessions in that normalized workspace and
+its descendants.
 
 ## Channels
 

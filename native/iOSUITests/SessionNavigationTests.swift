@@ -81,7 +81,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
         for _ in 0..<5 {
             if waitUntilHittable(inbox, timeout: 0.5) { break }
-            app.swipeUp()
+            app.scrollViews["session-timeline"].swipeUp()
         }
         XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
         inbox.tap()

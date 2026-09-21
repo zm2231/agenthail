@@ -43,6 +43,7 @@ type daemonSurface struct {
 	contextUsage  *surface.ContextUsage
 	searchResults []surface.SessionSearchResult
 	searchErr     error
+	compactCalls  atomic.Int32
 }
 
 type runtimeDaemonSurface struct {
@@ -244,7 +245,10 @@ func (*daemonSurface) GoalClear(context.Context, *surface.Session) error       {
 func (*daemonSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
 	return nil, nil
 }
-func (*daemonSurface) Compact(context.Context, *surface.Session) error { return nil }
+func (f *daemonSurface) Compact(context.Context, *surface.Session) error {
+	f.compactCalls.Add(1)
+	return nil
+}
 func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "", nil
 }
@@ -630,6 +634,22 @@ func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
 	history, err := r.ListHistory(10, to.ID)
 	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
 		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestOneShotRelayQueuesOnlyFirstMatchingCompletion(t *testing.T) {
+	daemon, r, _, from, to := daemonFixture(t)
+	if _, err := r.AddRouteWithOptions(from.ID, to.ID, ".*", true); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "completion-one", 0, "first")
+	daemon.fireRelays(&from, "completion-two", 0, "second")
+	if got := r.QueueCount(to.ID); got != 1 {
+		t.Fatalf("queued=%d, want one", got)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 1 || routes[0].Active || routes[0].FireCount != 1 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
 }
 

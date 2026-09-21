@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -17,12 +18,12 @@ type timelineSurface struct {
 	fail   bool
 }
 
-func (s *timelineSurface) Timeline(_ context.Context, _ *surface.Session, before int64) (*surface.SessionTimeline, error) {
-	s.cursor = before
+func (s *timelineSurface) ReadSession(_ context.Context, _ *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	s.cursor = request.Before
 	if s.fail {
 		return nil, errors.New("private local path")
 	}
-	return &surface.SessionTimeline{Items: []surface.TimelineItem{{ID: "tool-1", Kind: "toolCall", Title: "Bash", Text: "go test", CallID: "call-1"}}, NextBefore: 123, Source: "claude"}, nil
+	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "tool-1", Kind: "toolCall", Title: "Bash", Text: "go test", CallID: "call-1"}}, Exchanges: []surface.Exchange{}, NextBefore: 123, Source: "local-transcript"}, nil
 }
 func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
@@ -64,7 +65,7 @@ func TestAPIV1MobileTimelinePreservesContractAndReadAuthorization(t *testing.T) 
 		Timeline surface.SessionTimeline `json:"timeline"`
 	}
 	json.Unmarshal(response.Body.Bytes(), &body)
-	if response.Code != 200 || body.Timeline.UnavailableReason == "" || len(body.Timeline.Items) != 0 {
+	if response.Code != 200 || body.Timeline.UnavailableReason == "" || len(body.Timeline.Items) != 0 || strings.Contains(response.Body.String(), "private local path") {
 		t.Fatal(response.Body.String())
 	}
 }

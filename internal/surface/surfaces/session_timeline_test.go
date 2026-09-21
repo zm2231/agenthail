@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func timelineFixture(t *testing.T, data string) string {
@@ -27,7 +29,7 @@ func TestClaudeTimelinePreservesOrderedToolActivity(t *testing.T) {
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","is_error":true,"content":"test failed"}]}}
 {"type":"system","subtype":"compact_boundary"}
 `)
-	page, err := readSessionTimeline(context.Background(), path, "claude", 0)
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +60,7 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	seen := map[string]bool{}
 	count := 0
 	for pageIndex := 0; pageIndex < 5; pageIndex++ {
-		page, err := readSessionTimeline(context.Background(), path, "codex", cursor)
+		page, err := readTranscriptPage(context.Background(), path, "codex", cursor, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,11 +82,11 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	if count != 450 {
 		t.Fatalf("received %d of 450", count)
 	}
-	first, _ := readSessionTimeline(context.Background(), path, "codex", 0)
+	first, _ := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	fmt.Fprintln(f, `{"type":"response_item","payload":{"type":"function_call_output","call_id":"call-449","output":"ok"}}`)
 	f.Close()
-	second, _ := readSessionTimeline(context.Background(), path, "codex", 0)
+	second, _ := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if first.Items[len(first.Items)-1].ID != second.Items[len(second.Items)-2].ID {
 		t.Fatal("identity changed on append")
 	}
@@ -101,7 +103,7 @@ func TestCodexTimelineSkipsOversizedRecordAndAdvancesCursor(t *testing.T) {
 	truncated := false
 	finished := false
 	for pageIndex := 0; pageIndex < 8; pageIndex++ {
-		page, err := readSessionTimeline(context.Background(), path, "codex", cursor)
+		page, err := readTranscriptPage(context.Background(), path, "codex", cursor, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +133,7 @@ func TestTimelineBoundsEncodedPayloadAndPreservesUTF8(t *testing.T) {
 		content.Write(data)
 		content.WriteByte('\n')
 	}
-	page, err := readSessionTimeline(context.Background(), timelineFixture(t, content.String()), "codex", 0)
+	page, err := readTranscriptPage(context.Background(), timelineFixture(t, content.String()), "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,20 +153,20 @@ func TestTimelineBoundsEncodedPayloadAndPreservesUTF8(t *testing.T) {
 
 func TestTimelinePartialMalformedMissingAndCancelled(t *testing.T) {
 	path := timelineFixture(t, "broken\n"+`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}`+"\n"+`{"type":"response_item"`)
-	page, err := readSessionTimeline(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil || len(page.Items) != 1 || !page.Truncated {
 		t.Fatalf("%+v %v", page, err)
 	}
-	if _, err := readSessionTimeline(context.Background(), path, "codex", 999999); err == nil {
+	if _, err := readTranscriptPage(context.Background(), path, "codex", 999999, 0); err == nil {
 		t.Fatal("invalid cursor accepted")
 	}
-	missing, err := readSessionTimeline(context.Background(), "", "codex", 0)
+	missing, err := readTranscriptPage(context.Background(), "", "codex", 0, 0)
 	if err != nil || missing.UnavailableReason == "" {
 		t.Fatal("missing transcript not explicit")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := readSessionTimeline(ctx, path, "codex", 0); err == nil {
+	if _, err := readTranscriptPage(ctx, path, "codex", 0, 0); err == nil {
 		t.Fatal("cancellation ignored")
 	}
 }
@@ -175,7 +177,7 @@ func TestCodexTimelineUsesResponseItemsWithoutDuplicateEventMessages(t *testing.
 {"type":"response_item","payload":{"type":"reasoning","encrypted_content":"never expose this","summary":[{"type":"summary_text","text":"A visible summary"}]}}
 {"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"patch","input":"*** Begin Patch"}}
 `)
-	page, err := readSessionTimeline(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +191,7 @@ func TestCodexEventUserContextSurvivesAlongsideTools(t *testing.T) {
 {"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{}"}}
 {"timestamp":"2026-09-07T12:02:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}}
 `)
-	page, err := readSessionTimeline(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,11 +205,162 @@ func TestCodexDuplicateUserRepresentationsDoNotDuplicatePrompt(t *testing.T) {
 {"timestamp":"2026-09-07T12:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue"}]}}
 {"timestamp":"2026-09-07T12:01:00Z","type":"event_msg","payload":{"type":"user_message","message":"Continue"}}
 `)
-	page, err := readSessionTimeline(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Items) != 2 {
 		t.Fatalf("%+v", page)
+	}
+}
+
+func TestClaudeReadGroupsTurnsFiltersNonHumanRecordsAndKeepsFullReply(t *testing.T) {
+	long := strings.Repeat("界", 3*timelineTextBudget)
+	assistant := func(id, text string, done bool) string {
+		message := map[string]any{"id": id, "content": []map[string]string{{"type": "text", "text": text}}}
+		if done {
+			message["stop_reason"] = "end_turn"
+		}
+		record, _ := json.Marshal(map[string]any{"type": "assistant", "timestamp": "2026-09-07T10:01:00Z", "message": message})
+		return string(record)
+	}
+	path := timelineFixture(t, strings.Join([]string{
+		`{"type":"user","timestamp":"2026-09-07T09:59:00Z","message":{"content":"<command-name>/compact</command-name>"}}`,
+		`{"type":"user","timestamp":"2026-09-07T09:59:30Z","message":{"content":"<local-command-stdout>done</local-command-stdout>"}}`,
+		`{"type":"user","timestamp":"2026-09-07T10:00:00Z","message":{"content":"fix it"}}`,
+		assistant("m1", "Looking at the file", false),
+		`{"type":"assistant","timestamp":"2026-09-07T10:01:30Z","message":{"id":"m1","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"go test"}}]}}`,
+		`{"type":"user","timestamp":"2026-09-07T10:01:40Z","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"ok"}]}}`,
+		assistant("m1", long, true),
+	}, "\n")+"\n")
+	read, err := (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusIdle}, surface.SessionReadRequest{Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Exchanges) != 1 {
+		t.Fatalf("exchanges=%+v", read.Exchanges)
+	}
+	exchange := read.Exchanges[0]
+	if exchange.User != "fix it" || exchange.Assistant != "Looking at the file\n"+long || exchange.Timestamp.IsZero() {
+		t.Fatalf("user=%q assistant_bytes=%d timestamp=%v", exchange.User, len(exchange.Assistant), exchange.Timestamp)
+	}
+	if read.Reply == nil || read.Reply.Text != exchange.Assistant || read.Reply.UserText != "fix it" || !read.Reply.Done {
+		t.Fatalf("reply=%+v", read.Reply)
+	}
+	if !read.Truncated || len(read.Items) == 0 || len(read.Items[len(read.Items)-1].Text) > timelineTextBudget {
+		t.Fatalf("items must stay bounded: truncated=%t items=%d", read.Truncated, len(read.Items))
+	}
+}
+
+func TestCodexReadFallsBackToTranscriptAndReportsNativeFailure(t *testing.T) {
+	path := timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
+{"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}
+`)
+	codex := &Codex{desktopURL: "ws://127.0.0.1:1"}
+	session := &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusIdle}
+	read, err := codex.ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Source != "local-transcript" || read.UnavailableReason != "" || !strings.Contains(read.Warning, "native session read failed") || len(read.Exchanges) != 1 || read.Exchanges[0].Assistant != "hello" || read.Exchanges[0].Source != "local-transcript" {
+		t.Fatalf("%+v", read)
+	}
+	if strings.Contains(read.Warning, "127.0.0.1") || strings.Contains(read.Warning, "ws://") || strings.Contains(read.Warning, "dial") {
+		t.Fatalf("warning must not leak the transport error: %q", read.Warning)
+	}
+	missing := &surface.Session{ID: "thread", Transport: codexTransportDesktop, Transcript: filepath.Join(t.TempDir(), "absent.jsonl")}
+	read, err = codex.ReadSession(context.Background(), missing, surface.SessionReadRequest{Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.Exchanges) != 0 || !strings.Contains(read.UnavailableReason, "has not been created yet") || !strings.Contains(read.UnavailableReason, "native session read failed") || read.Warning != "" {
+		t.Fatalf("%+v", read)
+	}
+	older, err := codex.ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 5, Before: 50})
+	if err != nil || older.Warning != "" || older.Source != "local-transcript" {
+		t.Fatalf("older=%+v err=%v", older, err)
+	}
+}
+
+func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T) {
+	path := timelineFixture(t, `{"type":"user","timestamp":"2026-09-07T10:00:00Z","message":{"content":"fix it"}}
+{"type":"assistant","timestamp":"2026-09-07T10:01:00Z","message":{"id":"m1","content":[{"type":"text","text":"Looking at the file"}]}}
+`)
+	staleIdle := &surface.Session{Transcript: path, Status: surface.StatusIdle}
+	read, err := (&Claude{}).ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Reply == nil || read.Reply.Text != "Looking at the file" || read.Reply.Done || read.Reply.Error != "" {
+		t.Fatalf("in-progress turn reported as complete: %+v", read.Reply)
+	}
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:02:00Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Done, patched"}]}}`)
+	f.Close()
+	read, err = (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Reply == nil || read.Reply.Text != "Looking at the file\nDone, patched" || !read.Reply.Done || read.Reply.UserText != "fix it" {
+		t.Fatalf("completed turn not reported: %+v", read.Reply)
+	}
+	f, _ = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	fmt.Fprintln(f, `{"type":"user","timestamp":"2026-09-07T10:03:00Z","message":{"content":"again"}}`)
+	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:04:00Z","message":{"id":"m2","content":[{"type":"text","text":"Starting"}]}}`)
+	fmt.Fprintln(f, `{"type":"user","timestamp":"2026-09-07T10:05:00Z","message":{"content":"[Request interrupted by user]"}}`)
+	f.Close()
+	read, err = (&Claude{}).ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Reply == nil || read.Reply.Text != "Starting" || read.Reply.Done || read.Reply.Error == "" {
+		t.Fatalf("interrupted turn not reported: %+v", read.Reply)
+	}
+}
+
+func TestClaudeReadSessionOlderCursorWalksEveryExchange(t *testing.T) {
+	var content strings.Builder
+	for i := 1; i <= 150; i++ {
+		fmt.Fprintf(&content, `{"type":"user","uuid":"u%03d","timestamp":"2026-09-07T10:00:00Z","message":{"content":"q%03d"}}`+"\n", i, i)
+		fmt.Fprintf(&content, `{"type":"assistant","uuid":"a%03d","timestamp":"2026-09-07T10:00:01Z","message":{"id":"m%03d","stop_reason":"end_turn","content":[{"type":"tool_use","id":"call-%03d","name":"Bash","input":{}},{"type":"text","text":"a%03d"}]}}`+"\n", i, i, i, i)
+	}
+	session := &surface.Session{Transcript: timelineFixture(t, content.String()), Status: surface.StatusIdle}
+	var users []string
+	seenItems := map[string]bool{}
+	cursor := int64(0)
+	for page := 0; page < 20; page++ {
+		read, err := (&Claude{}).ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 50, Before: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(read.Exchanges) > 50 {
+			t.Fatalf("page %d returned %d exchanges", page, len(read.Exchanges))
+		}
+		var pageUsers []string
+		for _, exchange := range read.Exchanges {
+			pageUsers = append(pageUsers, exchange.User)
+		}
+		users = append(pageUsers, users...)
+		for _, item := range read.Items {
+			if seenItems[item.ID] {
+				t.Fatalf("duplicate item %s on page %d", item.ID, page)
+			}
+			seenItems[item.ID] = true
+		}
+		if read.NextBefore == 0 {
+			break
+		}
+		if cursor > 0 && read.NextBefore >= cursor {
+			t.Fatalf("cursor did not progress: %d -> %d", cursor, read.NextBefore)
+		}
+		cursor = read.NextBefore
+	}
+	if len(users) != 150 || len(seenItems) != 450 {
+		t.Fatalf("walked %d exchanges and %d items", len(users), len(seenItems))
+	}
+	for i, user := range users {
+		if want := fmt.Sprintf("q%03d", i+1); user != want {
+			t.Fatalf("exchange %d: got %q want %q", i, user, want)
+		}
 	}
 }

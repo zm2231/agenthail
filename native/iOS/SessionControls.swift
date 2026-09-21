@@ -102,14 +102,14 @@ struct QueueListView: View {
                 Button("Cancel", role: .cancel) { retryCandidate = nil }
             }
         } message: {
-            Text(retryCandidate?.deliveryOutcome == "unknown" && retryCandidate?.isHistorical == true ? "This delivery outcome was never confirmed and the queue entry later expired. Check the session before sending again." : retryCandidate?.status == "expired" ? "This instruction expired without being sent. Sending again creates a new delivery attempt." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
+            Text(retryCandidate?.evidence == "unknown" && retryCandidate?.isHistorical == true ? "This delivery outcome was never confirmed and the queue entry later expired. Check the session before sending again." : retryCandidate?.status == "expired" ? "This instruction expired without being sent. Sending again creates a new delivery attempt." : "The previous attempt may already have reached the agent. Send again only after checking the session.")
         }
     }
 
     private func queueRow(_ item: QueueState) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(item.isHistorical && item.deliveryOutcome == "unknown" ? "Outcome unknown · expired" : item.isHistorical && item.deliveryOutcome == "failed" ? "Delivery failed · expired" : item.status == "dead" ? "Delivery needs review" : item.status == "expired" ? "Expired" : item.status == "inflight" ? "Sending" : item.status.capitalized)
+                Text(item.isHistorical && item.evidence == "unknown" ? "Outcome unknown · expired" : item.isHistorical && item.evidence == "failed" ? "Delivery failed · expired" : item.evidence == "transport_accepted" ? "Transport accepted" : item.status == "dead" ? "Delivery needs review" : item.status == "expired" ? "Expired" : item.status == "inflight" ? "Sending" : item.status.capitalized)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? .orange : .secondary)
                 Spacer()
                 Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)

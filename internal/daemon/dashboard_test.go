@@ -198,7 +198,7 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 	}
 }
 
-func TestDashboardCompactQueuesWorkingClaudeSession(t *testing.T) {
+func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	_, registry, _, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "claude", Surface: surface.KindClaude, Name: "claude", Status: surface.StatusBusy}
 	if err := registry.RegisterSession(session); err != nil {
@@ -216,12 +216,41 @@ func TestDashboardCompactQueuesWorkingClaudeSession(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"compact","sessionId":"claude"}`))
 	d.dashboardActionHandler(response, request)
-	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"disposition":"queued"`) {
+	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 0 || !strings.Contains(response.Body.String(), `"evidence":"delivered"`) || fake.compactCalls.Load() != 1 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
-	rows, err := registry.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Message != "/compact" {
-		t.Fatalf("rows=%+v err=%v", rows, err)
+}
+
+func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "codex", Surface: surface.KindCodex, Name: "codex", Status: surface.StatusBusy, Transport: "desktop"}
+	if err := registry.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	fake := &daemonSurface{
+		kind:         surface.KindCodex,
+		sessions:     map[string]surface.Session{session.ID: session},
+		observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.StatusBusy, ActiveTurnID: "turn"}},
+		accepted:     true,
+		caps:         surface.Capabilities{Steer: true},
+	}
+	d := New(registry, []surface.Surface{fake})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"steer","sessionId":"codex","message":"focus on tests"}`))
+	d.dashboardActionHandler(response, request)
+	var body struct {
+		Result struct {
+			Evidence string `json:"evidence"`
+		} `json:"result"`
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Result.Evidence != string(surface.EvidenceDelivered) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -661,7 +690,6 @@ func TestDashboardNormalizesEmptyStateAndShowsDeliveryOutcomes(t *testing.T) {
 		"sessions: state.sessions || []",
 		"queue: state.queue || []",
 		"delivery-history",
-		`["sent", "delivered", "failed", "unknown", "expired", "canceled"]`,
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)
@@ -698,8 +726,6 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
 		`await action("interrupt")`,
 		`await action("steer", { message })`,
-		`"Compact queued and will run when this turn finishes."`,
-		"queued until this turn finishes.",
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)

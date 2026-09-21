@@ -40,7 +40,7 @@ final class SessionRecoveryTests: XCTestCase {
         RecoveryProtocol.state.configure(queueFailure: true)
         await model.refreshSession("demo")
         XCTAssertEqual(model.deliveryStatus["demo"], "Delivery status could not be refreshed. Check Inbox before retrying.")
-        RecoveryProtocol.state.configure(queueStatus: "dead", queueFailure: false)
+        RecoveryProtocol.state.configure(queueStatus: "dead", evidence: "unknown", queueFailure: false)
         await model.refreshSession("demo")
         XCTAssertEqual(model.deliveryStatus["demo"], "Delivery needs review in Inbox. Check the session before sending again.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
@@ -50,7 +50,7 @@ final class SessionRecoveryTests: XCTestCase {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
-        RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: false, deliveryOutcome: "unknown")
+        RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: false, evidence: "unknown")
         await model.refreshSession("demo")
         XCTAssertEqual(model.deliveryStatus["demo"], "Delivery needs review in Inbox. Check the session before sending again.")
         RecoveryProtocol.state.configure(queueHistorical: true)
@@ -63,7 +63,7 @@ final class SessionRecoveryTests: XCTestCase {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
-        RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: true, deliveryOutcome: "failed")
+        RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: true, evidence: "failed")
         await model.refreshSession("demo")
         XCTAssertEqual(model.deliveryStatus["demo"], "Delivery failed; the queue entry has expired. Review it in Inbox history.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
@@ -91,19 +91,19 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var stale = false
         private var queueStatus = "pending"
         private var queueHistorical: Bool?
-        private var deliveryOutcome: String?
+        private var evidence: String?
         private var queueFailure = false
         private var reads = 0
         private var actions = 0
         var sessionReads: Int { lock.withLock { reads } }
         var actionCount: Int { lock.withLock { actions } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; deliveryOutcome = nil; queueFailure = false; reads = 0; actions = 0 } }
-        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, deliveryOutcome: String? = nil, queueFailure: Bool? = nil) {
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; reads = 0; actions = 0 } }
+        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
                 if let queueStatus { self.queueStatus = queueStatus }
                 if let queueHistorical { self.queueHistorical = queueHistorical }
-                if let deliveryOutcome { self.deliveryOutcome = deliveryOutcome }
+                if let evidence { self.evidence = evidence }
                 if let queueFailure { self.queueFailure = queueFailure }
             }
         }
@@ -119,12 +119,12 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     return (200, String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!)
                 case "/api/v1/actions":
                     actions += 1
-                    return (200, #"{"ok":true,"result":{"disposition":"queued","queueId":7}}"#)
+                    return (200, #"{"ok":true,"result":{"evidence":"queued","queueId":7}}"#)
                 case "/api/v1/queue":
                     if queueFailure { return (503, #"{"error":{"message":"Queue unavailable"}}"#) }
                     var fields = ""
                     if let queueHistorical { fields += ",\"historical\":\(queueHistorical)" }
-                    if let deliveryOutcome { fields += ",\"deliveryOutcome\":\"\(deliveryOutcome)\"" }
+                    fields += ",\"evidence\":\"\(evidence ?? (queueStatus == "pending" || queueStatus == "inflight" ? "queued" : queueStatus))\""
                     return (200, "{\"items\":[{\"id\":7,\"sessionId\":\"demo\",\"target\":\"demo\",\"message\":\"Keep the regression test\",\"status\":\"\(queueStatus)\",\"attempts\":0,\"queuedAt\":\"2026-09-12 04:00:00\"\(fields)}]}")
                 default: return (404, "{}")
                 }

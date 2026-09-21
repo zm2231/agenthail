@@ -215,12 +215,8 @@ struct ConversationListView: View {
         }
     }
 
-    private var workspaces: [String] {
-        var seen = Set<String>()
-        return sessions.compactMap { session in
-            let path = session.cwd ?? ""
-            return seen.insert(path).inserted ? path : nil
-        }
+    private var workspaces: [WorkspaceGroup] {
+        WorkspaceHierarchy.groups(for: sessions.map { $0.cwd ?? "" })
     }
 
     var body: some View {
@@ -239,10 +235,11 @@ struct ConversationListView: View {
                 VoiceOperatorEntry(model: model)
                     .listRowSeparator(.hidden)
             }
-            ForEach(workspaces, id: \.self) { workspace in
+            ForEach(workspaces) { group in
+                let workspace = group.path
                 Section {
                     if !collapsedWorkspaces.contains(workspace) {
-                        ForEach(sessions.filter { ($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
+                        ForEach(sessions.filter { WorkspaceHierarchy.normalize($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
                     }
                 } header: {
                     Button {
@@ -261,6 +258,7 @@ struct ConversationListView: View {
                             Image(systemName: collapsedWorkspaces.contains(workspace) ? "chevron.right" : "chevron.down")
                                 .font(.caption.weight(.semibold))
                         }
+                        .padding(.leading, CGFloat(group.depth) * 16)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
@@ -324,6 +322,53 @@ struct ConversationListView: View {
         .buttonStyle(.plain)
         .listRowBackground(selectedID == session.id ? SessionStyle.surface : Color.clear)
         .accessibilityIdentifier("session-" + session.id)
+    }
+}
+
+struct WorkspaceGroup: Identifiable, Equatable {
+    let path: String
+    let depth: Int
+    var id: String { path }
+}
+
+enum WorkspaceHierarchy {
+    static func groups(for paths: [String]) -> [WorkspaceGroup] {
+        var seen = Set<String>()
+        let unique = paths.map(normalize).filter { seen.insert($0).inserted }
+        let indexed = Dictionary(uniqueKeysWithValues: unique.enumerated().map { ($0.element, $0.offset) })
+        var children: [String?: [String]] = [:]
+        for path in unique {
+            let parent = unique
+                .filter { $0 != path && isAncestor($0, of: path) }
+                .max { components($0).count < components($1).count }
+            children[parent, default: []].append(path)
+        }
+        for key in children.keys {
+            children[key]?.sort { indexed[$0, default: 0] < indexed[$1, default: 0] }
+        }
+        var result: [WorkspaceGroup] = []
+        func append(_ path: String, depth: Int) {
+            result.append(WorkspaceGroup(path: path, depth: depth))
+            for child in children[path] ?? [] { append(child, depth: depth + 1) }
+        }
+        for root in children[nil] ?? [] { append(root, depth: 0) }
+        return result
+    }
+
+    static func normalize(_ path: String) -> String {
+        guard !path.isEmpty else { return "" }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private static func components(_ path: String) -> [String] {
+        guard !path.isEmpty else { return [] }
+        return URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+    }
+
+    private static func isAncestor(_ candidate: String, of path: String) -> Bool {
+        let parent = components(candidate)
+        let child = components(path)
+        return !parent.isEmpty && parent.count < child.count && child.starts(with: parent)
     }
 }
 
@@ -414,11 +459,15 @@ struct SessionScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
             }
+            .accessibilityIdentifier("session-timeline")
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
             .defaultScrollAnchor(.top, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
+#if DEBUG
+                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+#endif
                 if phase == .interacting {
                     userScrolling = true
                     followingLatest = false
@@ -430,6 +479,9 @@ struct SessionScreen: View {
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY < 60
             } action: { _, value in
+#if DEBUG
+                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+#endif
                 atLatest = value
             }
             .refreshable { await model.refreshSession(session.id) }
@@ -490,12 +542,20 @@ struct SessionScreen: View {
                 if let detail { SessionInspector(model: model, session: session, detail: detail) }
             }
             .task(id: session.id) {
-                followingLatest = true
-                atLatest = true
+                let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
+                followingLatest = !startsAtOldest
+                atLatest = !startsAtOldest
                 await model.loadSession(session.id)
-                proxy.scrollTo("bottom", anchor: .bottom)
+                if startsAtOldest, let first = items.first {
+                    proxy.scrollTo(first.id, anchor: .top)
+                } else {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
             }
             .task(id: "activity-" + session.id) {
+#if DEBUG
+                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+#endif
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(4)) } catch { return }
                     await model.refreshSession(session.id)
@@ -815,6 +875,8 @@ struct SessionInspector: View {
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
                     if let value = detail.session.transport { LabeledContent("Connection", value: value) }
+                    if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
+                    if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
                 }
                 Section("Context") {
