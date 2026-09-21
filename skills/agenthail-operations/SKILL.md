@@ -70,10 +70,11 @@ from JSON discovery output when reporting partial availability.
 Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
-the transcript or native `SendMessage` for an explicit reply. Interrupt and
-model changes require a Remote Control bridge. A receipt with
-`reason: "peer_transport_accepted"` only proves socket acceptance; receiver
-policy can still hold or deny the message. Do not claim model delivery from it.
+the transcript or native `SendMessage` for an explicit reply. Compact, model,
+interrupt, and steer are typed controls that require a Remote Control identity.
+A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
+receiver policy can still hold or deny the message. Do not claim model delivery
+from it.
 
 The daemon registers each agent in the default Codex/Notion discovery page as
 an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
