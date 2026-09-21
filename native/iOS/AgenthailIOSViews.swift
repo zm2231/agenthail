@@ -459,6 +459,7 @@ struct SessionScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
             }
+            .accessibilityIdentifier("session-timeline")
             .defaultScrollAnchor(.bottom, for: .initialOffset)
             .defaultScrollAnchor(followingLatest ? .bottom : nil, for: .sizeChanges)
             .defaultScrollAnchor(.top, for: .alignment)

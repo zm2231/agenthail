@@ -6,6 +6,8 @@ final class TranscriptReadingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-reading"]
         app.launch()
+        let timeline = app.scrollViews["session-timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
         let latest = app.staticTexts["The latest update is visible above the composer."]
         XCTAssertTrue(latest.waitForExistence(timeout: 10))
         XCTAssertTrue(latest.isHittable)
@@ -15,7 +17,7 @@ final class TranscriptReadingUITests: XCTestCase {
 
         let context = app.buttons["context-context"]
         XCTAssertTrue(context.waitForExistence(timeout: 5))
-        for _ in 0..<8 { app.swipeDown() }
+        for _ in 0..<8 { timeline.swipeDown() }
         XCTAssertFalse(app.staticTexts["Repository guidance"].isHittable)
         capture("Context and long message collapsed", app)
         context.tap()
