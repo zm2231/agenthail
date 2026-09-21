@@ -20,6 +20,17 @@ final class SessionExperienceTests: XCTestCase {
         ])
     }
 
+    func testWorkspaceHierarchyKeepsSessionsWithoutOrUnnormalizedWorkspaces() {
+        let groups = WorkspaceHierarchy.groups(for: ["", "/work/app/", "/work/app/../app", "/work/app"])
+        XCTAssertEqual(groups, [
+            WorkspaceGroup(path: "", depth: 0),
+            WorkspaceGroup(path: "/work/app", depth: 0),
+        ])
+        XCTAssertEqual(WorkspaceHierarchy.normalize(""), "")
+        XCTAssertEqual(WorkspaceHierarchy.normalize("/work/app/"), "/work/app")
+        XCTAssertEqual(WorkspaceHierarchy.normalize("/work/app/../app"), "/work/app")
+    }
+
     func testRichSessionDecodesContextTimelineAndTools() throws {
         let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
         XCTAssertEqual(detail.timeline?.items.count, 5)

@@ -138,7 +138,7 @@ Session commands:
   reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
   last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
   goal <target> [text|clear]    Set or clear a goal
-  compact <target>              Compress context (queues for active Claude sessions)
+  compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
   steer <target> "message"      Inject guidance into a running turn; use send when idle
@@ -1096,7 +1096,7 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	if read.UnavailableReason != "" {
+	if read.UnavailableReason != "" && len(read.Exchanges) == 0 {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
 	}
 	reply := read.Reply
@@ -1107,8 +1107,9 @@ func (a *App) cmdReply(args []string) error {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
 	} else {
+		printSessionReadWarning(read)
 		if read.Source != "" {
 			fmt.Printf("[%s]\n", read.Source)
 		}
@@ -1151,19 +1152,20 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	if read.UnavailableReason != "" {
+	exchanges := read.Exchanges
+	if exchanges == nil {
+		exchanges = []surface.Exchange{}
+	}
+	if read.UnavailableReason != "" && len(exchanges) == 0 {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
 	}
-	exchanges := read.Exchanges
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
+	}
+	printSessionReadWarning(read)
 	if len(exchanges) == 0 {
-		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "exchanges": []surface.Exchange{}})
-		}
 		fmt.Println("(no conversation history)")
 		return nil
-	}
-	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "exchanges": exchanges})
 	}
 	label := a.resolveDisplay(sess.ID)
 	source := read.Source
@@ -1194,6 +1196,15 @@ func (a *App) cmdLast(args []string) error {
 		fmt.Printf("older cursor: %d\n", read.NextBefore)
 	}
 	return nil
+}
+
+func printSessionReadWarning(read *surface.SessionReadResult) {
+	if read.Warning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", read.Warning)
+	}
+	if read.UnavailableReason != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", read.UnavailableReason)
+	}
 }
 
 func readSessionWithContext(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
@@ -1372,7 +1383,12 @@ func (a *App) cmdSteer(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	return surf.Steer(ctx, sess, strings.Join(positional[1:], " "))
+	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, strings.Join(positional[1:], " "))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("steer %s for %s\n", receipt.Evidence, a.resolveDisplay(sess.ID))
+	return nil
 }
 
 func (a *App) cmdQueue(args []string) error {

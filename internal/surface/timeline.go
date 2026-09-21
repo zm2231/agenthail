@@ -43,6 +43,7 @@ type SessionReadResult struct {
 	Source            string         `json:"source"`
 	Truncated         bool           `json:"truncated"`
 	UnavailableReason string         `json:"unavailableReason,omitempty"`
+	Warning           string         `json:"warning,omitempty"`
 }
 
 type SessionReader interface {
@@ -71,36 +72,41 @@ func ReadSession(ctx context.Context, adapter Surface, session *Session, request
 	if len(exchanges) > 0 && exchanges[len(exchanges)-1].Source != "" {
 		source = exchanges[len(exchanges)-1].Source
 	}
-	result := &SessionReadResult{Exchanges: exchanges, Items: []TimelineItem{}, Source: source}
-	for index := range result.Exchanges {
-		if result.Exchanges[index].Source == "" {
-			result.Exchanges[index].Source = result.Source
-		}
-	}
-	result.Reply = latestReply(session, result.Exchanges, result.Source)
-	return result, nil
+	return BoundSessionRead(session, &SessionReadResult{Exchanges: exchanges, Items: []TimelineItem{}, Source: source}, 0), nil
 }
 
 func SessionReadFromTimeline(session *Session, timeline *SessionTimeline, limit int) *SessionReadResult {
 	if timeline == nil {
 		return &SessionReadResult{Items: []TimelineItem{}, Exchanges: []Exchange{}}
 	}
-	exchanges := exchangesFromTimeline(timeline.Items)
-	if limit > 0 && len(exchanges) > limit {
-		exchanges = exchanges[len(exchanges)-limit:]
-	}
-	for index := range exchanges {
-		exchanges[index].Source = timeline.Source
-	}
-	return &SessionReadResult{
+	return BoundSessionRead(session, &SessionReadResult{
 		Items:             timeline.Items,
-		Exchanges:         exchanges,
-		Reply:             latestReply(session, exchanges, timeline.Source),
+		Exchanges:         exchangesFromTimeline(timeline.Items),
 		NextBefore:        timeline.NextBefore,
 		Source:            timeline.Source,
 		Truncated:         timeline.Truncated,
 		UnavailableReason: timeline.UnavailableReason,
+	}, limit)
+}
+
+// BoundSessionRead keeps the newest exchanges of a page, stamps their source, and derives the latest reply.
+func BoundSessionRead(session *Session, result *SessionReadResult, limit int) *SessionReadResult {
+	if result.Items == nil {
+		result.Items = []TimelineItem{}
 	}
+	if result.Exchanges == nil {
+		result.Exchanges = []Exchange{}
+	}
+	if limit > 0 && len(result.Exchanges) > limit {
+		result.Exchanges = result.Exchanges[len(result.Exchanges)-limit:]
+	}
+	for index := range result.Exchanges {
+		if result.Exchanges[index].Source == "" {
+			result.Exchanges[index].Source = result.Source
+		}
+	}
+	result.Reply = latestReply(session, result.Exchanges, result.Source)
+	return result
 }
 
 func exchangesFromTimeline(items []TimelineItem) []Exchange {

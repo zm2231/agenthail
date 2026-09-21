@@ -19,7 +19,8 @@ final class ActivityReadingTests: XCTestCase {
         command.tap()
         let output = app.staticTexts["Test Suite ReconnectTests passed.\nExecuted 8 tests, with 0 failures."]
         XCTAssertTrue(output.exists)
-        let collapseTool = app.buttons["collapse-tool-top-3"]
+        let collapseTool = app.buttons["collapse-tool-3"]
+        for _ in 0..<4 where !collapseTool.isHittable { timeline.swipeUp() }
         XCTAssertTrue(collapseTool.isHittable)
         collapseTool.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapseTool)], timeout: 5), .completed)

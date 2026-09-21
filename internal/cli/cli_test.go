@@ -1034,6 +1034,27 @@ func TestLastPassesExplicitOlderCursorAndReportsNextPage(t *testing.T) {
 	}
 }
 
+func TestLastKeepsExchangesWhenOnlyDetailIsUnavailableAndSurfacesWarning(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}
+	reader := &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{User: "q", Assistant: "a", Source: "rpc"}}, Source: "rpc", UnavailableReason: "no local transcript yet"}}
+	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = reader
+	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	if err != nil || !strings.Contains(output, `"assistant":"a"`) || !strings.Contains(output, `"readError":"no local transcript yet"`) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	reader.result = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "local-transcript", UnavailableReason: "no local transcript yet"}
+	if _, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) }); err == nil || !strings.Contains(err.Error(), "no local transcript yet") {
+		t.Fatalf("err=%v", err)
+	}
+	reader.result = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{Assistant: "a", Source: "local-transcript"}}, Source: "local-transcript", Warning: "native read failed"}
+	output, err = captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	if err != nil || !strings.Contains(output, `"warning":"native read failed"`) {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "rpc"}}}

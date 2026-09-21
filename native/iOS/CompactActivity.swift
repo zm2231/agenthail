@@ -138,10 +138,6 @@ struct ToolActivityRow: View {
             .accessibilityHint("Show recorded input and output")
             if expanded {
                 VStack(alignment: .leading, spacing: 12) {
-                    Button("Collapse tool", systemImage: "chevron.up") { expanded = false }
-                        .font(.footnote.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .accessibilityIdentifier("collapse-tool-top-" + call.id)
                     ToolContentView(item: call)
                     ForEach(results) { result in
                         Divider()
@@ -160,7 +156,7 @@ struct ToolActivityRow: View {
                     Button("Collapse tool", systemImage: "chevron.up") { expanded = false }
                         .font(.footnote.weight(.medium))
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .accessibilityIdentifier("collapse-tool-bottom-" + call.id)
+                        .accessibilityIdentifier("collapse-tool-" + call.id)
                 }.padding([.horizontal, .bottom], 12)
             }
         }

@@ -216,7 +216,7 @@ struct ConversationListView: View {
     }
 
     private var workspaces: [WorkspaceGroup] {
-        WorkspaceHierarchy.groups(for: sessions.compactMap(\.cwd))
+        WorkspaceHierarchy.groups(for: sessions.map { $0.cwd ?? "" })
     }
 
     var body: some View {
@@ -239,7 +239,7 @@ struct ConversationListView: View {
                 let workspace = group.path
                 Section {
                     if !collapsedWorkspaces.contains(workspace) {
-                        ForEach(sessions.filter { ($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
+                        ForEach(sessions.filter { WorkspaceHierarchy.normalize($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
                     }
                 } header: {
                     Button {
@@ -355,7 +355,7 @@ enum WorkspaceHierarchy {
         return result
     }
 
-    private static func normalize(_ path: String) -> String {
+    static func normalize(_ path: String) -> String {
         guard !path.isEmpty else { return "" }
         return URL(fileURLWithPath: path).standardizedFileURL.path
     }

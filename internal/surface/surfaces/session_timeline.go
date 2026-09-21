@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,51 +21,79 @@ const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
 func (c *Claude) Timeline(ctx context.Context, session *surface.Session, before int64) (*surface.SessionTimeline, error) {
+	read, err := c.ReadSession(ctx, session, surface.SessionReadRequest{Before: before})
+	if err != nil {
+		return nil, err
+	}
+	return timelineOf(read), nil
+}
+
+func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	path := session.Transcript
 	if path == "" {
 		path = c.transcriptPath(session)
 	}
-	timeline, err := readSessionTimeline(ctx, path, "claude", before)
-	if timeline != nil {
-		timeline.Source = "local-transcript"
-	}
-	return timeline, err
-}
-
-func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	timeline, err := c.Timeline(ctx, session, request.Before)
+	page, err := readTranscriptPage(ctx, path, "claude", request.Before)
 	if err != nil {
 		return nil, err
 	}
-	return surface.SessionReadFromTimeline(session, timeline, request.Limit), nil
+	return surface.BoundSessionRead(session, page, request.Limit), nil
 }
 
 func (c *Codex) Timeline(ctx context.Context, session *surface.Session, before int64) (*surface.SessionTimeline, error) {
-	timeline, err := readSessionTimeline(ctx, codexTranscriptPath(session), "codex", before)
-	if timeline != nil {
-		timeline.Source = "local-transcript"
-	}
-	return timeline, err
-}
-
-func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	timeline, err := c.Timeline(ctx, session, request.Before)
+	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", before)
 	if err != nil {
 		return nil, err
 	}
-	result := surface.SessionReadFromTimeline(session, timeline, request.Limit)
-	if result.UnavailableReason == "" || request.Before > 0 {
-		return result, nil
-	}
-	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
-	if remoteErr != nil {
-		return result, nil
-	}
-	return remote, nil
+	return timelineOf(page), nil
 }
 
-func readSessionTimeline(ctx context.Context, path, source string, before int64) (*surface.SessionTimeline, error) {
-	result := &surface.SessionTimeline{Items: []surface.TimelineItem{}, Source: source}
+// ReadSession serves exchanges from the native app-server first and falls back to the bounded
+// local transcript page when that read fails; timeline items always come from the local transcript.
+func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before)
+	if err != nil {
+		return nil, err
+	}
+	local := surface.BoundSessionRead(session, page, request.Limit)
+	if request.Before > 0 {
+		return local, nil
+	}
+	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
+	if remoteErr == nil {
+		remote.Items = local.Items
+		remote.NextBefore = local.NextBefore
+		remote.Truncated = local.Truncated
+		remote.UnavailableReason = local.UnavailableReason
+		return remote, nil
+	}
+	failure := codexNativeReadFailure(remoteErr)
+	if local.UnavailableReason != "" {
+		local.UnavailableReason += " " + failure
+	} else {
+		local.Warning = failure + " Showing the local transcript instead."
+	}
+	return local, nil
+}
+
+func codexNativeReadFailure(err error) string {
+	if isCodexTimeout(err) {
+		return "Codex Desktop did not answer the native session read in time."
+	}
+	return "Codex Desktop native session read failed: " + strings.SplitN(err.Error(), "\n", 2)[0] + "."
+}
+
+func timelineOf(read *surface.SessionReadResult) *surface.SessionTimeline {
+	return &surface.SessionTimeline{Items: read.Items, NextBefore: read.NextBefore, Source: read.Source, Truncated: read.Truncated, UnavailableReason: read.UnavailableReason}
+}
+
+type transcriptRecord struct {
+	line  []byte
+	items []surface.TimelineItem
+}
+
+func readTranscriptPage(ctx context.Context, path, source string, before int64) (*surface.SessionReadResult, error) {
+	result := &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "local-transcript"}
 	if path == "" {
 		result.UnavailableReason = "Detailed activity is unavailable because this session has no local transcript."
 		return result, nil
@@ -129,6 +158,7 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
+	var records []transcriptRecord
 	for index := len(lines) - 1; index >= 0; index-- {
 		line := lines[index]
 		offset -= int64(len(line))
@@ -157,9 +187,12 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 		}
 		digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
 		for i := range items {
+			items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+			items[i].Timestamp = str(record, "timestamp")
+		}
+		full := slices.Clone(items)
+		for i := range items {
 			item := &items[i]
-			item.ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
-			item.Timestamp = str(record, "timestamp")
 			if len(item.Text) > timelineTextBudget {
 				cut := timelineTextBudget
 				for cut > 0 && !utf8.RuneStart(item.Text[cut]) {
@@ -178,6 +211,7 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 			result.NextBefore = offset + int64(len(line))
 			break
 		}
+		records = append(records, transcriptRecord{line: line, items: full})
 		// A single oversized record must not defeat the response budget.
 		for len(encoded) > budget && len(items) > 1 {
 			items = items[1:]
@@ -205,7 +239,55 @@ func readSessionTimeline(ctx context.Context, path, source string, before int64)
 	for i := len(groups) - 1; i >= 0; i-- {
 		result.Items = append(result.Items, groups[i]...)
 	}
+	slices.Reverse(records)
+	if source == "claude" {
+		result.Exchanges = claudeTranscriptExchanges(records)
+	} else {
+		result.Exchanges = codexTranscriptExchanges(records)
+	}
 	return result, nil
+}
+
+func claudeTranscriptExchanges(records []transcriptRecord) []surface.Exchange {
+	var turns []claudeTurn
+	for _, record := range records {
+		var parsed claudeRecord
+		if json.Unmarshal(record.line, &parsed) != nil {
+			continue
+		}
+		turns = appendClaudeTurn(turns, parsed)
+	}
+	exchanges := make([]surface.Exchange, 0, len(turns))
+	for _, turn := range turns {
+		if turn.User == "" && turn.Assistant == "" {
+			continue
+		}
+		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Timestamp: turn.StartedAt})
+	}
+	return exchanges
+}
+
+func codexTranscriptExchanges(records []transcriptRecord) []surface.Exchange {
+	exchanges := make([]surface.Exchange, 0)
+	for _, record := range records {
+		for _, item := range record.items {
+			if item.Kind != "message" || item.Text == "" {
+				continue
+			}
+			timestamp, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+			switch item.Role {
+			case "user":
+				exchanges = append(exchanges, surface.Exchange{User: item.Text, Timestamp: timestamp})
+			case "assistant":
+				if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
+					exchanges = append(exchanges, surface.Exchange{Assistant: item.Text, Timestamp: timestamp})
+				} else {
+					exchanges[len(exchanges)-1].Assistant = item.Text
+				}
+			}
+		}
+	}
+	return exchanges
 }
 
 func timelineValue(value any) string {

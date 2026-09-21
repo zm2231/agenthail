@@ -22,9 +22,14 @@ discovery; it never selects a caller identity.
 `agenthail reply <target> --timeout 30s` use one bounded session reader. The
 newest page is returned first, text and JSON identify the source, and JSON
 includes `nextBefore`. Pass `--before <nextBefore>` to read the preceding page.
-Phone session detail uses the same reader and cursor; it does not fetch an RPC
-exchange tail beside a separate local activity timeline. A read failure never
-resends a message.
+Claude reads the bounded local transcript page and groups exchanges by turn, so
+a reply that spans several text blocks around tool calls is one exchange with
+its full text. Codex reads the newest page from the native app-server RPC
+first; when that bounded read fails it falls back to the local transcript page
+and reports the RPC failure as a `warning`, and when no transcript exists either
+the RPC failure is part of `readError`. Phone session detail uses the same
+reader and cursor; timeline items always come from the local transcript. A read
+failure never resends a message.
 
 The daemon's retained event journal is the single live-update producer.
 `/api/v1/events` is a replayable SSE view over that journal; consumers use an

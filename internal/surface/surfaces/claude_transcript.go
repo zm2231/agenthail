@@ -22,6 +22,7 @@ type claudeTurn struct {
 	User        string
 	Assistant   string
 	Model       string
+	StartedAt   time.Time
 	TerminalAt  time.Time
 	Done        bool
 	Interrupted bool
@@ -94,7 +95,8 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
 			return turns
 		}
-		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)})
+		startedAt, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
+		return append(turns, claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text), StartedAt: startedAt})
 	case "assistant":
 		if len(turns) == 0 {
 			turns = append(turns, claudeTurn{})
@@ -103,6 +105,9 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 		if turn.MessageID != "" && record.Message.ID != "" && turn.MessageID != record.Message.ID && turn.Done {
 			turns = append(turns, claudeTurn{})
 			turn = &turns[len(turns)-1]
+		}
+		if turn.StartedAt.IsZero() {
+			turn.StartedAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
 		}
 		if record.Message.ID != "" {
 			turn.MessageID = record.Message.ID

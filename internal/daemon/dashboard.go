@@ -1152,7 +1152,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be steered", http.StatusBadRequest)
 			return
 		}
-		err = adapter.Steer(ctx, session, request.Message)
+		result, err = (delivery.Dispatcher{Registry: d.Registry}).Steer(ctx, adapter, session, request.Message)
 	case "interrupt":
 		if !effective.Interrupt {
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
@@ -1396,6 +1396,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	} else if sessionRead.UnavailableReason != "" {
 		response["readError"] = sessionRead.UnavailableReason
 		response["transcriptWarning"] = sessionRead.UnavailableReason
+	} else if sessionRead.Warning != "" {
+		response["readError"] = sessionRead.Warning
+		response["transcriptWarning"] = sessionRead.Warning
 	}
 	if r.URL.Query().Get("timeline") == "1" {
 		response["timeline"] = &surface.SessionTimeline{Items: sessionRead.Items, NextBefore: sessionRead.NextBefore, Source: sessionRead.Source, Truncated: sessionRead.Truncated, UnavailableReason: sessionRead.UnavailableReason}

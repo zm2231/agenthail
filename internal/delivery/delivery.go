@@ -47,6 +47,18 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
 }
 
+func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session *surface.Session, message string) (*Receipt, error) {
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return nil, err
+	}
+	if err := adapter.Steer(ctx, session, message); err != nil {
+		d.record(registry.HistoryEntry{Kind: "control-failed", SessionID: session.ID, Message: "steer", Error: err.Error()})
+		return nil, err
+	}
+	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
+	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
+}
+
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)

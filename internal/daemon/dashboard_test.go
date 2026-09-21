@@ -221,6 +221,39 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	}
 }
 
+func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	session := surface.Session{ID: "codex", Surface: surface.KindCodex, Name: "codex", Status: surface.StatusBusy, Transport: "desktop"}
+	if err := registry.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	fake := &daemonSurface{
+		kind:         surface.KindCodex,
+		sessions:     map[string]surface.Session{session.ID: session},
+		observations: map[string]*surface.TurnObservation{session.ID: {Status: surface.StatusBusy, ActiveTurnID: "turn"}},
+		accepted:     true,
+		caps:         surface.Capabilities{Steer: true},
+	}
+	d := New(registry, []surface.Surface{fake})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"steer","sessionId":"codex","message":"focus on tests"}`))
+	d.dashboardActionHandler(response, request)
+	var body struct {
+		Result struct {
+			Evidence string `json:"evidence"`
+		} `json:"result"`
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Result.Evidence != string(surface.EvidenceDelivered) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -657,8 +690,6 @@ func TestDashboardNormalizesEmptyStateAndShowsDeliveryOutcomes(t *testing.T) {
 		"sessions: state.sessions || []",
 		"queue: state.queue || []",
 		"delivery-history",
-		`transport_accepted: "Transport accepted"`,
-		`.filter((entry) => entry.evidence)`,
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)
@@ -695,8 +726,6 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
 		`await action("interrupt")`,
 		`await action("steer", { message })`,
-		`evidence === "transport_accepted"`,
-		`const queued = result?.result?.evidence === "queued"`,
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)

@@ -7,7 +7,7 @@ import (
 
 func TestClaudeDurationUsesRecordedMilliseconds(t *testing.T) {
 	path := timelineFixture(t, "{\"type\":\"system\",\"subtype\":\"turn_duration\",\"durationMs\":114536}\n")
-	page, err := readSessionTimeline(context.Background(), path, "claude", 0)
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
