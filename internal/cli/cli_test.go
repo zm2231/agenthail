@@ -460,7 +460,7 @@ func installHomebrewLaunchctl(t *testing.T) string {
 }
 
 func TestSubcommandSpecificFlags(t *testing.T) {
-	if err := validateCommandFlags("queue", []string{"list", "--json", "--all"}); err != nil {
+	if err := validateCommandFlags("queue", []string{"list", "--json", "--all", "--target", "@builder", "--mine", "--cwd", "/work"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"retry", "1", "--json"}, {"target", "message", "--json"}, {"list", "--from", "x"}} {
@@ -479,6 +479,51 @@ func TestSubcommandSpecificFlags(t *testing.T) {
 	}
 	if err := validateCommandFlags("dashboard", []string{"remote", "--no-open", "--json", "--tailscale", "/tmp/tailscale"}); err != nil {
 		t.Fatalf("dashboard remote flags rejected: %v", err)
+	}
+	if err := validateCommandFlags("relay", []string{"add", "from", "to", ".*", "--once"}); err != nil {
+		t.Fatalf("relay once flag rejected: %v", err)
+	}
+}
+
+func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
+	app, r := cliFixture(t, fake)
+	sessions := []surface.Session{
+		{ID: "caller", Surface: surface.KindCodex, Cwd: "/work/root"},
+		{ID: "nested", Surface: surface.KindCodex, Cwd: "/work/root/nested"},
+		{ID: "other", Surface: surface.KindCodex, Cwd: "/work/other"},
+	}
+	for _, session := range sessions {
+		fake.sessions[session.ID] = session
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.QueueMessageWithOptions("nested", "outbound", "", surface.SendOptions{SourceSessionID: "caller"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueMessageWithOptions("caller", "inbound", "", surface.SendOptions{SourceSessionID: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueMessageWithOptions("other", "unrelated", "", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "caller")
+	rows, err := r.ListQueue(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := app.filterQueueRows(context.Background(), rows, "", true, "")
+	if err != nil || len(mine) != 2 {
+		t.Fatalf("mine=%+v err=%v", mine, err)
+	}
+	nested, err := app.filterQueueRows(context.Background(), rows, "", false, "/work/root")
+	if err != nil || len(nested) != 2 {
+		t.Fatalf("workspace=%+v err=%v", nested, err)
+	}
+	target, err := app.filterQueueRows(context.Background(), rows, "codex:nested", false, "")
+	if err != nil || len(target) != 1 || target[0].Message != "outbound" {
+		t.Fatalf("target=%+v err=%v", target, err)
 	}
 }
 

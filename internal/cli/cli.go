@@ -143,7 +143,8 @@ Session commands:
   interrupt <target>            Stop current turn
   steer <target> "message"      Inject guidance into a running turn; use send when idle
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
-  queue list [--json] [--all]   Inspect waiting, sending, and failed messages
+  queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]
+                                 Inspect queued work scoped to a session or workspace
   queue retry <id>              Retry a failed message
   queue rm <id>                 Cancel a pending queued message
   queue clear <target>          Cancel all pending messages for a target
@@ -162,7 +163,7 @@ Channels:
   channel send <name> "msg"     Broadcast to all members (--from <name>)
 
 Automatic handoffs:
-  relay add <from> <to> [regex] Send-to-on-completion rule
+  relay add <from> <to> [regex] [--once]  Send-to-on-completion rule
   relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
@@ -335,7 +336,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -380,7 +381,11 @@ func validateCommandFlags(command string, args []string) error {
 		return nil
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
-		spec.bools = map[string]bool{"--all": true, "--json": true}
+		spec.values = map[string]bool{"--target": true, "--cwd": true}
+		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true}
+	}
+	if command == "relay" && len(args) > 0 && args[0] == "add" {
+		spec.bools = map[string]bool{"--once": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "list" {
 		spec.bools = map[string]bool{"--json": true}
@@ -1375,7 +1380,14 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("queue requires the registry")
 	}
 	if len(args) > 0 && args[0] == "list" {
+		if len(stripFlags(args)) != 1 {
+			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
+		}
 		rows, err := a.Registry.ListQueue(hasFlag(args, "--all"))
+		if err != nil {
+			return err
+		}
+		rows, err = a.filterQueueRows(context.Background(), rows, flagVal(args, "--target"), hasFlag(args, "--mine"), flagVal(args, "--cwd"))
 		if err != nil {
 			return err
 		}
@@ -1491,6 +1503,66 @@ func (a *App) cmdQueue(args []string) error {
 	}
 	fmt.Printf("queued for %s (delivered when the target is idle on a daemon scan)\n", a.resolveDisplay(sess.ID))
 	return nil
+}
+
+func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, cwd string) ([]registry.QueueRow, error) {
+	targetID := ""
+	if targetSelector != "" {
+		session, _, err := a.resolveTarget(ctx, targetSelector)
+		if err != nil {
+			return nil, fmt.Errorf("resolve --target: %w", err)
+		}
+		targetID = session.ID
+	}
+	mineID := ""
+	if mine {
+		var err error
+		mineID, err = a.sourceSessionID(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if mineID == "" {
+			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_SESSION_ID")
+		}
+	}
+	root := ""
+	if cwd != "" {
+		var err error
+		root, err = workspace.NormalizeCWD(cwd)
+		if err != nil {
+			return nil, fmt.Errorf("normalize --cwd: %w", err)
+		}
+	}
+	filtered := make([]registry.QueueRow, 0, len(rows))
+	sessions := make(map[string]*surface.Session)
+	for _, row := range rows {
+		if targetID != "" && row.SessionID != targetID {
+			continue
+		}
+		if mineID != "" && row.SessionID != mineID && row.SourceSessionID != mineID {
+			continue
+		}
+		if root != "" {
+			session := sessions[row.SessionID]
+			if session == nil {
+				var err error
+				session, err = a.Registry.Session(row.SessionID)
+				if err != nil {
+					return nil, fmt.Errorf("read queue target %s: %w", row.SessionID, err)
+				}
+				sessions[row.SessionID] = session
+			}
+			within, err := workspace.IsWithin(root, session.Cwd)
+			if err != nil {
+				return nil, fmt.Errorf("compare queue target workspace: %w", err)
+			}
+			if !within {
+				continue
+			}
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered, nil
 }
 
 func (a *App) cmdHistory(args []string) error {

@@ -224,6 +224,7 @@ Persistent agent-to-agent subscription:
 ```bash
 agenthail relay add @researcher @builder
 agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
+agenthail relay add @researcher @builder 'READY' --once
 agenthail relay list [--json]
 agenthail relay rm <id>
 ```
@@ -233,7 +234,8 @@ completed reply. The optional filter is a regular expression. Relays reject
 self-routes and cycles, remember delivered completion IDs across restarts, and
 require the daemon. `relay list` derives per-route firing evidence from that
 delivery ledger, reporting each rule's fire count and last-fired timestamp in
-both text and `--json` output.
+both text and `--json` output. `--once` deactivates the rule after its first
+matching completion while retaining that firing evidence.
 
 Human completion notifications:
 
@@ -263,6 +265,9 @@ live stream, a persistent relay to another agent, or a human notification.
 agenthail queue @builder "Then add focused tests."
 agenthail queue list --json
 agenthail queue list --all --json
+agenthail queue list --target @builder --json
+agenthail queue list --mine --json
+agenthail queue list --cwd /Volumes/4/GitHub/agenthail --json
 agenthail queue retry <id>
 agenthail queue rm <id>
 agenthail queue clear @builder
@@ -275,7 +280,10 @@ ordered per session. Known pre-dispatch failures retry with bounded backoff.
 Repeated failures become dead letters. An `unknown` outcome means delivery may
 already have happened; inspect history and the target before retrying. Pending
 messages expire after one hour. Expired items leave the active queue, appear in
-history, and remain available through `queue list --all`.
+history, and remain available through `queue list --all`. `--target` filters by
+destination, `--mine` includes messages sent by or addressed to the caller
+session, and `--cwd` includes target sessions in that normalized workspace and
+its descendants.
 
 ## Channels
 

@@ -122,6 +122,7 @@ Then connect them:
 
 ```bash
 agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
+agenthail relay add @investigator @builder 'READY' --once
 ```
 
 When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
@@ -170,6 +171,8 @@ Agenthail keeps a local record of messages it moved, work still waiting, retries
 
 ```bash
 agenthail queue list
+agenthail queue list --mine
+agenthail queue list --cwd /Volumes/4/GitHub/agenthail
 agenthail queue retry 12
 agenthail queue rm 12
 agenthail history --json

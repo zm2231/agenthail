@@ -637,6 +637,22 @@ func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
 	}
 }
 
+func TestOneShotRelayQueuesOnlyFirstMatchingCompletion(t *testing.T) {
+	daemon, r, _, from, to := daemonFixture(t)
+	if _, err := r.AddRouteWithOptions(from.ID, to.ID, ".*", true); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "completion-one", 0, "first")
+	daemon.fireRelays(&from, "completion-two", 0, "second")
+	if got := r.QueueCount(to.ID); got != 1 {
+		t.Fatalf("queued=%d, want one", got)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 1 || routes[0].Active || routes[0].FireCount != 1 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+}
+
 func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
 	daemon, r, fake, _, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {

@@ -429,6 +429,32 @@ func TestListRoutesIncludesDerivedFiringEvidence(t *testing.T) {
 	}
 }
 
+func TestOneShotRouteRetainsEvidenceAfterDeactivation(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "from", "to")
+	id, err := r.AddRouteWithOptions("from", "to", ".*", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved, err := r.RecordRelayDelivery(id, "turn-one"); err != nil || !reserved {
+		t.Fatalf("reserved=%v err=%v", reserved, err)
+	}
+	if err := r.DeactivateRoute(id); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 1 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	if !routes[0].Once || routes[0].Active || routes[0].FireCount != 1 || routes[0].LastFiredAt == "" {
+		t.Fatalf("route=%+v", routes[0])
+	}
+	watched, err := r.WatchedSessions()
+	if err != nil || len(watched) != 0 {
+		t.Fatalf("watched=%+v err=%v", watched, err)
+	}
+}
+
 func TestRouteFiringEvidenceSurvivesRegistryReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	first, err := Open(path)

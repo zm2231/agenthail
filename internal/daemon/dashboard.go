@@ -149,10 +149,14 @@ type dashboardChannelMember struct {
 }
 
 type dashboardRelay struct {
-	ID      int64  `json:"id"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Pattern string `json:"pattern"`
+	ID          int64  `json:"id"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Pattern     string `json:"pattern"`
+	Once        bool   `json:"once"`
+	Active      bool   `json:"active"`
+	FireCount   int64  `json:"fireCount"`
+	LastFiredAt string `json:"lastFiredAt,omitempty"`
 }
 
 type dashboardHistory struct {
@@ -561,7 +565,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		state.Channels = append(state.Channels, dashboardChannel{Name: channel.Name, Members: members, MemberDetails: memberDetails})
 	}
 	for _, route := range routes {
-		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern})
+		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern, Once: route.Once, Active: route.Active, FireCount: route.FireCount, LastFiredAt: route.LastFiredAt})
 	}
 	for _, entry := range history {
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
@@ -756,6 +760,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		FromID          string                     `json:"fromId"`
 		ToID            string                     `json:"toId"`
 		Pattern         string                     `json:"pattern"`
+		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
 		Surface         string                     `json:"surface"`
 		Cwd             string                     `json:"cwd"`
@@ -1031,7 +1036,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if pattern == "" {
 			pattern = ".*"
 		}
-		if _, err := d.Registry.AddRoute(fromID, toID, pattern); err != nil {
+		if _, err := d.Registry.AddRouteWithOptions(fromID, toID, pattern, request.Once); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

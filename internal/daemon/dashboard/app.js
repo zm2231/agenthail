@@ -647,7 +647,7 @@ function renderOperations() {
     relays
       .map(
         (relay) =>
-          `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(relay.from)} <span class="route-arrow">→</span> ${escape(relay.to)}</div><div class="operation-detail">Matches /${escape(relay.pattern)}/</div></div><button class="button quiet" data-network-action="relay-remove" data-relay-id="${relay.id}" type="button">Remove</button></article>`,
+          `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(relay.from)} <span class="route-arrow">→</span> ${escape(relay.to)}</div><div class="operation-detail">Matches /${escape(relay.pattern)}/ · ${relay.once ? "once" : "persistent"} · ${relay.active ? "active" : "complete"} · fired ${relay.fireCount || 0}${relay.lastFiredAt ? ` · last ${escape(relay.lastFiredAt)}` : ""}</div></div><button class="button quiet" data-network-action="relay-remove" data-relay-id="${relay.id}" type="button">Remove</button></article>`,
       )
       .join("") || '<div class="empty-card">No automatic handoffs yet.</div>';
   renderAudit();
@@ -1302,6 +1302,7 @@ document.addEventListener("submit", async (event) => {
   event.preventDefault();
   const actionName = form.dataset.networkForm;
   const values = Object.fromEntries(new FormData(form).entries());
+  if (actionName === "relay-add") values.once = values.once === "true";
   try {
     await action(actionName, values);
     toast(actionName === "relay-add" ? "Relay added." : "Network saved.");

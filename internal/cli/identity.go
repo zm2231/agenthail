@@ -245,15 +245,16 @@ func (a *App) cmdRelay(args []string) error {
 	}
 	switch args[0] {
 	case "add":
-		if len(args) < 3 || len(args) > 4 {
-			return fmt.Errorf("usage: agenthail relay add <from-target> <to-target> [regex]")
+		positional := stripFlags(args)
+		if len(positional) < 3 || len(positional) > 4 {
+			return fmt.Errorf("usage: agenthail relay add <from-target> <to-target> [regex] [--once]")
 		}
 		ctx := context.Background()
-		fromSess, _, err := a.resolveTarget(ctx, args[1])
+		fromSess, _, err := a.resolveTarget(ctx, positional[1])
 		if err != nil {
 			return fmt.Errorf("from-target: %w", err)
 		}
-		toSess, toAdapter, err := a.resolveTarget(ctx, args[2])
+		toSess, toAdapter, err := a.resolveTarget(ctx, positional[2])
 		if err != nil {
 			return fmt.Errorf("to-target: %w", err)
 		}
@@ -261,18 +262,23 @@ func (a *App) cmdRelay(args []string) error {
 			return fmt.Errorf("to-target: %w", err)
 		}
 		pattern := ".*"
-		if len(args) > 3 {
-			pattern = args[3]
+		if len(positional) > 3 {
+			pattern = positional[3]
 		}
-		id, err := a.Registry.AddRoute(fromSess.ID, toSess.ID, pattern)
+		once := hasFlag(args, "--once")
+		id, err := a.Registry.AddRouteWithOptions(fromSess.ID, toSess.ID, pattern, once)
 		if err != nil {
 			return err
 		}
 		if _, ok := daemon.IsRunning(); !ok {
 			fmt.Fprintf(os.Stderr, "warning: daemon is not running; relay will not fire until you start it (agenthail daemon start)\n")
 		}
-		fmt.Printf("relay #%d: %s -> %s (pattern /%s/)\n",
-			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern)
+		mode := "persistent"
+		if once {
+			mode = "once"
+		}
+		fmt.Printf("relay #%d: %s -> %s (pattern /%s/, %s)\n",
+			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern, mode)
 		return nil
 	case "list":
 		if len(stripFlags(args)) != 1 {
@@ -297,8 +303,16 @@ func (a *App) cmdRelay(args []string) error {
 			if r.LastFiredAt != "" {
 				lastFired = r.LastFiredAt
 			}
-			fmt.Printf("#%-3d %s -> %s /%s/ fires=%d last-fired=%s\n",
-				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, r.FireCount, lastFired)
+			mode := "persistent"
+			if r.Once {
+				mode = "once"
+			}
+			state := "active"
+			if !r.Active {
+				state = "complete"
+			}
+			fmt.Printf("#%-3d %s -> %s /%s/ %s %s fires=%d last-fired=%s\n",
+				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired)
 		}
 		return nil
 	case "rm", "remove", "delete":

@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 4
+	schemaVersion   = 5
 	queueMessageTTL = time.Hour
 )
 
@@ -73,6 +73,12 @@ func (r *Registry) migrate() error {
 		return nil
 	}
 	if _, err := r.db.Exec(schema); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return err
 	}
 	if version >= 1 {
@@ -211,6 +217,8 @@ CREATE TABLE IF NOT EXISTS routes (
 	to_session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
 	pattern TEXT NOT NULL DEFAULT '.*',
+	once_only INTEGER NOT NULL DEFAULT 0,
+	active INTEGER NOT NULL DEFAULT 1,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS message_queue (
@@ -549,6 +557,10 @@ func (r *Registry) AddToChannel(channelName, sessionID string) error {
 }
 
 func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
+	return r.AddRouteWithOptions(from, to, pattern, false)
+}
+
+func (r *Registry) AddRouteWithOptions(from, to, pattern string, once bool) (int64, error) {
 	if _, err := regexp.Compile(pattern); err != nil {
 		return 0, fmt.Errorf("invalid relay pattern: %w", err)
 	}
@@ -563,9 +575,9 @@ func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
 	var cycle int
 	err = tx.QueryRow(`
 		WITH RECURSIVE reachable(id) AS (
-			SELECT to_session FROM routes WHERE from_session=?
+			SELECT to_session FROM routes WHERE from_session=? AND active=1
 			UNION
-			SELECT routes.to_session FROM routes JOIN reachable ON routes.from_session=reachable.id
+			SELECT routes.to_session FROM routes JOIN reachable ON routes.from_session=reachable.id WHERE routes.active=1
 		)
 		SELECT COUNT(*) FROM reachable WHERE id=?`, to, from).Scan(&cycle)
 	if err != nil {
@@ -574,7 +586,7 @@ func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
 	if cycle > 0 {
 		return 0, fmt.Errorf("relay route would create a cycle")
 	}
-	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern) VALUES (?,?,?)`, from, to, pattern)
+	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern,once_only) VALUES (?,?,?,?)`, from, to, pattern, b2i(once))
 	if err != nil {
 		return 0, err
 	}
@@ -1384,8 +1396,8 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
 		WHERE s.id IN (
-			SELECT from_session FROM routes
-			UNION SELECT to_session FROM routes
+			SELECT from_session FROM routes WHERE active=1
+			UNION SELECT to_session FROM routes WHERE active=1
 			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
 		)
 		ORDER BY s.surface,s.id`)
@@ -1422,15 +1434,17 @@ type RouteRow struct {
 	FromSession string `json:"fromSession"`
 	ToSession   string `json:"toSession"`
 	Pattern     string `json:"pattern"`
+	Once        bool   `json:"once"`
+	Active      bool   `json:"active"`
 	FireCount   int64  `json:"fireCount"`
 	LastFiredAt string `json:"lastFiredAt,omitempty"`
 }
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
-	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern,
+	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
 		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), '')
 		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
-		GROUP BY r.id, r.from_session, r.to_session, r.pattern
+		GROUP BY r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active
 		ORDER BY r.id`)
 	if err != nil {
 		return nil, err
@@ -1439,11 +1453,25 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	var out []RouteRow
 	for rows.Next() {
 		var r RouteRow
-		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &r.FireCount, &r.LastFiredAt); err == nil {
+		var once, active int
+		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &once, &active, &r.FireCount, &r.LastFiredAt); err == nil {
+			r.Once = once != 0
+			r.Active = active != 0
 			out = append(out, r)
 		}
 	}
 	return out, rows.Err()
+}
+
+func (r *Registry) DeactivateRoute(id int64) error {
+	res, err := r.db.Exec(`UPDATE routes SET active=0 WHERE id=? AND active=1`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("active relay route %d does not exist", id)
+	}
+	return nil
 }
 
 type AliasRow struct {
