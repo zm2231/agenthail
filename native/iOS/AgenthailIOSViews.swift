@@ -465,6 +465,9 @@ struct SessionScreen: View {
             .defaultScrollAnchor(.top, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
+#if DEBUG
+                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+#endif
                 if phase == .interacting {
                     userScrolling = true
                     followingLatest = false
@@ -476,6 +479,9 @@ struct SessionScreen: View {
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY < 60
             } action: { _, value in
+#if DEBUG
+                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+#endif
                 atLatest = value
             }
             .refreshable { await model.refreshSession(session.id) }
@@ -542,6 +548,9 @@ struct SessionScreen: View {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
             .task(id: "activity-" + session.id) {
+#if DEBUG
+                guard !ProcessInfo.processInfo.arguments.contains("--preview-session") else { return }
+#endif
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(4)) } catch { return }
                     await model.refreshSession(session.id)

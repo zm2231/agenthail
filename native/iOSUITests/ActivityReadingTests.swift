@@ -22,8 +22,10 @@ final class ActivityReadingTests: XCTestCase {
         let collapseTool = app.buttons["collapse-tool-3"]
         for _ in 0..<4 where !collapseTool.isHittable { timeline.swipeUp() }
         XCTAssertTrue(collapseTool.isHittable)
+        if collapseTool.frame.maxY > timeline.frame.maxY - 140 { timeline.swipeUp() }
+        XCTAssertTrue(collapseTool.isHittable)
         collapseTool.tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: collapseTool)], timeout: 5), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: output)], timeout: 5), .completed)
         XCTAssertTrue(activity.isHittable)
         activity.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: command)], timeout: 5), .completed)
