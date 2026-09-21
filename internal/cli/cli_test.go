@@ -46,6 +46,18 @@ type runtimeCLISurface struct {
 	status surface.RuntimeStatus
 }
 
+type cliReadSurface struct {
+	*cliSurface
+	result   *surface.SessionReadResult
+	err      error
+	requests []surface.SessionReadRequest
+}
+
+func (f *cliReadSurface) ReadSession(_ context.Context, _ *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	f.requests = append(f.requests, request)
+	return f.result, f.err
+}
+
 func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "")
 	if got := codexconfig.RemoteDebuggingPort(); got != "" {
@@ -767,8 +779,9 @@ func TestSendTimeoutBoundsDelivery(t *testing.T) {
 
 func TestReplyRejectsFailedCompletion(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, reply: &surface.ReplyResult{Text: "partial", Done: true, Error: "turn failed"}}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}}
 	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Reply: &surface.ReplyResult{Text: "partial", Done: true, Error: "turn failed"}, Source: "rpc"}}
 	err := app.cmdReply([]string{"codex:s"})
 	if err == nil || !strings.Contains(err.Error(), "did not complete successfully") {
 		t.Fatalf("err=%v", err)
@@ -952,15 +965,32 @@ func TestLastLabelsTranscriptSourceInTextAndJSON(t *testing.T) {
 	}
 }
 
+func TestLastPassesExplicitOlderCursorAndReportsNextPage(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}
+	reader := &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{Assistant: "older", Source: "local-transcript"}}, Source: "local-transcript", NextBefore: 123}}
+	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = reader
+	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--before", "456", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.requests) != 1 || reader.requests[0].Before != 456 || !strings.Contains(output, `"nextBefore":123`) {
+		t.Fatalf("requests=%+v output=%s", reader.requests, output)
+	}
+}
+
 func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, reply: &surface.ReplyResult{Text: "answer", Done: true, Source: "rpc"}}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "rpc"}}}
 	app, _ := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.cmdReply([]string{"codex:s", "--json", "--timeout", "50ms"}) })
 	if err != nil || !strings.Contains(output, `"source":"rpc"`) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	blocked := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, replyWait: true}
+	blockedTail := make(chan struct{})
+	defer close(blockedTail)
+	blocked := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tailBlock: blockedTail}
 	app, _ = cliFixture(t, blocked)
 	started := time.Now()
 	err = app.cmdReply([]string{"codex:s", "--timeout", "50ms"})

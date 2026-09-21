@@ -16,12 +16,19 @@ workspace; ordinary table output also uses the full path when multiple sessions 
 a workspace basename. JSON always retains the complete `cwd` field. CWD narrows
 discovery; it never selects a caller identity.
 
-`agenthail last <target> [count] --timeout 30s` bounds target resolution and
-transcript retrieval. The default is the application's command timeout. A blocked
-transport or filesystem read returns a timeout error instead of waiting forever.
-`agenthail reply <target> --timeout 30s` uses the same deadline. Codex `last` and
-`reply` identify whether the result came from the paginated RPC or a bounded local
-transcript fallback; a missing local transcript leaves the RPC timeout visible.
+`agenthail last <target> [count] --timeout 30s` and
+`agenthail reply <target> --timeout 30s` use one bounded session reader. The
+newest page is returned first, text and JSON identify the source, and JSON
+includes `nextBefore`. Pass `--before <nextBefore>` to read the preceding page.
+Phone session detail uses the same reader and cursor; it does not fetch an RPC
+exchange tail beside a separate local activity timeline. A read failure never
+resends a message.
+
+The daemon's retained event journal is the single live-update producer.
+`/api/v1/events` is a replayable SSE view over that journal; consumers use an
+event as an invalidation signal and fetch the bounded session page they need.
+Agenthail does not run a second per-connection session poller or publish a
+separate `/session-stream` contract.
 
 Busy-target behavior is explicit: `send` delivers immediately when idle and queues
 when busy; `send --no-queue` refuses delayed delivery. `queue` always creates the

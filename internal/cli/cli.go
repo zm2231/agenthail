@@ -135,8 +135,8 @@ Session commands:
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
-  reply <target> [--json] [--timeout 30s]  Fetch last assistant reply
-  last <target> [count] [--full] [--json] [--timeout 30s]  Show last N exchanges
+  reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
+  last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context (queues for active Claude sessions)
   model <target> [name]         Get or set model
@@ -335,7 +335,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--alias": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -367,7 +367,7 @@ func validateCommandFlags(command string, args []string) error {
 	specs := map[string]flagSpec{
 		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
-		"reply": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
+		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
@@ -1045,10 +1045,22 @@ func commandTimeout(args []string, fallback time.Duration) (time.Duration, error
 	return timeout, nil
 }
 
+func sessionReadBefore(args []string) (int64, error) {
+	value := flagVal(args, "--before")
+	if value == "" {
+		return 0, nil
+	}
+	cursor, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || cursor <= 0 {
+		return 0, fmt.Errorf("--before must be a positive activity cursor")
+	}
+	return cursor, nil
+}
+
 func (a *App) cmdReply(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
-		return fmt.Errorf("usage: agenthail reply <target> [--json] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail reply <target> [--before cursor] [--json] [--timeout 30s]")
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -1063,10 +1075,18 @@ func (a *App) cmdReply(args []string) error {
 	if !surf.Capabilities().Reply {
 		return fmt.Errorf("%s does not support reply", surf.Name())
 	}
-	reply, err := surf.Reply(ctx, sess, 50)
+	before, err := sessionReadBefore(args)
 	if err != nil {
 		return err
 	}
+	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
+	if err != nil {
+		return err
+	}
+	if read.UnavailableReason != "" {
+		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
+	}
+	reply := read.Reply
 	if reply == nil {
 		return fmt.Errorf("%s returned an empty reply result", surf.Name())
 	}
@@ -1074,12 +1094,15 @@ func (a *App) cmdReply(args []string) error {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": reply.Source})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason})
 	} else {
-		if reply.Source != "" {
-			fmt.Printf("[%s]\n", reply.Source)
+		if read.Source != "" {
+			fmt.Printf("[%s]\n", read.Source)
 		}
 		fmt.Println(reply.Text)
+		if read.NextBefore > 0 {
+			fmt.Printf("older cursor: %d\n", read.NextBefore)
+		}
 	}
 	return nil
 }
@@ -1087,7 +1110,7 @@ func (a *App) cmdReply(args []string) error {
 func (a *App) cmdLast(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
-		return fmt.Errorf("usage: agenthail last <target> [count] [--full] [--timeout 30s]")
+		return fmt.Errorf("usage: agenthail last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]")
 	}
 	timeout, err := commandTimeout(args, a.DefaultTimeout)
 	if err != nil {
@@ -1107,26 +1130,30 @@ func (a *App) cmdLast(args []string) error {
 		}
 		n = v
 	}
-	exchanges, err := tailWithContext(ctx, surf, sess, n)
+	before, err := sessionReadBefore(args)
 	if err != nil {
 		return err
 	}
+	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: n, Before: before})
+	if err != nil {
+		return err
+	}
+	if read.UnavailableReason != "" {
+		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
+	}
+	exchanges := read.Exchanges
 	if len(exchanges) == 0 {
 		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": "", "exchanges": []surface.Exchange{}})
+			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "exchanges": []surface.Exchange{}})
 		}
 		fmt.Println("(no conversation history)")
 		return nil
 	}
 	if hasFlag(args, "--json") {
-		source := ""
-		if len(exchanges) > 0 {
-			source = exchanges[len(exchanges)-1].Source
-		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": source, "exchanges": exchanges})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "exchanges": exchanges})
 	}
 	label := a.resolveDisplay(sess.ID)
-	source := exchanges[len(exchanges)-1].Source
+	source := read.Source
 	if source != "" {
 		fmt.Printf("── %s [%s] ──\n", label, source)
 	} else {
@@ -1150,24 +1177,27 @@ func (a *App) cmdLast(args []string) error {
 		}
 		fmt.Println()
 	}
+	if read.NextBefore > 0 {
+		fmt.Printf("older cursor: %d\n", read.NextBefore)
+	}
 	return nil
 }
 
-func tailWithContext(ctx context.Context, adapter surface.Surface, session *surface.Session, count int) ([]surface.Exchange, error) {
+func readSessionWithContext(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	type result struct {
-		exchanges []surface.Exchange
-		err       error
+		read *surface.SessionReadResult
+		err  error
 	}
 	completed := make(chan result, 1)
 	go func() {
-		exchanges, err := adapter.Tail(ctx, session, count)
-		completed <- result{exchanges: exchanges, err: err}
+		read, err := surface.ReadSession(ctx, adapter, session, request)
+		completed <- result{read: read, err: err}
 	}()
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case outcome := <-completed:
-		return outcome.exchanges, outcome.err
+		return outcome.read, outcome.err
 	}
 }
 
