@@ -77,6 +77,20 @@ type SendResult struct {
 	Accepted bool   `json:"accepted"`
 }
 
+type DeliveryEvidence string
+
+const (
+	EvidenceQueued            DeliveryEvidence = "queued"
+	EvidenceTransportAccepted DeliveryEvidence = "transport_accepted"
+	EvidenceHeld              DeliveryEvidence = "held"
+	EvidenceDelivered         DeliveryEvidence = "delivered"
+	EvidenceReplyObserved     DeliveryEvidence = "reply_observed"
+	EvidenceFailed            DeliveryEvidence = "failed"
+	EvidenceUnknown           DeliveryEvidence = "unknown"
+	EvidenceExpired           DeliveryEvidence = "expired"
+	EvidenceCanceled          DeliveryEvidence = "canceled"
+)
+
 type DeliveryOutcomeUnknownError struct {
 	Err error
 }

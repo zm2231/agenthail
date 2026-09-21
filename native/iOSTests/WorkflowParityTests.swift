@@ -50,7 +50,7 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     func testQueueDecodesIntegratedTurnSettings() throws {
-        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","attempts":0,"queuedAt":"now","effort":"high","mode":"plan","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
+        let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now","effort":"high","mode":"plan","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)
         XCTAssertEqual(queue.sourceSessionId, "sender"); XCTAssertEqual(queue.effort, "high")
         XCTAssertEqual(queue.mode, "plan"); XCTAssertEqual(queue.serviceTier, "fast")
@@ -60,10 +60,10 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     func testQueuePreservesExpiredUnknownOutcomeAsHistory() throws {
-        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","attempts":1,"queuedAt":"now","expiresAt":1,"historical":true,"deliveryOutcome":"unknown"}"#.utf8)
+        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"now","expiresAt":1,"historical":true}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)
         XCTAssertTrue(queue.isHistorical)
-        XCTAssertEqual(queue.deliveryOutcome, "unknown")
+        XCTAssertEqual(queue.evidence, "unknown")
         XCTAssertEqual(queue.expiresAt, 1)
     }
 
@@ -118,7 +118,7 @@ final class WorkflowParityTests: XCTestCase {
         model.selectedDetail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
         try await model.editSession(id: "demo", action: "goal-set", text: "Verify release")
         try await model.editSession(id: "demo", action: "alias", text: "release")
-        let queue = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":7,"sessionId":"demo","target":"demo","message":"next","status":"dead","attempts":1,"queuedAt":"now"}"#.utf8))
+        let queue = try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":7,"sessionId":"demo","target":"demo","message":"next","status":"dead","evidence":"failed","attempts":1,"queuedAt":"now"}"#.utf8))
         try await model.updateQueue(queue, retry: true)
         try await model.updateQueue(queue, retry: false)
         let actions = ParityProtocol.state.actions

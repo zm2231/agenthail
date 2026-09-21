@@ -61,7 +61,7 @@ func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			historyCount++
 		}
-		items = append(items, dashboardQueue{TurnOptions: item.TurnOptions, SourceSessionID: item.SourceSessionID, ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, DeliveryOutcome: item.DeliveryOutcome})
+		items = append(items, dashboardQueue{TurnOptions: item.TurnOptions, SourceSessionID: item.SourceSessionID, ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"items": items})

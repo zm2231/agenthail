@@ -213,7 +213,7 @@ func (a *App) cmdChannel(args []string) error {
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
 				continue
 			}
-			if receipt.Disposition == delivery.DispositionQueued {
+			if receipt.Evidence == surface.EvidenceQueued {
 				queued++
 				fmt.Printf("  [QUEUE] %s\n", a.resolveDisplay(mid))
 			} else {

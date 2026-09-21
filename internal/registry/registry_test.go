@@ -579,7 +579,7 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
 	rows, err = r.ListQueue(true)
-	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].DeliveryOutcome != "unknown" {
+	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("history rows=%+v err=%v", rows, err)
 	}
 	attention, err := r.ListAttentionItems(false)
@@ -611,7 +611,7 @@ func TestFutureUnknownDeliveryRemainsCurrentAttention(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Historical || rows[0].DeliveryOutcome != "unknown" {
+	if err != nil || len(rows) != 1 || rows[0].Historical || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
 	attention, err := r.ListAttentionItems(false)
@@ -660,8 +660,27 @@ func TestDeliveredOutcomeWinsOverRetainedUnknownError(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(true)
-	if err != nil || len(rows) != 1 || rows[0].DeliveryOutcome != "delivered" {
+	if err != nil || len(rows) != 1 || rows[0].Evidence != surface.EvidenceDelivered {
 		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestQueueRetainsTransportAcceptanceEvidence(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	if err := r.QueueMessage("s", "peer delivery"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("s", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.AckMessageWithEvidence(item.ID, "s", 0, surface.EvidenceTransportAccepted); err != nil {
+		t.Fatal(err)
+	}
+	row, err := r.QueueItem(item.ID)
+	if err != nil || row.Evidence != surface.EvidenceTransportAccepted {
+		t.Fatalf("row=%+v err=%v", row, err)
 	}
 }
 

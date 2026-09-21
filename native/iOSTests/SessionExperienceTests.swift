@@ -102,7 +102,7 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 body = String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
             }
         } else if request.url!.path == "/api/v1/queue" {
-            body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","attempts":0,"queuedAt":"2026-09-12 04:00:00"}]}"#
+            body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"}]}"#
         } else if request.url!.path == "/api/v1/actions" {
             var data = request.httpBody ?? Data()
             if let stream = request.httpBodyStream {
@@ -111,7 +111,7 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; data.append(buffer, count: count) }
             }
             Self.state.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
-            body = #"{"ok":true,"result":{"disposition":"queued","queueId":7}}"#
+            body = #"{"ok":true,"result":{"evidence":"queued","queueId":7}}"#
         } else if request.url!.path == "/api/v1/search" {
             body = #"{"results":[{"session":{"id":"older","surface":"codex","name":"Old build","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":false,"stream":false,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}},"snippet":"Saved"}],"remoteError":""}"#
         }

@@ -79,7 +79,7 @@ func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 			t.Fatalf("queue item %d returned more than once", item.ID)
 		}
 		seen[item.ID] = item
-		if item.ID == deadID && (item.Historical || item.DeliveryOutcome != "unknown") {
+		if item.ID == deadID && (item.Historical || item.Evidence != surface.EvidenceUnknown) {
 			t.Fatalf("active unknown row=%+v", item)
 		}
 		if _, terminal := terminalIDs[item.ID]; terminal {

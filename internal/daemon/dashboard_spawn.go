@@ -51,5 +51,5 @@ func (d *Daemon) createNotionThread(ctx context.Context, message, alias, model s
 		}
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
-	return &delivery.Receipt{Disposition: delivery.DispositionAccepted, SessionID: session.ID, TurnID: result.UUID}, nil
+	return &delivery.Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID, TurnID: result.UUID}, nil
 }

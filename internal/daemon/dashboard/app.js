@@ -583,7 +583,10 @@ function renderSurfaceFilter() {
   $("#session-status-filter").value = app.filters.status;
 }
 function queueReason(item) {
-  if (item.status !== "pending") return statusLabel(item.status);
+	if (item.evidence === "transport_accepted") return "Transport accepted; receiver completion is pending";
+	if (item.evidence === "unknown") return "Delivery outcome is unknown";
+	if (item.evidence === "failed") return "Delivery failed";
+	if (item.status !== "pending") return statusLabel(item.status);
   const target = app.state.sessions.find(
     (session) => session.id === item.sessionId,
   );
@@ -611,23 +614,22 @@ function renderOperations() {
       .join("") ||
     '<div class="empty-card">Nothing is waiting to be delivered.</div>';
   const outcomes = history
-    .filter((entry) =>
-      ["sent", "delivered", "failed", "unknown", "expired", "canceled"].includes(
-        entry.kind,
-      ),
-    )
+    .filter((entry) => entry.evidence)
     .slice(0, 8);
   $("#delivery-history").innerHTML =
     outcomes
       .map((entry) => {
         const label = {
-          sent: "Sent",
+          queued: "Queued",
+          transport_accepted: "Transport accepted",
+          held: "Held by receiver",
           delivered: "Delivered",
+          reply_observed: "Reply observed",
           failed: "Failed",
           unknown: "Delivery uncertain",
           expired: "Expired",
           canceled: "Canceled",
-        }[entry.kind] || auditKindLabel(entry.kind);
+        }[entry.evidence] || auditKindLabel(entry.kind);
         const detail = entry.error || entry.message || entry.result || "No details recorded";
         return `<article class="delivery-event"><div class="delivery-event-heading"><strong>${escape(label)} · ${escape(entry.target || "Agenthail")}</strong><time>${timeAgo(entry.createdAt)}</time></div><p>${escape(detail)}</p></article>`;
       })
@@ -1112,17 +1114,16 @@ async function send(requestedAction = "send") {
     app.drafts.delete(app.selected.id);
     resizeComposer();
     renderSlashMenu();
-    const queued = result?.result?.disposition === "queued";
+    const evidence = result?.result?.evidence;
+    const queued = evidence === "queued";
     toast(
       composerAction === "steer"
         ? "Current turn redirected."
-        : queued && command.toLowerCase() === "/compact"
-        ? "Compact queued and will run when this turn finishes."
         : commandAction
         ? `${command} requested.`
         : queued
         ? "This agent is busy, so your message is safely queued."
-        : result?.result?.reason === "peer_transport_accepted"
+        : evidence === "transport_accepted"
         ? "Accepted by Claude's socket. Receiver policy and completion are pending."
         : "Message sent.",
     );
@@ -1251,12 +1252,12 @@ document.addEventListener("click", async (event) => {
     const result = await action(control.dataset.action, {
       message: $("#message").value.trim(),
     });
-    const queued = result?.result?.disposition === "queued";
-    if (control.dataset.action === "compact" && !queued && app.history?.context) {
+    const queued = result?.result?.evidence === "queued";
+    if (control.dataset.action === "compact" && app.history?.context) {
       app.history.context.compacting = true;
       renderContextUsage(app.history.context);
     }
-    toast(queued ? `${control.textContent} queued until this turn finishes.` : `${control.textContent} requested.`);
+    toast(queued ? `${control.textContent} queued.` : `${control.textContent} requested.`);
     await load();
     await selectSession(app.selected.id);
   } catch (error) {

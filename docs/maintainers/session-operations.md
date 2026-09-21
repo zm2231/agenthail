@@ -2,6 +2,8 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
 
+Delivery state has one evidence vocabulary in CLI JSON, dashboard/mobile APIs, Inbox, and history: `queued`, `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, and `canceled`. `transport_accepted` is deliberately weaker than `delivered`; for a Claude peer it means the authenticated socket accepted the frame, while receiver policy and model completion remain pending. `reply_observed` is emitted only after Agenthail reads the completed reply. User interfaces must not relabel either state as a completed delivery.
+
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
 discovery; the command fails only when every configured surface failed. Codex

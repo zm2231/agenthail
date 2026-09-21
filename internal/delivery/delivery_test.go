@@ -77,11 +77,11 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	dispatcher := Dispatcher{Registry: r}
 
 	receipt, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{UUID: "turn", Accepted: true}}, session, "one", "")
-	if err != nil || receipt.Disposition != DispositionAccepted || receipt.TurnID != "turn" {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != "turn" {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt, err = dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
-	if err != nil || receipt.Disposition != DispositionQueued || receipt.QueueID == 0 || r.QueueCount("s") != 1 {
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 || r.QueueCount("s") != 1 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt2, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
@@ -152,7 +152,7 @@ func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	dispatcher := Dispatcher{Registry: r}
 	claude := &fakeSurface{kind: surface.KindClaude}
 	receipt, err := dispatcher.Compact(context.Background(), claude, claudeSession)
-	if err != nil || receipt.Disposition != DispositionAccepted || receipt.QueueID != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.QueueID != 0 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	if r.QueueCount(claudeSession.ID) != 0 || claude.compactCalls != 1 || len(claude.sent) != 0 {
@@ -160,7 +160,7 @@ func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	}
 	codex := &fakeSurface{kind: surface.KindCodex}
 	receipt, err = dispatcher.Compact(context.Background(), codex, codexSession)
-	if err != nil || receipt.Disposition != DispositionAccepted || codex.compactCalls != 1 || len(codex.sent) != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || codex.compactCalls != 1 || len(codex.sent) != 0 {
 		t.Fatalf("receipt=%+v sent=%v compactCalls=%d err=%v", receipt, codex.sent, codex.compactCalls, err)
 	}
 }

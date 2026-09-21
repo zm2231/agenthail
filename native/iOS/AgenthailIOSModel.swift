@@ -39,6 +39,19 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
 
+    private func deliveryLabel(_ evidence: String?) -> String {
+        switch evidence {
+        case "queued": return "Queued for the agent"
+        case "transport_accepted": return "Accepted by the transport; receiver policy and completion are pending"
+        case "delivered": return "Instruction delivered"
+        case "reply_observed": return "Reply observed"
+        case "held": return "Held by the receiving agent"
+        case "failed": return "Delivery failed"
+        case "unknown", nil: return "Delivery outcome unconfirmed. Check activity before retrying."
+        default: return "Delivery status: \(evidence ?? "unknown")"
+        }
+    }
+
     func turnSettings(for sessionID: String) -> TurnSettings {
         turnSettingsDrafts[sessionID] ?? TurnSettings()
     }
@@ -335,13 +348,14 @@ final class AgenthailIOSModel: ObservableObject {
                     deliveryStatus[sessionID] = "Delivery is no longer in recent history. Check the session before retrying."
                     continue
                 }
-                switch item.isHistorical && item.deliveryOutcome == "unknown" ? "unknown-expired" : item.isHistorical && item.deliveryOutcome == "failed" ? "failed-expired" : item.status {
-                case "pending": deliveryStatus[sessionID] = "Queued for the agent"
-                case "inflight": deliveryStatus[sessionID] = "Sending to the agent"
-                case "dead": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
+                switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
+                case "queued": deliveryStatus[sessionID] = item.status == "inflight" ? "Sending to the agent" : "Queued for the agent"
+                case "unknown": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
+                case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
                 case "unknown-expired": deliveryStatus[sessionID] = "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again."
                 case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
                 case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
+                case "transport_accepted": deliveryStatus[sessionID] = "Accepted by the transport; receiver policy and completion are pending"
                 case "delivered": deliveryStatus[sessionID] = "Instruction delivered"
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled"
                 default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
@@ -416,8 +430,8 @@ final class AgenthailIOSModel: ObservableObject {
             defer { sendingSessionIDs.remove(session.id) }
             do {
                 let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
-                deliveryStatus[session.id] = response.result?.disposition == "queued" ? "Queued for the agent" : "Instruction accepted"
-                if response.result?.disposition == "queued", let queueID = response.result?.queueId {
+                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence)
+                if response.result?.evidence == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[session.id] = queueID
                 }
                 await refreshSession(session.id)

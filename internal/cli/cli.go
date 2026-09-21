@@ -928,7 +928,7 @@ func (a *App) cmdSend(args []string) error {
 		return err
 	}
 
-	if receipt.Disposition == delivery.DispositionQueued {
+	if receipt.Evidence == surface.EvidenceQueued {
 		if _, ok := daemon.IsRunning(); !ok {
 			fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 		}
@@ -972,6 +972,14 @@ func (a *App) cmdSend(args []string) error {
 		if err != nil {
 			return err
 		}
+		receipt.Evidence = surface.EvidenceReplyObserved
+		if a.Registry != nil {
+			text := ""
+			if reply != nil {
+				text = reply.Text
+			}
+			_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: "reply", SessionID: sess.ID, CompletionID: receipt.TurnID, Result: text})
+		}
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(map[string]any{"delivery": receipt, "reply": reply})
 		}
@@ -982,7 +990,7 @@ func (a *App) cmdSend(args []string) error {
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(receipt)
-	} else if receipt.Reason == "peer_transport_accepted" {
+	} else if receipt.Evidence == surface.EvidenceTransportAccepted {
 		fmt.Printf("accepted by Claude socket (message %s); receiver policy and model completion are pending\n", receipt.TurnID)
 	} else {
 		fmt.Printf("sent (turn %s)\n", receipt.TurnID)
@@ -1379,7 +1387,7 @@ func (a *App) cmdQueue(args []string) error {
 			return nil
 		}
 		for _, row := range rows {
-			fmt.Printf("#%-4d %-9s attempts=%d target=%s %s\n", row.ID, row.Status, row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
+			fmt.Printf("#%-4d %-18s attempts=%d target=%s %s\n", row.ID, row.Evidence, row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
 			if row.LastError != "" {
 				fmt.Printf("      last error: %s\n", row.LastError)
 			}
@@ -1538,9 +1546,9 @@ func (a *App) cmdHistory(args []string) error {
 			target = a.resolveDisplay(target)
 		}
 		if entry.SourceSessionID != "" {
-			fmt.Printf("%s %-9s %s -> %s", entry.CreatedAt, entry.Kind, a.resolveDisplay(entry.SourceSessionID), target)
+			fmt.Printf("%s %-18s %s -> %s", entry.CreatedAt, historyEvidenceLabel(entry), a.resolveDisplay(entry.SourceSessionID), target)
 		} else {
-			fmt.Printf("%s %-9s %s", entry.CreatedAt, entry.Kind, target)
+			fmt.Printf("%s %-18s %s", entry.CreatedAt, historyEvidenceLabel(entry), target)
 		}
 		if entry.Message != "" {
 			fmt.Printf(" %s", truncate(strings.ReplaceAll(entry.Message, "\n", " "), 140))
@@ -1551,6 +1559,13 @@ func (a *App) cmdHistory(args []string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+func historyEvidenceLabel(entry registry.HistoryEntry) string {
+	if entry.Evidence != "" {
+		return string(entry.Evidence)
+	}
+	return entry.Kind
 }
 
 func (a *App) cmdDoctor(args []string) error {

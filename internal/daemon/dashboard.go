@@ -122,19 +122,19 @@ type dashboardAttention struct {
 
 type dashboardQueue struct {
 	surface.TurnOptions
-	SourceSessionID string `json:"sourceSessionId,omitempty"`
-	ID              int64  `json:"id"`
-	SessionID       string `json:"sessionId"`
-	Target          string `json:"target"`
-	Message         string `json:"message"`
-	Model           string `json:"model,omitempty"`
-	Status          string `json:"status"`
-	Attempts        int    `json:"attempts"`
-	LastError       string `json:"lastError,omitempty"`
-	QueuedAt        string `json:"queuedAt"`
-	ExpiresAt       int64  `json:"expiresAt,omitempty"`
-	Historical      bool   `json:"historical"`
-	DeliveryOutcome string `json:"deliveryOutcome,omitempty"`
+	SourceSessionID string                   `json:"sourceSessionId,omitempty"`
+	ID              int64                    `json:"id"`
+	SessionID       string                   `json:"sessionId"`
+	Target          string                   `json:"target"`
+	Message         string                   `json:"message"`
+	Model           string                   `json:"model,omitempty"`
+	Status          string                   `json:"status"`
+	Attempts        int                      `json:"attempts"`
+	LastError       string                   `json:"lastError,omitempty"`
+	QueuedAt        string                   `json:"queuedAt"`
+	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
+	Historical      bool                     `json:"historical"`
+	Evidence        surface.DeliveryEvidence `json:"evidence"`
 }
 
 type dashboardChannel struct {
@@ -156,17 +156,18 @@ type dashboardRelay struct {
 }
 
 type dashboardHistory struct {
-	ID              int64  `json:"id"`
-	CreatedAt       string `json:"createdAt"`
-	Kind            string `json:"kind"`
-	SessionID       string `json:"sessionId,omitempty"`
-	SourceSessionID string `json:"sourceSessionId,omitempty"`
-	Target          string `json:"target,omitempty"`
-	Source          string `json:"source,omitempty"`
-	QueueID         int64  `json:"queueId,omitempty"`
-	Message         string `json:"message,omitempty"`
-	Result          string `json:"result,omitempty"`
-	Error           string `json:"error,omitempty"`
+	ID              int64                    `json:"id"`
+	CreatedAt       string                   `json:"createdAt"`
+	Kind            string                   `json:"kind"`
+	SessionID       string                   `json:"sessionId,omitempty"`
+	SourceSessionID string                   `json:"sourceSessionId,omitempty"`
+	Target          string                   `json:"target,omitempty"`
+	Source          string                   `json:"source,omitempty"`
+	QueueID         int64                    `json:"queueId,omitempty"`
+	Message         string                   `json:"message,omitempty"`
+	Result          string                   `json:"result,omitempty"`
+	Error           string                   `json:"error,omitempty"`
+	Evidence        surface.DeliveryEvidence `json:"evidence,omitempty"`
 }
 
 func (d *Daemon) startDashboard() (*dashboardServer, error) {
@@ -389,7 +390,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHistory {
-	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error}
+	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence}
 }
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
@@ -547,7 +548,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, DeliveryOutcome: item.DeliveryOutcome})
+		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -947,7 +948,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			if receipt.Disposition == delivery.DispositionQueued {
+			if receipt.Evidence == surface.EvidenceQueued {
 				queued++
 			} else {
 				sent++

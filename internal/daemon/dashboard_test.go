@@ -216,7 +216,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"compact","sessionId":"claude"}`))
 	d.dashboardActionHandler(response, request)
-	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 0 || !strings.Contains(response.Body.String(), `"disposition":"accepted"`) || fake.compactCalls.Load() != 1 {
+	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 0 || !strings.Contains(response.Body.String(), `"evidence":"delivered"`) || fake.compactCalls.Load() != 1 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
 }
@@ -657,7 +657,8 @@ func TestDashboardNormalizesEmptyStateAndShowsDeliveryOutcomes(t *testing.T) {
 		"sessions: state.sessions || []",
 		"queue: state.queue || []",
 		"delivery-history",
-		`["sent", "delivered", "failed", "unknown", "expired", "canceled"]`,
+		`transport_accepted: "Transport accepted"`,
+		`.filter((entry) => entry.evidence)`,
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)
@@ -694,8 +695,8 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
 		`await action("interrupt")`,
 		`await action("steer", { message })`,
-		`"Compact queued and will run when this turn finishes."`,
-		"queued until this turn finishes.",
+		`evidence === "transport_accepted"`,
+		`const queued = result?.result?.evidence === "queued"`,
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("dashboard source missing %q", fragment)
