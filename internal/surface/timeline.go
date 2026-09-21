@@ -1,9 +1,6 @@
 package surface
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {
@@ -24,10 +21,6 @@ type SessionTimeline struct {
 	Source            string         `json:"source"`
 	Truncated         bool           `json:"truncated"`
 	UnavailableReason string         `json:"unavailableReason,omitempty"`
-}
-
-type TimelineProvider interface {
-	Timeline(context.Context, *Session, int64) (*SessionTimeline, error)
 }
 
 type SessionReadRequest struct {
@@ -57,13 +50,6 @@ func ReadSession(ctx context.Context, adapter Surface, session *Session, request
 	if reader, ok := adapter.(SessionReader); ok {
 		return reader.ReadSession(ctx, session, request)
 	}
-	if provider, ok := adapter.(TimelineProvider); ok {
-		timeline, err := provider.Timeline(ctx, session, request.Before)
-		if err != nil {
-			return nil, err
-		}
-		return SessionReadFromTimeline(session, timeline, request.Limit), nil
-	}
 	exchanges, err := adapter.Tail(ctx, session, request.Limit)
 	if err != nil {
 		return nil, err
@@ -75,21 +61,7 @@ func ReadSession(ctx context.Context, adapter Surface, session *Session, request
 	return BoundSessionRead(session, &SessionReadResult{Exchanges: exchanges, Items: []TimelineItem{}, Source: source}, 0), nil
 }
 
-func SessionReadFromTimeline(session *Session, timeline *SessionTimeline, limit int) *SessionReadResult {
-	if timeline == nil {
-		return &SessionReadResult{Items: []TimelineItem{}, Exchanges: []Exchange{}}
-	}
-	return BoundSessionRead(session, &SessionReadResult{
-		Items:             timeline.Items,
-		Exchanges:         exchangesFromTimeline(timeline.Items),
-		NextBefore:        timeline.NextBefore,
-		Source:            timeline.Source,
-		Truncated:         timeline.Truncated,
-		UnavailableReason: timeline.UnavailableReason,
-	}, limit)
-}
-
-// BoundSessionRead keeps the newest exchanges of a page, stamps their source, and derives the latest reply.
+// BoundSessionRead keeps the newest exchanges of a page, stamps their source, and derives the latest reply when the reader did not.
 func BoundSessionRead(session *Session, result *SessionReadResult, limit int) *SessionReadResult {
 	if result.Items == nil {
 		result.Items = []TimelineItem{}
@@ -105,32 +77,10 @@ func BoundSessionRead(session *Session, result *SessionReadResult, limit int) *S
 			result.Exchanges[index].Source = result.Source
 		}
 	}
-	result.Reply = latestReply(session, result.Exchanges, result.Source)
-	return result
-}
-
-func exchangesFromTimeline(items []TimelineItem) []Exchange {
-	exchanges := make([]Exchange, 0)
-	for _, item := range items {
-		if item.Kind != "message" || item.Text == "" {
-			continue
-		}
-		timestamp, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
-		switch item.Role {
-		case "user":
-			exchanges = append(exchanges, Exchange{User: item.Text, Timestamp: timestamp})
-		case "assistant":
-			if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
-				exchanges = append(exchanges, Exchange{Assistant: item.Text, Timestamp: timestamp})
-			} else {
-				exchanges[len(exchanges)-1].Assistant = item.Text
-				if exchanges[len(exchanges)-1].Timestamp.IsZero() {
-					exchanges[len(exchanges)-1].Timestamp = timestamp
-				}
-			}
-		}
+	if result.Reply == nil {
+		result.Reply = latestReply(session, result.Exchanges, result.Source)
 	}
-	return exchanges
+	return result
 }
 
 func latestReply(session *Session, exchanges []Exchange, source string) *ReplyResult {

@@ -33,8 +33,8 @@ func (s *timedOutTailSurface) Models(ctx context.Context) ([]surface.ModelOption
 	return []surface.ModelOption{{ID: "claude-opus-5[1m]", DisplayName: "Opus 5", SupportedReasoningEfforts: []string{"low", "high"}, DefaultReasoningEffort: "high"}}, nil
 }
 
-func (s *timedOutTailSurface) Timeline(context.Context, *surface.Session, int64) (*surface.SessionTimeline, error) {
-	return &surface.SessionTimeline{Items: []surface.TimelineItem{{ID: "tool-1", Kind: "toolCall", Title: "Read", Text: "capture"}}}, nil
+func (s *timedOutTailSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "tool-1", Kind: "toolCall", Title: "Read", Text: "capture"}}, Exchanges: []surface.Exchange{}, Source: "local-transcript"}, nil
 }
 
 func TestDashboardSessionUsesOneActivityReadAndRetainsMetadata(t *testing.T) {
@@ -86,7 +86,7 @@ func (s *slowSessionReads) Tail(ctx context.Context, _ *surface.Session, _ int) 
 	return nil, s.awaitDeadline(ctx)
 }
 
-func (s *slowSessionReads) Timeline(ctx context.Context, _ *surface.Session, _ int64) (*surface.SessionTimeline, error) {
+func (s *slowSessionReads) ReadSession(ctx context.Context, _ *surface.Session, _ surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	return nil, s.awaitDeadline(ctx)
 }
 

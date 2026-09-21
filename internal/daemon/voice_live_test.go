@@ -50,7 +50,7 @@ func TestLiveCodexVoice(t *testing.T) {
 		t.Fatal("provide an existing test-owned operator state; this evaluation must not create tasks")
 	}
 	baselineContext, baselineCancel := context.WithTimeout(context.Background(), 20*time.Second)
-	baseline, err := codex.Timeline(baselineContext, s.View("").Session, 0)
+	baseline, err := codex.ReadSession(baselineContext, s.View("").Session, surface.SessionReadRequest{})
 	baselineCancel()
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestLiveCodexVoice(t *testing.T) {
 		priorItems[item.ID] = true
 	}
 	workerSession := &surface.Session{ID: workerID, Surface: surface.KindCodex}
-	workerBaseline, err := codex.Timeline(context.Background(), workerSession, 0)
+	workerBaseline, err := codex.ReadSession(context.Background(), workerSession, surface.SessionReadRequest{})
 	if err != nil || workerBaseline.UnavailableReason != "" {
 		t.Fatalf("existing worker activity unavailable: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestLiveCodexVoice(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	timeline, err := codex.Timeline(ctx, v.Session, 0)
+	timeline, err := codex.ReadSession(ctx, v.Session, surface.SessionReadRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestLiveCodexVoice(t *testing.T) {
 	if json.Unmarshal(output, &reply) != nil || reply.Session != workerID {
 		t.Fatal("worker reply identity missing")
 	}
-	workerTimeline, err := codex.Timeline(ctx, workerSession, 0)
+	workerTimeline, err := codex.ReadSession(ctx, workerSession, surface.SessionReadRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}

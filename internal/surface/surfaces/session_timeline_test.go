@@ -278,3 +278,39 @@ func TestCodexReadFallsBackToTranscriptAndReportsNativeFailure(t *testing.T) {
 		t.Fatalf("older=%+v err=%v", older, err)
 	}
 }
+
+func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T) {
+	path := timelineFixture(t, `{"type":"user","timestamp":"2026-09-07T10:00:00Z","message":{"content":"fix it"}}
+{"type":"assistant","timestamp":"2026-09-07T10:01:00Z","message":{"id":"m1","content":[{"type":"text","text":"Looking at the file"}]}}
+`)
+	staleIdle := &surface.Session{Transcript: path, Status: surface.StatusIdle}
+	read, err := (&Claude{}).ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Reply == nil || read.Reply.Text != "Looking at the file" || read.Reply.Done || read.Reply.Error != "" {
+		t.Fatalf("in-progress turn reported as complete: %+v", read.Reply)
+	}
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:02:00Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"Done, patched"}]}}`)
+	f.Close()
+	read, err = (&Claude{}).ReadSession(context.Background(), &surface.Session{Transcript: path, Status: surface.StatusBusy}, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Reply == nil || read.Reply.Text != "Looking at the file\nDone, patched" || !read.Reply.Done || read.Reply.UserText != "fix it" {
+		t.Fatalf("completed turn not reported: %+v", read.Reply)
+	}
+	f, _ = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	fmt.Fprintln(f, `{"type":"user","timestamp":"2026-09-07T10:03:00Z","message":{"content":"again"}}`)
+	fmt.Fprintln(f, `{"type":"assistant","timestamp":"2026-09-07T10:04:00Z","message":{"id":"m2","content":[{"type":"text","text":"Starting"}]}}`)
+	fmt.Fprintln(f, `{"type":"user","timestamp":"2026-09-07T10:05:00Z","message":{"content":"[Request interrupted by user]"}}`)
+	f.Close()
+	read, err = (&Claude{}).ReadSession(context.Background(), staleIdle, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Reply == nil || read.Reply.Text != "Starting" || read.Reply.Done || read.Reply.Error == "" {
+		t.Fatalf("interrupted turn not reported: %+v", read.Reply)
+	}
+}

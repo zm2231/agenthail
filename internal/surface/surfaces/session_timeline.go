@@ -20,14 +20,6 @@ const timelineReadBudget = 4 << 20
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
-func (c *Claude) Timeline(ctx context.Context, session *surface.Session, before int64) (*surface.SessionTimeline, error) {
-	read, err := c.ReadSession(ctx, session, surface.SessionReadRequest{Before: before})
-	if err != nil {
-		return nil, err
-	}
-	return timelineOf(read), nil
-}
-
 func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	path := session.Transcript
 	if path == "" {
@@ -38,14 +30,6 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 		return nil, err
 	}
 	return surface.BoundSessionRead(session, page, request.Limit), nil
-}
-
-func (c *Codex) Timeline(ctx context.Context, session *surface.Session, before int64) (*surface.SessionTimeline, error) {
-	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", before)
-	if err != nil {
-		return nil, err
-	}
-	return timelineOf(page), nil
 }
 
 // ReadSession serves exchanges from the native app-server first and falls back to the bounded
@@ -81,10 +65,6 @@ func codexNativeReadFailure(err error) string {
 		return "Codex Desktop did not answer the native session read in time."
 	}
 	return "Codex Desktop native session read failed: " + strings.SplitN(err.Error(), "\n", 2)[0] + "."
-}
-
-func timelineOf(read *surface.SessionReadResult) *surface.SessionTimeline {
-	return &surface.SessionTimeline{Items: read.Items, NextBefore: read.NextBefore, Source: read.Source, Truncated: read.Truncated, UnavailableReason: read.UnavailableReason}
 }
 
 type transcriptRecord struct {
@@ -241,14 +221,14 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64) 
 	}
 	slices.Reverse(records)
 	if source == "claude" {
-		result.Exchanges = claudeTranscriptExchanges(records)
+		result.Exchanges, result.Reply = claudeTranscriptExchanges(records, result.Source)
 	} else {
 		result.Exchanges = codexTranscriptExchanges(records)
 	}
 	return result, nil
 }
 
-func claudeTranscriptExchanges(records []transcriptRecord) []surface.Exchange {
+func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]surface.Exchange, *surface.ReplyResult) {
 	var turns []claudeTurn
 	for _, record := range records {
 		var parsed claudeRecord
@@ -258,13 +238,20 @@ func claudeTranscriptExchanges(records []transcriptRecord) []surface.Exchange {
 		turns = appendClaudeTurn(turns, parsed)
 	}
 	exchanges := make([]surface.Exchange, 0, len(turns))
+	reply := &surface.ReplyResult{Done: false, Source: source}
 	for _, turn := range turns {
 		if turn.User == "" && turn.Assistant == "" {
 			continue
 		}
 		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Timestamp: turn.StartedAt})
+		if turn.Assistant != "" {
+			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: turn.Done, Source: source}
+			if turn.Interrupted && !turn.Done {
+				reply.Error = "turn interrupted before completion"
+			}
+		}
 	}
-	return exchanges
+	return exchanges, reply
 }
 
 func codexTranscriptExchanges(records []transcriptRecord) []surface.Exchange {

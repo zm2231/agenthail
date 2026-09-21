@@ -14,11 +14,11 @@ The [research comparison](../research/mobile-agent-clients-2026-09.md) records p
 |---|---|---|
 | Find and open work | Session registry and adapter discovery → snapshot/search `cwd` → workspace groups → explicit compact navigation or iPad selection | `mobile_workspace_test.go`, `ActivityPresentationTests`, `SessionNavigationTests` |
 | Open from Inbox | Queue target → requested session identity → the main Sessions route | UI test opens an Inbox target, returns to Sessions, then opens another session |
-| Understand tool activity | Local Claude/Codex JSONL → `TimelineProvider` → authenticated session API → semantic run summary → individual invocation and paired results | Parser tests, out-of-order parallel-result grouping test, UI expansion through recorded output |
+| Understand tool activity | Local Claude/Codex JSONL → `SessionReader` bounded page → authenticated session API → semantic run summary → individual invocation and paired results | Parser tests, out-of-order parallel-result grouping test, UI expansion through recorded output |
 | Read conversation content | Messages → Textual native Markdown, code/table rendering and system serif assistant prose | Phone/tablet visual inspection, public fixtures and local captured transcripts |
 | Inspect raw sequence | Session menu → All events → original record order, identifiers and truncation | Grouping order checks and UI menu test |
 | Read older work | Bounded reverse reader → byte cursor → API → history merge | Existing 450-record paging and model history tests; captures do not simulate uncaptured pages |
-| Recover from activity errors | One bounded session read → sanitized source/error state → local activity or explicit unavailable state | `session_history_failure_test.go`; timeline error sanitization test |
+| Recover from activity errors | One bounded session read → sanitized source/error state → local activity or explicit unavailable state | `session_timeline_test.go` timeline error sanitization test; Codex native-read fallback test |
 | Explain lifecycle | Claude `durationMs` → rounded duration → quiet inline event | `session_duration_test.go`, including 114536 ms → 1m55s |
 | Explain delivery | Queued receipt → queue ID → refreshed terminal state → Latest instruction receipt; all instructions remain in Inbox | `SessionRecoveryTests` covers reconnect, expiry, failed refresh and unknown delivery without resending |
 | Separate current decisions from history | Persistent queue → all active rows plus latest 100 terminal rows → Inbox Current/History | `mobile_queue_history_test.go` retains older active rows across a terminal flood; native expiry/retry UI test |
