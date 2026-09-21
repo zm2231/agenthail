@@ -172,7 +172,7 @@ Agenthail keeps a local record of messages it moved, work still waiting, retries
 ```bash
 agenthail queue list
 agenthail queue list --mine
-agenthail queue list --cwd /Volumes/4/GitHub/agenthail
+agenthail queue list --cwd /workspace/agenthail
 agenthail queue retry 12
 agenthail queue rm 12
 agenthail history --json
