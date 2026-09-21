@@ -267,7 +267,7 @@ agenthail queue list --json
 agenthail queue list --all --json
 agenthail queue list --target @builder --json
 agenthail queue list --mine --json
-agenthail queue list --cwd /Volumes/4/GitHub/agenthail --json
+agenthail queue list --cwd /workspace/agenthail --json
 agenthail queue retry <id>
 agenthail queue rm <id>
 agenthail queue clear @builder

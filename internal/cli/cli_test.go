@@ -940,6 +940,14 @@ func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing
 	}
 }
 
+func TestQueueListHelpDocumentsScopedFilters(t *testing.T) {
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	output, err := captureStdout(t, func() error { return app.cmdQueue([]string{"list", "--help"}) })
+	if err != nil || !strings.Contains(output, "--target") || !strings.Contains(output, "--mine") || !strings.Contains(output, "--cwd") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestListFailsWhenEverySurfaceDiscoveryFails(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindNotion, listErr: errors.New("unavailable")}
 	app := App{Surfaces: []SurfaceEntry{{Name: "notion", Surface: fake}}}

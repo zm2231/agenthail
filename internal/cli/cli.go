@@ -382,7 +382,7 @@ func validateCommandFlags(command string, args []string) error {
 	}
 	if command == "queue" && len(args) > 0 && args[0] == "list" {
 		spec.values = map[string]bool{"--target": true, "--cwd": true}
-		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true}
+		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
 		spec.bools = map[string]bool{"--once": true}
@@ -1380,6 +1380,14 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("queue requires the registry")
 	}
 	if len(args) > 0 && args[0] == "list" {
+		if hasFlag(args, "--help") {
+			fmt.Println("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
+			fmt.Println("  --target  show messages for one destination")
+			fmt.Println("  --mine    show messages sent by or addressed to the caller session")
+			fmt.Println("  --cwd     show messages for targets in a workspace and its descendants")
+			fmt.Println("  --all     include terminal queue history")
+			return nil
+		}
 		if len(stripFlags(args)) != 1 {
 			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
 		}
