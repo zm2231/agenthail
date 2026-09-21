@@ -25,21 +25,21 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 	if path == "" {
 		path = c.transcriptPath(session)
 	}
-	page, err := readTranscriptPage(ctx, path, "claude", request.Before)
+	page, err := readTranscriptPage(ctx, path, "claude", request.Before, request.Limit)
 	if err != nil {
 		return nil, err
 	}
-	return surface.BoundSessionRead(session, page, request.Limit), nil
+	return surface.BoundSessionRead(session, page), nil
 }
 
 // ReadSession serves exchanges from the native app-server first and falls back to the bounded
 // local transcript page when that read fails; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before)
+	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before, request.Limit)
 	if err != nil {
 		return nil, err
 	}
-	local := surface.BoundSessionRead(session, page, request.Limit)
+	local := surface.BoundSessionRead(session, page)
 	if request.Before > 0 {
 		return local, nil
 	}
@@ -68,11 +68,15 @@ func codexNativeReadFailure(err error) string {
 }
 
 type transcriptRecord struct {
-	line  []byte
-	items []surface.TimelineItem
+	offset int64
+	line   []byte
+	items  []surface.TimelineItem
 }
 
-func readTranscriptPage(ctx context.Context, path, source string, before int64) (*surface.SessionReadResult, error) {
+// readTranscriptPage returns the newest page of the transcript ending at before. When limit is
+// positive the page holds at most that many exchanges plus the activity recorded alongside
+// them, and NextBefore always addresses the record preceding the oldest returned one.
+func readTranscriptPage(ctx context.Context, path, source string, before int64, limit int) (*surface.SessionReadResult, error) {
 	result := &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "local-transcript"}
 	if path == "" {
 		result.UnavailableReason = "Detailed activity is unavailable because this session has no local transcript."
@@ -138,6 +142,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64) 
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
+	var groupOffsets []int64
 	var records []transcriptRecord
 	for index := len(lines) - 1; index >= 0; index-- {
 		line := lines[index]
@@ -191,7 +196,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64) 
 			result.NextBefore = offset + int64(len(line))
 			break
 		}
-		records = append(records, transcriptRecord{line: line, items: full})
+		records = append(records, transcriptRecord{offset: offset, line: line, items: full})
 		// A single oversized record must not defeat the response budget.
 		for len(encoded) > budget && len(items) > 1 {
 			items = items[1:]
@@ -206,6 +211,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64) 
 			result.Truncated = result.Truncated || item.Truncated
 		}
 		groups = append(groups, items)
+		groupOffsets = append(groupOffsets, offset)
 		budget -= len(encoded)
 	}
 	if result.NextBefore == 0 && start > 0 {
@@ -216,34 +222,50 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64) 
 			result.NextBefore = start
 		}
 	}
-	for i := len(groups) - 1; i >= 0; i-- {
-		result.Items = append(result.Items, groups[i]...)
-	}
 	slices.Reverse(records)
+	var exchangeOffsets []int64
 	if source == "claude" {
-		result.Exchanges, result.Reply = claudeTranscriptExchanges(records, result.Source)
+		result.Exchanges, exchangeOffsets, result.Reply = claudeTranscriptExchanges(records, result.Source)
 	} else {
-		result.Exchanges = codexTranscriptExchanges(records)
+		result.Exchanges, exchangeOffsets = codexTranscriptExchanges(records)
+	}
+	pageStart := int64(-1)
+	if limit > 0 && len(result.Exchanges) > limit {
+		result.Exchanges = result.Exchanges[len(result.Exchanges)-limit:]
+		pageStart = exchangeOffsets[len(exchangeOffsets)-limit]
+		result.NextBefore = pageStart
+	}
+	for i := len(groups) - 1; i >= 0; i-- {
+		if groupOffsets[i] < pageStart {
+			continue
+		}
+		result.Items = append(result.Items, groups[i]...)
 	}
 	return result, nil
 }
 
-func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]surface.Exchange, *surface.ReplyResult) {
+func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]surface.Exchange, []int64, *surface.ReplyResult) {
 	var turns []claudeTurn
+	var turnOffsets []int64
 	for _, record := range records {
 		var parsed claudeRecord
 		if json.Unmarshal(record.line, &parsed) != nil {
 			continue
 		}
 		turns = appendClaudeTurn(turns, parsed)
+		for len(turnOffsets) < len(turns) {
+			turnOffsets = append(turnOffsets, record.offset)
+		}
 	}
 	exchanges := make([]surface.Exchange, 0, len(turns))
+	offsets := make([]int64, 0, len(turns))
 	reply := &surface.ReplyResult{Done: false, Source: source}
-	for _, turn := range turns {
+	for index, turn := range turns {
 		if turn.User == "" && turn.Assistant == "" {
 			continue
 		}
 		exchanges = append(exchanges, surface.Exchange{User: turn.User, Assistant: turn.Assistant, Timestamp: turn.StartedAt})
+		offsets = append(offsets, turnOffsets[index])
 		if turn.Assistant != "" {
 			reply = &surface.ReplyResult{Text: turn.Assistant, UserText: turn.User, Done: turn.Done, Source: source}
 			if turn.Interrupted && !turn.Done {
@@ -251,11 +273,12 @@ func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]sur
 			}
 		}
 	}
-	return exchanges, reply
+	return exchanges, offsets, reply
 }
 
-func codexTranscriptExchanges(records []transcriptRecord) []surface.Exchange {
+func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, []int64) {
 	exchanges := make([]surface.Exchange, 0)
+	offsets := make([]int64, 0)
 	for _, record := range records {
 		for _, item := range record.items {
 			if item.Kind != "message" || item.Text == "" {
@@ -265,16 +288,18 @@ func codexTranscriptExchanges(records []transcriptRecord) []surface.Exchange {
 			switch item.Role {
 			case "user":
 				exchanges = append(exchanges, surface.Exchange{User: item.Text, Timestamp: timestamp})
+				offsets = append(offsets, record.offset)
 			case "assistant":
 				if len(exchanges) == 0 || exchanges[len(exchanges)-1].Assistant != "" {
 					exchanges = append(exchanges, surface.Exchange{Assistant: item.Text, Timestamp: timestamp})
+					offsets = append(offsets, record.offset)
 				} else {
 					exchanges[len(exchanges)-1].Assistant = item.Text
 				}
 			}
 		}
 	}
-	return exchanges
+	return exchanges, offsets
 }
 
 func timelineValue(value any) string {

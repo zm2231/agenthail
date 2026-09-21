@@ -40,7 +40,7 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 		return nil, err
 	}
 	if err := adapter.Compact(ctx, session); err != nil {
-		d.record(registry.HistoryEntry{Kind: "control-failed", SessionID: session.ID, Message: "compact", Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "compact", Error: err.Error()})
 		return nil, err
 	}
 	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "compact"})
@@ -52,11 +52,19 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		return nil, err
 	}
 	if err := adapter.Steer(ctx, session, message); err != nil {
-		d.record(registry.HistoryEntry{Kind: "control-failed", SessionID: session.ID, Message: "steer", Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
 		return nil, err
 	}
 	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
 	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
+}
+
+// failureKind keeps an uncertain outcome distinct from a confirmed failure so every surface shows the same evidence.
+func failureKind(err error, fallback string) string {
+	if surface.IsDeliveryOutcomeUnknown(err) {
+		return "unknown"
+	}
+	return fallback
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
@@ -91,7 +99,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		result, err = adapter.Send(ctx, session, message)
 	}
 	if err != nil {
-		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
+		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
 	}
 	if result == nil {

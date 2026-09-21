@@ -21,7 +21,10 @@ discovery; it never selects a caller identity.
 `agenthail last <target> [count] --timeout 30s` and
 `agenthail reply <target> --timeout 30s` use one bounded session reader. The
 newest page is returned first, text and JSON identify the source, and JSON
-includes `nextBefore`. Pass `--before <nextBefore>` to read the preceding page.
+includes `nextBefore`. A page holds at most `count` exchanges and the activity
+recorded alongside them, and `nextBefore` addresses the record before the oldest
+exchange on the page, so `--before <nextBefore>` reads the preceding page with
+no gap.
 Claude reads the bounded local transcript page and groups exchanges by turn, so
 a reply that spans several text blocks around tool calls is one exchange with
 its full text. Codex reads the newest page from the native app-server RPC

@@ -29,7 +29,7 @@ func TestClaudeTimelinePreservesOrderedToolActivity(t *testing.T) {
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","is_error":true,"content":"test failed"}]}}
 {"type":"system","subtype":"compact_boundary"}
 `)
-	page, err := readTranscriptPage(context.Background(), path, "claude", 0)
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	seen := map[string]bool{}
 	count := 0
 	for pageIndex := 0; pageIndex < 5; pageIndex++ {
-		page, err := readTranscriptPage(context.Background(), path, "codex", cursor)
+		page, err := readTranscriptPage(context.Background(), path, "codex", cursor, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,11 +82,11 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	if count != 450 {
 		t.Fatalf("received %d of 450", count)
 	}
-	first, _ := readTranscriptPage(context.Background(), path, "codex", 0)
+	first, _ := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	fmt.Fprintln(f, `{"type":"response_item","payload":{"type":"function_call_output","call_id":"call-449","output":"ok"}}`)
 	f.Close()
-	second, _ := readTranscriptPage(context.Background(), path, "codex", 0)
+	second, _ := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if first.Items[len(first.Items)-1].ID != second.Items[len(second.Items)-2].ID {
 		t.Fatal("identity changed on append")
 	}
@@ -103,7 +103,7 @@ func TestCodexTimelineSkipsOversizedRecordAndAdvancesCursor(t *testing.T) {
 	truncated := false
 	finished := false
 	for pageIndex := 0; pageIndex < 8; pageIndex++ {
-		page, err := readTranscriptPage(context.Background(), path, "codex", cursor)
+		page, err := readTranscriptPage(context.Background(), path, "codex", cursor, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +133,7 @@ func TestTimelineBoundsEncodedPayloadAndPreservesUTF8(t *testing.T) {
 		content.Write(data)
 		content.WriteByte('\n')
 	}
-	page, err := readTranscriptPage(context.Background(), timelineFixture(t, content.String()), "codex", 0)
+	page, err := readTranscriptPage(context.Background(), timelineFixture(t, content.String()), "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,20 +153,20 @@ func TestTimelineBoundsEncodedPayloadAndPreservesUTF8(t *testing.T) {
 
 func TestTimelinePartialMalformedMissingAndCancelled(t *testing.T) {
 	path := timelineFixture(t, "broken\n"+`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}`+"\n"+`{"type":"response_item"`)
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil || len(page.Items) != 1 || !page.Truncated {
 		t.Fatalf("%+v %v", page, err)
 	}
-	if _, err := readTranscriptPage(context.Background(), path, "codex", 999999); err == nil {
+	if _, err := readTranscriptPage(context.Background(), path, "codex", 999999, 0); err == nil {
 		t.Fatal("invalid cursor accepted")
 	}
-	missing, err := readTranscriptPage(context.Background(), "", "codex", 0)
+	missing, err := readTranscriptPage(context.Background(), "", "codex", 0, 0)
 	if err != nil || missing.UnavailableReason == "" {
 		t.Fatal("missing transcript not explicit")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := readTranscriptPage(ctx, path, "codex", 0); err == nil {
+	if _, err := readTranscriptPage(ctx, path, "codex", 0, 0); err == nil {
 		t.Fatal("cancellation ignored")
 	}
 }
@@ -177,7 +177,7 @@ func TestCodexTimelineUsesResponseItemsWithoutDuplicateEventMessages(t *testing.
 {"type":"response_item","payload":{"type":"reasoning","encrypted_content":"never expose this","summary":[{"type":"summary_text","text":"A visible summary"}]}}
 {"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"patch","input":"*** Begin Patch"}}
 `)
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestCodexEventUserContextSurvivesAlongsideTools(t *testing.T) {
 {"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{}"}}
 {"timestamp":"2026-09-07T12:02:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}}
 `)
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestCodexDuplicateUserRepresentationsDoNotDuplicatePrompt(t *testing.T) {
 {"timestamp":"2026-09-07T12:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue"}]}}
 {"timestamp":"2026-09-07T12:01:00Z","type":"event_msg","payload":{"type":"user_message","message":"Continue"}}
 `)
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0)
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,5 +315,52 @@ func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T
 	}
 	if read.Reply == nil || read.Reply.Text != "Starting" || read.Reply.Done || read.Reply.Error == "" {
 		t.Fatalf("interrupted turn not reported: %+v", read.Reply)
+	}
+}
+
+func TestClaudeReadSessionOlderCursorWalksEveryExchange(t *testing.T) {
+	var content strings.Builder
+	for i := 1; i <= 150; i++ {
+		fmt.Fprintf(&content, `{"type":"user","uuid":"u%03d","timestamp":"2026-09-07T10:00:00Z","message":{"content":"q%03d"}}`+"\n", i, i)
+		fmt.Fprintf(&content, `{"type":"assistant","uuid":"a%03d","timestamp":"2026-09-07T10:00:01Z","message":{"id":"m%03d","stop_reason":"end_turn","content":[{"type":"tool_use","id":"call-%03d","name":"Bash","input":{}},{"type":"text","text":"a%03d"}]}}`+"\n", i, i, i, i)
+	}
+	session := &surface.Session{Transcript: timelineFixture(t, content.String()), Status: surface.StatusIdle}
+	var users []string
+	seenItems := map[string]bool{}
+	cursor := int64(0)
+	for page := 0; page < 20; page++ {
+		read, err := (&Claude{}).ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 50, Before: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(read.Exchanges) > 50 {
+			t.Fatalf("page %d returned %d exchanges", page, len(read.Exchanges))
+		}
+		var pageUsers []string
+		for _, exchange := range read.Exchanges {
+			pageUsers = append(pageUsers, exchange.User)
+		}
+		users = append(pageUsers, users...)
+		for _, item := range read.Items {
+			if seenItems[item.ID] {
+				t.Fatalf("duplicate item %s on page %d", item.ID, page)
+			}
+			seenItems[item.ID] = true
+		}
+		if read.NextBefore == 0 {
+			break
+		}
+		if cursor > 0 && read.NextBefore >= cursor {
+			t.Fatalf("cursor did not progress: %d -> %d", cursor, read.NextBefore)
+		}
+		cursor = read.NextBefore
+	}
+	if len(users) != 150 || len(seenItems) != 450 {
+		t.Fatalf("walked %d exchanges and %d items", len(users), len(seenItems))
+	}
+	for i, user := range users {
+		if want := fmt.Sprintf("q%03d", i+1); user != want {
+			t.Fatalf("exchange %d: got %q want %q", i, user, want)
+		}
 	}
 }

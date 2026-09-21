@@ -58,19 +58,16 @@ func ReadSession(ctx context.Context, adapter Surface, session *Session, request
 	if len(exchanges) > 0 && exchanges[len(exchanges)-1].Source != "" {
 		source = exchanges[len(exchanges)-1].Source
 	}
-	return BoundSessionRead(session, &SessionReadResult{Exchanges: exchanges, Items: []TimelineItem{}, Source: source}, 0), nil
+	return BoundSessionRead(session, &SessionReadResult{Exchanges: exchanges, Items: []TimelineItem{}, Source: source}), nil
 }
 
-// BoundSessionRead keeps the newest exchanges of a page, stamps their source, and derives the latest reply when the reader did not.
-func BoundSessionRead(session *Session, result *SessionReadResult, limit int) *SessionReadResult {
+// BoundSessionRead stamps the exchange source and derives the latest reply when the reader did not.
+func BoundSessionRead(session *Session, result *SessionReadResult) *SessionReadResult {
 	if result.Items == nil {
 		result.Items = []TimelineItem{}
 	}
 	if result.Exchanges == nil {
 		result.Exchanges = []Exchange{}
-	}
-	if limit > 0 && len(result.Exchanges) > limit {
-		result.Exchanges = result.Exchanges[len(result.Exchanges)-limit:]
 	}
 	for index := range result.Exchanges {
 		if result.Exchanges[index].Source == "" {

@@ -173,3 +173,36 @@ func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
 	}
 }
+
+func TestDispatcherRecordsUnknownOutcomeAsUnknownEvidence(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, Status: surface.StatusIdle}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	unknown := surface.DeliveryOutcomeUnknown(errors.New("sidecar not found"))
+	adapter := &fakeSurface{kind: surface.KindClaude, err: unknown}
+	dispatcher := Dispatcher{Registry: r}
+	if _, err := dispatcher.Deliver(context.Background(), adapter, session, "hello", ""); !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+	if _, err := dispatcher.Compact(context.Background(), adapter, session); !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+	entries, err := r.ListHistory(10, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries=%+v", entries)
+	}
+	for _, entry := range entries {
+		if entry.Evidence != surface.EvidenceUnknown {
+			t.Fatalf("entry %+v must carry unknown evidence", entry)
+		}
+	}
+}
