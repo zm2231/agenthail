@@ -88,6 +88,50 @@ func TestOpenRunsMigrationsOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestOpenReconcilesRequiredColumnsWhenDatabaseVersionIsNewer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "newer.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, first, "source", "target")
+	if _, err := first.db.Exec(`
+		INSERT INTO routes(from_session,to_session,pattern) VALUES('source','target','.*');
+		INSERT INTO message_queue(session_id,message,status,delivered) VALUES('target','done','delivered',1);
+		ALTER TABLE routes DROP COLUMN active;
+		ALTER TABLE routes DROP COLUMN once_only;
+		ALTER TABLE message_queue DROP COLUMN evidence;
+		PRAGMA user_version=6;`); err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var active int
+	if err := second.db.QueryRow(`SELECT active FROM routes LIMIT 1`).Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active=%d err=%v", active, err)
+	}
+	var onceOnly int
+	if err := second.db.QueryRow(`SELECT once_only FROM routes LIMIT 1`).Scan(&onceOnly); err != nil || onceOnly != 0 {
+		t.Fatalf("once_only=%d err=%v", onceOnly, err)
+	}
+	var evidence string
+	if err := second.db.QueryRow(`SELECT evidence FROM message_queue WHERE message='done'`).Scan(&evidence); err != nil || evidence != "delivered" {
+		t.Fatalf("evidence=%q err=%v", evidence, err)
+	}
+	var version int
+	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 6 {
+		t.Fatalf("version=%d err=%v", version, err)
+	}
+}
+
 func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")

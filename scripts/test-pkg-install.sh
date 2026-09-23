@@ -181,8 +181,20 @@ jq -e 'all(.surfaces[]; ((.error // "") | test("curl_cffi|python.*not found|node
 plist="$HOME/Library/LaunchAgents/com.agenthail.daemon.plist"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$plist")" = "/Library/Application Support/Agenthail/runtime/python/bin/python3"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_SIDECAR raw -o - "$plist")" = "/Library/Application Support/Agenthail/sidecar.py"
+launchctl bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
+sqlite3 "$HOME/.agenthail/registry.db" <<'SQL'
+ALTER TABLE routes DROP COLUMN active;
+ALTER TABLE routes DROP COLUMN once_only;
+ALTER TABLE message_queue DROP COLUMN evidence;
+PRAGMA user_version=6;
+SQL
 sudo installer -pkg "$pkg" -target /
 /usr/local/bin/agenthail daemon status
+/usr/local/bin/agenthail queue list --all --json >/dev/null
+test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='active'")" = "1"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "6"
 sleep 2
 test "$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')" = 1
 upgraded_menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"

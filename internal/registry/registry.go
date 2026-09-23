@@ -69,9 +69,6 @@ func (r *Registry) migrate() error {
 	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if version >= schemaVersion {
-		return nil
-	}
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
@@ -81,23 +78,7 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("routes", "active", `INTEGER NOT NULL DEFAULT 1`); err != nil {
 		return err
 	}
-	if version >= 1 {
-		if err := r.ensureColumn("message_queue", "turn_options", `TEXT NOT NULL DEFAULT '{}'`); err != nil {
-			return err
-		}
-		if err := r.ensureColumn("message_queue", "source_session_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
-			return err
-		}
-		if err := r.ensureColumn("message_queue", "evidence", `TEXT NOT NULL DEFAULT ''`); err != nil {
-			return err
-		}
-		if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
-			return err
-		}
-		_, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
-		return err
-	}
-	columns := []struct {
+	for _, column := range []struct {
 		name string
 		decl string
 	}{
@@ -114,8 +95,7 @@ func (r *Registry) migrate() error {
 		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
-	}
-	for _, column := range columns {
+	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
 		}
@@ -139,6 +119,16 @@ func (r *Registry) migrate() error {
 		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
 			return err
 		}
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
+		return err
+	}
+	if version >= schemaVersion {
+		return nil
+	}
+	if version >= 1 {
+		_, err := r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
+		return err
 	}
 	_, err := r.db.Exec(fmt.Sprintf(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
