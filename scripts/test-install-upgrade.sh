@@ -151,6 +151,14 @@ dashboard_status="$(HOME="$TEST_HOME" PATH="$FAKE_BIN:/opt/homebrew/bin:/usr/bin
 grep -Fq 'dashboard: enabled' <<<"$dashboard_status"
 test "$(jq -r .enabled "$TEST_HOME/.agenthail/dashboard.json")" = "true"
 
+HOME="$TEST_HOME" "$FAKE_BIN/launchctl" bootout "gui/$UID/com.agenthail.daemon" >/dev/null 2>&1 || true
+sqlite3 "$TEST_HOME/.agenthail/registry.db" <<'SQL'
+ALTER TABLE routes DROP COLUMN active;
+ALTER TABLE routes DROP COLUMN once_only;
+ALTER TABLE message_queue DROP COLUMN evidence;
+PRAGMA user_version=6;
+SQL
+
 install_once "$TEST_HOME" "$NEW_BIN" "$DATA_DIR" >"$TMP/upgrade.log"
 
 test ! -e "$OLD_BIN/agenthail"
@@ -162,6 +170,11 @@ grep -Fq 'reinstalling supervised daemon' "$TMP/upgrade.log"
 grep -Fq 'agenthail-managed-wrapper-v1' "$NEW_BIN/agenthail"
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$NEW_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail version --json >/dev/null
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$NEW_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail daemon status >/dev/null
+HOME="$TEST_HOME" PATH="$FAKE_BIN:$NEW_BIN:/opt/homebrew/bin:/usr/bin:/bin" agenthail queue list --all --json >/dev/null
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='active'")" = "1"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "6"
 
 test -f "$DATA_DIR/skills/agenthail-operations/SKILL.md"
 test ! -e "$TEST_HOME/.claude"
