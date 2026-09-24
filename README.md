@@ -58,9 +58,11 @@ Each app connects independently. If you do not use Notion, it simply stays out o
 
 Agenthail discovers open Claude Code sessions through their local messaging sockets. Native messages require the Agenthail daemon and do not need browser cookies or Remote Control. Sessions that expose only a Remote Control bridge use that transport; enable it with `/rc` in Claude when needed.
 
-The daemon automatically registers the current/recent page of Codex and Notion agents as individual Claude peers, refreshing discovery every 30 seconds. They appear in Claude's `ListAgents` as `agenthail/<surface>: <name>`. Claude can reply to them using native `SendMessage`; Agenthail puts those messages in its durable queue. Read-only agents are discoverable, but inbound messages to them are denied and recorded in history.
+The daemon automatically registers busy agents and agents active within the last 24 hours as individual Claude peers, refreshing discovery every 30 seconds. They appear in Claude's `ListAgents` as `agenthail/<surface>: <name>`. Claude can reply to them using native `SendMessage`; Agenthail puts those messages in its durable queue. Older agents register automatically on their next outbound send, and idle peer helpers are retired after 24 hours. Read-only agents can be discoverable, but inbound messages to them are denied and recorded in history.
 
-An older agent registers automatically when it sends to Claude. Use `--from @alias` or `--from surface:session-id` to identify it. Agenthail also recognizes `AGENTHAIL_SESSION_ID`, `CODEX_THREAD_ID`, and `CLAUDE_SESSION_ID`, in that order. Without a sender identity, messages use an operator peer whose replies are kept in history.
+Use `--from @alias` or `--from surface:session-id` to identify the sender. Agenthail also recognizes `AGENTHAIL_SESSION_ID`, `CODEX_THREAD_ID`, and `CLAUDE_SESSION_ID`, in that order. Without a sender identity, messages use an operator peer whose replies are kept in history.
+
+Daemon restart, package replacement and an earlier crash do not require manual socket cleanup. Agenthail reconciles only artifacts it can prove belong to its peer workers, preserves foreign or ambiguous sockets, and resolves the target Claude process and socket again for every delivery.
 
 ```bash
 agenthail send claude:<session-id> "Here are the findings" --from @builder --json

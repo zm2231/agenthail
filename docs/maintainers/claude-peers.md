@@ -1,8 +1,8 @@
 # Claude peer messaging
 
-The daemon publishes one live helper process per discovered non-Claude agent. Each helper owns its real PID-named Claude registry file and Unix socket, so Claude can address the individual agent and send replies back. Registration itself performs no inference. Native Claude sessions already publish their own records. See `internal/daemon/claude_peers.go:registerRecentClaudePeers` and `internal/peerbridge/manager.go:Ensure`.
+The daemon publishes one live helper process per eligible non-Claude agent. Each helper owns its real PID-named Claude registry file and Unix socket, so Claude can address the individual agent and send replies back. Registration itself performs no inference. Native Claude sessions already publish their own records. See `internal/daemon/claude_peers.go:registerRecentClaudePeers` and `internal/peerbridge/manager.go:Ensure`.
 
-The default adapter discovery page defines “recent”, without an additional age cutoff. Startup and a 30-second refresh register every non-offline entry, including read-only entries. An older sender is registered on demand through `peerbridge.Send`. Helpers remain available until daemon shutdown, or are replaced after exit on the next registration attempt. Each helper uses a process and a SQLite connection; this is intentionally a per-agent identity, not a single shared alias. There is no eviction policy for agents that fall off the recent page.
+Startup and a 30-second refresh pre-register busy agents and agents active within the last 24 hours. An older sender is registered on demand through `peerbridge.Send`. Idle helpers age out after 24 hours and are recreated automatically on the next outbound send. Each helper uses a process and a SQLite connection; this is intentionally a per-agent identity, not a single shared alias.
 
 ## Operator path
 
@@ -19,7 +19,13 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 
 ## Lifecycle and verification
 
-Helpers exit on parent stdin EOF. Registration files are refreshed atomically, restored if removed, and never deliberately replace an existing foreign record. Socket permissions are 0600. Cleanup tests cover parent exit, forced child death and restart, duplicate registration, distinct per-agent PIDs, reply deduplication, read-only rejection, cancellation, and alias refresh. Sender persistence tests cover SQLite v1-to-v2 upgrades, ID merges, queue claiming, relays, dispatch and dashboard output.
+The daemon manager is the only routing authority. It holds a process-lifetime file lock and removes its public socket on shutdown only when the socket identity still matches. Callers send ensure or delivery requests to that private endpoint; they do not derive a worker control path from a session ID. A request whose response is lost after transmission has an unknown outcome and is not automatically retried. Each daemon generation gives its workers unique control sockets under `~/.agenthail/run/p/<generation>/`, while Claude-facing sockets retain the required `/tmp/cc-socks/<pid>.sock` shape. Before creating those artifacts, the worker writes a pending ownership manifest; it atomically records each socket identity as it is created, then promotes that manifest before publishing the Claude session record. The manifest ties the source session, daemon generation, worker PID/process start, random launch token, control socket inode, Claude-facing socket inode and Claude session record together. Registration checks the live control endpoint and replaces a worker whose endpoint disappeared or changed.
+
+Helpers exit on parent stdin EOF. Registration files are refreshed atomically, restored if removed, and never deliberately replace an existing foreign record. Socket permissions are 0600. On startup, Agenthail reconciles ownership manifests, retires proven Agenthail orphans and removes only artifacts whose manifest and file identity still match. Legacy sockets under `~/.agenthail/peers` are no longer reused and are left untouched because they do not carry enough ownership evidence for automatic deletion. Live foreign or ambiguous endpoints and non-socket files are preserved. It never scans and deletes arbitrary `/tmp/cc-socks` entries.
+
+Cleanup tests cover parent exit, daemon crash and restart, preservation of unowned legacy sockets, dead ownership manifests, preservation of live or ambiguous artifacts, forced child death and restart, duplicate registration, distinct per-agent PIDs, manager-routed sends, reply deduplication, read-only rejection, cancellation, alias refresh and idle retirement. Sender persistence tests cover schema upgrades, ID merges, queue claiming, relays, dispatch and dashboard output.
+
+The manager admits at most 128 peer workers and 32 concurrent manager requests. Calls beyond either bound receive an explicit retry/retirement error instead of creating another process or goroutine.
 
 The `ps` probe and Claude 2.1.267+ records use UTC; older native records use
 local time. Agenthail compares them as instants using the record version after

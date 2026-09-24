@@ -99,6 +99,11 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude", "sessions", strconv.Itoa(r.PID)+".json")); !os.IsNotExist(err) {
 		t.Fatalf("record remains: %v", err)
 	}
+	for _, path := range []string{r.SocketPath, r.ControlPath, WorkerManifestPath(home, "direct", r.PID)} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("worker artifact remains %s: %v", path, err)
+		}
+	}
 }
 
 type readyWriter struct {
@@ -131,8 +136,9 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 		var r Ready
 		errs <- RunWorker(context.Background(), Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir}, parentR, readyWriter{&r, ready})
 	}()
+	var worker Ready
 	select {
-	case <-ready:
+	case worker = <-ready:
 	case err := <-errs:
 		t.Fatalf("worker failed before ready: %v", err)
 	case <-time.After(5 * time.Second):
@@ -157,7 +163,7 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	if err := json.Unmarshal([]byte(readyLine), &target); err != nil {
 		t.Fatal(err)
 	}
-	result, err := Send(context.Background(), home, s.ID, target.SocketPath, "status ping")
+	result, err := Send(context.Background(), worker.ControlPath, s.ID, target.SocketPath, "status ping")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -212,10 +218,13 @@ func shortTempDir(t *testing.T, prefix string) string {
 	return path
 }
 
-func TestControlPathIsCompactAndDeterministic(t *testing.T) {
-	p := ControlPath("/Users/example", "sender")
-	if p != ControlPath("/Users/example", "sender") || len(p) >= 104 {
+func TestWorkerControlPathIsGenerationScopedAndCompact(t *testing.T) {
+	p := WorkerControlPath("/tmp/example", "generation", 123)
+	if p != WorkerControlPath("/tmp/example", "generation", 123) || len(p) >= 104 {
 		t.Fatalf("path=%q len=%d", p, len(p))
+	}
+	if p == WorkerControlPath("/tmp/example", "other", 123) {
+		t.Fatal("worker control path did not change with daemon generation")
 	}
 }
 
@@ -268,7 +277,7 @@ func TestPeerContentHasRoutableIdentityAndSanitizedName(t *testing.T) {
 
 func TestPeerClientCancellationBoundsUnresponsiveControl(t *testing.T) {
 	home := shortTempDir(t, "cp-cancel-")
-	path := ControlPath(home, "sender")
+	path := WorkerControlPath(home, "test", 1)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +299,7 @@ func TestPeerClientCancellationBoundsUnresponsiveControl(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	_, err = Send(ctx, home, "sender", "/tmp/cc-socks/1.sock", "hello")
+	_, err = Send(ctx, path, "sender", "/tmp/cc-socks/1.sock", "hello")
 	if !surface.IsDeliveryOutcomeUnknown(err) || time.Since(started) > time.Second {
 		t.Fatalf("cancel err=%v elapsed=%s", err, time.Since(started))
 	}
@@ -329,10 +338,311 @@ func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.
 
 func TestFailedRegistrationWriteLeavesNoRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "record.json")
-	if err := writeExclusiveJSON(path, make(chan int)); err == nil {
+	if err := writeExclusiveJSONAtomic(path, make(chan int)); err == nil {
 		t.Fatal("unsupported value accepted")
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("partial record remains: %v", err)
+	}
+	if matches, _ := filepath.Glob(path + ".tmp.*"); len(matches) != 0 {
+		t.Fatalf("temporary records remain: %v", matches)
+	}
+}
+
+func TestReconcileRemovesDeadManifestOwnedArtifacts(t *testing.T) {
+	home := shortTempDir(t, "cp-reconcile-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999999
+	generation := "old"
+	controlPath := WorkerControlPath(home, generation, pid)
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{controlPath, filepath.Join(socketDir, strconv.Itoa(pid)+".sock")} {
+		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.SetUnlinkOnClose(false)
+		listener.Close()
+	}
+	controlDevice, controlInode, err := socketIdentity(controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	socketDevice, socketInode, err := socketIdentity(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	record := sessionRecord{PID: pid, SessionID: "owned", ProcStart: "dead", Agenthail: "peer-worker"}
+	if err := writeExclusiveJSON(recordPath, record); err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-worker", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", ControlPath: controlPath, ControlDevice: controlDevice, ControlInode: controlInode, SocketPath: socketPath, SocketDevice: socketDevice, SocketInode: socketInode, RecordPath: recordPath}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{controlPath, manifest.SocketPath, recordPath, manifestPath} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("stale artifact remains %s: %v", path, err)
+		}
+	}
+}
+
+func TestReconcileRemovesPendingWorkerArtifacts(t *testing.T) {
+	home := shortTempDir(t, "cp-pending-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999999
+	generation := "pending"
+	controlPath := WorkerControlPath(home, generation, pid)
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	recordPath := filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	pending := OwnershipManifest{Agenthail: "peer-worker", State: "starting", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", ControlPath: controlPath, SocketPath: filepath.Join(socketDir, strconv.Itoa(pid)+".sock"), RecordPath: recordPath}
+	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{controlPath, pending.SocketPath} {
+		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.SetUnlinkOnClose(false)
+		listener.Close()
+	}
+	pending.ControlDevice, pending.ControlInode, _ = socketIdentity(controlPath)
+	pending.SocketDevice, pending.SocketInode, _ = socketIdentity(pending.SocketPath)
+	if err := writeExclusiveJSON(manifestPath, pending); err != nil {
+		t.Fatal(err)
+	}
+	record := sessionRecord{PID: pid, SessionID: "owned", ProcStart: "dead", Agenthail: "peer-worker"}
+	if err := writeExclusiveJSON(recordPath, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{controlPath, pending.SocketPath, recordPath, manifestPath} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("pending artifact remains %s: %v", path, err)
+		}
+	}
+}
+
+func TestReconcilePreservesPendingSocketWithoutIdentity(t *testing.T) {
+	home := shortTempDir(t, "cp-pending-ambiguous-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999999
+	generation := "pending"
+	controlPath := WorkerControlPath(home, generation, pid)
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	socketPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	pending := OwnershipManifest{Agenthail: "peer-worker", State: "starting", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", ControlPath: controlPath, SocketPath: socketPath, RecordPath: filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")}
+	if err := writeExclusiveJSON(manifestPath, pending); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(socketPath); err != nil {
+		t.Fatalf("ambiguous pending socket was removed: %v", err)
+	}
+	if _, err := os.Lstat(manifestPath); !os.IsNotExist(err) {
+		t.Fatalf("stale manifest remains: %v", err)
+	}
+}
+
+func TestReconcilePreservesLiveAndAmbiguousArtifacts(t *testing.T) {
+	home := shortTempDir(t, "cp-preserve-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacyDir := filepath.Join(home, ".agenthail", "peers")
+	if err := os.MkdirAll(legacyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	livePath := filepath.Join(legacyDir, "live.sock")
+	live, err := net.Listen("unix", livePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	foreignPath := filepath.Join(legacyDir, "foreign.sock")
+	if err := os.WriteFile(foreignPath, []byte("not a socket"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pid := os.Getpid()
+	started, err := processStart(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation := "ambiguous"
+	controlPath := WorkerControlPath(home, generation, pid)
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	control, err := net.Listen("unix", controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close()
+	peerPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	peer, err := net.Listen("unix", peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	controlDevice, controlInode, err := socketIdentity(controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketDevice, socketInode, err := socketIdentity(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	record := sessionRecord{PID: pid, SessionID: "ambiguous", ProcStart: started, Agenthail: "peer-worker"}
+	if err := writeExclusiveJSON(recordPath, record); err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-worker", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: started, ControlPath: controlPath, ControlDevice: controlDevice, ControlInode: controlInode, SocketPath: peerPath, SocketDevice: socketDevice, SocketInode: socketInode, RecordPath: recordPath}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{livePath, foreignPath, controlPath, recordPath, manifestPath} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("reconcile removed ambiguous artifact %s: %v", path, err)
+		}
+	}
+}
+
+func TestReconcileIgnoresLegacySocketNamespace(t *testing.T) {
+	home := shortTempDir(t, "cp-legacy-")
+	legacyDir := filepath.Join(home, ".agenthail", "peers")
+	if err := os.MkdirAll(legacyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(legacyDir, "0123456789abcdef01234567.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	if err := Reconcile(home, filepath.Join(home, "socks")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("unowned legacy socket was removed: %v", err)
+	}
+}
+
+func TestReconcilePreservesReplacementSocketAtReusedPIDPath(t *testing.T) {
+	home := shortTempDir(t, "cp-replaced-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999999
+	generation := "stale"
+	controlPath := WorkerControlPath(home, generation, pid)
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	peerPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	for _, path := range []string{controlPath, peerPath} {
+		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.SetUnlinkOnClose(false)
+		listener.Close()
+	}
+	controlDevice, controlInode, err := socketIdentity(controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketDevice, socketInode, err := socketIdentity(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	record := sessionRecord{PID: pid, SessionID: "stale", ProcStart: "dead", Agenthail: "peer-worker"}
+	if err := writeExclusiveJSON(recordPath, record); err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-worker", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", ControlPath: controlPath, ControlDevice: controlDevice, ControlInode: controlInode, SocketPath: peerPath, SocketDevice: socketDevice, SocketInode: socketInode, RecordPath: recordPath}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(peerPath); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := net.Listen("unix", peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(peerPath); err != nil {
+		t.Fatalf("replacement socket was removed: %v", err)
+	}
+	for _, path := range []string{controlPath, recordPath, manifestPath} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("stale owned artifact remains %s: %v", path, err)
+		}
+	}
+}
+
+func TestProcessOwnershipRequiresRandomLaunchToken(t *testing.T) {
+	token := uuid.NewString()
+	command := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done", "claude-peer-worker", token)
+	command.Env = append(os.Environ(), "AGENTHAIL_PEER_TOKEN="+token)
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
+	started, err := processStart(command.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{PID: command.Process.Pid, ProcStart: started, ProcessToken: token}
+	if !processOwnsManifest(manifest) {
+		t.Fatal("matching launch token did not prove process ownership")
+	}
+	manifest.ProcessToken = uuid.NewString()
+	if processOwnsManifest(manifest) {
+		t.Fatal("same PID and second-resolution start time accepted a different launch token")
 	}
 }

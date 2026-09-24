@@ -33,11 +33,32 @@ func TestRecentPeerRegistrationIncludesLatestPageAndReadOnly(t *testing.T) {
 		return nil
 	}
 	d.registerRecentClaudePeers(context.Background(), ensure)
-	if len(seen) != 3 || seen["recent"] != 1 || seen["last-page"] != 1 || seen["notes"] != 1 {
+	if len(seen) != 1 || seen["recent"] != 1 {
 		t.Fatalf("registered=%v", seen)
 	}
 	if claude.listCalls.Load() != 0 {
 		t.Fatal("native Claude registry must not be proxied")
+	}
+}
+
+func TestClaudePeerEligibilityKeepsBusyAndRecentOnly(t *testing.T) {
+	now := time.Now()
+	for _, test := range []struct {
+		name    string
+		session surface.Session
+		want    bool
+	}{
+		{name: "busy old", session: surface.Session{ID: "busy", Status: surface.StatusBusy, LastActive: now.Add(-30 * 24 * time.Hour)}, want: true},
+		{name: "recent idle", session: surface.Session{ID: "recent", Status: surface.StatusIdle, LastActive: now.Add(-time.Hour)}, want: true},
+		{name: "old idle", session: surface.Session{ID: "old", Status: surface.StatusIdle, LastActive: now.Add(-25 * time.Hour)}},
+		{name: "unknown timestamp", session: surface.Session{ID: "unknown", Status: surface.StatusUnknown}},
+		{name: "offline", session: surface.Session{ID: "offline", Status: surface.StatusOffline, LastActive: now}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := claudePeerEligible(test.session, now); got != test.want {
+				t.Fatalf("eligible=%v want=%v", got, test.want)
+			}
+		})
 	}
 }
 

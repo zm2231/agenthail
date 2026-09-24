@@ -42,12 +42,33 @@ type Config struct {
 	RegistryPath string
 	Session      surface.Session
 	SocketDir    string
+	ControlPath  string
+	ManifestPath string
+	Generation   string
+	ProcessToken string
 }
 
 type Ready struct {
 	PID         int    `json:"pid"`
 	SocketPath  string `json:"socketPath"`
 	ControlPath string `json:"controlPath"`
+}
+
+type OwnershipManifest struct {
+	Agenthail     string `json:"agenthail"`
+	State         string `json:"state"`
+	Generation    string `json:"generation"`
+	SourceID      string `json:"sourceSessionId"`
+	ProcessToken  string `json:"processToken"`
+	PID           int    `json:"pid"`
+	ProcStart     string `json:"procStart"`
+	ControlPath   string `json:"controlPath"`
+	ControlDevice uint64 `json:"controlDevice"`
+	ControlInode  uint64 `json:"controlInode"`
+	SocketPath    string `json:"socketPath"`
+	SocketDevice  uint64 `json:"socketDevice"`
+	SocketInode   uint64 `json:"socketInode"`
+	RecordPath    string `json:"recordPath"`
 }
 
 type sessionRecord struct {
@@ -67,6 +88,7 @@ type sessionRecord struct {
 	UpdatedAt           int64  `json:"updatedAt"`
 	StatusUpdatedAt     int64  `json:"statusUpdatedAt"`
 	Agenthail           string `json:"agenthail"`
+	ProcessToken        string `json:"processToken"`
 }
 
 type frame struct {
@@ -101,15 +123,25 @@ type controlError struct {
 	Error string `json:"error"`
 }
 
-func ControlPath(home, senderID string) string {
-	h := sha256.Sum256([]byte(senderID))
-	return filepath.Join(home, ".agenthail", "peers", hex.EncodeToString(h[:])[:24]+".sock")
+func RuntimeRoot(home string) string {
+	return filepath.Join(home, ".agenthail", "run", "p")
+}
+
+func WorkerControlPath(home, generation string, pid int) string {
+	return filepath.Join(RuntimeRoot(home), generation, strconv.Itoa(pid)+".sock")
+}
+
+func WorkerManifestPath(home, generation string, pid int) string {
+	return filepath.Join(RuntimeRoot(home), generation, strconv.Itoa(pid)+".json")
 }
 
 func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Writer) error {
 	c, err := normalizeConfig(config)
 	if err != nil {
 		return err
+	}
+	if c.ProcessToken != "" && os.Getenv("AGENTHAIL_PEER_TOKEN") != c.ProcessToken {
+		return errors.New("Claude peer worker process token does not match its launch environment")
 	}
 	pid := os.Getpid()
 	procStart, err := processStart(pid)
@@ -118,42 +150,106 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	}
 	claudeID := canonicalID(c.Session.Surface, c.Session.ID)
 	socketPath := filepath.Join(c.SocketDir, strconv.Itoa(pid)+".sock")
-	controlPath := ControlPath(c.Home, c.Session.ID)
+	controlPath := c.ControlPath
+	if controlPath == "" {
+		controlPath = WorkerControlPath(c.Home, c.Generation, pid)
+	}
+	manifestPath := c.ManifestPath
+	if manifestPath == "" {
+		manifestPath = WorkerManifestPath(c.Home, c.Generation, pid)
+	}
 	if err := os.MkdirAll(c.SocketDir, 0700); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
 		return err
 	}
+	recordPath := filepath.Join(c.Home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	if err := requireAbsent(socketPath, controlPath, recordPath, manifestPath); err != nil {
+		return err
+	}
+	pending := OwnershipManifest{Agenthail: "peer-worker", State: "starting", Generation: c.Generation, SourceID: c.Session.ID, PID: pid, ProcStart: procStart, ControlPath: controlPath, SocketPath: socketPath, RecordPath: recordPath}
+	pending.ProcessToken = c.ProcessToken
+	if err := writeExclusiveJSONAtomic(manifestPath, pending); err != nil {
+		return fmt.Errorf("write pending peer ownership manifest: %w", err)
+	}
 	ln, err := listenOwned(socketPath)
 	if err != nil {
+		cleanupManifest(manifestPath, pending)
 		return fmt.Errorf("listen peer socket: %w", err)
 	}
+	socketDevice, socketInode, err := socketIdentity(socketPath)
+	if err != nil {
+		ln.Close()
+		cleanupManifest(manifestPath, pending)
+		return fmt.Errorf("read peer socket identity: %w", err)
+	}
+	peerOwned := pending
+	peerOwned.SocketDevice = socketDevice
+	peerOwned.SocketInode = socketInode
+	if err := replaceManifest(manifestPath, pending, peerOwned); err != nil {
+		ln.Close()
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		cleanupManifest(manifestPath, pending)
+		return fmt.Errorf("record peer socket ownership: %w", err)
+	}
+	pending = peerOwned
 	cl, err := listenOwned(controlPath)
 	if err != nil {
 		ln.Close()
-		os.Remove(socketPath)
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		cleanupManifest(manifestPath, pending)
 		return fmt.Errorf("listen control socket: %w", err)
 	}
 	started := time.Now().UnixMilli()
-	recordPath := filepath.Join(c.Home, ".claude", "sessions", strconv.Itoa(pid)+".json")
 	record := sessionRecord{PID: pid, SessionID: claudeID, Cwd: c.Session.Cwd, StartedAt: started, ProcStart: procStart,
 		Version: "agenthail", PeerProtocol: peerProtocol, Kind: "interactive", Entrypoint: "cli", MessagingSocketPath: socketPath,
-		Name: "agenthail/" + string(c.Session.Surface) + ": " + c.Session.Name, NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker"}
-	if err := writeExclusiveJSON(recordPath, record); err != nil {
+		Name: "agenthail/" + string(c.Session.Surface) + ": " + c.Session.Name, NameSince: started, Status: status(c.Session), UpdatedAt: started, StatusUpdatedAt: started, Agenthail: "peer-worker", ProcessToken: c.ProcessToken}
+	controlDevice, controlInode, err := socketIdentity(controlPath)
+	if err != nil {
 		ln.Close()
 		cl.Close()
-		os.Remove(socketPath)
-		os.Remove(controlPath)
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		return fmt.Errorf("read control socket identity: %w", err)
+	}
+	controlOwned := pending
+	controlOwned.ControlDevice = controlDevice
+	controlOwned.ControlInode = controlInode
+	if err := replaceManifest(manifestPath, pending, controlOwned); err != nil {
+		ln.Close()
+		cl.Close()
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		removeOwnedSocket(controlPath, controlDevice, controlInode)
+		cleanupManifest(manifestPath, pending)
+		return fmt.Errorf("record control socket ownership: %w", err)
+	}
+	pending = controlOwned
+	manifest := pending
+	manifest.State = "ready"
+	if err := replaceManifest(manifestPath, pending, manifest); err != nil {
+		ln.Close()
+		cl.Close()
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		removeOwnedSocket(controlPath, controlDevice, controlInode)
+		cleanupManifest(manifestPath, pending)
+		return fmt.Errorf("complete peer ownership manifest: %w", err)
+	}
+	if err := writeExclusiveJSONAtomic(recordPath, record); err != nil {
+		ln.Close()
+		cl.Close()
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		removeOwnedSocket(controlPath, controlDevice, controlInode)
+		cleanupManifest(manifestPath, manifest)
 		return err
 	}
 	reg, err := registry.Open(c.RegistryPath)
 	if err != nil {
+		cleanupManifest(manifestPath, manifest)
 		cleanupOwned(recordPath, record)
 		ln.Close()
 		cl.Close()
-		os.Remove(socketPath)
-		os.Remove(controlPath)
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		removeOwnedSocket(controlPath, controlDevice, controlInode)
 		return err
 	}
 	defer reg.Close()
@@ -171,6 +267,9 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 		listeners.Wait()
 		handlers.Wait()
 		cleanupOwned(recordPath, record)
+		cleanupManifest(manifestPath, manifest)
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		removeOwnedSocket(controlPath, controlDevice, controlInode)
 	}()
 	if ready != nil {
 		if err := json.NewEncoder(ready).Encode(Ready{PID: pid, SocketPath: socketPath, ControlPath: controlPath}); err != nil {
@@ -188,12 +287,11 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	return nil
 }
 
-func Send(ctx context.Context, home, senderID, targetSocket, message string) (*surface.SendResult, error) {
-	if strings.TrimSpace(senderID) == "" || strings.TrimSpace(message) == "" {
-		return nil, surface.DeliveryTerminal(errors.New("sender and message are required"), surface.DeliveryInvalidRequest)
+func Send(ctx context.Context, controlPath, senderID, targetSocket, message string) (*surface.SendResult, error) {
+	if err := ValidateSend(senderID, targetSocket, message); err != nil {
+		return nil, err
 	}
-	control := ControlPath(home, senderID)
-	conn, err := dialContext(ctx, control)
+	conn, err := dialContext(ctx, controlPath)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("peer control socket: %w", err))
 	}
@@ -204,9 +302,6 @@ func Send(ctx context.Context, home, senderID, targetSocket, message string) (*s
 		return nil, err
 	}
 	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message})
-	if len(req) >= maxLineBytes {
-		return nil, surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
-	}
 	if _, err := conn.Write(append(req, '\n')); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -230,6 +325,20 @@ func Send(ctx context.Context, home, senderID, targetSocket, message string) (*s
 	}
 }
 
+func ValidateSend(senderID, targetSocket, message string) error {
+	if strings.TrimSpace(senderID) == "" || strings.TrimSpace(targetSocket) == "" || strings.TrimSpace(message) == "" {
+		return surface.DeliveryTerminal(errors.New("sender, target socket, and message are required"), surface.DeliveryInvalidRequest)
+	}
+	req, err := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message})
+	if err != nil {
+		return surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
+	}
+	if len(req) >= maxLineBytes {
+		return surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
+	}
+	return nil
+}
+
 func normalizeConfig(c Config) (Config, error) {
 	if c.Home == "" {
 		c.Home, _ = os.UserHomeDir()
@@ -239,6 +348,9 @@ func normalizeConfig(c Config) (Config, error) {
 	}
 	if c.SocketDir == "" {
 		c.SocketDir = defaultSocketDir
+	}
+	if c.Generation == "" {
+		c.Generation = "direct"
 	}
 	return c, nil
 }
@@ -279,7 +391,21 @@ func listenOwned(path string) (net.Listener, error) {
 		os.Remove(path)
 		return nil, err
 	}
+	if unixListener, ok := ln.(*net.UnixListener); ok {
+		unixListener.SetUnlinkOnClose(false)
+	}
 	return ln, nil
+}
+
+func requireAbsent(paths ...string) error {
+	for _, path := range paths {
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("path already exists: %s", path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeExclusiveJSON(path string, value any) error {
@@ -291,12 +417,40 @@ func writeExclusiveJSON(path string, value any) error {
 		return fmt.Errorf("create owned session record: %w", err)
 	}
 	encodeErr := json.NewEncoder(f).Encode(value)
+	syncErr := f.Sync()
 	closeErr := f.Close()
-	if encodeErr != nil || closeErr != nil {
+	if encodeErr != nil || syncErr != nil || closeErr != nil {
 		_ = os.Remove(path)
-		return errors.Join(encodeErr, closeErr)
+		return errors.Join(encodeErr, syncErr, closeErr)
 	}
 	return nil
+}
+
+func writeExclusiveJSONAtomic(path string, value any) error {
+	tmp := path + ".tmp." + uuid.NewString()
+	if err := writeExclusiveJSON(tmp, value); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err := os.Link(tmp, path); err != nil {
+		return fmt.Errorf("publish owned record: %w", err)
+	}
+	return nil
+}
+
+func replaceManifest(path string, current, replacement OwnershipManifest) error {
+	if !manifestOwned(path, current) {
+		return fmt.Errorf("peer ownership manifest changed before activation")
+	}
+	tmp := path + ".tmp." + uuid.NewString()
+	if err := writeExclusiveJSON(tmp, replacement); err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if !manifestOwned(path, current) {
+		return fmt.Errorf("peer ownership manifest changed before activation")
+	}
+	return os.Rename(tmp, path)
 }
 
 func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *registry.Registry, id string) {
@@ -351,13 +505,191 @@ func recordOwned(path string, record sessionRecord) bool {
 		return false
 	}
 	var current sessionRecord
-	return json.Unmarshal(data, &current) == nil && current.Agenthail == record.Agenthail && current.PID == record.PID && current.SessionID == record.SessionID && current.ProcStart == record.ProcStart
+	return json.Unmarshal(data, &current) == nil && current.Agenthail == record.Agenthail && current.PID == record.PID && current.SessionID == record.SessionID && current.ProcStart == record.ProcStart && current.ProcessToken == record.ProcessToken
 }
 
 func cleanupOwned(path string, record sessionRecord) {
 	if recordOwned(path, record) {
 		_ = os.Remove(path)
 	}
+}
+
+func manifestOwned(path string, expected OwnershipManifest) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var current OwnershipManifest
+	return json.Unmarshal(data, &current) == nil && current == expected
+}
+
+func cleanupManifest(path string, manifest OwnershipManifest) {
+	if manifestOwned(path, manifest) {
+		_ = os.Remove(path)
+	}
+}
+
+// Reconcile retires manifest-backed orphan workers and removes dead, same-user
+// Agenthail artifacts. Foreign or ambiguous endpoints are preserved.
+func Reconcile(home, socketDir string) error {
+	if socketDir == "" {
+		socketDir = defaultSocketDir
+	}
+	root := RuntimeRoot(home)
+	entries, err := filepath.Glob(filepath.Join(root, "*", "*.json"))
+	if err != nil {
+		return err
+	}
+	for _, path := range entries {
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		var manifest OwnershipManifest
+		if json.Unmarshal(data, &manifest) != nil || !validManifest(root, socketDir, path, manifest) {
+			continue
+		}
+		if processOwnsManifest(manifest) && processIsPeerWorker(manifest.PID) {
+			_ = syscall.Kill(manifest.PID, syscall.SIGTERM)
+			deadline := time.Now().Add(time.Second)
+			for processOwnsManifest(manifest) && time.Now().Before(deadline) {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if processOwnsManifest(manifest) {
+				_ = syscall.Kill(manifest.PID, syscall.SIGKILL)
+			}
+		} else if processExists(manifest.PID) {
+			continue
+		}
+		if processExists(manifest.PID) {
+			continue
+		}
+		removeManifestSocket(manifest.ControlPath, manifest.ControlDevice, manifest.ControlInode)
+		removeManifestSocket(manifest.SocketPath, manifest.SocketDevice, manifest.SocketInode)
+		removeOwnedRecord(manifest.RecordPath, manifest)
+		cleanupManifest(path, manifest)
+		_ = os.Remove(filepath.Dir(path))
+	}
+	return nil
+}
+
+func validManifest(root, socketDir, path string, manifest OwnershipManifest) bool {
+	if manifest.Agenthail != "peer-worker" || manifest.PID <= 0 || manifest.Generation == "" || manifest.ProcStart == "" || (manifest.State != "starting" && manifest.State != "ready") {
+		return false
+	}
+	if (manifest.ControlDevice == 0) != (manifest.ControlInode == 0) || (manifest.SocketDevice == 0) != (manifest.SocketInode == 0) {
+		return false
+	}
+	if manifest.State == "ready" && (manifest.ControlInode == 0 || manifest.SocketInode == 0) {
+		return false
+	}
+	wantDir := filepath.Join(root, manifest.Generation)
+	if filepath.Dir(path) != wantDir || manifest.ControlPath != filepath.Join(wantDir, strconv.Itoa(manifest.PID)+".sock") || manifest.SocketPath != filepath.Join(socketDir, strconv.Itoa(manifest.PID)+".sock") {
+		return false
+	}
+	home := filepath.Dir(filepath.Dir(filepath.Dir(root)))
+	return manifest.RecordPath == filepath.Join(home, ".claude", "sessions", strconv.Itoa(manifest.PID)+".json")
+}
+
+func processMatches(pid int, expected string) bool {
+	actual, err := processStart(pid)
+	return err == nil && actual == expected
+}
+
+func processExists(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func processOwnsManifest(manifest OwnershipManifest) bool {
+	if manifest.ProcessToken == "" || !processMatches(manifest.PID, manifest.ProcStart) {
+		return false
+	}
+	out, err := exec.Command("ps", "-ww", "-p", strconv.Itoa(manifest.PID), "-o", "command=").Output()
+	if err != nil {
+		return false
+	}
+	wantToken := manifest.ProcessToken
+	foundWorker := false
+	foundToken := false
+	for _, field := range strings.Fields(string(out)) {
+		foundWorker = foundWorker || field == "claude-peer-worker"
+		foundToken = foundToken || field == wantToken
+	}
+	return foundWorker && foundToken
+}
+
+func processIsPeerWorker(pid int) bool {
+	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && strings.Contains(string(out), "agenthail claude-peer-worker")
+}
+
+func ownedByCurrentUser(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == uint32(os.Getuid())
+}
+
+func socketIdentity(path string) (uint64, uint64, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || info.Mode()&os.ModeSocket == 0 {
+		return 0, 0, fmt.Errorf("not a Unix socket: %s", path)
+	}
+	return uint64(stat.Dev), uint64(stat.Ino), nil
+}
+
+func removeOwnedSocket(path string, device, inode uint64) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if ok && info.Mode()&os.ModeSocket != 0 && ownedByCurrentUser(info) && uint64(stat.Dev) == device && uint64(stat.Ino) == inode {
+		_ = os.Remove(path)
+	}
+}
+
+func removeManifestSocket(path string, device, inode uint64) bool {
+	if device == 0 || inode == 0 {
+		_, err := os.Lstat(path)
+		return os.IsNotExist(err)
+	}
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || uint64(stat.Dev) != device || uint64(stat.Ino) != inode {
+		return false
+	}
+	removeErr := os.Remove(path)
+	return removeErr == nil || os.IsNotExist(removeErr)
+}
+
+func removeOwnedRecord(path string, manifest OwnershipManifest) {
+	if !ownedRecordMatches(path, manifest) {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+func ownedRecordMatches(path string, manifest OwnershipManifest) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var record sessionRecord
+	return json.Unmarshal(data, &record) == nil && record.Agenthail == "peer-worker" && record.PID == manifest.PID && record.ProcStart == manifest.ProcStart && record.ProcessToken == manifest.ProcessToken
 }
 
 func acceptPeers(wg *sync.WaitGroup, ln net.Listener, reg *registry.Registry, c Config, ownSocket string) {

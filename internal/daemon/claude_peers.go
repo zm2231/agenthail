@@ -9,6 +9,8 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+const claudePeerIdleLifetime = 24 * time.Hour
+
 func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -31,6 +33,7 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 		defer ticker.Stop()
 		for {
 			d.registerRecentClaudePeers(ctx, manager.Ensure)
+			manager.RetireInactive(time.Now(), claudePeerIdleLifetime)
 			select {
 			case <-ctx.Done():
 				return
@@ -55,7 +58,7 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, ensure func(cont
 			continue
 		}
 		for _, session := range sessions {
-			if session.ID == "" || session.Status == surface.StatusOffline {
+			if !claudePeerEligible(session, time.Now()) {
 				continue
 			}
 			if err := ctx.Err(); err != nil {
@@ -75,4 +78,14 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, ensure func(cont
 			}
 		}
 	}
+}
+
+func claudePeerEligible(session surface.Session, now time.Time) bool {
+	if session.ID == "" || session.Status == surface.StatusOffline {
+		return false
+	}
+	if session.Status == surface.StatusBusy {
+		return true
+	}
+	return !session.LastActive.IsZero() && now.Sub(session.LastActive) <= claudePeerIdleLifetime
 }

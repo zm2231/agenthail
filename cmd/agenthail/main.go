@@ -21,10 +21,14 @@ var (
 )
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "claude-peer-worker" {
+	if len(os.Args) == 3 && os.Args[1] == "claude-peer-worker" {
 		var config claudepeer.Config
 		if err := json.NewDecoder(os.Stdin).Decode(&config); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if config.ProcessToken == "" || os.Args[2] != config.ProcessToken {
+			fmt.Fprintln(os.Stderr, "Claude peer worker launch token mismatch")
 			os.Exit(1)
 		}
 		if err := claudepeer.RunWorker(context.Background(), config, os.Stdin, os.Stdout); err != nil {
