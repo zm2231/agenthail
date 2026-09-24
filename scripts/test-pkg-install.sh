@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-trap 'echo "error: package install test failed at line $LINENO: $BASH_COMMAND" >&2' ERR
+report_failure() {
+	status=$?
+	echo "error: package install test failed at line $1: $2" >&2
+	tail -n 120 /var/log/install.log 2>/dev/null >&2 || true
+	exit "$status"
+}
+trap 'report_failure "$LINENO" "$BASH_COMMAND"' ERR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 pkg="${1:?usage: scripts/test-pkg-install.sh <Agenthail.pkg>}"

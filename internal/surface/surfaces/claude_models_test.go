@@ -14,6 +14,7 @@ func TestClaudeModelsCoalescesAndCachesSuccessfulCatalog(t *testing.T) {
 	home := t.TempDir()
 	binary := filepath.Join(home, "claude")
 	script := `#!/bin/sh
+IFS= read -r _
 printf x >> "$HOME/catalog-calls"
 sleep 0.05
 printf '%s\n' '{"type":"control_response","response":{"request_id":"agenthail-model-catalog","response":{"models":[{"value":"haiku","displayName":"Haiku"}]}}}'
@@ -60,6 +61,7 @@ func TestClaudeModelCatalogErrorIsNotCached(t *testing.T) {
 	home := t.TempDir()
 	binary := filepath.Join(home, "claude")
 	script := `#!/bin/sh
+IFS= read -r _
 count=$(wc -c < "$HOME/catalog-calls" 2>/dev/null || echo 0)
 printf x >> "$HOME/catalog-calls"
 if [ "$count" -eq 0 ]; then
