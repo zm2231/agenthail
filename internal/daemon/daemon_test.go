@@ -18,32 +18,35 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type daemonSurface struct {
-	kind          surface.SurfaceKind
-	sessions      map[string]surface.Session
-	observations  map[string]*surface.TurnObservation
-	accepted      bool
-	sent          []string
-	models        []string
-	modelOptions  []surface.ModelOption
-	listCalls     atomic.Int32
-	resolveCalls  atomic.Int32
-	rejectBusy    bool
-	sendErr       error
-	turnID        string
-	observeErr    error
-	observeCalls  atomic.Int32
-	startOptions  []surface.SessionStartOptions
-	startErr      error
-	caps          surface.Capabilities
-	streamEvents  []surface.StreamEvent
-	streamErr     error
-	contextUsage  *surface.ContextUsage
-	searchResults []surface.SessionSearchResult
-	searchErr     error
-	compactCalls  atomic.Int32
+	kind           surface.SurfaceKind
+	sessions       map[string]surface.Session
+	observations   map[string]*surface.TurnObservation
+	accepted       bool
+	sent           []string
+	models         []string
+	modelOptions   []surface.ModelOption
+	listCalls      atomic.Int32
+	resolveCalls   atomic.Int32
+	rejectBusy     bool
+	sendErr        error
+	turnID         string
+	observeErr     error
+	observeCalls   atomic.Int32
+	startOptions   []surface.SessionStartOptions
+	startErr       error
+	caps           surface.Capabilities
+	streamEvents   []surface.StreamEvent
+	streamErr      error
+	contextUsage   *surface.ContextUsage
+	searchResults  []surface.SessionSearchResult
+	searchErr      error
+	compactCalls   atomic.Int32
+	compactRelease <-chan struct{}
+	compactErr     error
 }
 
 type runtimeDaemonSurface struct {
@@ -245,9 +248,16 @@ func (*daemonSurface) GoalClear(context.Context, *surface.Session) error       {
 func (*daemonSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
 	return nil, nil
 }
-func (f *daemonSurface) Compact(context.Context, *surface.Session) error {
+func (f *daemonSurface) Compact(ctx context.Context, _ *surface.Session) error {
 	f.compactCalls.Add(1)
-	return nil
+	if f.compactRelease != nil {
+		select {
+		case <-f.compactRelease:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return f.compactErr
 }
 func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "", nil
@@ -802,7 +812,9 @@ func TestScanLoadsUnloadedDesktopCodexSessionForQueueDelivery(t *testing.T) {
 
 func TestQueuedCompactBlocksFollowingMessageUntilCompletion(t *testing.T) {
 	daemon, r, fake, _, to := daemonFixture(t)
-	if err := r.QueueMessage(to.ID, "/compact"); err != nil {
+	release := make(chan struct{})
+	fake.compactRelease = release
+	if _, err := r.QueueCompact(to.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.QueueMessage(to.ID, "follow-up"); err != nil {
@@ -811,21 +823,124 @@ func TestQueuedCompactBlocksFollowingMessageUntilCompletion(t *testing.T) {
 	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
 
 	daemon.scanAndRelay(context.Background())
-	if len(fake.sent) != 1 || fake.sent[0] != "/compact" || r.QueueCount(to.ID) != 1 {
-		t.Fatalf("after compact sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
+	deadline := time.Now().Add(time.Second)
+	for fake.compactCalls.Load() != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(fake.sent) != 0 || r.QueueCount(to.ID) != 2 || fake.compactCalls.Load() != 1 {
+		t.Fatalf("while compacting sent=%v pending=%d compact=%d", fake.sent, r.QueueCount(to.ID), fake.compactCalls.Load())
 	}
 
-	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "compact"}
-	daemon.scanAndRelay(context.Background())
-	if len(fake.sent) != 1 || r.QueueCount(to.ID) != 1 {
-		t.Fatalf("before completion sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
+	close(release)
+	deadline = time.Now().Add(time.Second)
+	for r.QueueCount(to.ID) != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-
-	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
 	daemon.scanAndRelay(context.Background())
-	if len(fake.sent) != 2 || fake.sent[1] != "follow-up" || r.QueueCount(to.ID) != 0 {
+	if len(fake.sent) != 1 || fake.sent[0] != "follow-up" || r.QueueCount(to.ID) != 0 {
 		t.Fatalf("after completion sent=%v pending=%d", fake.sent, r.QueueCount(to.ID))
 	}
+}
+
+func TestQueuedCompactUnknownOutcomeIsNotRetried(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	fake.compactErr = surface.DeliveryOutcomeUnknown(errors.New("confirmation lost"))
+	id, err := r.QueueCompact(to.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	daemon.scanAndRelay(context.Background())
+	deadline := time.Now().Add(time.Second)
+	var item *registry.QueueRow
+	for time.Now().Before(deadline) {
+		item, err = r.QueueItem(id)
+		if err == nil && item.Status == "dead" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err != nil || item == nil || item.Status != "dead" || item.Evidence != surface.EvidenceUnknown {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	daemon.scanAndRelay(context.Background())
+	if fake.compactCalls.Load() != 1 {
+		t.Fatalf("compact calls=%d", fake.compactCalls.Load())
+	}
+}
+
+func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T) {
+	daemon, r, _, _, _ := daemonFixture(t)
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"content":"ready"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, Status: surface.StatusIdle, Transcript: path}
+	if err := r.RegisterSession(session); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueCompact(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestSent := make(chan string, 1)
+	claude := surfaces.NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
+			t.Fatalf("method=%s url=%s", method, url)
+		}
+		requestSent <- body
+		return 200, `{}`, nil
+	})
+
+	daemon.drainMessageQueue(context.Background(), claude, &session)
+	var requestUUID string
+	select {
+	case body := <-requestSent:
+		if !strings.Contains(body, `"content":"/compact"`) {
+			t.Fatalf("body=%s", body)
+		}
+		var envelope struct {
+			Events []struct {
+				Payload struct {
+					UUID string `json:"uuid"`
+				} `json:"payload"`
+			} `json:"events"`
+		}
+		if err := json.Unmarshal([]byte(body), &envelope); err != nil || len(envelope.Events) != 1 {
+			t.Fatalf("body=%s err=%v", body, err)
+		}
+		requestUUID = envelope.Events[0].Payload.UUID
+	case <-time.After(time.Second):
+		t.Fatal("compact command was not sent")
+	}
+	item, err := r.QueueItem(id)
+	if err != nil || item.Status != "inflight" || item.Evidence == surface.EvidenceDelivered {
+		t.Fatalf("before boundary item=%+v err=%v", item, err)
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(f, "{\"type\":\"user\",\"uuid\":%q,\"message\":{\"content\":\"/compact\"}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"done\"}\n", requestUUID); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		item, err = r.QueueItem(id)
+		if err == nil && item.Status == "delivered" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("after boundary item=%+v err=%v", item, err)
+	}
+	daemon.queueWorkers.Wait()
 }
 
 func TestQueueWaitsForBridgeRecoveryAndDeliversExactlyOnce(t *testing.T) {

@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 5
+	schemaVersion   = 7
 	queueMessageTTL = time.Hour
 )
 
@@ -95,6 +95,7 @@ func (r *Registry) migrate() error {
 		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
+		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -224,6 +225,7 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	turn_options TEXT NOT NULL DEFAULT '{}',
 	expires_at_ms INTEGER NOT NULL DEFAULT 0,
 	evidence TEXT NOT NULL DEFAULT '',
+	operation TEXT NOT NULL DEFAULT 'message',
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
@@ -600,7 +602,46 @@ func (r *Registry) QueueMessageWithKey(sessionID, message, deliveryKey string) (
 }
 
 func (r *Registry) QueueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions) (int64, error) {
-	return r.queueMessageWithOptions(sessionID, message, deliveryKey, options, 0)
+	return r.queueMessageWithOptions(sessionID, message, deliveryKey, options, 0, QueueOperationMessage)
+}
+
+type QueueOperation string
+
+const (
+	QueueOperationMessage QueueOperation = "message"
+	QueueOperationCompact QueueOperation = "compact"
+)
+
+// QueueCompact preserves compact as a control operation. It must never be
+// drained through a message transport, where "/compact" would become prompt text.
+func (r *Registry) QueueCompact(sessionID string) (int64, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var existing int64
+	err = tx.QueryRow(`SELECT id FROM message_queue WHERE session_id=? AND operation=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID, QueueOperationCompact).Scan(&existing)
+	if err == nil {
+		return existing, tx.Commit()
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,expires_at_ms,status,updated_at) VALUES (?,?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: "compact"})
+	return id, nil
 }
 
 func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, relayHops int) (int64, error) {
@@ -608,12 +649,12 @@ func (r *Registry) QueueRelayMessage(sessionID, message, deliveryKey string, rel
 }
 
 func (r *Registry) QueueRelayMessageWithOptions(sessionID, message, deliveryKey string, relayHops int, options surface.SendOptions) (int64, error) {
-	return r.queueMessageWithOptions(sessionID, message, deliveryKey, options, relayHops)
+	return r.queueMessageWithOptions(sessionID, message, deliveryKey, options, relayHops, QueueOperationMessage)
 }
 
-func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int) (int64, error) {
+func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation) (int64, error) {
 	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
-	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt)
+	res, err := r.db.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt)
 
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -711,6 +752,7 @@ type QueuedMessage struct {
 	SourceSessionID string
 	Attempts        int
 	RelayHops       int
+	Operation       QueueOperation
 }
 
 const (
@@ -913,6 +955,7 @@ type QueueRow struct {
 	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
+	Operation       QueueOperation           `json:"operation"`
 }
 
 type AttentionItem struct {
@@ -933,7 +976,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
-	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence FROM message_queue`
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
 	}
@@ -951,7 +994,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	for rows.Next() {
 		var row QueueRow
 		var evidence string
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence); err != nil {
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation); err != nil {
 			return nil, err
 		}
 		row.Historical = queueRowIsHistorical(row, now)
@@ -968,7 +1011,7 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	}
 	var row QueueRow
 	var evidence string
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence)
+	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation)
 	if err != nil {
 		return nil, err
 	}
@@ -1161,14 +1204,18 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-time.Minute).UnixMilli() {
+	inflightTimeout := time.Minute
+	if item.Operation == QueueOperationCompact {
+		inflightTimeout = 10 * time.Minute
+	}
+	if status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli() {
 		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}

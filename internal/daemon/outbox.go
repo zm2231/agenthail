@@ -11,6 +11,8 @@ import (
 
 const maxDeliveryAttempts = 5
 
+const compactOperationTimeout = 5 * time.Minute
+
 func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
 	now := time.Now()
 	item, err := d.Registry.ClaimNextMessage(session.ID, now)
@@ -19,6 +21,14 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		return
 	}
 	if item == nil {
+		return
+	}
+	if item.Operation == registry.QueueOperationCompact {
+		d.queueWorkers.Add(1)
+		go func() {
+			defer d.queueWorkers.Done()
+			d.runQueuedCompact(ctx, adapter, session, item)
+		}()
 		return
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
@@ -36,35 +46,7 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	}
 	cancel()
 	if sendErr != nil {
-		if surface.IsDeliveryUnavailable(sendErr) {
-			if err := d.Registry.DeferMessage(item.ID, sendErr, now); err != nil {
-				d.log.Printf("defer queue item %d: %s", item.ID, err)
-			}
-			d.log.Printf("queue delivery %d did not start and will retry: %s", item.ID, sendErr)
-			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
-			return
-		}
-		if surface.IsDeliveryOutcomeUnknown(sendErr) {
-			if err := d.Registry.DeadLetterUnknown(item.ID, sendErr); err != nil {
-				d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
-			}
-			d.log.Printf("queue delivery %d has unknown outcome and requires explicit retry: %s", item.ID, sendErr)
-			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
-			return
-		}
-		if surface.IsDeliveryTerminal(sendErr) {
-			if err := d.Registry.DeadLetterMessage(item.ID, sendErr); err != nil {
-				d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
-			}
-			d.log.Printf("queue delivery %d was rejected: %s", item.ID, sendErr)
-			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
-			return
-		}
-		if err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts); err != nil {
-			d.log.Printf("nack queue item %d: %s", item.ID, err)
-		}
-		d.log.Printf("queue delivery %d failed: %s", item.ID, sendErr)
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: sendErr.Error()})
+		d.finishQueueFailure(item, session, sendErr, now)
 		return
 	}
 	if result == nil || !result.Accepted {
@@ -93,4 +75,54 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	}
 	d.log.Printf("delivered queue item %d to %s", item.ID, d.resolveDisplay(session.ID))
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: historyKind, SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID})
+}
+
+func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, session *surface.Session, item *registry.QueuedMessage) {
+	defer d.publishEvent("state.changed", session.ID, map[string]string{"source": "compact"})
+	operationCtx, cancel := context.WithTimeout(ctx, compactOperationTimeout)
+	defer cancel()
+	err := adapter.Compact(operationCtx, session)
+	if err != nil {
+		d.finishQueueFailure(item, session, err, time.Now())
+		return
+	}
+	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered); err != nil {
+		d.log.Printf("ack compact queue item %d: %s", item.ID, err)
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: "compact", Error: err.Error()})
+		return
+	}
+	d.log.Printf("completed compact queue item %d for %s", item.ID, d.resolveDisplay(session.ID))
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: "compact", Evidence: surface.EvidenceDelivered})
+}
+
+func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {
+	message := item.Message
+	if item.Operation != registry.QueueOperationMessage {
+		message = string(item.Operation)
+	}
+	if surface.IsDeliveryUnavailable(sendErr) {
+		if err := d.Registry.DeferMessage(item.ID, sendErr, now); err != nil {
+			d.log.Printf("defer queue item %d: %s", item.ID, err)
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "deferred", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		return
+	}
+	if surface.IsDeliveryOutcomeUnknown(sendErr) {
+		if err := d.Registry.DeadLetterUnknown(item.ID, sendErr); err != nil {
+			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		return
+	}
+	if surface.IsDeliveryTerminal(sendErr) {
+		if err := d.Registry.DeadLetterMessage(item.ID, sendErr); err != nil {
+			d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		return
+	}
+	if err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts); err != nil {
+		d.log.Printf("nack queue item %d: %s", item.ID, err)
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 }

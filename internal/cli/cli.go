@@ -1310,11 +1310,15 @@ func (a *App) cmdCompact(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	_, err = (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
+	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Compact(ctx, surf, sess)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("compact requested for %s\n", a.resolveDisplay(sess.ID))
+	if receipt.Evidence == surface.EvidenceQueued {
+		fmt.Printf("compact queued for %s as #%d; it will run when the target is idle\n", a.resolveDisplay(sess.ID), receipt.QueueID)
+		return nil
+	}
+	fmt.Printf("compacted %s\n", a.resolveDisplay(sess.ID))
 	return nil
 }
 

@@ -30,6 +30,7 @@ type Daemon struct {
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
 	notificationArmed map[string]bool
+	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	dashboard         *dashboardServer
 }
@@ -164,6 +165,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			d.queueWorkers.Wait()
 			d.log.Printf("stopping")
 			return nil
 		case <-ticker.C:

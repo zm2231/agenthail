@@ -88,6 +88,7 @@ struct SessionState: Codable, Identifiable, Hashable {
 }
 
 struct QueueState: Decodable, Identifiable, Equatable {
+	let operation: String?
     let sourceSessionId: String?
     let effort: String?
     let mode: String?

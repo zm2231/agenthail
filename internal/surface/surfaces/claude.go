@@ -32,9 +32,16 @@ type Claude struct {
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
 	modelsFlight *claudeModelsFlight
+	request      ClaudeRequest
 }
 
+type ClaudeRequest func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error)
+
 func NewClaude(profile, home string) *Claude {
+	return NewClaudeWithRequest(profile, home, claudeSendRequest)
+}
+
+func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 	if profile == "" {
 		profile = "Default"
 	}
@@ -45,7 +52,7 @@ func NewClaude(profile, home string) *Claude {
 	if bridge == "" {
 		bridge = cookieBridgePath("cookie")
 	}
-	return &Claude{profile: profile, home: home, cookieBridge: bridge}
+	return &Claude{profile: profile, home: home, cookieBridge: bridge, request: request}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -429,7 +436,11 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 	bodyBytes, _ := json.Marshal(body)
 	headers := c.headerMap("", sess.ID)
 	headers["content-type"] = "application/json"
-	status, respBody, err := claudeSendRequest(ctx, "POST",
+	request := c.request
+	if request == nil {
+		request = claudeSendRequest
+	}
+	status, respBody, err := request(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 30*time.Second)
 	if err != nil {
@@ -561,7 +572,34 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
-	return c.sendCommand(ctx, sess, "/compact")
+	path := sess.Transcript
+	if path == "" {
+		path = c.transcriptPath(sess)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("compact confirmation requires a local transcript: %w", err)
+	}
+	result, err := c.postMessage(ctx, sess, "/compact")
+	if err != nil {
+		return err
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return surface.DeliveryOutcomeUnknown(fmt.Errorf("compact was accepted but completion was not observed: %w", ctx.Err()))
+		case <-ticker.C:
+			completed, readErr := readClaudeCompactCompletion(path, info.Size(), result.UUID)
+			if readErr != nil {
+				return surface.DeliveryOutcomeUnknown(fmt.Errorf("read compact completion: %w", readErr))
+			}
+			if completed {
+				return nil
+			}
+		}
+	}
 }
 
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {

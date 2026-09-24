@@ -152,10 +152,10 @@ func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	dispatcher := Dispatcher{Registry: r}
 	claude := &fakeSurface{kind: surface.KindClaude}
 	receipt, err := dispatcher.Compact(context.Background(), claude, claudeSession)
-	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.QueueID != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
-	if r.QueueCount(claudeSession.ID) != 0 || claude.compactCalls != 1 || len(claude.sent) != 0 {
+	if r.QueueCount(claudeSession.ID) != 1 || claude.compactCalls != 0 || len(claude.sent) != 0 {
 		t.Fatalf("sent=%v compactCalls=%d queued=%d", claude.sent, claude.compactCalls, r.QueueCount(claudeSession.ID))
 	}
 	codex := &fakeSurface{kind: surface.KindCodex}
@@ -190,8 +190,9 @@ func TestDispatcherRecordsUnknownOutcomeAsUnknownEvidence(t *testing.T) {
 	if _, err := dispatcher.Deliver(context.Background(), adapter, session, "hello", ""); !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}
-	if _, err := dispatcher.Compact(context.Background(), adapter, session); !surface.IsDeliveryOutcomeUnknown(err) {
-		t.Fatalf("err=%v", err)
+	receipt, err := dispatcher.Compact(context.Background(), adapter, session)
+	if err != nil || receipt.Evidence != surface.EvidenceQueued {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	entries, err := r.ListHistory(10, session.ID)
 	if err != nil {
@@ -200,9 +201,7 @@ func TestDispatcherRecordsUnknownOutcomeAsUnknownEvidence(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("entries=%+v", entries)
 	}
-	for _, entry := range entries {
-		if entry.Evidence != surface.EvidenceUnknown {
-			t.Fatalf("entry %+v must carry unknown evidence", entry)
-		}
+	if entries[0].Evidence != surface.EvidenceQueued || entries[1].Evidence != surface.EvidenceUnknown {
+		t.Fatalf("entries=%+v", entries)
 	}
 }

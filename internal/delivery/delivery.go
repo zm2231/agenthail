@@ -39,11 +39,18 @@ func (d Dispatcher) Compact(ctx context.Context, adapter surface.Surface, sessio
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		return nil, err
 	}
+	if adapter.Name() == surface.KindClaude && d.Registry != nil {
+		queueID, err := d.Registry.QueueCompact(session.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &Receipt{Evidence: surface.EvidenceQueued, SessionID: session.ID, QueueID: queueID, Detail: "compact will run when the target is idle"}, nil
+	}
 	if err := adapter.Compact(ctx, session); err != nil {
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "compact", Error: err.Error()})
 		return nil, err
 	}
-	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "compact"})
+	d.record(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, Message: "compact", Evidence: surface.EvidenceDelivered})
 	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
 }
 
