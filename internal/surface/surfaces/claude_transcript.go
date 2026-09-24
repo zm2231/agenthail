@@ -269,6 +269,34 @@ func readClaudeCommandResult(path string, offset int64, commandName, commandArgs
 	return "", false, nil
 }
 
+func readClaudeCompactCompletion(path string, offset int64, requestUUID string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return false, err
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
+	matchedRequest := false
+	for scanner.Scan() {
+		var record claudeRecord
+		if json.Unmarshal(scanner.Bytes(), &record) != nil {
+			continue
+		}
+		if record.Type == "user" && record.UUID == requestUUID && strings.TrimSpace(transcriptText(record.Message.Content)) == "/compact" {
+			matchedRequest = true
+			continue
+		}
+		if matchedRequest && record.Type == "system" && record.Subtype == "compact_boundary" {
+			return true, nil
+		}
+	}
+	return false, scanner.Err()
+}
+
 func transcriptText(content any) string {
 	switch value := content.(type) {
 	case string:

@@ -127,8 +127,53 @@ func TestOpenReconcilesRequiredColumnsWhenDatabaseVersionIsNewer(t *testing.T) {
 		t.Fatalf("evidence=%q err=%v", evidence, err)
 	}
 	var version int
-	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 6 {
+	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("version=%d err=%v", version, err)
+	}
+}
+
+func TestOpenAddsQueueOperationToExistingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, first, "session")
+	if _, err := first.QueueMessageWithKey("session", "hello", "legacy-key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.Exec(`ALTER TABLE message_queue DROP COLUMN operation; PRAGMA user_version=6`); err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	item, err := second.ClaimNextMessage("session", time.Now())
+	if err != nil || item == nil || item.Operation != QueueOperationMessage {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+func TestQueueCompactIsTypedAndDeduplicated(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	first, err := r.QueueCompact("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.QueueCompact("session")
+	if err != nil || second != first || r.QueueCount("session") != 1 {
+		t.Fatalf("first=%d second=%d count=%d err=%v", first, second, r.QueueCount("session"), err)
+	}
+	item, err := r.ClaimNextMessage("session", time.Now())
+	if err != nil || item == nil || item.Operation != QueueOperationCompact || item.Message != "/compact" {
+		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }
 

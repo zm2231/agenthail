@@ -216,7 +216,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"compact","sessionId":"claude"}`))
 	d.dashboardActionHandler(response, request)
-	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 0 || !strings.Contains(response.Body.String(), `"evidence":"delivered"`) || fake.compactCalls.Load() != 1 {
+	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"evidence":"queued"`) || fake.compactCalls.Load() != 0 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
 }

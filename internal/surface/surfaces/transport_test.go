@@ -2,6 +2,8 @@ package surfaces
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -283,21 +285,82 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 	}
 }
 
-func TestClaudeCompactPostsRemoteSlashCommandWithoutTranscriptConfirmation(t *testing.T) {
+func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	original := claudeSendRequest
 	t.Cleanup(func() { claudeSendRequest = original })
+	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
 	claudeSendRequest = func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
 		body = requestBody
+		var envelope struct {
+			Events []struct {
+				Payload struct {
+					UUID string `json:"uuid"`
+				} `json:"payload"`
+			} `json:"events"`
+		}
+		if err := json.Unmarshal([]byte(requestBody), &envelope); err != nil || len(envelope.Events) != 1 || envelope.Events[0].Payload.UUID == "" {
+			t.Fatalf("request body=%s err=%v", requestBody, err)
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Fprintf(f, "\n{\"type\":\"user\",\"uuid\":%q,\"message\":{\"content\":\"/compact\"}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"done\"}\n", envelope.Events[0].Payload.UUID); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
 		return 200, `{}`, nil
 	}
-	if err := (&Claude{}).Compact(context.Background(), &surface.Session{ID: "session_test"}); err != nil {
+	if err := (&Claude{}).Compact(context.Background(), &surface.Session{ID: "session_test", Transcript: path}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(body, `"content":"/compact"`) {
 		t.Fatalf("body=%s", body)
+	}
+}
+
+func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
+	claude := NewClaudeWithRequest("", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString("\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"other compact\"}\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return 200, `{}`, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := claude.Compact(ctx, &surface.Session{ID: "session_test", Transcript: path})
+	if !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *testing.T) {
+	original := claudeSendRequest
+	t.Cleanup(func() { claudeSendRequest = original })
+	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
+	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		return 200, `{}`, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := (&Claude{}).Compact(ctx, &surface.Session{ID: "session_test", Transcript: path})
+	if !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
 	}
 }

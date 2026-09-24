@@ -584,10 +584,10 @@ func TestCompactUsesTypedControlForWorkingClaudeSession(t *testing.T) {
 	}
 	app, registry := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"busy"}) })
-	if err != nil || !strings.Contains(output, "compact requested") || registry.QueueCount("busy") != 0 {
+	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("busy") != 1 {
 		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("busy"), err)
 	}
-	if fake.compactCalls != 1 || len(fake.sent) != 0 {
+	if fake.compactCalls != 0 || len(fake.sent) != 0 {
 		t.Fatalf("compactCalls=%d sent=%v", fake.compactCalls, fake.sent)
 	}
 }
@@ -603,10 +603,10 @@ func TestCompactRequestsIdleClaudeSessionWithoutWaiting(t *testing.T) {
 	}
 	app, registry := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"idle"}) })
-	if err != nil || !strings.Contains(output, "compact requested") || registry.QueueCount("idle") != 0 {
+	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("idle") != 1 {
 		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("idle"), err)
 	}
-	if fake.compactCalls != 1 || len(fake.sent) != 0 {
+	if fake.compactCalls != 0 || len(fake.sent) != 0 {
 		t.Fatalf("compactCalls=%d sent=%v", fake.compactCalls, fake.sent)
 	}
 }

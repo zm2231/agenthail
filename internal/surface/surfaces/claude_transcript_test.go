@@ -454,6 +454,31 @@ func TestClaudeCommandResultStripsMarkupAndANSI(t *testing.T) {
 	}
 }
 
+func TestClaudeCompactCompletionRequiresNewBoundary(t *testing.T) {
+	path := writeTranscript(t, `{"type":"system","subtype":"compact_boundary","content":"old"}`)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed, err := readClaudeCompactCompletion(path, info.Size(), "request"); err != nil || completed {
+		t.Fatalf("before append completed=%v err=%v", completed, err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n{\"type\":\"user\",\"uuid\":\"request\",\"message\":{\"content\":\"/compact\"}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"new\"}\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if completed, err := readClaudeCompactCompletion(path, info.Size(), "request"); err != nil || !completed {
+		t.Fatalf("after append completed=%v err=%v", completed, err)
+	}
+}
+
 func TestClaudeSlashCommandsAreNotActiveTurns(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
