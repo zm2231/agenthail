@@ -352,7 +352,7 @@ func (m *Manager) Ensure(ctx context.Context, id string) error {
 	manifestPath := claudepeer.WorkerManifestPath(m.home, m.generation, command.Process.Pid)
 	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken}
 	if err := json.NewEncoder(input).Encode(config); err != nil {
-		return fail(err)
+		return startupFailure(err)
 	}
 	ready := make(chan error, 1)
 	go func() {
