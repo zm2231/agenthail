@@ -349,7 +349,7 @@ struct ActionReceipt: Decodable {
     }
 }
 struct DeliveryReceipt: Decodable, Sendable {
-	let output: String?
+    let output: String?
     let evidence: String?
     let queueId: Int64?
     let requestId: String?

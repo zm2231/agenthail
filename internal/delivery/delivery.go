@@ -15,6 +15,7 @@ type Receipt struct {
 	Evidence  surface.DeliveryEvidence `json:"evidence"`
 	SessionID string                   `json:"sessionId"`
 	RequestID string                   `json:"requestId,omitempty"`
+	Source    string                   `json:"source,omitempty"`
 	TurnID    string                   `json:"turnId,omitempty"`
 	QueueID   int64                    `json:"queueId,omitempty"`
 	Detail    string                   `json:"detail,omitempty"`
@@ -65,8 +66,8 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
 			return nil, err
 		}
-		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer", Result: result.RequestID, Evidence: result.Evidence})
-		return &Receipt{Evidence: result.Evidence, SessionID: session.ID, RequestID: result.RequestID, TurnID: result.TurnID, Detail: result.Detail}, nil
+		d.record(registry.HistoryEntry{Kind: string(result.Evidence), SessionID: session.ID, Message: "steer", Result: result.RequestID, Evidence: result.Evidence})
+		return &Receipt{Evidence: result.Evidence, SessionID: session.ID, RequestID: result.RequestID, Source: result.Source, TurnID: result.TurnID, Detail: result.Detail}, nil
 	}
 	if err := adapter.Steer(ctx, session, message); err != nil {
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})

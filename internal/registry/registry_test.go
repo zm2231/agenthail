@@ -1130,6 +1130,19 @@ func TestDeliveryHistoryIsBoundedAndFilterable(t *testing.T) {
 	}
 }
 
+func TestControlEvidenceSurvivesHistoryReload(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, evidence := range []surface.DeliveryEvidence{surface.EvidenceTransportAccepted, surface.EvidenceReplyObserved, surface.EvidenceHeld} {
+		if err := r.RecordHistory(HistoryEntry{Kind: string(evidence), SessionID: "control", Result: "request-uuid", Evidence: evidence}); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := r.ListHistory(1, "control")
+		if err != nil || len(entries) != 1 || entries[0].Evidence != evidence || entries[0].Result != "request-uuid" {
+			t.Fatalf("entries=%+v err=%v", entries, err)
+		}
+	}
+}
+
 func TestListHistoryPageUsesStableCursor(t *testing.T) {
 	r := openTestRegistry(t)
 	for i := 0; i < 5; i++ {

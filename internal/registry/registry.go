@@ -894,7 +894,7 @@ func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 	switch entry.Kind {
 	case "queued":
 		return surface.EvidenceQueued
-	case "peer_sent", "peer_received", "transport-accepted":
+	case "peer_sent", "peer_received", "transport-accepted", "transport_accepted":
 		return surface.EvidenceTransportAccepted
 	case "peer_receipt":
 		status := strings.ToLower(strings.TrimSpace(strings.SplitN(entry.Result, ":", 2)[0]))
@@ -910,8 +910,10 @@ func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 		}
 	case "sent", "delivered", "control-accepted":
 		return surface.EvidenceDelivered
-	case "reply", "completed":
+	case "reply", "completed", "reply_observed":
 		return surface.EvidenceReplyObserved
+	case "held":
+		return surface.EvidenceHeld
 	case "unknown", "ack-error":
 		return surface.EvidenceUnknown
 	case "failed", "peer_rejected", "control-failed":

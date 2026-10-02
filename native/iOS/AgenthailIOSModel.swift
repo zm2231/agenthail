@@ -431,7 +431,10 @@ final class AgenthailIOSModel: ObservableObject {
             defer { sendingSessionIDs.remove(session.id) }
             do {
                 let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
-                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence)
+                deliveryStatus[session.id] = response.result?.detail ?? deliveryLabel(response.result?.evidence)
+                if let receipt = response.result, let requestID = receipt.requestId {
+                    controlOutput[session.id] = [receipt.detail, "Request: \(requestID)", receipt.evidence].compactMap { $0 }.joined(separator: "\n")
+                }
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[session.id] = queueID
                 }

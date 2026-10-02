@@ -53,6 +53,8 @@ final class TurnSettingsFlowTests: XCTestCase {
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "steer")
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["effort"])
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["mode"])
+        XCTAssertTrue(model.controlOutput[fixture.session.id]?.contains("posted-steer-uuid") == true)
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Application to the active turn unconfirmed")
         XCTAssertEqual(model.turnSettings(for: fixture.session.id), TurnSettings(effort: "high", mode: .plan))
     }
 
@@ -166,6 +168,9 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
                 return (502, #"{"ok":false,"error":{"code":"control_failed","message":"accepted but completion was not observed"},"result":{"evidence":"unknown","requestId":"request-proof","detail":"Original turn termination unconfirmed","source":"claude-control-response"}}"#)
             }
             if shouldFail { return (502, #"{"error":{"message":"unavailable"}}"#) }
+            if body["action"] as? String == "steer" {
+                return (200, #"{"ok":true,"result":{"evidence":"transport_accepted","requestId":"posted-steer-uuid","detail":"Application to the active turn unconfirmed"}}"#)
+            }
             return (200, #"{"ok":true}"#)
         }
 
