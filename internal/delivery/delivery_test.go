@@ -64,6 +64,19 @@ func (*fakeSurface) EnsureWritable(_ context.Context, session *surface.Session) 
 	return nil
 }
 
+type controlSurface struct{ *fakeSurface }
+
+func (f *controlSurface) Control(context.Context, *surface.Session, surface.ControlRequest) (*surface.ControlResult, error) {
+	return &surface.ControlResult{RequestID: "posted-uuid", TurnID: "posted-uuid", Evidence: surface.EvidenceTransportAccepted}, nil
+}
+
+func TestSteerReceiptPreservesRequestUUID(t *testing.T) {
+	receipt, err := (Dispatcher{}).Steer(context.Background(), &controlSurface{&fakeSurface{}}, &surface.Session{ID: "test"}, "guidance")
+	if err != nil || receipt.RequestID != "posted-uuid" || receipt.TurnID != "posted-uuid" {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+}
+
 func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {

@@ -4,6 +4,19 @@ import XCTest
 
 final class TurnSettingsFlowTests: XCTestCase {
     @MainActor
+    func testAdditionalClaudeControlsSendExplicitValues() async throws {
+        let fixture = try makeFixture(status: "idle")
+        for (action, value) in [("context", nil), ("status", nil), ("usage", nil), ("effort", "medium"), ("rename", "Disposable tester")] as [(String, String?)] {
+            TurnSettingsFlowProtocol.state.reset()
+            let model = makeModel()
+            model.action(action, session: fixture.session, message: value)
+            try await waitUntil { model.pendingControls.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+            XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, action)
+            XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["message"] as? String, value)
+        }
+    }
+
+    @MainActor
     func testUnknownControlReplacesStaleDeliveryState() async throws {
         let fixture = try makeFixture(status: "busy")
         TurnSettingsFlowProtocol.state.reset(unknownControl: true)

@@ -865,6 +865,8 @@ struct SessionInspector: View {
     let detail: SessionDetail
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
+    @State private var renamingClaude = false
+    @State private var claudeName = ""
     var body: some View {
         NavigationStack {
             List {
@@ -912,14 +914,36 @@ struct SessionInspector: View {
                             Button("Change model") { showingModels = true }
                                 .disabled(model.pendingControls.contains(session.id))
                         }
+                        if session.surface == "claude" && detail.capabilities.model {
+                            Group {
+                                Button("Check runtime status") { model.action("status", session: session) }
+                                Button("Inspect context") { model.action("context", session: session) }
+                                Button("Check usage") { model.action("usage", session: session) }
+                                Menu("Change effort") {
+                                    ForEach(["low", "medium", "high", "max", "auto"], id: \.self) { effort in
+                                        Button(effort.capitalized) { model.action("effort", session: session, message: effort) }
+                                    }
+                                }
+                                Button("Rename Claude session") { claudeName = session.name; renamingClaude = true }
+                            }.disabled(model.pendingControls.contains(session.id))
+                        }
                         if detail.capabilities.compact { Button("Compact context", systemImage: "arrow.down.right.and.arrow.up.left") { model.action("compact", session: session); dismiss() } }
                         if detail.capabilities.interrupt && detail.session.status == "busy" { Button("Stop current turn", systemImage: "stop.fill", role: .destructive) { model.action("interrupt", session: session); dismiss() } }
                         LabeledContent("Send messages", value: detail.capabilities.send ? "Available" : "Unavailable")
                         LabeledContent("Steer active turns", value: detail.capabilities.steer ? "Available" : "Unavailable")
                     }
                 }
+                if let output = model.controlOutput[session.id], !output.isEmpty {
+                    Section("Control result") { Text(output).font(.footnote).textSelection(.enabled) }
+                }
             }
             .navigationTitle("Session details").navigationBarTitleDisplayMode(.inline)
+            .alert("Rename Claude session", isPresented: $renamingClaude) {
+                TextField("Session name", text: $claudeName)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") { model.action("rename", session: session, message: claudeName) }
+                    .disabled(claudeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } message: { Text("Changes the Claude session name, not its Agenthail alias.") }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: detail.models ?? [], currentSelectedID: detail.model, allowsDefault: false, onSelect: { value in

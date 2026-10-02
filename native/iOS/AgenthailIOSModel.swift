@@ -16,6 +16,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
     @Published var deliveryStatus: [String: String] = [:]
+    @Published var controlOutput: [String: String] = [:]
     private var deliveryQueueIDs: [String: Int64] = [:]
     private var refreshingDeliveries = false
     @Published var olderActivity: [TimelineItem] = []
@@ -451,15 +452,16 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    func action(_ action: String, session: SessionState, model: String? = nil) {
+    func action(_ action: String, session: SessionState, model: String? = nil, message: String? = nil) {
         guard let api, !pendingControls.contains(session.id) else { return }
         pendingControls.insert(session.id)
         Task {
             defer { pendingControls.remove(session.id) }
             do {
-                let response = try await api.action(action, sessionID: session.id, model: model)
+                let response = try await api.action(action, sessionID: session.id, message: message, model: model)
                 if let receipt = response.result {
                     deliveryStatus[session.id] = receipt.detail ?? deliveryLabel(receipt.evidence)
+                    controlOutput[session.id] = [receipt.output, receipt.requestId.map { "Request: \($0)" }, receipt.evidence].compactMap { $0 }.joined(separator: "\n")
                 }
                 await refresh(fresh: true)
                 await refreshSession(session.id)
@@ -467,6 +469,7 @@ final class AgenthailIOSModel: ObservableObject {
                 if let apiError = error as? AgenthailAPIError,
                    case .control(_, _, let receipt) = apiError {
                     deliveryStatus[session.id] = receipt.detail ?? deliveryLabel(receipt.evidence)
+                    controlOutput[session.id] = [receipt.detail, receipt.requestId.map { "Request: \($0)" }, receipt.evidence].compactMap { $0 }.joined(separator: "\n")
                 }
                 operationError = error.localizedDescription
             }
