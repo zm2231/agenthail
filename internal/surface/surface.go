@@ -33,6 +33,7 @@ type Session struct {
 	PID        int           `json:"pid"`
 	Status     SessionStatus `json:"status"`
 	Transcript string        `json:"transcript"`
+	ConfigDir  string        `json:"configDir,omitempty"`
 	HasLocal   bool          `json:"hasLocal"`
 	Source     string        `json:"source,omitempty"`
 	Transport  string        `json:"transport,omitempty"`

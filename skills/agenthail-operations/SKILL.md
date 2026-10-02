@@ -46,6 +46,15 @@ uses AgentHail's local app-server bridge. Relevant overrides are
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 
+Alternate Claude sessions: set `AGENTHAIL_CLAUDE_CONFIG_DIRS` to a colon-separated
+list of absolute config directories (for example `/absolute/gentle/.claude`).
+`CLAUDE_CONFIG_DIR` is also discovered; the native `~/.claude` remains included.
+Configure the same roots in the daemon environment. `agenthail daemon install`
+persists them in launchd. `list --json` exposes each session's `configDir`;
+resolve an exact session ID before sending when names or workspaces overlap.
+Keys and transcripts stay in their original root. This does not enable arbitrary
+Claude slash commands. See `docs/maintainers/claude-peers.md` for the local live test.
+
 AgentHail reads these overrides from the environment of each CLI or daemon
 process and stores shared session, alias, queue, relay, and delivery state in
 `~/.agenthail/registry.db`. A launchd service does not inherit variables that

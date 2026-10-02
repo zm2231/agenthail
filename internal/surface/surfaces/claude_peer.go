@@ -64,7 +64,18 @@ func sameClaudeProcessStartInLocation(version, recorded, actual string, localLoc
 }
 
 func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(session.PID)+".json"))
+	root := session.ConfigDir
+	if root == "" {
+		root = c.configDirs[0]
+	}
+	allowed := false
+	for _, configured := range c.configDirs {
+		allowed = allowed || configured == root
+	}
+	if !allowed {
+		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude config directory is not configured: %s", root), surface.DeliveryAccessDenied)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "sessions", strconv.Itoa(session.PID)+".json"))
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}

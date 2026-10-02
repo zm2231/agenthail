@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudeconfig"
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -97,6 +98,7 @@ type managerResponse struct {
 
 type Manager struct {
 	home       string
+	configDirs []string
 	socketDir  string
 	registry   *registry.Registry
 	executable string
@@ -121,6 +123,10 @@ func Start(ctx context.Context, home string, reg *registry.Registry, executable 
 }
 
 func start(ctx context.Context, home string, reg *registry.Registry, executable, socketDir string) (*Manager, error) {
+	roots, err := claudeconfig.Roots(home)
+	if err != nil {
+		return nil, err
+	}
 	path := managerPath(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
@@ -184,6 +190,7 @@ func start(ctx context.Context, home string, reg *registry.Registry, executable,
 	}
 	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint}
 	lockTransferred = true
+	m.configDirs = roots
 	go m.serve()
 	return m, nil
 }
@@ -350,7 +357,7 @@ func (m *Manager) Ensure(ctx context.Context, id string) error {
 	}
 	controlPath := claudepeer.WorkerControlPath(m.home, m.generation, command.Process.Pid)
 	manifestPath := claudepeer.WorkerManifestPath(m.home, m.generation, command.Process.Pid)
-	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken}
+	config := claudepeer.Config{Home: m.home, ClaudeConfigDirs: m.configDirs, RegistryPath: m.registry.Path(), Session: *session, SocketDir: m.socketDir, ControlPath: controlPath, ManifestPath: manifestPath, Generation: m.generation, ProcessToken: processToken}
 	if err := json.NewEncoder(input).Encode(config); err != nil {
 		return startupFailure(err)
 	}

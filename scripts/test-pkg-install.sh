@@ -193,6 +193,7 @@ ALTER TABLE routes DROP COLUMN active;
 ALTER TABLE routes DROP COLUMN once_only;
 ALTER TABLE message_queue DROP COLUMN evidence;
 ALTER TABLE message_queue DROP COLUMN operation;
+ALTER TABLE sessions DROP COLUMN config_dir;
 PRAGMA user_version=6;
 SQL
 sudo installer -pkg "$pkg" -target /
@@ -202,7 +203,8 @@ test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_tabl
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "7"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='config_dir'")" = "1"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "8"
 sleep 2
 test "$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')" = 1
 upgraded_menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"

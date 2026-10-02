@@ -148,7 +148,7 @@ func (c *Claude) loadModels(ctx context.Context) ([]surface.ModelOption, error) 
 		"--print", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--no-session-persistence", "--permission-prompts", "none")
 	cmd.Dir = c.home
-	cmd.Env = append(os.Environ(), "HOME="+c.home)
+	cmd.Env = append(os.Environ(), "HOME="+c.home, "CLAUDE_CONFIG_DIR="+c.configDirs[0])
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("start Claude model catalog: %w", err)

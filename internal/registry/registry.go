@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 7
+	schemaVersion   = 8
 	queueMessageTTL = time.Hour
 )
 
@@ -108,6 +108,7 @@ func (r *Registry) migrate() error {
 		{"source", `TEXT NOT NULL DEFAULT ''`},
 		{"transport", `TEXT NOT NULL DEFAULT ''`},
 		{"last_active_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"config_dir", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
 			return err
@@ -184,7 +185,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	cwd TEXT NOT NULL DEFAULT '', pid INTEGER NOT NULL DEFAULT 0,
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
-	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '', config_dir TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -316,11 +317,11 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 	}
 	defer tx.Rollback()
 	_, err = tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,config_dir,updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
-		   has_local=excluded.has_local,
+		   has_local=excluded.has_local,config_dir=excluded.config_dir,
 		   source=CASE
 		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.source
 		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.source
@@ -335,7 +336,7 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 		   END,
 		   last_active_ms=excluded.last_active_ms,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, lastActiveMS)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, lastActiveMS, s.ConfigDir)
 	if err != nil {
 		return err
 	}
@@ -1599,8 +1600,8 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var kind, status string
 	var hasLocal int
 	var lastActiveMS int64
-	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions WHERE id = ?`, id).Scan(
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS,
+	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,config_dir FROM sessions WHERE id = ?`, id).Scan(
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS, &session.ConfigDir,
 	)
 	if err != nil {
 		return nil, err
@@ -1623,7 +1624,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.last_active_ms
+	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.last_active_ms,s.config_dir
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
@@ -1637,7 +1638,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS, &session.ConfigDir); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)
@@ -1652,7 +1653,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
+	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,config_dir FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -1669,7 +1670,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS, &session.ConfigDir); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)

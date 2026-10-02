@@ -23,6 +23,7 @@ import (
 type Claude struct {
 	profile      string
 	home         string
+	configDirs   []string
 	cookieBridge string
 	contextMu    sync.Mutex
 	contextState map[string]*claudeContextState
@@ -52,7 +53,7 @@ func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 	if bridge == "" {
 		bridge = cookieBridgePath("cookie")
 	}
-	return &Claude{profile: profile, home: home, cookieBridge: bridge, request: request}
+	return &Claude{profile: profile, home: home, configDirs: []string{filepath.Join(home, ".claude")}, cookieBridge: bridge, request: request}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -146,7 +147,11 @@ func (c *Claude) resolveTranscript(s *surface.Session, conversationID string) st
 	if s.Cwd == "" || conversationID == "" {
 		return ""
 	}
-	return filepath.Join(c.home, ".claude", "projects", strings.ReplaceAll(s.Cwd, "/", "-"), conversationID+".jsonl")
+	root := s.ConfigDir
+	if root == "" {
+		root = c.configDirs[0]
+	}
+	return filepath.Join(root, "projects", strings.ReplaceAll(s.Cwd, "/", "-"), conversationID+".jsonl")
 }
 
 func (c *Claude) firstUserMessage(path string) string {
@@ -200,7 +205,26 @@ func (c *Claude) firstUserMessage(path string) string {
 }
 
 func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
-	sessionsDir := filepath.Join(c.home, ".claude", "sessions")
+	var out []surface.Session
+	seen := map[string]string{}
+	for _, root := range c.configDirs {
+		sessions, err := c.listConfigDir(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		for _, session := range sessions {
+			if previous, exists := seen[session.ID]; exists {
+				return nil, fmt.Errorf("Claude session %s appears in multiple config directories: %s and %s", session.ID, previous, root)
+			}
+			seen[session.ID] = root
+			out = append(out, session)
+		}
+	}
+	return out, nil
+}
+
+func (c *Claude) listConfigDir(ctx context.Context, root string) ([]surface.Session, error) {
+	sessionsDir := filepath.Join(root, "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -233,10 +257,11 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 			continue
 		}
 		sess := surface.Session{
-			ID:      bridge,
-			Surface: surface.KindClaude,
-			Cwd:     str(m, "cwd"),
-			Status:  surface.SessionStatus(str(m, "status")),
+			ID:        bridge,
+			Surface:   surface.KindClaude,
+			ConfigDir: root,
+			Cwd:       str(m, "cwd"),
+			Status:    surface.SessionStatus(str(m, "status")),
 		}
 		if pid, ok := m["pid"].(float64); ok {
 			sess.PID = int(pid)

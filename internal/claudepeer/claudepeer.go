@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudeconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -38,14 +39,15 @@ const (
 )
 
 type Config struct {
-	Home         string
-	RegistryPath string
-	Session      surface.Session
-	SocketDir    string
-	ControlPath  string
-	ManifestPath string
-	Generation   string
-	ProcessToken string
+	Home             string
+	ClaudeConfigDirs []string
+	RegistryPath     string
+	Session          surface.Session
+	SocketDir        string
+	ControlPath      string
+	ManifestPath     string
+	Generation       string
+	ProcessToken     string
 }
 
 type Ready struct {
@@ -346,6 +348,14 @@ func normalizeConfig(c Config) (Config, error) {
 	if c.Home == "" || c.Session.ID == "" || c.Session.Surface == "" {
 		return c, errors.New("home, session id, and session surface are required")
 	}
+	if len(c.ClaudeConfigDirs) == 0 {
+		c.ClaudeConfigDirs = []string{filepath.Join(c.Home, ".claude")}
+	}
+	roots, err := claudeconfig.Normalize(c.ClaudeConfigDirs)
+	if err != nil {
+		return c, err
+	}
+	c.ClaudeConfigDirs = roots
 	if c.SocketDir == "" {
 		c.SocketDir = defaultSocketDir
 	}
@@ -837,7 +847,7 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 		if len(f) >= maxLineBytes {
 			sendErr = surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
 		} else {
-			sendErr = sendAuthenticatedFrame(c.Home, req.TargetSocket, f)
+			sendErr = sendAuthenticatedFrame(c.ClaudeConfigDirs, req.TargetSocket, f)
 		}
 		if err := sendErr; err != nil {
 			resp.Error = classifyControlError(err)
@@ -928,10 +938,37 @@ func sendFrame(target string, payload []byte) error {
 	return nil
 }
 
-func sendAuthenticatedFrame(home, target string, payload []byte) error {
+func sendAuthenticatedFrame(roots []string, target string, payload []byte) error {
 	hash := sha256.Sum256([]byte(target))
 	pid := strings.TrimSuffix(filepath.Base(target), ".sock")
-	keyPath := filepath.Join(home, ".claude", "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
+	var keyPath string
+	for _, root := range roots {
+		path := filepath.Join(root, "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
+		if _, err := os.Lstat(path); err == nil {
+			if keyPath != "" {
+				return surface.DeliveryTerminal(errors.New("Claude peer authentication key appears in multiple config directories"), surface.DeliveryAuthenticationNeeded)
+			}
+			keyPath = path
+		} else if !os.IsNotExist(err) {
+			return surface.DeliveryUnavailable(err)
+		}
+	}
+	if keyPath == "" {
+		for _, root := range roots {
+			data, err := os.ReadFile(filepath.Join(root, "sessions", pid+".json"))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return surface.DeliveryUnavailable(err)
+			}
+			var record sessionRecord
+			if json.Unmarshal(data, &record) != nil || record.Agenthail != "peer-worker" {
+				return surface.DeliveryTerminal(errors.New("Claude peer authentication key is missing"), surface.DeliveryAuthenticationNeeded)
+			}
+		}
+		return sendFrame(target, payload)
+	}
 	if info, err := os.Lstat(keyPath); err == nil {
 		if !info.Mode().IsRegular() {
 			return surface.DeliveryTerminal(errors.New("invalid Claude peer key file"), surface.DeliveryAuthenticationNeeded)
@@ -950,7 +987,7 @@ func sendAuthenticatedFrame(home, target string, payload []byte) error {
 		}
 		auth, _ := json.Marshal(map[string]string{"type": "auth", "token": key.PeerToken})
 		payload = append(append(auth, '\n'), payload...)
-	} else if !os.IsNotExist(err) {
+	} else {
 		return surface.DeliveryUnavailable(err)
 	}
 	return sendFrame(target, payload)

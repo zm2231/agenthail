@@ -17,6 +17,47 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 
 `transport_accepted` evidence means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, and slash commands are rejected. Transcript reads remain available. Compact, model, interrupt, and steer require a separately resolved Remote Control identity. Those controls do not enter the peer message socket or ordinary message queue. A socket failure does not trigger a second send through HTTP.
 
+## Alternate Claude config directories
+
+Agenthail discovers `~/.claude` and the directory in `CLAUDE_CONFIG_DIR`.
+`AGENTHAIL_CLAUDE_CONFIG_DIRS` adds directories using the platform path-list
+separator (`:` on macOS). Values are absolute config directories, not the
+`CLAUDE.md` file or its parent home. Paths are normalized and symlink aliases
+deduplicated. A session ID published by multiple roots is rejected as ambiguous.
+
+```sh
+export AGENTHAIL_CLAUDE_CONFIG_DIRS="/absolute/gentle/.claude"
+agenthail list --json
+agenthail send claude:<exact-session-id> "Your instruction"
+agenthail last claude:<exact-session-id> 3 --json
+```
+
+Configure both the CLI and daemon with the same directories. `agenthail daemon
+install` saves these variables in launchd; changing a shell variable does not
+change an already running daemon. The registry remains in `~/.agenthail`.
+Session JSON carries `configDir`, including saved/search/dashboard results.
+Queued work retains it through registry reopen. Transcripts and background
+lifecycle commands use the selected session's root. New background agents
+still start in the default `~/.claude` root.
+
+The peer manager uses the target socket's PID and path hash to find its native
+authentication key across configured roots. Duplicate keys and missing native
+keys fail explicitly. Tokens are read in place and never copied or emitted.
+Agenthail helper peers retain their daemon-owned records and sockets. Configuring
+a second Claude root does not create another daemon or change the operator's HOME.
+
+An opt-in live test creates an isolated Agenthail registry and manager, sends
+one message to the explicit target and waits for a transcript answer describing
+that root. It does not restart the installed daemon:
+
+```sh
+go build -o /tmp/agenthail-claude-roots ./cmd/agenthail
+AGENTHAIL_LIVE_BINARY=/tmp/agenthail-claude-roots \
+AGENTHAIL_LIVE_CLAUDE_CONFIG_DIR=/absolute/config/.claude \
+AGENTHAIL_LIVE_CLAUDE_TARGET=<exact-session-id> \
+  go test ./internal/surface/surfaces -run '^TestLiveAlternateClaudeConfigMessaging$' -v -count=1
+```
+
 ## Lifecycle and verification
 
 The daemon manager is the only routing authority. It holds a process-lifetime file lock and removes its public socket on shutdown only when the socket identity still matches. Callers send ensure or delivery requests to that private endpoint; they do not derive a worker control path from a session ID. A request whose response is lost after transmission has an unknown outcome and is not automatically retried. Each daemon generation gives its workers unique control sockets under `~/.agenthail/run/p/<generation>/`, while Claude-facing sockets retain the required `/tmp/cc-socks/<pid>.sock` shape. Before creating those artifacts, the worker writes a pending ownership manifest; it atomically records each socket identity as it is created, then promotes that manifest before publishing the Claude session record. The manifest ties the source session, daemon generation, worker PID/process start, random launch token, control socket inode, Claude-facing socket inode and Claude session record together. Registration checks the live control endpoint and replaces a worker whose endpoint disappeared or changed.
@@ -47,4 +88,4 @@ bash scripts/check-public-copy.sh
 git diff --check
 ```
 
-The subprocess tests build the real CLI and exercise native sockets against isolated peer fixtures. A plain-body wrapper emitted by Go was additionally accepted by the extracted installed Claude 2.1.263 `oF` parser and its canonical rebuild; that probe does not cover every Unicode body or permission policy. No messages were sent to live user Claude sessions, no model-response round trip was claimed, and the running daemon was not restarted. Review was performed locally under the user's instruction to keep the work with the implementing agent.
+The subprocess tests build the real CLI and exercise native sockets against isolated peer fixtures. Live-session verification is opt-in and requires an explicitly authorized target. A held inbound message is not a completed round trip; verify the matching reply separately. A transcript reply also does not prove that the reverse socket callback succeeded.

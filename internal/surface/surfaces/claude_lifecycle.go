@@ -24,6 +24,10 @@ type claudeBackground struct {
 }
 
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
+	return c.backgroundCommandAt(ctx, c.configDirs[0], cwd, args...)
+}
+
+func (c *Claude) backgroundCommandAt(ctx context.Context, root, cwd string, args ...string) ([]byte, error) {
 	binary, err := claudeBinary(c.home)
 	if err != nil {
 		return nil, err
@@ -31,11 +35,15 @@ func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...stri
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "HOME="+c.home)
+	cmd.Env = append(os.Environ(), "HOME="+c.home, "CLAUDE_CONFIG_DIR="+root)
 	return cmd.CombinedOutput()
 }
 func (c *Claude) backgroundSessions(ctx context.Context) ([]claudeBackground, error) {
-	data, err := c.backgroundCommand(ctx, "", "agents", "--json", "--all")
+	return c.backgroundSessionsAt(ctx, c.configDirs[0])
+}
+
+func (c *Claude) backgroundSessionsAt(ctx context.Context, root string) ([]claudeBackground, error) {
+	data, err := c.backgroundCommandAt(ctx, root, "", "agents", "--json", "--all")
 	if err != nil {
 		return nil, fmt.Errorf("Claude agents: %w: %s", err, string(data))
 	}
@@ -106,7 +114,14 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if action != "stop" && action != "resume" && action != "logs" && action != "status" {
 		return nil, fmt.Errorf("Claude lifecycle action must be status, stop, resume, or logs")
 	}
-	records, err := c.backgroundSessions(ctx)
+	root := session.ConfigDir
+	if root == "" {
+		root = c.configDirs[0]
+	}
+	if !slices.Contains(c.configDirs, root) {
+		return nil, fmt.Errorf("Claude config directory is not configured: %s", root)
+	}
+	records, err := c.backgroundSessionsAt(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +140,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		if action == "resume" {
 			args = []string{"--bg", "--resume", record.SessionID}
 		}
-		output, err := c.backgroundCommand(ctx, record.Cwd, args...)
+		output, err := c.backgroundCommandAt(ctx, root, record.Cwd, args...)
 		if err != nil {
 			if action != "logs" {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s: %w: %s", action, err, string(output)))

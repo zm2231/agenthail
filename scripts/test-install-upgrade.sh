@@ -90,6 +90,8 @@ install_once() {
 	PATH="$SOURCE_GO_BIN:$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" \
 	AGENTHAIL_PYTHON="$PYTHON_BIN" \
 	AGENTHAIL_CLAUDE_BIN="$home/custom Claude & tools/claude" \
+	CLAUDE_CONFIG_DIR="$home/primary Claude & config" \
+	AGENTHAIL_CLAUDE_CONFIG_DIRS="$home/alternate Claude & config" \
 	AGENTHAIL_PREBUILT_BINARY="$TMP/agenthail" \
 	AGENTHAIL_PREBUILT_MAC_APP="$TMP/Agenthail.app" \
 	AGENTHAIL_SKIP_MAC_APP_LAUNCH=1 \
@@ -157,6 +159,7 @@ ALTER TABLE routes DROP COLUMN active;
 ALTER TABLE routes DROP COLUMN once_only;
 ALTER TABLE message_queue DROP COLUMN evidence;
 ALTER TABLE message_queue DROP COLUMN operation;
+ALTER TABLE sessions DROP COLUMN config_dir;
 PRAGMA user_version=6;
 SQL
 
@@ -176,7 +179,8 @@ test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "7"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='config_dir'")" = "1"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "8"
 
 test -f "$DATA_DIR/skills/agenthail-operations/SKILL.md"
 test ! -e "$TEST_HOME/.claude"
@@ -249,6 +253,8 @@ SUPERVISED_PLIST="$SUPERVISED_HOME/Library/LaunchAgents/com.agenthail.daemon.pli
 test "$(plutil -extract ProgramArguments.0 raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_DATA_1/agenthail"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_PYTHON raw -o - "$SUPERVISED_PLIST")" = "$PYTHON_BIN"
 test "$(plutil -extract EnvironmentVariables.AGENTHAIL_CLAUDE_BIN raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_HOME/custom Claude & tools/claude"
+test "$(plutil -extract EnvironmentVariables.CLAUDE_CONFIG_DIR raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_HOME/primary Claude & config"
+test "$(plutil -extract EnvironmentVariables.AGENTHAIL_CLAUDE_CONFIG_DIRS raw -o - "$SUPERVISED_PLIST")" = "$SUPERVISED_HOME/alternate Claude & config"
 
 install_from_source >"$TMP/source-install.log"
 strings "$SOURCE_DATA/agenthail" | grep -F 'https://relay.example.test' >/dev/null

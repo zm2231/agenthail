@@ -77,6 +77,7 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
+	ConfigDir      string                `json:"configDir,omitempty"`
 	ID             string                `json:"id"`
 	Surface        surface.SurfaceKind   `json:"surface"`
 	Name           string                `json:"name"`
@@ -602,7 +603,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
 				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
+				state.Sessions = append(state.Sessions, dashboardSession{ConfigDir: session.ConfigDir, ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
 			}
 			mu.Unlock()
 		}()
@@ -1275,7 +1276,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		alias, _ := d.Registry.ReverseAlias(result.Session.ID)
 		effective := surface.EffectiveCapabilities(&result.Session, adapter.Capabilities())
 		payload = append(payload, map[string]any{
-			"session": dashboardSession{ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
+			"session": dashboardSession{ConfigDir: result.Session.ConfigDir, ID: result.Session.ID, Surface: result.Session.Surface, Name: result.Session.Name, Cwd: result.Session.Cwd, Alias: alias, Status: result.Session.Status, LastActive: result.Session.LastActive, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: result.Session.Source, Transport: result.Session.Transport},
 			"snippet": result.Snippet,
 		})
 	}

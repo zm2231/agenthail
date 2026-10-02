@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudeconfig"
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/cli"
 	"github.com/zm2231/agenthail/internal/codexconfig"
@@ -45,7 +46,16 @@ func main() {
 	}
 	defer reg.Close()
 
-	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
+	roots, err := claudeconfig.Roots(home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: Claude config: %s\n", err)
+		os.Exit(1)
+	}
+	claude, err := surfaces.NewClaudeWithConfigDirs(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home, roots)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: Claude config: %s\n", err)
+		os.Exit(1)
+	}
 	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
 	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
 	notion := surfaces.NewNotion(
