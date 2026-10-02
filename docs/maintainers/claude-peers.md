@@ -19,22 +19,33 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 
 ## Alternate Claude config directories
 
-Agenthail discovers `~/.claude` and the directory in `CLAUDE_CONFIG_DIR`.
+Agenthail discovers `~/.claude` and roots saved in `~/.agenthail/config.json`:
+
+```json
+{"claudeConfigDirs": ["/absolute/gentle/.claude"]}
+```
+
+The CLI and daemon read this shared setting automatically. Restart the daemon
+after editing it; CLI commands read it on each invocation. No shell export is
+required. The file must be a JSON object no larger than 64 KiB; invalid settings
+fail explicitly. Other settings in the object are preserved and ignored by this reader.
+
+The directory in `CLAUDE_CONFIG_DIR` is also included.
 `AGENTHAIL_CLAUDE_CONFIG_DIRS` adds directories using the platform path-list
 separator (`:` on macOS). Values are absolute config directories, not the
 `CLAUDE.md` file or its parent home. Paths are normalized and symlink aliases
 deduplicated. A session ID published by multiple roots is rejected as ambiguous.
 
 ```sh
-export AGENTHAIL_CLAUDE_CONFIG_DIRS="/absolute/gentle/.claude"
 agenthail list --json
 agenthail send claude:<exact-session-id> "Your instruction"
 agenthail last claude:<exact-session-id> 3 --json
 ```
 
-Configure both the CLI and daemon with the same directories. `agenthail daemon
-install` saves these variables in launchd; changing a shell variable does not
-change an already running daemon. The registry remains in `~/.agenthail`.
+Environment additions apply only to that CLI or daemon process. `agenthail daemon
+install` saves those additions in launchd; changing a shell variable does not
+change an already running daemon. Prefer the shared file for persistent roots.
+The registry remains in `~/.agenthail`.
 Session JSON carries `configDir`, including saved/search/dashboard results.
 Queued work retains it through registry reopen. Transcripts and background
 lifecycle commands use the selected session's root. New background agents

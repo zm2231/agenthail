@@ -46,11 +46,13 @@ uses AgentHail's local app-server bridge. Relevant overrides are
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 
-Alternate Claude sessions: set `AGENTHAIL_CLAUDE_CONFIG_DIRS` to a colon-separated
-list of absolute config directories (for example `/absolute/gentle/.claude`).
+Alternate Claude sessions: save `{"claudeConfigDirs":["/absolute/gentle/.claude"]}`
+in `~/.agenthail/config.json`. Both CLI and daemon read it automatically; restart
+the daemon after editing. No export is needed. Temporary additions can use
+`AGENTHAIL_CLAUDE_CONFIG_DIRS`, a colon-separated list of absolute directories.
 `CLAUDE_CONFIG_DIR` is also discovered; the native `~/.claude` remains included.
-Configure the same roots in the daemon environment. `agenthail daemon install`
-persists them in launchd. `list --json` exposes each session's `configDir`;
+`agenthail daemon install` persists environment additions in launchd.
+`list --json` exposes each session's `configDir`;
 resolve an exact session ID before sending when names or workspaces overlap.
 Keys and transcripts stay in their original root. This does not enable arbitrary
 Claude slash commands. See `docs/maintainers/claude-peers.md` for the local live test.
