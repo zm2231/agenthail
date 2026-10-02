@@ -78,6 +78,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdCompact(rest)
 	case "model":
 		return a.cmdModel(rest)
+	case "control":
+		return a.cmdControl(rest)
 	case "interrupt":
 		return a.cmdInterrupt(rest)
 	case "steer":
@@ -139,8 +141,10 @@ Session commands:
   last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
   goal <target> [text|clear]    Set or clear a goal
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
-  model <target> [name]         Get or set model
-  interrupt <target>            Stop current turn
+  model <target> [name] [--json] [--timeout 30s]  Get or set model
+  control <target> <model|interrupt|steer|compact|context|usage|status|effort|rename> [value] [--json] [--timeout 30s]
+                                 Claude Remote Control with request-correlated evidence
+  interrupt <target> [--json] [--timeout 30s]  Stop current turn
   steer <target> "message"      Inject guidance into a running turn; use send when idle
   queue <target> "msg"|-        Hold until target is ready; start daemon to deliver queued work
   queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]
@@ -366,7 +370,8 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
+		"list":    {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -377,6 +382,10 @@ func validateCommandFlags(command string, args []string) error {
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
+	if command == "model" || command == "interrupt" || command == "steer" {
+		spec.values = map[string]bool{"--timeout": true}
+		spec.bools = map[string]bool{"--json": true}
+	}
 	if !known {
 		return nil
 	}
@@ -1322,12 +1331,69 @@ func (a *App) cmdCompact(args []string) error {
 	return nil
 }
 
+func (a *App) cmdControl(args []string) error {
+	positional := stripFlags(args)
+	if len(positional) < 2 {
+		return fmt.Errorf("usage: agenthail control <target> <model|interrupt|steer|compact|context|usage|status|effort|rename> [value] [--json] [--timeout 30s]")
+	}
+	timeout, err := commandTimeout(args, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	sess, adapter, err := a.resolveTarget(ctx, positional[0])
+	if err != nil {
+		return err
+	}
+	controller, ok := adapter.(surface.Controller)
+	if !ok {
+		return surface.ErrUnsupported
+	}
+	if err := a.ensureWritableTarget(ctx, sess, adapter); err != nil {
+		return err
+	}
+	result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: positional[1], Value: strings.Join(positional[2:], " ")})
+	return a.printControlResult(sess, result, controlErr, args)
+}
+
+func (a *App) printControlResult(sess *surface.Session, result *surface.ControlResult, controlErr error, args []string) error {
+	if result != nil {
+		if hasFlag(args, "--json") {
+			if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+				return err
+			}
+		} else {
+			fmt.Printf("%s %s for %s (request %s)\n", result.Action, result.Evidence, a.resolveDisplay(sess.ID), result.RequestID)
+			if result.Detail != "" {
+				fmt.Println(result.Detail)
+			}
+			if result.Output != "" {
+				fmt.Println(result.Output)
+			}
+		}
+		if a.Registry != nil {
+			errorText := ""
+			if controlErr != nil {
+				errorText = controlErr.Error()
+			}
+			_ = a.Registry.RecordHistory(registry.HistoryEntry{Kind: string(result.Evidence), SessionID: sess.ID, Message: result.Action, Result: result.RequestID, Evidence: result.Evidence, Error: errorText})
+		}
+	}
+	return controlErr
+}
+
 func (a *App) cmdModel(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 1 || len(positional) > 2 {
 		return fmt.Errorf("usage: agenthail model <target> [name]")
 	}
-	ctx := context.Background()
+	timeout, err := commandTimeout(args, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
 	if err != nil {
 		return err
@@ -1341,12 +1407,19 @@ func (a *App) cmdModel(args []string) error {
 		if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 			return err
 		}
+		if controller, ok := surf.(surface.Controller); ok {
+			result, err := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
+			return a.printControlResult(sess, result, err, args)
+		}
 	}
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
 		return err
 	}
 	if current != "" {
+		if hasFlag(args, "--json") {
+			return json.NewEncoder(os.Stdout).Encode(map[string]string{"sessionId": sess.ID, "model": current})
+		}
 		fmt.Println(current)
 	}
 	return nil
@@ -1368,6 +1441,16 @@ func (a *App) cmdInterrupt(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
+	if controller, ok := surf.(surface.Controller); ok {
+		timeout, err := commandTimeout(args, 30*time.Second)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		result, err := controller.Control(ctx, sess, surface.ControlRequest{Action: "interrupt"})
+		return a.printControlResult(sess, result, err, args)
+	}
 	return surf.Interrupt(ctx, sess)
 }
 
@@ -1376,7 +1459,12 @@ func (a *App) cmdSteer(args []string) error {
 	if len(positional) < 2 {
 		return fmt.Errorf("usage: agenthail steer <target> \"message\"")
 	}
-	ctx := context.Background()
+	timeout, err := commandTimeout(args, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
 	if err != nil {
 		return err
@@ -1390,6 +1478,9 @@ func (a *App) cmdSteer(args []string) error {
 	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, strings.Join(positional[1:], " "))
 	if err != nil {
 		return err
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(receipt)
 	}
 	fmt.Printf("steer %s for %s\n", receipt.Evidence, a.resolveDisplay(sess.ID))
 	return nil

@@ -291,6 +291,9 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
 	claudeSendRequest = func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method == "GET" {
+			return 200, `{"response_shape":{"id":"cse_test","connection_status":"connected"}}`, nil
+		}
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -328,7 +331,10 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 
 func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
-	claude := NewClaudeWithRequest("", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method string, _ string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method == "GET" {
+			return 200, `{"response_shape":{"id":"cse_test","connection_status":"connected"}}`, nil
+		}
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -354,7 +360,10 @@ func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *tes
 	original := claudeSendRequest
 	t.Cleanup(func() { claudeSendRequest = original })
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
-	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	claudeSendRequest = func(_ context.Context, method string, _ string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method == "GET" {
+			return 200, `{"response_shape":{"id":"cse_test","connection_status":"connected"}}`, nil
+		}
 		return 200, `{}`, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

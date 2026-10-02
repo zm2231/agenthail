@@ -17,6 +17,45 @@ Claude sees names like `agenthail/codex: builder`. These are external peers, not
 
 `transport_accepted` evidence means the socket closed after accepting bytes. It is not a completed model turn. A receiving Claude may hold or deny a message under its own policy; asynchronous status receipts appear in history. Native message IDs cannot be correlated reliably with transcript turn IDs, so `send --reply`, `--stream`, and slash commands are rejected. Transcript reads remain available. Compact, model, interrupt, and steer require a separately resolved Remote Control identity. Those controls do not enter the peer message socket or ordinary message queue. A socket failure does not trigger a second send through HTTP.
 
+## Remote controls
+
+Remote controls preflight the exact live Remote Control identity. A bridge ID
+alone does not prove a connected runtime. These operations never use the peer
+message socket.
+
+```sh
+agenthail model claude:<session-id> haiku --json --timeout 30s
+agenthail interrupt claude:<session-id> --json --timeout 30s
+agenthail control claude:<session-id> context --json
+agenthail control claude:<session-id> usage --json
+agenthail control claude:<session-id> status --json
+agenthail control claude:<session-id> effort medium --json
+agenthail control claude:<session-id> rename "Review worker" --json
+agenthail control claude:<session-id> compact --json --timeout 2m
+```
+
+Model and interrupt use native `control_request` events and require a
+`control_response` with the same request ID. Interrupt also waits for the
+original active transcript turn to become terminal; this does not prove that
+interrupt caused termination if the turn finished naturally. Reading the model
+uses runtime metadata, not the last assistant response.
+
+Context, usage, effort and rename are explicitly allowlisted browser commands.
+The browser-client headers are part of their execution contract. Confirmation
+requires a local `commandRun` record, joined either by request parent ID or by
+its cloud output UUID after the submitted request. A competing prompt before
+that cloud confirmation makes the outcome unknown. `status` is a read-only
+runtime-state inspection, not a slash-text prompt.
+
+Receipts carry the session, request ID, evidence and source. Command output is
+`reply_observed`; steering is only `transport_accepted`, with its posted UUID
+preserved. Timeout after acceptance is `unknown`, not rejection; do not retry
+blindly. Claude compact through the normal `compact` command is durable queued
+work, executed when idle. Explicit `control ... compact` waits immediately for
+a new boundary after its exact request. Native socket-only sessions cannot use
+these controls. Arbitrary slash commands, interactive pickers and changes to
+permissions, config, directory, clear, resume or branch are not exposed.
+
 ## Alternate Claude config directories
 
 Agenthail discovers `~/.claude` and roots saved in `~/.agenthail/config.json`:

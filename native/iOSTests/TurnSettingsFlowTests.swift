@@ -4,6 +4,27 @@ import XCTest
 
 final class TurnSettingsFlowTests: XCTestCase {
     @MainActor
+    func testUnknownControlReplacesStaleDeliveryState() async throws {
+        let fixture = try makeFixture(status: "busy")
+        TurnSettingsFlowProtocol.state.reset(unknownControl: true)
+        let model = makeModel()
+        model.deliveryStatus[fixture.session.id] = "Instruction delivered"
+        model.action("interrupt", session: fixture.session)
+        try await waitUntil { model.pendingControls.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Original turn termination unconfirmed")
+        XCTAssertTrue(model.operationError?.contains("request-proof") == true)
+        XCTAssertTrue(model.operationError?.contains("unknown") == true)
+    }
+
+    func testActionReceiptsPreserveClaudeEvidenceAndAcceptCodexModelResult() throws {
+        let claude = try JSONDecoder().decode(ActionReceipt.self, from: Data(#"{"ok":true,"result":{"evidence":"delivered","requestId":"request-1","turnId":"turn-1","detail":"original turn terminal","source":"claude-control-response+transcript"}}"#.utf8))
+        XCTAssertEqual(claude.result?.requestId, "request-1")
+        XCTAssertEqual(claude.result?.turnId, "turn-1")
+        XCTAssertEqual(claude.result?.detail, "original turn terminal")
+        let codex = try JSONDecoder().decode(ActionReceipt.self, from: Data(#"{"ok":true,"result":"gpt-model"}"#.utf8))
+        XCTAssertNil(codex.result)
+    }
+    @MainActor
     func testSteerExcludesTurnOptionsAndPreservesDraft() async throws {
         let fixture = try makeFixture(status: "busy")
         TurnSettingsFlowProtocol.state.reset()
@@ -101,6 +122,7 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
         private let condition = NSCondition()
         private var records: [[String: Any]] = []
         private var failActions = false
+        private var unknownControl = false
         private var blockSessionRefresh = false
         private var refreshStarted = false
         private var sessionRefreshReleased = false
@@ -114,16 +136,23 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
             return refreshStarted
         }
 
-        func reset(failActions: Bool = false, blockSessionRefresh: Bool = false) {
+        func reset(failActions: Bool = false, blockSessionRefresh: Bool = false, unknownControl: Bool = false) {
             condition.lock()
             records = []; self.failActions = failActions; self.blockSessionRefresh = blockSessionRefresh
+            self.unknownControl = unknownControl
             refreshStarted = false; sessionRefreshReleased = false
             condition.broadcast(); condition.unlock()
         }
 
         func record(_ body: [String: Any]) -> (Int, String) {
-            condition.lock(); records.append(body); condition.broadcast(); condition.unlock()
-            if failActions { return (502, #"{"error":{"message":"unavailable"}}"#) }
+            condition.lock(); records.append(body); condition.broadcast()
+            let shouldFail = failActions
+            let shouldReturnUnknown = unknownControl
+            condition.unlock()
+            if shouldReturnUnknown {
+                return (502, #"{"ok":false,"error":{"code":"control_failed","message":"accepted but completion was not observed"},"result":{"evidence":"unknown","requestId":"request-proof","detail":"Original turn termination unconfirmed","source":"claude-control-response"}}"#)
+            }
+            if shouldFail { return (502, #"{"error":{"message":"unavailable"}}"#) }
             return (200, #"{"ok":true}"#)
         }
 

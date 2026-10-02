@@ -81,9 +81,18 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	defer d.publishEvent("state.changed", session.ID, map[string]string{"source": "compact"})
 	operationCtx, cancel := context.WithTimeout(ctx, compactOperationTimeout)
 	defer cancel()
-	err := adapter.Compact(operationCtx, session)
+	var result *surface.ControlResult
+	var err error
+	if controller, ok := adapter.(surface.Controller); ok {
+		result, err = controller.Control(operationCtx, session, surface.ControlRequest{Action: "compact"})
+	} else {
+		err = adapter.Compact(operationCtx, session)
+	}
 	if err != nil {
 		d.finishQueueFailure(item, session, err, time.Now())
+		if result != nil {
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: string(result.Evidence), SessionID: session.ID, QueueID: item.ID, Message: "compact", Result: result.RequestID, Evidence: result.Evidence, Error: err.Error()})
+		}
 		return
 	}
 	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered); err != nil {
@@ -92,7 +101,11 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 		return
 	}
 	d.log.Printf("completed compact queue item %d for %s", item.ID, d.resolveDisplay(session.ID))
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: "compact", Evidence: surface.EvidenceDelivered})
+	requestID := ""
+	if result != nil {
+		requestID = result.RequestID
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: "compact", Result: requestID, Evidence: surface.EvidenceDelivered})
 }
 
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {

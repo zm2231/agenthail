@@ -490,11 +490,6 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 	return &surface.SendResult{UUID: uuid, Accepted: true}, nil
 }
 
-func (c *Claude) sendCommand(ctx context.Context, sess *surface.Session, cmd string) error {
-	_, err := c.postMessage(ctx, sess, cmd)
-	return err
-}
-
 func (c *Claude) Reply(ctx context.Context, sess *surface.Session, limit int) (*surface.ReplyResult, error) {
 	read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: max(1, limit)})
 	if err != nil {
@@ -594,109 +589,29 @@ func (c *Claude) GoalGet(ctx context.Context, sess *surface.Session) (*surface.G
 }
 
 func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
-	if nativeClaudeOnly(sess) {
-		return surface.ErrUnsupported
-	}
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("compact confirmation requires a local transcript: %w", err)
-	}
-	result, err := c.postMessage(ctx, sess, "/compact")
-	if err != nil {
-		return err
-	}
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return surface.DeliveryOutcomeUnknown(fmt.Errorf("compact was accepted but completion was not observed: %w", ctx.Err()))
-		case <-ticker.C:
-			completed, readErr := readClaudeCompactCompletion(path, info.Size(), result.UUID)
-			if readErr != nil {
-				return surface.DeliveryOutcomeUnknown(fmt.Errorf("read compact completion: %w", readErr))
-			}
-			if completed {
-				return nil
-			}
-		}
-	}
+	_, err := c.compactControl(ctx, sess)
+	return err
 }
 
 func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
-	if nativeClaudeOnly(sess) && name != "" {
+	if nativeClaudeOnly(sess) {
 		return "", surface.ErrUnsupported
 	}
 	if name != "" {
-		result, err := c.confirmedCommand(ctx, sess, "/model", name, 5*time.Second)
+		result, err := c.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
 		if err != nil {
-			return "", fmt.Errorf("model switch rejected: %w", err)
+			return "", err
 		}
-		return result, nil
+		return result.Output, nil
 	}
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	turns, err := readClaudeTailTurns(ctx, path)
+	model, err := c.remoteState(ctx, sess)
 	if err != nil {
 		return "", err
 	}
-	for i := len(turns) - 1; i >= 0; i-- {
-		if turns[i].Model != "" {
-			return turns[i].Model, nil
-		}
+	if model == "" {
+		return "", fmt.Errorf("current model unavailable from Claude runtime")
 	}
-	return "", fmt.Errorf("model unavailable: no assistant turn recorded")
-}
-
-func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", fmt.Errorf("command confirmation requires a local transcript: %w", err)
-	}
-	command := commandName
-	if args != "" {
-		command += " " + args
-	}
-	if err := c.sendCommand(ctx, sess, command); err != nil {
-		return "", err
-	}
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-deadline.C:
-			return "", fmt.Errorf("%s was accepted but no correlated confirmation appeared within %s", commandName, timeout)
-		case <-ticker.C:
-			result, found, readErr := readClaudeCommandResult(path, info.Size(), commandName, args)
-			if readErr != nil {
-				return "", fmt.Errorf("read %s confirmation: %w", commandName, readErr)
-			}
-			if !found {
-				continue
-			}
-			lower := strings.ToLower(result)
-			for _, failure := range []string{"not found", "error", "failed", "cannot"} {
-				if strings.Contains(lower, failure) {
-					return "", fmt.Errorf("%s", result)
-				}
-			}
-			return result, nil
-		}
-	}
+	return model, nil
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
@@ -711,45 +626,12 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 		return fmt.Errorf("session idle; nothing to interrupt")
 	}
 	sess = current
-	cse := toCse(sess.ID)
-	reqID := "interrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10) + "-" + randSeq(6)
-	body := map[string]any{
-		"events": []map[string]any{{
-			"payload": map[string]any{
-				"type":       "control_request",
-				"request_id": reqID,
-				"request":    map[string]any{"subtype": "interrupt"},
-				"uuid":       newUUID(),
-			},
-		}},
-	}
-	bodyBytes, _ := json.Marshal(body)
-	headers := c.headerMap("", sess.ID)
-	headers["content-type"] = "application/json"
-	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
-		"https://claude.ai/v1/code/sessions/"+cse+"/events",
-		headers, string(bodyBytes), c.cookieBridge, "https://claude.ai/", 10*time.Second)
-	if err != nil {
-		return err
-	}
-	if status != 200 {
-		return fmt.Errorf("interrupt failed (HTTP %d): %s", status, diagnosticExcerpt(respBody))
-	}
-	return nil
+	_, err = c.Control(ctx, sess, surface.ControlRequest{Action: "interrupt"})
+	return err
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
-	if nativeClaudeOnly(sess) {
-		return surface.ErrUnsupported
-	}
-	current, err := c.Resolve(ctx, sess.ID)
-	if err != nil {
-		return err
-	}
-	if current.Status != surface.StatusBusy {
-		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
-	}
-	_, err = c.postMessage(ctx, current, message)
+	_, err := c.Control(ctx, sess, surface.ControlRequest{Action: "steer", Value: message})
 	return err
 }
 

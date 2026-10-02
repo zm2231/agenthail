@@ -197,7 +197,7 @@ func TestReadClaudeTurnsRequiresEndTurnAndKeepsTurnIdentity(t *testing.T) {
 	}
 }
 
-func TestClaudeObserveAndModelUseCompletedTranscript(t *testing.T) {
+func TestClaudeObserveUsesCompletedTranscript(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
@@ -210,10 +210,6 @@ func TestClaudeObserveAndModelUseCompletedTranscript(t *testing.T) {
 	}
 	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || observation.Reply.Text != "answer" {
 		t.Fatalf("observation=%+v", observation)
-	}
-	model, err := claude.Model(context.Background(), session, "")
-	if err != nil || model != "model-a" {
-		t.Fatalf("model=%q err=%v", model, err)
 	}
 }
 
@@ -442,15 +438,12 @@ func TestClaudeTranscriptPreservesMultiMegabyteUnicodeReply(t *testing.T) {
 	}
 }
 
-func TestClaudeCommandResultStripsMarkupAndANSI(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","message":{"content":"<command-name>/compact</command-name>\n<command-args></command-args>"}}
-{"type":"system","subtype":"local_command","content":"<local-command-stdout>Compacted</local-command-stdout>"}
-{"type":"user","message":{"content":"<command-name>/model</command-name>\n<command-args>bad</command-args>"}}
-{"type":"system","subtype":"local_command","content":"<local-command-stdout>Model 'bad' not found\u001b[2m</local-command-stdout>"}`)
-	result, found, err := readClaudeCommandResult(path, 0, "/model", "bad")
-	if err != nil || !found || result != "Model 'bad' not found" {
-		t.Fatalf("result=%q found=%v err=%v", result, found, err)
+func TestClaudeCompactCompletionRejectsCompetingRequest(t *testing.T) {
+	for _, competing := range []string{`{"type":"user","uuid":"other","message":{"content":"/compact"}}`, `{"type":"control_request","uuid":"other"}`} {
+		path := writeTranscript(t, `{"type":"user","uuid":"request","message":{"content":"/compact"}}`+"\n"+competing+"\n"+`{"type":"system","subtype":"compact_boundary"}`)
+		if completed, err := readClaudeCompactCompletion(path, 0, "request"); completed || err == nil {
+			t.Fatalf("competing request credited: completed=%v err=%v", completed, err)
+		}
 	}
 }
 

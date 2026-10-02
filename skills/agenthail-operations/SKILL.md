@@ -210,7 +210,26 @@ agenthail goal @builder "Ship the verified fix."
 agenthail goal @builder clear
 ```
 
-`compact` is a typed control, never a queued message. Claude sessions with a Remote Control identity compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
+`compact` is a control, never slash text sent through a peer socket. Claude
+compact is durable queued work and runs when the target is idle; its queue
+receipt is not completion. `control <target> compact --json --timeout 2m`
+executes immediately and waits for a new request-linked transcript boundary.
+Native socket-only Claude peers report controls as unsupported. Codex uses its
+native compact operation.
+
+For Claude, `model` and `interrupt` also accept `--json` and `--timeout`.
+They preserve request-correlated receipts. Interrupt success requires both the
+handler acknowledgment and termination of the original active turn. Read model
+from runtime metadata, not an earlier assistant response. Steering preserves its
+UUID and reports only transport acceptance, not proof of application.
+
+`control <target> <context|usage|status|effort|rename> [value] --json` exposes
+the allowlisted Claude controls. Context and usage return observed command
+output; status reads live runtime state. Effort requires an explicit level;
+rename requires a name. No interactive picker or arbitrary slash command is
+injected. An accepted command with missing or ambiguous confirmation returns
+`unknown` and a nonzero exit; inspect before retrying. Clear, resume, branch,
+permissions, config and directory changes remain unsupported.
 
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is

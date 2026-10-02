@@ -457,10 +457,17 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { pendingControls.remove(session.id) }
             do {
-                try await api.action(action, sessionID: session.id, model: model)
+                let response = try await api.action(action, sessionID: session.id, model: model)
+                if let receipt = response.result {
+                    deliveryStatus[session.id] = receipt.detail ?? deliveryLabel(receipt.evidence)
+                }
                 await refresh(fresh: true)
                 await refreshSession(session.id)
             } catch {
+                if let apiError = error as? AgenthailAPIError,
+                   case .control(_, _, let receipt) = apiError {
+                    deliveryStatus[session.id] = receipt.detail ?? deliveryLabel(receipt.evidence)
+                }
                 operationError = error.localizedDescription
             }
         }

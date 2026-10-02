@@ -885,6 +885,9 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	}
 	requestSent := make(chan string, 1)
 	claude := surfaces.NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method == "GET" {
+			return 200, `{"response_shape":{"id":"cse_compact","connection_status":"connected"}}`, nil
+		}
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}

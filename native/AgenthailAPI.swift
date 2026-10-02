@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case control(Int, String, DeliveryReceipt)
     case streamClosed
 
     var errorDescription: String? {
@@ -13,6 +14,8 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .control(_, let message, let receipt):
+            return "\(message)\n\(receipt.evidence ?? "unknown") · request \(receipt.requestId ?? "unavailable")"
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
     }
@@ -184,7 +187,8 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil) async throws {
+    @discardableResult
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil) async throws -> ActionReceipt {
         var body: [String: Any] = ["action": action]
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
@@ -196,7 +200,7 @@ final class AgenthailAPI: @unchecked Sendable {
         if let toID { body["toId"] = toID }
         if let pattern { body["pattern"] = pattern }
         if let relayID { body["relayId"] = relayID }
-        let _: EmptyResponse = try await post("/api/v1/actions", body: body)
+        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 35)
     }
 
     func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
@@ -273,6 +277,10 @@ final class AgenthailAPI: @unchecked Sendable {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }
+                if let receipt = try? JSONDecoder().decode(ActionReceipt.self, from: data).result,
+                   receipt.requestId != nil {
+                    throw AgenthailAPIError.control(response.statusCode, message, receipt)
+                }
             }
             throw AgenthailAPIError.request(response.statusCode, message)
         }
@@ -324,8 +332,27 @@ private struct EmptyResponse: Decodable {}
 
 struct ActionReceipt: Decodable {
     let result: DeliveryReceipt?
+
+    enum CodingKeys: String, CodingKey { case result }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if !container.contains(.result) {
+            result = nil
+        } else if try container.decodeNil(forKey: .result) {
+            result = nil
+        } else if (try? container.decode(String.self, forKey: .result)) != nil {
+            result = nil
+        } else {
+            result = try container.decode(DeliveryReceipt.self, forKey: .result)
+        }
+    }
 }
-struct DeliveryReceipt: Decodable {
+struct DeliveryReceipt: Decodable, Sendable {
     let evidence: String?
     let queueId: Int64?
+    let requestId: String?
+    let turnId: String?
+    let detail: String?
+    let source: String?
 }

@@ -1160,7 +1160,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
 			return
 		}
-		err = adapter.Interrupt(ctx, session)
+		if controller, ok := adapter.(surface.Controller); ok {
+			result, err = controller.Control(ctx, session, surface.ControlRequest{Action: "interrupt"})
+		} else {
+			err = adapter.Interrupt(ctx, session)
+		}
 	case "compact":
 		if !effective.Compact {
 			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
@@ -1188,12 +1192,30 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "model is required", http.StatusBadRequest)
 			return
 		}
-		result, err = adapter.Model(ctx, session, request.Model)
+		if controller, ok := adapter.(surface.Controller); ok {
+			result, err = controller.Control(ctx, session, surface.ControlRequest{Action: "model", Value: request.Model})
+		} else {
+			result, err = adapter.Model(ctx, session, request.Model)
+		}
+	case "context", "usage", "status", "effort", "rename":
+		controller, ok := adapter.(surface.Controller)
+		if !ok {
+			http.Error(w, "this session does not support Claude controls", http.StatusBadRequest)
+			return
+		}
+		result, err = controller.Control(ctx, session, surface.ControlRequest{Action: request.Action, Value: request.Message})
 	default:
 		http.Error(w, "unsupported dashboard action", http.StatusBadRequest)
 		return
 	}
+	if controlResult, ok := result.(*surface.ControlResult); ok && controlResult != nil {
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: string(controlResult.Evidence), SessionID: session.ID, Message: controlResult.Action, Result: controlResult.RequestID, Evidence: controlResult.Evidence})
+	}
 	if err != nil {
+		if result != nil {
+			writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "result": result, "error": map[string]string{"code": "control_failed", "message": err.Error()}})
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}

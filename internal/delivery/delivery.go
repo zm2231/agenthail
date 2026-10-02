@@ -58,11 +58,23 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		return nil, err
 	}
+	if controller, ok := adapter.(surface.Controller); ok {
+		result, err := controller.Control(ctx, session, surface.ControlRequest{Action: "steer", Value: message})
+		if err != nil {
+			d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
+			return nil, err
+		}
+		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer", Result: result.RequestID, Evidence: result.Evidence})
+		return &Receipt{Evidence: result.Evidence, SessionID: session.ID, TurnID: result.TurnID, Detail: result.Detail}, nil
+	}
 	if err := adapter.Steer(ctx, session, message); err != nil {
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
 		return nil, err
 	}
 	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
+	if adapter.Name() == surface.KindClaude {
+		return &Receipt{Evidence: surface.EvidenceTransportAccepted, SessionID: session.ID, Detail: "steer accepted; application to the active turn is not confirmed"}, nil
+	}
 	return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID}, nil
 }
 
