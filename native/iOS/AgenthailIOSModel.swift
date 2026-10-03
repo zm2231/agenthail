@@ -659,10 +659,25 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func receiveCatalog(_ event: CatalogStreamEvent) async {
+    func receiveCatalog(_ event: CatalogStreamEvent) async {
         guard event.stream == "catalog" else { return }
         catalogStreamCursor = max(catalogStreamCursor, event.seq)
-        _ = await refresh()
+        guard var current = snapshot else { return }
+        switch event.type {
+        case "session.upserted":
+            guard let changed = event.data.session else { _ = await refresh(); return }
+            guard let index = current.sessions.firstIndex(where: { $0.id == changed.id }) else { _ = await refresh(); return }
+            let previous = current.sessions[index]
+            current.sessions[index] = SessionState(id: changed.id, surface: changed.surface, name: changed.name, alias: previous.alias, status: changed.status, lastActive: changed.lastActive, queueCount: previous.queueCount, open: previous.open, current: previous.current, currentReason: previous.currentReason, capabilities: previous.capabilities, readOnly: previous.readOnly, readOnlyReason: previous.readOnlyReason, cwd: changed.cwd)
+            snapshot = current
+        case "session.removed":
+            guard let id = event.data.sessionId else { _ = await refresh(); return }
+            current.sessions.removeAll { $0.id == id }
+            current.totalSessions = current.sessions.count
+            snapshot = current
+        default:
+            _ = await refresh()
+        }
     }
 
     private func startSessionStream(_ id: String) {
