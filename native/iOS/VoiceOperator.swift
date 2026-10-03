@@ -16,6 +16,7 @@ final class VoiceOperatorModel: ObservableObject {
     @Published private(set) var hostHangupPending = false
     @Published private(set) var hostHangupUnconfirmed = false
     @Published var text = ""
+    @Published var targetID = ""
     let isPreview: Bool
     let audio: any VoiceAudioClient
     private var api: (any VoiceServiceClient)?
@@ -29,7 +30,7 @@ final class VoiceOperatorModel: ObservableObject {
     private var startSubmitted = false
     private var hostHangupAttemptID: String?
     private var closed = false
-    var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    var canCall: Bool { ready && !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
     var canStartNewConversation: Bool {
         state != nil && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed
             && !closed && state?.hasCall != true && state?.occupied != true
@@ -141,6 +142,9 @@ final class VoiceOperatorModel: ObservableObject {
         let current = generation
         defer { working = false }
         do {
+            let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
+            guard !closed, generation == current else { return }
+            state = selected
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
@@ -290,6 +294,8 @@ final class VoiceOperatorModel: ObservableObject {
         guard !closed else { return }
         hangup()
         closed = true
+        state = nil
+        detail = nil
         polling?.cancel(); polling = nil
         audio.close()
     }
@@ -349,17 +355,17 @@ struct AgenthailVoiceOperatorSheet: View {
                     if let state = model.state, !state.transcripts.isEmpty {
                         ForEach(state.transcripts) { item in
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(item.role == "user" ? "You" : "Orchestrator").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                                Text(item.role == "user" ? "You" : "Selected session").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                                 Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
                             }
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 20) {
                             Text("What would you like to work on?").font(.title2.weight(.semibold))
-                            Text("Talk through a plan, check on your agents, or ask the orchestrator to send them work.").font(.body).foregroundStyle(.secondary)
+                            Text("Choose an existing Codex or Claude session, then speak or type a request for that session.").font(.body).foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 14) {
-                                Label("What are my agents working on?", systemImage: "bubble.left")
-                                Label("Ask the builder to review the failing tests.", systemImage: "bubble.left")
+                                Label("What are you working on?", systemImage: "bubble.left")
+                                Label("Review the failing tests.", systemImage: "bubble.left")
                             }.font(.subheadline).foregroundStyle(.secondary)
                         }.padding(.vertical, 16)
                     }
@@ -430,7 +436,7 @@ struct AgenthailVoiceOperatorSheet: View {
             .background(alignment: .bottom) {
                 if let bridge = model.audio as? VoiceAudioBridge { VoiceAudioSurface(bridge: bridge).frame(width: 1, height: 1).accessibilityHidden(true) }
             }
-            .navigationTitle("Orchestrator")
+            .navigationTitle("Session voice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
@@ -471,7 +477,7 @@ struct AgenthailVoiceOperatorSheet: View {
         VStack(spacing: 16) {
             if showKeyboard && model.audioConnected {
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField("Message the orchestrator", text: $model.text, axis: .vertical)
+                    TextField("Message selected session", text: $model.text, axis: .vertical)
                         .lineLimit(1...5).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
                     Button("Send", systemImage: "arrow.up") { Task { await model.sendText() } }
                         .labelStyle(.iconOnly).frame(width: 44, height: 44).background(.tint, in: Circle()).foregroundStyle(.white)
@@ -492,6 +498,14 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(.secondary) }
             } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Existing Codex or Claude session ID or alias", text: $model.targetID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                    Text("Voice uses Codex realtime for audio and sends work only to this exact existing session.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button { Task { await model.call() } } label: {
                     Label(dynamicTypeSize.isAccessibilitySize ? "Call" : "Call Codex Voice", systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
                 }.buttonStyle(.borderedProminent).accessibilityLabel("Call Codex Voice").disabled(!model.canCall)
@@ -534,6 +548,11 @@ struct AgenthailVoiceOperatorSheet: View {
             List {
                 Section("Connection") {
                     LabeledContent("Provider", value: "Codex Voice")
+                    if let target = model.state?.target {
+                        LabeledContent("Coding target", value: target.name)
+                        LabeledContent("Coding provider", value: model.state?.codingProvider ?? target.surface)
+                    }
+                    if let provider = model.state?.audioProvider { LabeledContent("Audio provider", value: provider) }
                     LabeledContent("Audio", value: connectionTitle)
                     Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
                     Text("Leaving the app ends audio. Return and call again to continue with the same orchestrator.")

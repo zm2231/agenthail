@@ -6,7 +6,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testPreOfferAudioFailurePreservesCauseAndDoesNotStopUnknownHostCall() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("error", "Microphone route unavailable")
         await Task.yield()
@@ -18,7 +18,7 @@ final class VoiceTests: XCTestCase {
     func testCleanupFailureDoesNotOverwriteAudioFailure() async {
         let api = VoiceFixtureAPI(); api.stopError = AgenthailAPIError.request(409, "call identity does not match")
         let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
@@ -32,7 +32,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testHangupEndsLocalAudioBeforeHostStopIsConfirmed() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
@@ -67,7 +67,7 @@ final class VoiceTests: XCTestCase {
     func testUnconfirmedHostHangupKeepsLocalAudioOffAndAllowsRetry() async {
         let api = VoiceFixtureAPI(); api.stopError = AgenthailAPIError.request(503, "host unavailable")
         let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
@@ -90,7 +90,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testUnavailableAudioAndDisconnectedHostBlockCalls() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio)
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"
         audio.onMessage?("ready", "")
         XCTAssertTrue(model.canCall)
         model.connectionError = "Host offline"
@@ -108,7 +108,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testClosedScreenCannotSendTextOrInterrupt() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         model.close()
         model.text = "Do not deliver after close"
@@ -121,7 +121,7 @@ final class VoiceTests: XCTestCase {
     func testNewConversationUsesServerActionAndClearsLoadedTimeline() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ready","session":{"id":"old","surface":"codex","name":"Old operator","status":"idle","lastActive":"now","cwd":"/operator","source":"agenthail","transport":"desktop"},"events":[{"sequence":1,"method":"thread/realtime/transcript/done","params":{"role":"assistant","text":"Old history"}}],"occupied":false,"truncated":false}"#.utf8))
-        let model = VoiceOperatorModel(api: api, audio: audio)
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"
         await model.refresh()
         XCTAssertTrue(model.canStartNewConversation)
         await model.startNewConversation()
@@ -132,7 +132,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testLateTextResponseCannotReplaceClosedScreenState() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         api.holdText = true
         model.text = "Check the existing task"
@@ -143,7 +143,7 @@ final class VoiceTests: XCTestCase {
         let connected = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","events":[],"occupied":false,"truncated":false}"#.utf8))
         api.release(connected)
         await send.value
-        XCTAssertEqual(model.state?.phase, "ready")
+        XCTAssertNil(model.state)
         XCTAssertFalse(model.audioConnected)
     }
 
@@ -152,7 +152,7 @@ final class VoiceTests: XCTestCase {
         let api = VoiceFixtureAPI()
         api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"old-call","events":[],"occupied":false,"truncated":false}"#.utf8))
         let audio = VoiceFixtureAudio(); audio.holdStart = true
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         let call = Task { await model.call() }
         for _ in 0..<1000 where audio.pending == nil { await Task.yield() }
         XCTAssertNotNil(audio.pending)
@@ -171,7 +171,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testCurrentCallEndingIsVisibleInsteadOfSilentlyReturningToReady() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
@@ -189,7 +189,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testOldEndedSnapshotCannotEndNewConnectedCall() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
@@ -214,7 +214,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testOnlyBegunAudioInterruptionEndsActiveCallWithVisibleReason() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
                                             userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]))
@@ -230,7 +230,7 @@ final class VoiceTests: XCTestCase {
     @MainActor
     func testAudioInterruptionIncludesSystemReasonWhenProvided() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
                                             userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
@@ -242,7 +242,7 @@ final class VoiceTests: XCTestCase {
     func testClosingDuringPreparationCannotRestartMicrophone() async throws {
         let api = VoiceFixtureAPI(); api.holdPrepare = true
         let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         let call = Task { await model.call() }
         for _ in 0..<1000 where api.pending == nil { await Task.yield() }
         XCTAssertNotNil(api.pending)
@@ -258,7 +258,7 @@ final class VoiceTests: XCTestCase {
     func testLateAcceptedOfferIsStoppedAndCannotReviveClosedScreen() async throws {
         let api = VoiceFixtureAPI(); api.holdStart = true
         let audio = VoiceFixtureAudio()
-        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where api.pending == nil { await Task.yield() }

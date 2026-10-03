@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/voice"
@@ -29,11 +30,37 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	if err != nil {
 		provider = nil
 	}
-	s := voice.NewWithOperatorSource(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, func(session *surface.Session, active bool) {
+	s := voice.NewWithTargetsAndOperatorSource(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, delivery.Dispatcher{Registry: d.Registry}, func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")
 	})
 	mux.HandleFunc("/api/v1/voice", d.voiceBearerGuard(dashboard, voiceHandler(s)))
 	mux.HandleFunc("/api/v1/voice/peer", d.voiceBearerGuard(dashboard, voicePeerHandler))
+}
+
+func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voice.Target, error) {
+	if d.Registry == nil {
+		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
+	}
+	id, err := d.Registry.ResolveTarget(requested)
+	if err != nil {
+		return nil, fmt.Errorf("resolve voice target: %w", err)
+	}
+	session, err := d.Registry.Session(id)
+	if err != nil {
+		return nil, fmt.Errorf("load voice target: %w", err)
+	}
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil {
+		return nil, fmt.Errorf("%s target has no configured adapter", session.Surface)
+	}
+	resolved, err := adapter.Resolve(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("verify voice target: %w", err)
+	}
+	if resolved == nil || resolved.ID != session.ID {
+		return nil, fmt.Errorf("verified voice target did not retain its exact identity")
+	}
+	return &voice.Target{Session: resolved, Adapter: adapter}, nil
 }
 
 func (d *Daemon) voiceBearerGuard(dashboard *dashboardServer, next http.HandlerFunc) http.HandlerFunc {
