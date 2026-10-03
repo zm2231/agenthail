@@ -777,6 +777,9 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 	}
 	for _, entry := range expired {
 		_ = r.RecordHistory(entry)
+		if _, _, err := r.ExpireQueuedDeliveryIntent(entry.QueueID, "message expired after "+queueMessageTTLLabel()); err != nil {
+			return 0, err
+		}
 	}
 	return len(expired), nil
 }
