@@ -63,6 +63,17 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testCatalogRemovalDeletesOnlyItsSession() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let before = model.snapshot!.sessions.count
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"session.removed","data":{"sessionId":"demo"}}"#.utf8))
+        await model.receiveCatalog(event)
+        XCTAssertNil(model.snapshot?.sessions.first { $0.id == "demo" })
+        XCTAssertEqual(model.snapshot?.totalSessions, before - 1)
+    }
+
+    @MainActor
     func testEventRefreshDoesNotRestorePreviousSelection() async {
         let probe = IOSSelectionProbe()
         probe.selectedID = "A"
