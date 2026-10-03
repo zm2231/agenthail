@@ -1104,6 +1104,9 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 	if eventReads < 2 || len(events) != 2 || events[0].Text != "done" || events[1].Kind != "done" {
 		t.Fatalf("event_reads=%d events=%+v", eventReads, events)
 	}
+	if events[0].ProviderKey != "renderer:12" || events[0].ID != "renderer:12" || events[0].Operation != "append" || events[0].TurnID != "target-turn" {
+		t.Fatalf("normalized event=%+v", events[0])
+	}
 }
 
 func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
