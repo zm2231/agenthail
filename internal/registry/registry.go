@@ -124,6 +124,9 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 		return err
 	}
@@ -337,6 +340,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	sender_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	target_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
 	provider_key TEXT NOT NULL DEFAULT '',
+	message TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
