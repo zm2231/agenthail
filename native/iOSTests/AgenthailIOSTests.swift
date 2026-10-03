@@ -21,6 +21,22 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(result.events, 0)
     }
 
+    func testCatalogStreamDecodesItsIndependentCursorEvent() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CatalogEventStreamURLProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://mac.tailnet.ts.net")!, token: "token", session: URLSession(configuration: configuration))
+        let probe = CatalogConnectionProbe()
+        do {
+            try await api.streamCatalog(after: 41, onConnected: { await probe.markConnected() }, onEvent: { event in await probe.mark(event) })
+            XCTFail("closed catalog stream unexpectedly returned")
+        } catch AgenthailAPIError.streamClosed {
+        }
+        let result = await probe.result()
+        XCTAssertTrue(result.connected)
+        XCTAssertEqual(result.sequence, 42)
+        XCTAssertEqual(result.type, "session.upserted")
+    }
+
     @MainActor
     func testEventRefreshDoesNotRestorePreviousSelection() async {
         let probe = IOSSelectionProbe()
@@ -189,6 +205,15 @@ private actor EventConnectionProbe {
     }
 }
 
+private actor CatalogConnectionProbe {
+    private var connected = false
+    private var sequence: UInt64 = 0
+    private var type = ""
+    func markConnected() { connected = true }
+    func mark(_ event: CatalogStreamEvent) { sequence = event.seq; type = event.type }
+    func result() -> (connected: Bool, sequence: UInt64, type: String) { (connected, sequence, type) }
+}
+
 private final class EmptyEventStreamURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -204,6 +229,20 @@ private final class EmptyEventStreamURLProtocol: URLProtocol, @unchecked Sendabl
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    override func stopLoading() {}
+}
+
+private final class CatalogEventStreamURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        XCTAssertEqual(request.url?.path, "/api/v1/catalog-events")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Last-Event-ID"), "41")
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("data: {\"stream\":\"catalog\",\"seq\":42,\"type\":\"session.upserted\",\"data\":{}}\n\n".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
     override func stopLoading() {}
 }
 
