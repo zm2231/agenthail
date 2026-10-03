@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	pollInterval = 5 * time.Second
+	pollInterval             = 5 * time.Second
+	catalogDiscoveryInterval = 30 * time.Second
 )
 
 type Daemon struct {
@@ -170,8 +171,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if recovered > 0 {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	observerTicker := time.NewTicker(pollInterval)
+	defer observerTicker.Stop()
+	catalogTicker := time.NewTicker(catalogDiscoveryInterval)
+	defer catalogTicker.Stop()
 	d.scanAndRelay(ctx)
 	d.discoverCatalog(ctx)
 	for {
@@ -180,8 +183,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.queueWorkers.Wait()
 			d.log.Printf("stopping")
 			return nil
-		case <-ticker.C:
+		case <-observerTicker.C:
 			d.scanAndRelay(ctx)
+		case <-catalogTicker.C:
 			d.discoverCatalog(ctx)
 		}
 	}
