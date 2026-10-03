@@ -391,6 +391,29 @@ func TestAcceptedDeliveryDoesNotRelayPreviousCompletion(t *testing.T) {
 	}
 }
 
+func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindCodex
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-next", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-next", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	stored, err := r.DeliveryIntent(intent.ID)
+	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
 func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)
