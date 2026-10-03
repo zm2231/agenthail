@@ -364,16 +364,23 @@ CREATE TABLE IF NOT EXISTS catalog_state (
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
-	lastActiveMS := int64(0)
-	if !s.LastActive.IsZero() {
-		lastActiveMS = s.LastActive.UnixMilli()
-	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(
+	if err := registerSessionTx(tx, s); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func registerSessionTx(tx *sql.Tx, s surface.Session) error {
+	lastActiveMS := int64(0)
+	if !s.LastActive.IsZero() {
+		lastActiveMS = s.LastActive.UnixMilli()
+	}
+	_, err := tx.Exec(
 		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,updated_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
@@ -420,7 +427,7 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *Registry) mergeDuplicateClaudeSessions() error {

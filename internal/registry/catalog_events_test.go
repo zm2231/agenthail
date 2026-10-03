@@ -3,6 +3,9 @@ package registry
 import (
 	"bytes"
 	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestCatalogEventsReplayDeduplicateAndPersistEpoch(t *testing.T) {
@@ -53,6 +56,22 @@ func TestAppendCatalogEventTxRollsBackWithOwnerTransaction(t *testing.T) {
 	}
 	if len(window.Events) != 0 {
 		t.Fatalf("events survived rollback: %+v", window.Events)
+	}
+}
+
+func TestRecordCatalogSessionCommitsStateAndEventTogether(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "catalog-session", Surface: surface.KindCodex, Name: "Catalog"}
+	event, created, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project-1"}`), Checkout: []byte(`{"id":"checkout-1"}`), ObservedAt: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}, CatalogEvent{DedupeKey: "catalog-session:1", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"catalog-session"}}`)})
+	if err != nil || !created || event.Seq != 1 {
+		t.Fatalf("event=%+v created=%v err=%v", event, created, err)
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CatalogSeq != event.Seq || len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Session.ID != session.ID || string(snapshot.Sessions[0].HostProject) != `{"id":"project-1"}` {
+		t.Fatalf("snapshot=%+v", snapshot)
 	}
 }
 

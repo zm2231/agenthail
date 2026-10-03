@@ -77,22 +77,26 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	ID             string                `json:"id"`
-	Surface        surface.SurfaceKind   `json:"surface"`
-	Name           string                `json:"name"`
-	Cwd            string                `json:"cwd,omitempty"`
-	Alias          string                `json:"alias,omitempty"`
-	Status         surface.SessionStatus `json:"status"`
-	LastActive     time.Time             `json:"lastActive,omitempty"`
-	QueueCount     int                   `json:"queueCount"`
-	Open           bool                  `json:"open"`
-	Current        bool                  `json:"current"`
-	CurrentReason  string                `json:"currentReason,omitempty"`
-	Capabilities   surface.Capabilities  `json:"capabilities"`
-	ReadOnly       bool                  `json:"readOnly,omitempty"`
-	ReadOnlyReason string                `json:"readOnlyReason,omitempty"`
-	Source         string                `json:"source,omitempty"`
-	Transport      string                `json:"transport,omitempty"`
+	ID                string                `json:"id"`
+	Surface           surface.SurfaceKind   `json:"surface"`
+	Name              string                `json:"name"`
+	Cwd               string                `json:"cwd,omitempty"`
+	Alias             string                `json:"alias,omitempty"`
+	Status            surface.SessionStatus `json:"status"`
+	LastActive        time.Time             `json:"lastActive,omitempty"`
+	QueueCount        int                   `json:"queueCount"`
+	Open              bool                  `json:"open"`
+	Current           bool                  `json:"current"`
+	CurrentReason     string                `json:"currentReason,omitempty"`
+	Capabilities      surface.Capabilities  `json:"capabilities"`
+	ReadOnly          bool                  `json:"readOnly,omitempty"`
+	ReadOnlyReason    string                `json:"readOnlyReason,omitempty"`
+	Source            string                `json:"source,omitempty"`
+	Transport         string                `json:"transport,omitempty"`
+	HostProject       *catalogHostProject   `json:"hostProject,omitempty"`
+	Checkout          *catalogCheckout      `json:"checkout,omitempty"`
+	ObservedAt        time.Time             `json:"observedAt,omitempty"`
+	UnavailableReason string                `json:"unavailableReason,omitempty"`
 }
 
 type dashboardState struct {
@@ -524,7 +528,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if d.events != nil {
 		eventCursor = d.events.cursor()
 	}
-	hostEpoch, catalogSeq, err := d.Registry.CatalogState()
+	catalogSnapshot, err := d.Registry.CatalogSnapshot()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read catalog state: %w", err)
 	}
@@ -557,7 +561,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: hostEpoch, CatalogSeq: catalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation})
 	}
@@ -585,9 +589,18 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		adapters[adapter.Name()] = adapter
 		state.Surfaces = append(state.Surfaces, dashboardSurface{Name: string(adapter.Name()), Connected: true, Health: "cached", Capabilities: adapter.Capabilities()})
 	}
-	sessions, err := d.Registry.ListSessions(0)
-	if err != nil {
-		return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
+	catalogSessions := map[string]registry.CatalogSessionState{}
+	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))
+	for _, record := range catalogSnapshot.Sessions {
+		catalogSessions[record.Session.ID] = record
+		sessions = append(sessions, record.Session)
+	}
+	if len(catalogSnapshot.Sessions) == 0 {
+		var err error
+		sessions, err = d.Registry.ListSessions(0)
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
+		}
 	}
 	for _, session := range sessions {
 		adapter := adapters[session.Surface]
@@ -598,7 +611,20 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
 		current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
 		effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-		state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
+		entry := dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport}
+		if record, found := catalogSessions[session.ID]; found {
+			var hostProject catalogHostProject
+			var checkout catalogCheckout
+			if json.Unmarshal(record.HostProject, &hostProject) == nil {
+				entry.HostProject = &hostProject
+			}
+			if json.Unmarshal(record.Checkout, &checkout) == nil {
+				entry.Checkout = &checkout
+			}
+			entry.ObservedAt = record.ObservedAt
+			entry.UnavailableReason = record.UnavailableReason
+		}
+		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	sort.Slice(state.Sessions, func(i, j int) bool {

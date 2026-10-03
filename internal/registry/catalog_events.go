@@ -29,6 +29,15 @@ type CatalogEventWindow struct {
 }
 
 func (r *Registry) EnsureCatalogState() error {
+	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_sessions (
+		session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+		host_project BLOB NOT NULL,
+		checkout BLOB NOT NULL,
+		unavailable_reason TEXT NOT NULL DEFAULT '',
+		observed_at TEXT NOT NULL
+	)`); err != nil {
+		return err
+	}
 	_, err := r.catalogHostEpoch(true)
 	return err
 }
