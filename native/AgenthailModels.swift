@@ -411,17 +411,8 @@ struct CatalogStreamEvent: Decodable {
 }
 
 struct CatalogStreamData: Decodable {
-    let session: CatalogSession?
+    let session: SessionState?
     let sessionId: String?
-}
-
-struct CatalogSession: Decodable {
-    let id: String
-    let surface: String
-    let name: String
-    let cwd: String?
-    let status: String
-    let lastActive: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {

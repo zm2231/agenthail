@@ -41,7 +41,7 @@ final class AgenthailIOSTests: XCTestCase {
     func testCatalogDeltaUpdatesKnownSessionWithoutSnapshotRead() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
-        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":42,"type":"session.upserted","data":{"session":{"id":"demo","surface":"codex","name":"Updated","cwd":"/updated","status":"busy","lastActive":"2026-10-03T12:00:00Z"}}}"#.utf8))
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":42,"type":"session.upserted","data":{"session":{"id":"demo","surface":"codex","name":"Updated","cwd":"/updated","status":"busy","lastActive":"2026-10-03T12:00:00Z","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
         await model.receiveCatalog(event)
         let updated = model.snapshot?.sessions.first { $0.id == "demo" }
         XCTAssertEqual(updated?.name, "Updated")

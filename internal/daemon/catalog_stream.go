@@ -234,7 +234,8 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 				continue
 			}
 			observedAt := time.Now().UTC()
-			payload, err := json.Marshal(map[string]any{"session": session, "hostProject": identity.HostProject, "checkout": identity.Checkout, "unavailableReason": identity.UnavailableReason, "observedAt": observedAt.Format(time.RFC3339Nano)})
+			row := d.catalogSessionRow(ctx, adapter, session, identity, observedAt)
+			payload, err := json.Marshal(map[string]any{"session": row})
 			if err != nil {
 				continue
 			}
@@ -250,4 +251,16 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
 		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 	}
+}
+
+func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time) dashboardSession {
+	alias, _ := d.Registry.ReverseAlias(session.ID)
+	open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		config = DashboardConfig{}
+	}
+	current, reason := dashboardSessionPresence(session, d.Registry.QueueCount(session.ID), open, config.CodexRecentHours, observedAt)
+	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: d.Registry.QueueCount(session.ID), Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason}
 }
