@@ -60,6 +60,25 @@ func (r *Registry) CatalogState() (string, uint64, error) {
 }
 
 func (r *Registry) AppendCatalogEvent(input CatalogEvent) (CatalogEvent, bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	defer tx.Rollback()
+	event, created, err := r.AppendCatalogEventTx(tx, input)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return event, created, nil
+}
+
+func (r *Registry) AppendCatalogEventTx(tx *sql.Tx, input CatalogEvent) (CatalogEvent, bool, error) {
+	if tx == nil {
+		return CatalogEvent{}, false, fmt.Errorf("catalog event transaction is required")
+	}
 	if strings.TrimSpace(input.DedupeKey) == "" || strings.TrimSpace(input.Type) == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog event requires dedupe key and type")
 	}
@@ -69,16 +88,11 @@ func (r *Registry) AppendCatalogEvent(input CatalogEvent) (CatalogEvent, bool, e
 		input.CreatedAt = input.CreatedAt.UTC()
 	}
 	input.Payload = append([]byte(nil), input.Payload...)
-	tx, err := r.db.Begin()
-	if err != nil {
-		return CatalogEvent{}, false, err
-	}
-	defer tx.Rollback()
 	if _, err := catalogHostEpochTx(tx, true); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if existing, err := catalogEventByDedupeKey(tx, input.DedupeKey); err == nil {
-		return existing, false, tx.Commit()
+		return existing, false, nil
 	} else if err != sql.ErrNoRows {
 		return CatalogEvent{}, false, err
 	}
@@ -94,7 +108,7 @@ func (r *Registry) AppendCatalogEvent(input CatalogEvent) (CatalogEvent, bool, e
 	if _, err := tx.Exec(`DELETE FROM catalog_events WHERE seq NOT IN (SELECT seq FROM catalog_events ORDER BY seq DESC LIMIT ?)`, catalogEventRetention); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	return input, true, tx.Commit()
+	return input, true, nil
 }
 
 func (r *Registry) CatalogEventsAfter(after uint64, limit int) (CatalogEventWindow, error) {

@@ -32,6 +32,30 @@ func TestCatalogEventsReplayDeduplicateAndPersistEpoch(t *testing.T) {
 	}
 }
 
+func TestAppendCatalogEventTxRollsBackWithOwnerTransaction(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.EnsureCatalogState(); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: "rollback", Type: "delivery.problem", EntityID: "intent-1", Payload: []byte(`{"id":"intent-1"}`)}); err != nil || !created {
+		t.Fatalf("append created=%v err=%v", created, err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Events) != 0 {
+		t.Fatalf("events survived rollback: %+v", window.Events)
+	}
+}
+
 func TestSessionJournalSourceEpochChangesOnRestart(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")

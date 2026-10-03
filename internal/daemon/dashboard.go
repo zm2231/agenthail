@@ -98,6 +98,8 @@ type dashboardSession struct {
 type dashboardState struct {
 	UpdatedAt        time.Time            `json:"updatedAt"`
 	EventCursor      uint64               `json:"eventCursor"`
+	HostEpoch        string               `json:"hostEpoch"`
+	CatalogSeq       uint64               `json:"catalogSeq"`
 	Daemon           map[string]any       `json:"daemon"`
 	Surfaces         []dashboardSurface   `json:"surfaces"`
 	Sessions         []dashboardSession   `json:"sessions"`
@@ -522,6 +524,10 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if d.events != nil {
 		eventCursor = d.events.cursor()
 	}
+	hostEpoch, catalogSeq, err := d.Registry.CatalogState()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read catalog state: %w", err)
+	}
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("load dashboard config: %w", err)
@@ -551,7 +557,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: hostEpoch, CatalogSeq: catalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation})
 	}

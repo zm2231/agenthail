@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case streamGap
     case streamClosed
 
     var errorDescription: String? {
@@ -13,6 +14,7 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
     }
@@ -220,6 +222,34 @@ final class AgenthailAPI: @unchecked Sendable {
         if !Task.isCancelled {
             throw AgenthailAPIError.streamClosed
         }
+    }
+
+    func streamSession(id: String, after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (SessionStreamEvent) async -> Void) async throws {
+        var components = URLComponents()
+        components.path = "/api/v1/session-stream"
+        components.queryItems = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "after", value: String(after))]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
+        let (bytes, response) = try await session.bytes(for: request)
+        if let response = response as? HTTPURLResponse, response.statusCode == 409 {
+            throw AgenthailAPIError.streamGap
+        }
+        try validate(response: response, data: nil)
+        await onConnected()
+        var dataLine = ""
+        for try await line in bytes.lines {
+            if Task.isCancelled { return }
+            if line.hasPrefix("data: ") {
+                dataLine = String(line.dropFirst(6))
+            } else if line.isEmpty, !dataLine.isEmpty {
+                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(SessionStreamEvent.self, from: data) {
+                    await onEvent(event)
+                }
+                dataLine = ""
+            }
+        }
+        if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

@@ -1,0 +1,59 @@
+package daemon
+
+import (
+	"bufio"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/zm2231/agenthail/internal/registry"
+)
+
+func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	if _, created, err := d.catalog.publish(registry.CatalogEvent{DedupeKey: "session:from:1", Type: "session.upserted", EntityID: "from", Payload: []byte(`{"id":"from"}`)}); err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/catalog-events?after=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			if !strings.Contains(line, `"stream":"catalog"`) || !strings.Contains(line, `"type":"session.upserted"`) {
+				t.Fatalf("line=%q", line)
+			}
+			break
+		}
+	}
+}
+
+func TestSnapshotDoesNotCallProviderDuringDiscovery(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.listCalls.Store(0)
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.HostEpoch == "" || fake.listCalls.Load() != 0 {
+		t.Fatalf("state=%+v providerCalls=%d", state, fake.listCalls.Load())
+	}
+}

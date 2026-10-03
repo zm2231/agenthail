@@ -15,6 +15,11 @@ type sourceCountingSurface struct {
 	calls   atomic.Int32
 	started chan struct{}
 	events  chan surface.StreamEvent
+	items   []surface.TimelineItem
+}
+
+func (s *sourceCountingSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	return &surface.SessionReadResult{Items: append([]surface.TimelineItem(nil), s.items...)}, nil
 }
 
 func (s *sourceCountingSurface) Stream(ctx context.Context, _ *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
@@ -78,5 +83,45 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 	window, err := registry.SessionJournalAfter(from.ID, 0, 10)
 	if err != nil || len(window.Entries) != 1 {
 		t.Fatalf("window=%+v err=%v", window, err)
+	}
+}
+
+func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items: []surface.TimelineItem{{
+			ID:        "timeline-1",
+			Kind:      "message",
+			Text:      "persisted activity",
+			Timestamp: "2026-10-03T12:00:00Z",
+		}},
+	}
+	manager := newSessionSourceManager(registry)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	window, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Entries) != 1 {
+		t.Fatalf("seeded entries=%d", len(window.Entries))
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ItemID != "timeline-1" || payload.ProviderKey != "timeline:timeline-1" || payload.Op != "upsert" || payload.Body != "persisted activity" {
+		t.Fatalf("seed payload=%+v", payload)
 	}
 }

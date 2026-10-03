@@ -32,6 +32,7 @@ type Daemon struct {
 	notificationArmed map[string]bool
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
+	catalog           *catalogHub
 	sources           *sessionSourceManager
 	dashboard         *dashboardServer
 }
@@ -69,6 +70,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		events:            newEventHub(reg),
+		catalog:           newCatalogHub(reg),
 		sources:           newSessionSourceManager(reg),
 	}
 	if err := reg.EnsureCatalogState(); err != nil {
@@ -168,6 +170,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	d.scanAndRelay(ctx)
+	d.discoverCatalog(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -176,6 +179,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			d.scanAndRelay(ctx)
+			d.discoverCatalog(ctx)
 		}
 	}
 }

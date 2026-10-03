@@ -267,7 +267,7 @@ struct SessionDetail: Decodable {
     let goal: GoalState?
     let model: String?
     let models: [ModelOption]?
-    let timeline: SessionTimeline?
+    var timeline: SessionTimeline?
     let readSource: String?
     let readError: String?
     let transcriptWarning: String?
@@ -376,10 +376,29 @@ enum AppSection: String, CaseIterable, Identifiable {
 
 struct SessionTimeline: Decodable {
     let nextBefore: Int64?
-    let items: [TimelineItem]
+    var items: [TimelineItem]
     let source: String?
     let truncated: Bool
     let unavailableReason: String?
+}
+
+struct SessionStreamItem: Decodable {
+    let itemId: String
+    let version: UInt64
+    let op: String
+    let kind: String
+    let turnId: String?
+    let ts: String
+    let body: String?
+    let truncated: Bool
+}
+
+struct SessionStreamEvent: Decodable {
+    let stream: String
+    let sessionId: String
+    let seq: UInt64
+    let type: String
+    let data: SessionStreamItem
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {

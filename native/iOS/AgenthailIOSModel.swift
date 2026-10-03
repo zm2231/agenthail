@@ -126,6 +126,8 @@ final class AgenthailIOSModel: ObservableObject {
     private var token: String?
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
+    private var sessionStreamTask: Task<Void, Never>?
+    private var sessionStreamCursor: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
     private var pushRelayURL: URL?
@@ -160,6 +162,7 @@ final class AgenthailIOSModel: ObservableObject {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        sessionStreamTask?.cancel()
     }
 
     func handlePairingURL(_ url: URL) {
@@ -302,6 +305,8 @@ final class AgenthailIOSModel: ObservableObject {
     func loadSession(_ id: String) async {
         if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
         if selectedSessionID != id {
+            sessionStreamTask?.cancel()
+            sessionStreamCursor = 0
             composer = drafts[id] ?? ""
             selectedDetail = nil
             olderActivity = []
@@ -312,6 +317,7 @@ final class AgenthailIOSModel: ObservableObject {
         sessionError = nil
         loadingSession = selectedDetail == nil
         await refreshSession(id)
+        if selectedSessionID == id { startSessionStream(id) }
         if selectedSessionID == id { loadingSession = false }
     }
 
@@ -497,6 +503,7 @@ final class AgenthailIOSModel: ObservableObject {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        sessionStreamTask?.cancel()
         api = nil
         endpoint = nil
         token = nil
@@ -621,24 +628,61 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    private func startSessionStream(_ id: String) {
+        sessionStreamTask?.cancel()
+        guard let api, selectedSessionID == id else { return }
+        sessionStreamTask = Task {
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled, selectedSessionID == id {
+                do {
+                    try await api.streamSession(id: id, after: sessionStreamCursor, onConnected: {}, onEvent: { [weak self] event in
+                        backoff.reset()
+                        await self?.applySessionStreamEvent(event)
+                    })
+                } catch {
+                    if Task.isCancelled || selectedSessionID != id { return }
+                    if case AgenthailAPIError.streamGap = error {
+                        sessionStreamCursor = 0
+                        await refreshSession(id)
+                        continue
+                    }
+                    let delay = backoff.nextDelay()
+                    try? await Task.sleep(for: .seconds(delay))
+                }
+            }
+        }
+    }
+
+    private func applySessionStreamEvent(_ event: SessionStreamEvent) {
+        guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
+        sessionStreamCursor = max(sessionStreamCursor, event.seq)
+        guard var timeline = detail.timeline else { return }
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated)
+        if event.data.op == "remove" {
+            timeline.items.removeAll { $0.id == event.data.itemId }
+        } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
+            timeline.items[index] = item
+        } else {
+            timeline.items.append(item)
+        }
+        detail.timeline = timeline
+        selectedDetail = detail
+    }
+
     private func receive(_ event: AgenthailEvent) async {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
-        let selectedID = selectedSessionID
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, let self else { return }
             await self.refresh()
-            if let selectedID, sessionLoadIsCurrent(selectedID, selectedID: self.selectedSessionID) {
-                await self.refreshSession(selectedID)
-            }
         }
     }
 
     func eventStreamConnected() async {
         reconnecting = false
         _ = await refresh(fresh: true)
-        if let id = selectedSessionID { await refreshSession(id) }
+        if let id = selectedSessionID { startSessionStream(id) }
     }
 
     func recordStreamInterruption(probeError: Error?) {

@@ -161,6 +161,7 @@ func (s *sessionSource) stop() {
 }
 
 func (s *sessionSource) run() {
+	s.seedJournal()
 	_ = s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
 	s.mu.Lock()
 	for id, subscriber := range s.subscribers {
@@ -175,8 +176,35 @@ func (s *sessionSource) run() {
 	s.manager.mu.Unlock()
 }
 
+func (s *sessionSource) seedJournal() {
+	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
+	defer cancel()
+	read, err := surface.ReadSession(ctx, s.adapter, s.session, surface.SessionReadRequest{Limit: 40})
+	if err != nil || read == nil {
+		return
+	}
+	for _, item := range read.Items {
+		if item.ID == "" {
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		s.append(surface.StreamEvent{
+			ID:          item.ID,
+			ProviderKey: "timeline:" + item.ID,
+			Version:     uint64(len(item.Text)),
+			Operation:   "upsert",
+			TurnID:      item.CallID,
+			Timestamp:   at,
+			Kind:        item.Kind,
+			Text:        item.Text,
+		})
+	}
+}
+
 func (s *sessionSource) append(event surface.StreamEvent) {
-	payload := s.normalize(event)
+	s.mu.Lock()
+	payload := s.normalizeLocked(event)
+	s.mu.Unlock()
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return
@@ -197,7 +225,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	s.mu.Unlock()
 }
 
-func (s *sessionSource) normalize(event surface.StreamEvent) sessionJournalPayload {
+func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJournalPayload {
 	providerKey := event.ProviderKey
 	if strings.HasPrefix(providerKey, "renderer:") {
 		providerKey = s.epoch + ":" + providerKey
