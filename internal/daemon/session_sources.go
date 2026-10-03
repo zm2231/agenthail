@@ -162,13 +162,23 @@ func (s *sessionSource) stop() {
 
 func (s *sessionSource) run() {
 	s.seedJournal()
-	_ = s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
-	s.mu.Lock()
-	for id, subscriber := range s.subscribers {
-		delete(s.subscribers, id)
-		close(subscriber)
+	for {
+		_ = s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		s.mu.Lock()
+		for id, subscriber := range s.subscribers {
+			delete(s.subscribers, id)
+			close(subscriber)
+		}
+		hasHolders := len(s.holders) > 0
+		s.mu.Unlock()
+		if s.ctx.Err() != nil || !hasHolders {
+			break
+		}
+		select {
+		case <-s.ctx.Done():
+		case <-time.After(time.Second):
+		}
 	}
-	s.mu.Unlock()
 	s.manager.mu.Lock()
 	if s.manager.sources[s.session.ID] == s {
 		delete(s.manager.sources, s.session.ID)

@@ -18,6 +18,19 @@ type sourceCountingSurface struct {
 	items   []surface.TimelineItem
 }
 
+type restartingSource struct {
+	*daemonSurface
+	calls atomic.Int32
+}
+
+func (s *restartingSource) Stream(ctx context.Context, _ *surface.Session, _ string, _ func(surface.StreamEvent), _ time.Duration) error {
+	if s.calls.Add(1) == 1 {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func (s *sourceCountingSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	return &surface.SessionReadResult{Items: append([]surface.TimelineItem(nil), s.items...)}, nil
 }
@@ -151,5 +164,23 @@ func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
 	d.sourceHoldMu.Unlock()
 	if held {
 		t.Fatal("idle session source remained held")
+	}
+}
+
+func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	adapter := &restartingSource{daemonSurface: fake}
+	manager := newSessionSourceManager(registry)
+	release, err := manager.hold(&from, adapter, "active-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	deadline := time.Now().Add(2 * time.Second)
+	for adapter.calls.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls := adapter.calls.Load(); calls < 2 {
+		t.Fatalf("stream calls=%d", calls)
 	}
 }
