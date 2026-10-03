@@ -34,6 +34,8 @@ type Daemon struct {
 	events            *eventHub
 	catalog           *catalogHub
 	sources           *sessionSourceManager
+	sourceHoldMu      sync.Mutex
+	sourceHolds       map[string]func()
 	dashboard         *dashboardServer
 }
 
@@ -72,6 +74,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		events:            newEventHub(reg),
 		catalog:           newCatalogHub(reg),
 		sources:           newSessionSourceManager(reg),
+		sourceHolds:       map[string]func(){},
 	}
 	if err := reg.EnsureCatalogState(); err != nil {
 		d.log.Printf("catalog state: %s", err)

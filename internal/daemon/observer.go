@@ -143,6 +143,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("observe %s: empty observation", d.resolveDisplay(session.ID))
 		return
 	}
+	if observation.Status == surface.StatusBusy && observation.ActiveTurnID != "" && surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+		d.holdSessionSource(session, adapter)
+	} else if observation.Status != surface.StatusBusy || observation.ActiveTurnID == "" {
+		d.releaseSessionSource(session.ID)
+	}
 	session.Status = observation.Status
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
@@ -221,6 +226,39 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		if queued > 0 {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}
+	}
+}
+
+func (d *Daemon) holdSessionSource(session *surface.Session, adapter surface.Surface) {
+	d.sourceHoldMu.Lock()
+	if _, found := d.sourceHolds[session.ID]; found {
+		d.sourceHoldMu.Unlock()
+		return
+	}
+	d.sourceHoldMu.Unlock()
+	release, err := d.sources.hold(session, adapter, "active-turn")
+	if err != nil {
+		d.log.Printf("hold session source %s: %s", d.resolveDisplay(session.ID), err)
+		return
+	}
+	d.sourceHoldMu.Lock()
+	if existing, found := d.sourceHolds[session.ID]; found {
+		d.sourceHoldMu.Unlock()
+		release()
+		_ = existing
+		return
+	}
+	d.sourceHolds[session.ID] = release
+	d.sourceHoldMu.Unlock()
+}
+
+func (d *Daemon) releaseSessionSource(sessionID string) {
+	d.sourceHoldMu.Lock()
+	release := d.sourceHolds[sessionID]
+	delete(d.sourceHolds, sessionID)
+	d.sourceHoldMu.Unlock()
+	if release != nil {
+		release()
 	}
 }
 

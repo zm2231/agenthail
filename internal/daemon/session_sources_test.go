@@ -125,3 +125,31 @@ func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 		t.Fatalf("seed payload=%+v", payload)
 	}
 }
+
+func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
+	d, _, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
+	adapter.caps.Stream = true
+	d.Surfaces = []surface.Surface{adapter}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}
+	d.observeSession(context.Background(), adapter, &from)
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("active turn did not hold a source")
+	}
+	d.sourceHoldMu.Lock()
+	_, held := d.sourceHolds[from.ID]
+	d.sourceHoldMu.Unlock()
+	if !held {
+		t.Fatal("active turn source was not held")
+	}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
+	d.observeSession(context.Background(), adapter, &from)
+	d.sourceHoldMu.Lock()
+	_, held = d.sourceHolds[from.ID]
+	d.sourceHoldMu.Unlock()
+	if held {
+		t.Fatal("idle session source remained held")
+	}
+}
