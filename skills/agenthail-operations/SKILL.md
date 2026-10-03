@@ -74,13 +74,16 @@ the transcript or native `SendMessage` for an explicit reply. Compact, model,
 interrupt, and steer are typed controls that require a Remote Control identity.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
-from it.
+from it. A send `status: "submitted"` means the post-dispatch outcome is
+unconfirmed: it is neither acceptance nor failure, so do not report success and
+do not resend.
 
 The daemon registers each agent in the default Codex/Notion discovery page as
 an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
 senders register on first send to Claude. `--from` must resolve to a session
 or alias; otherwise identity comes from `AGENTHAIL_SESSION_ID`,
-`CODEX_THREAD_ID`, then `CLAUDE_SESSION_ID`. Without identity, an operator peer
+`CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, then the enclosing Claude Code
+session found by process ancestry. Without identity, an operator peer
 receives replies into history. Inbound messages to read-only/offline agents
 are denied rather than silently queued. Peer histories include received
 messages, rejection reasons, and asynchronous Claude receipts.
