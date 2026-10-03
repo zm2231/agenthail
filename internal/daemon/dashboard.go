@@ -617,23 +617,20 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		if adapter == nil {
 			continue
 		}
-		alias, _ := d.Registry.ReverseAlias(session.ID)
-		open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
-		current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
-		effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-		entry := dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport}
+		identity := catalogIdentity{}
+		observedAt := time.Time{}
 		if record, found := catalogSessions[session.ID]; found {
-			var hostProject catalogHostProject
-			var checkout catalogCheckout
-			if json.Unmarshal(record.HostProject, &hostProject) == nil {
-				entry.HostProject = &hostProject
-			}
-			if json.Unmarshal(record.Checkout, &checkout) == nil {
-				entry.Checkout = &checkout
-			}
-			entry.ObservedAt = record.ObservedAt
-			entry.UnavailableReason = record.UnavailableReason
+			_ = json.Unmarshal(record.HostProject, &identity.HostProject)
+			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
+			identity.UnavailableReason = record.UnavailableReason
+			observedAt = record.ObservedAt
 		}
+		if observedAt.IsZero() {
+			observedAt = now.UTC()
+		}
+		entry := d.catalogSessionRow(ctx, adapter, session, identity, observedAt)
+		entry.QueueCount = counts[session.ID]
+		entry.Current, entry.CurrentReason = dashboardSessionPresence(session, entry.QueueCount, entry.Open, config.CodexRecentHours, now)
 		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
