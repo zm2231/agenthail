@@ -646,3 +646,65 @@ func TestProcessOwnershipRequiresRandomLaunchToken(t *testing.T) {
 		t.Fatal("same PID and second-resolution start time accepted a different launch token")
 	}
 }
+
+func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
+	if err := os.MkdirAll(DefaultSocketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	name := uuid.NewString()
+	senderSocket := filepath.Join(DefaultSocketDir, "native-sender-"+name+".sock")
+	targetSocket := filepath.Join(DefaultSocketDir, strconv.Itoa(os.Getpid())+".sock")
+	if _, err := os.Lstat(targetSocket); !os.IsNotExist(err) {
+		t.Fatalf("test target socket already exists: %v", err)
+	}
+	senderListener, err := net.Listen("unix", senderSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer senderListener.Close()
+	targetListener, err := net.Listen("unix", targetSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetListener.Close()
+	received := make(chan frame, 1)
+	serveErr := make(chan error, 1)
+	go func() {
+		conn, err := targetListener.Accept()
+		if err != nil {
+			serveErr <- err
+			return
+		}
+		defer conn.Close()
+		var got frame
+		err = json.NewDecoder(conn).Decode(&got)
+		if err == nil {
+			received <- got
+		}
+		serveErr <- err
+	}()
+	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "native sender"}
+	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "status?")
+	if err != nil || result == nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	var got frame
+	select {
+	case got = <-received:
+	case <-time.After(time.Second):
+		t.Fatal("native frame was not received")
+	}
+	if err := <-serveErr; err != nil {
+		t.Fatal(err)
+	}
+	if got.From != "uds:"+senderSocket {
+		t.Fatalf("from=%q", got.From)
+	}
+	var body messageBody
+	if err := json.Unmarshal(got.Message, &body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Content, `from-session="`+canonicalID(sender.Surface, sender.ID)+`"`) || !strings.Contains(body.Content, "status?") {
+		t.Fatalf("content=%q", body.Content)
+	}
+}

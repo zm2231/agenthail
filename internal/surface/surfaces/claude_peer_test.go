@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,10 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "local-id" || sessions[0].Transport != "uds" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
+	caller, found, err := adapter.ResolveCaller(context.Background(), []int{os.Getpid()})
+	if err != nil || !found || caller.ID != "local-id" {
+		t.Fatalf("caller=%+v found=%v err=%v", caller, found, err)
+	}
 	if sessions[0].Transcript != filepath.Join(home, ".claude", "projects", "-fixture", "local-id.jsonl") {
 		t.Fatal("transcript escaped adapter home")
 	}
@@ -75,6 +80,98 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	sessions, err = adapter.List(context.Background())
 	if err != nil || len(sessions) != 0 {
 		t.Fatalf("stale PID admitted=%+v err=%v", sessions, err)
+	}
+	if _, _, err := adapter.ResolveCaller(context.Background(), []int{os.Getpid()}); err == nil {
+		t.Fatal("stale caller endpoint was allowed to fall back")
+	}
+}
+
+func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
+	home := t.TempDir()
+	sessionsDir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	process := exec.Command("/bin/sh", "-c", "sleep 5")
+	if err := process.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = process.Process.Kill()
+		_ = process.Wait()
+	}()
+	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
+		t.Fatal(err)
+	}
+	sourceSocket := filepath.Join("/tmp/cc-socks", strconv.Itoa(os.Getpid())+".sock")
+	targetSocket := filepath.Join("/tmp/cc-socks", strconv.Itoa(process.Process.Pid)+".sock")
+	for _, socket := range []string{sourceSocket, targetSocket} {
+		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
+			t.Fatalf("test socket already exists %s: %v", socket, err)
+		}
+	}
+	sourceListener, err := net.Listen("unix", sourceSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sourceListener.Close()
+	targetListener, err := net.Listen("unix", targetSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetListener.Close()
+	start := func(pid int) string {
+		command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+		output, err := command.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(output)
+	}
+	write := func(pid int, id, socket string) {
+		t.Helper()
+		record := map[string]any{"pid": pid, "sessionId": id, "name": id, "cwd": "/fixture", "status": "idle", "version": "2.1.270", "procStart": start(pid), "messagingSocketPath": socket}
+		data, _ := json.Marshal(record)
+		if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(pid)+".json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(os.Getpid(), "source-native", sourceSocket)
+	write(process.Process.Pid, "target-native", targetSocket)
+	received := make(chan struct {
+		From    string          `json:"from"`
+		Message json.RawMessage `json:"message"`
+	}, 1)
+	go func() {
+		conn, err := targetListener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var frame struct {
+			From    string          `json:"from"`
+			Message json.RawMessage `json:"message"`
+		}
+		if json.NewDecoder(conn).Decode(&frame) == nil {
+			received <- frame
+		}
+	}()
+	adapter := NewClaude("", home)
+	result, err := adapter.sendPeer(surface.WithSourceSessionID(context.Background(), "source-native"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, PID: process.Process.Pid, Transport: "uds"}, "status?")
+	if err != nil || result == nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	select {
+	case frame := <-received:
+		if frame.From != "uds:"+sourceSocket {
+			t.Fatalf("from=%q", frame.From)
+		}
+		if !strings.Contains(string(frame.Message), "status?") {
+			t.Fatalf("message=%s", frame.Message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("native sender frame was not delivered")
 	}
 }
 
