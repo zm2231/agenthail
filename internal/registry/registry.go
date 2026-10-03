@@ -121,6 +121,9 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
+	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 		return err
 	}
@@ -318,7 +321,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
 CREATE TABLE IF NOT EXISTS session_journal_state (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	next_seq INTEGER NOT NULL DEFAULT 0,
-	retained_bytes INTEGER NOT NULL DEFAULT 0
+	retained_bytes INTEGER NOT NULL DEFAULT 0,
+	source_epoch TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS action_receipts (
 	idempotency_key TEXT PRIMARY KEY,
@@ -353,6 +357,10 @@ CREATE TABLE IF NOT EXISTS catalog_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS catalog_events_created ON catalog_events(created_at DESC, seq DESC);
+CREATE TABLE IF NOT EXISTS catalog_state (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	host_epoch TEXT NOT NULL
+);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
