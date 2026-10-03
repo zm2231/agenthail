@@ -12,11 +12,13 @@ import (
 var ErrTargetBusy = errors.New("target is active and queuing is disabled")
 
 type Receipt struct {
-	Evidence  surface.DeliveryEvidence `json:"evidence"`
-	SessionID string                   `json:"sessionId"`
-	TurnID    string                   `json:"turnId,omitempty"`
-	QueueID   int64                    `json:"queueId,omitempty"`
-	Detail    string                   `json:"detail,omitempty"`
+	Evidence   surface.DeliveryEvidence `json:"evidence"`
+	Status     string                   `json:"status"`
+	SessionID  string                   `json:"sessionId"`
+	TurnID     string                   `json:"turnId,omitempty"`
+	QueueID    int64                    `json:"queueId,omitempty"`
+	DeliveryID int64                    `json:"deliveryId,omitempty"`
+	Detail     string                   `json:"detail,omitempty"`
 }
 
 type Dispatcher struct {
@@ -106,6 +108,19 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		result, err = adapter.Send(ctx, session, message)
 	}
 	if err != nil {
+		if surface.IsDeliveryOutcomeUnknown(err) {
+			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, Detail: "delivery intent recorded; receipt is pending"}
+			if d.Registry != nil && options.SourceSessionID != "" {
+				intent, intentErr := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: options.SourceSessionID, TargetSessionID: session.ID, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+				if intentErr != nil {
+					d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: intentErr.Error()})
+				} else {
+					receipt.DeliveryID = intent.ID
+				}
+			}
+			d.record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
+			return receipt, nil
+		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
 	}
@@ -115,7 +130,20 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		return nil, err
 	}
 	if result.Accepted {
+		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
 		peerTransport := session.Surface == surface.KindClaude && session.Transport == "uds"
+		if peerTransport {
+			receipt.Evidence = surface.EvidenceTransportAccepted
+			receipt.Detail = "receiver policy and model completion are pending"
+		}
+		if d.Registry != nil && options.SourceSessionID != "" {
+			intent, intentErr := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: options.SourceSessionID, TargetSessionID: session.ID, ProviderKey: result.UUID, Status: registry.DeliveryIntentSent, Evidence: receipt.Evidence})
+			if intentErr != nil {
+				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Result: result.UUID, Error: intentErr.Error()})
+			} else {
+				receipt.DeliveryID = intent.ID
+			}
+		}
 		if d.Registry != nil && !peerTransport {
 			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
 				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result.UUID, Error: err.Error()})
@@ -123,10 +151,10 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		}
 		if peerTransport {
 			d.record(registry.HistoryEntry{Kind: "transport-accepted", SessionID: session.ID, Message: message, Result: result.UUID})
-			return &Receipt{Evidence: surface.EvidenceTransportAccepted, SessionID: session.ID, TurnID: result.UUID, Detail: "receiver policy and model completion are pending"}, nil
+			return receipt, nil
 		}
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
-		return &Receipt{Evidence: surface.EvidenceDelivered, SessionID: session.ID, TurnID: result.UUID}, nil
+		return receipt, nil
 	}
 	if !allowQueue {
 		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
@@ -141,7 +169,16 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err != nil {
 		return nil, err
 	}
-	return &Receipt{Evidence: surface.EvidenceQueued, SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, Detail: "target busy"}, nil
+	receipt := &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, Detail: "target busy"}
+	if d.Registry != nil && options.SourceSessionID != "" {
+		intent, intentErr := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: options.SourceSessionID, TargetSessionID: session.ID, Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+		if intentErr != nil {
+			d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, QueueID: queueID, Message: message, Error: intentErr.Error()})
+		} else {
+			receipt.DeliveryID = intent.ID
+		}
+	}
+	return receipt, nil
 }
 
 func (d Dispatcher) record(entry registry.HistoryEntry) {

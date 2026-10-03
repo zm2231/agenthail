@@ -80,6 +80,7 @@ type SendResult struct {
 type DeliveryEvidence string
 
 const (
+	EvidenceSubmitted         DeliveryEvidence = "submitted"
 	EvidenceQueued            DeliveryEvidence = "queued"
 	EvidenceTransportAccepted DeliveryEvidence = "transport_accepted"
 	EvidenceHeld              DeliveryEvidence = "held"

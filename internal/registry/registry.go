@@ -19,7 +19,7 @@ type Registry struct {
 }
 
 const (
-	schemaVersion   = 7
+	schemaVersion   = 8
 	queueMessageTTL = time.Hour
 )
 
@@ -303,6 +303,56 @@ CREATE TABLE IF NOT EXISTS daemon_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS daemon_events_created ON daemon_events(created_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS session_journal (
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	seq INTEGER NOT NULL,
+	kind TEXT NOT NULL,
+	provider_key TEXT NOT NULL DEFAULT '',
+	payload BLOB NOT NULL,
+	observed_at TEXT NOT NULL,
+	bytes INTEGER NOT NULL,
+	PRIMARY KEY (session_id, seq)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
+	ON session_journal(session_id, provider_key) WHERE provider_key!='';
+CREATE TABLE IF NOT EXISTS session_journal_state (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+	next_seq INTEGER NOT NULL DEFAULT 0,
+	retained_bytes INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS action_receipts (
+	idempotency_key TEXT PRIMARY KEY,
+	request_hash TEXT NOT NULL,
+	status TEXT NOT NULL,
+	receipt BLOB NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS delivery_intents (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	sender_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	target_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	provider_key TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL,
+	evidence TEXT NOT NULL,
+	failure TEXT NOT NULL DEFAULT '',
+	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_provider_key
+	ON delivery_intents(target_session_id, provider_key) WHERE provider_key!='';
+CREATE INDEX IF NOT EXISTS delivery_intents_sender_status
+	ON delivery_intents(sender_session_id, status, id DESC);
+CREATE TABLE IF NOT EXISTS catalog_events (
+	seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	dedupe_key TEXT NOT NULL UNIQUE,
+	type TEXT NOT NULL,
+	entity_id TEXT NOT NULL,
+	payload BLOB NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS catalog_events_created ON catalog_events(created_at DESC, seq DESC);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
@@ -891,6 +941,8 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 
 func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 	switch entry.Kind {
+	case "submitted":
+		return surface.EvidenceSubmitted
 	case "queued":
 		return surface.EvidenceQueued
 	case "peer_sent", "peer_received", "transport-accepted":
