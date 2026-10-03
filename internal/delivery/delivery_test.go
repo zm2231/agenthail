@@ -115,6 +115,47 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 	}
 }
 
+func TestDispatcherSubmittedWithoutSenderDoesNotClaimRecordedIntent(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "target", Surface: surface.KindClaude}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "maybe", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID != 0 || strings.Contains(receipt.Detail, "intent recorded") {
+		t.Fatalf("receipt=%+v", receipt)
+	}
+}
+
+func TestDispatcherQueuedReceiptBindsDeliveryIntentToQueue(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, id := range []string{"sender", "target"} {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := &surface.Session{ID: "target", Surface: surface.KindCodex}
+	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "later", "", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil || receipt.Status != string(registry.DeliveryIntentQueued) || receipt.DeliveryID == 0 {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.QueueID != receipt.QueueID || intent.Status != registry.DeliveryIntentQueued {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
 func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {

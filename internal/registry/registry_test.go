@@ -790,7 +790,7 @@ func TestQueueRetainsTransportAcceptanceEvidence(t *testing.T) {
 	if err != nil || item == nil {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
-	if err := r.AckMessageWithEvidence(item.ID, "s", 0, surface.EvidenceTransportAccepted); err != nil {
+	if err := r.AckMessageWithEvidence(item.ID, "s", 0, surface.EvidenceTransportAccepted, ""); err != nil {
 		t.Fatal(err)
 	}
 	row, err := r.QueueItem(item.ID)
@@ -1057,7 +1057,7 @@ func TestAttentionItemsExplainTerminalDeliveryRecovery(t *testing.T) {
 			if err != nil || item == nil {
 				t.Fatalf("item=%+v err=%v", item, err)
 			}
-			if err := r.DeadLetterMessage(item.ID, errors.New(test.error)); err != nil {
+			if _, err := r.DeadLetterMessage(item.ID, errors.New(test.error)); err != nil {
 				t.Fatal(err)
 			}
 			items, err := r.ListAttentionItems(false)

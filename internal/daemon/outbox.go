@@ -68,7 +68,7 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		evidence = surface.EvidenceTransportAccepted
 		historyKind = "transport-accepted"
 	}
-	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, evidence); err != nil {
+	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, evidence, result.UUID); err != nil {
 		d.log.Printf("ack queue item %d: %s", item.ID, err)
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Result: result.UUID, Error: err.Error()})
 		return
@@ -86,7 +86,7 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 		d.finishQueueFailure(item, session, err, time.Now())
 		return
 	}
-	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered); err != nil {
+	if err := d.Registry.AckMessageWithEvidence(item.ID, session.ID, item.RelayHops, surface.EvidenceDelivered, ""); err != nil {
 		d.log.Printf("ack compact queue item %d: %s", item.ID, err)
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "ack-error", SessionID: session.ID, QueueID: item.ID, Message: "compact", Error: err.Error()})
 		return
@@ -115,13 +115,12 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		return
 	}
 	if surface.IsDeliveryTerminal(sendErr) {
-		if err := d.Registry.DeadLetterMessage(item.ID, sendErr); err != nil {
+		notified, err := d.Registry.DeadLetterMessage(item.ID, sendErr)
+		if err != nil {
 			d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
-		if _, queued, err := d.Registry.FailQueuedDeliveryIntent(item.ID, sendErr.Error()); err != nil {
-			d.log.Printf("record delivery failure for queue item %d: %s", item.ID, err)
-		} else if queued {
+		if notified {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "delivery-problem"})
 		}
 		return

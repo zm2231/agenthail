@@ -165,7 +165,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	completionPredatesActiveDelivery := previous.ActiveTurnID != "" && observation.ActiveTurnID == previous.ActiveTurnID
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
 	if completionChanged {
-		if session.Surface == surface.KindCodex {
+		if session.Surface == surface.KindCodex && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
 			reconciled, reconcileErr := d.Registry.ReconcileDeliveryIntent(session.ID, observation.CompletedTurnID)
 			if reconcileErr != nil {
 				d.log.Printf("reconcile delivery intent %s: %s", d.resolveDisplay(session.ID), reconcileErr)

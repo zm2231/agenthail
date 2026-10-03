@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -91,16 +92,9 @@ func TestDeliveryIntentDoesNotNotifyUnknownOutcome(t *testing.T) {
 func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "sender", "target")
-	queueID, err := r.QueueMessageWithKey("target", "wait", "expiry-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Message: "wait", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.BindDeliveryIntentQueue(intent.ID, queueID); err != nil {
-		t.Fatal(err)
+	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "expiry-test", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil || deliveryID == 0 {
+		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
 	}
 	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
 		t.Fatal(err)
@@ -108,8 +102,93 @@ func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
 	if _, err := r.ExpireMessages(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := r.DeliveryIntent(intent.ID)
-	if err != nil || stored.Status != DeliveryIntentExpired || r.QueueCount("sender") != 1 {
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != DeliveryIntentExpired || stored.QueueID != queueID || r.QueueCount("sender") != 1 {
 		t.Fatalf("intent=%+v err=%v notices=%d", stored, err, r.QueueCount("sender"))
+	}
+	if _, err := r.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if count := r.QueueCount("sender"); count != 1 {
+		t.Fatalf("sender notice count=%d", count)
+	}
+}
+
+func TestQueueDeliveryWithIntentSkipsUnregisteredSender(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "target")
+	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "", surface.SendOptions{SourceSessionID: "unregistered"})
+	if err != nil || queueID == 0 || deliveryID != 0 {
+		t.Fatalf("queueID=%d deliveryID=%d err=%v", queueID, deliveryID, err)
+	}
+}
+
+func TestQueueTerminalFailureNotifiesSenderWithDeadLetter(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	_, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	notified, err := r.DeadLetterMessage(item.ID, errors.New("target rejected input"))
+	if err != nil || !notified {
+		t.Fatalf("notified=%v err=%v", notified, err)
+	}
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != DeliveryIntentFailed || stored.NotificationQueueID == 0 || stored.Failure != "target rejected input" {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	if count := r.QueueCount("sender"); count != 1 {
+		t.Fatalf("sender notice count=%d", count)
+	}
+}
+
+func TestQueuedDeliveryAckBindsProviderKeyForReconciliation(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	_, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.AckMessageWithEvidence(item.ID, "target", 0, surface.EvidenceDelivered, "turn-7"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != DeliveryIntentSent || stored.ProviderKey != "turn-7" || stored.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	if reconciled, err := r.ReconcileDeliveryIntent("target", "turn-7"); err != nil || !reconciled {
+		t.Fatalf("reconciled=%v err=%v", reconciled, err)
+	}
+}
+
+func TestQueuedDeliveryUnknownOutcomeRetainsUncertaintyWithoutNotice(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	_, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	if err := r.DeadLetterUnknown(item.ID, errors.New("connection closed")); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != DeliveryIntentUnknown || stored.Evidence != surface.EvidenceUnknown || stored.NotificationQueueID != 0 {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	if count := r.QueueCount("sender"); count != 0 {
+		t.Fatalf("unknown outcome queued %d notices", count)
 	}
 }

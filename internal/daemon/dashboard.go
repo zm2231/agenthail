@@ -958,7 +958,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		sent, queued, failed := 0, 0, 0
+		sent, queued, submitted, failed := 0, 0, 0, 0
 		for _, member := range members {
 			session, sessionErr := d.Registry.Session(member)
 			if sessionErr != nil {
@@ -979,17 +979,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			if receipt.Evidence == surface.EvidenceQueued {
+			switch receipt.Evidence {
+			case surface.EvidenceQueued:
 				queued++
-			} else {
+			case surface.EvidenceSubmitted:
+				submitted++
+			default:
 				sent++
 			}
 		}
 		if failed > 0 {
-			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d failed", sent, queued, failed), http.StatusConflict)
+			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed", sent, queued, submitted, failed), http.StatusConflict)
 			return
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued, "failed": failed})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
 		return
 	}
 	if request.Action == "channel-add" || request.Action == "channel-remove" {
