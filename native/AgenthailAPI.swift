@@ -327,5 +327,6 @@ struct ActionReceipt: Decodable {
 }
 struct DeliveryReceipt: Decodable {
     let evidence: String?
+    let status: String?
     let queueId: Int64?
 }
