@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -84,5 +85,31 @@ func TestDeliveryIntentDoesNotNotifyUnknownOutcome(t *testing.T) {
 	}
 	if count := r.QueueCount("sender"); count != 0 {
 		t.Fatalf("unknown outcome queued %d notices", count)
+	}
+}
+
+func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	queueID, err := r.QueueMessageWithKey("target", "wait", "expiry-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Message: "wait", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.BindDeliveryIntentQueue(intent.ID, queueID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := r.DeliveryIntent(intent.ID)
+	if err != nil || stored.Status != DeliveryIntentExpired || r.QueueCount("sender") != 1 {
+		t.Fatalf("intent=%+v err=%v notices=%d", stored, err, r.QueueCount("sender"))
 	}
 }

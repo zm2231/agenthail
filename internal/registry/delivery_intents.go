@@ -136,6 +136,14 @@ func (r *Registry) BindDeliveryIntentQueue(id, queueID int64) error {
 }
 
 func (r *Registry) FailQueuedDeliveryIntent(queueID int64, failure string) (int64, bool, error) {
+	return r.finishQueuedDeliveryIntent(queueID, DeliveryIntentFailed, failure)
+}
+
+func (r *Registry) ExpireQueuedDeliveryIntent(queueID int64, failure string) (int64, bool, error) {
+	return r.finishQueuedDeliveryIntent(queueID, DeliveryIntentExpired, failure)
+}
+
+func (r *Registry) finishQueuedDeliveryIntent(queueID int64, status DeliveryIntentStatus, failure string) (int64, bool, error) {
 	var id int64
 	err := r.db.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&id)
 	if err == sql.ErrNoRows {
@@ -144,7 +152,7 @@ func (r *Registry) FailQueuedDeliveryIntent(queueID int64, failure string) (int6
 	if err != nil {
 		return 0, false, err
 	}
-	changed, err := r.FailDeliveryIntent(id, DeliveryIntentFailed, failure)
+	changed, err := r.FailDeliveryIntent(id, status, failure)
 	if err != nil || !changed {
 		return id, false, err
 	}
