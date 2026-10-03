@@ -176,6 +176,9 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, QueueID: queueID, Message: message, Error: intentErr.Error()})
 		} else {
 			receipt.DeliveryID = intent.ID
+			if bindErr := d.Registry.BindDeliveryIntentQueue(intent.ID, queueID); bindErr != nil {
+				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, QueueID: queueID, Message: message, Error: bindErr.Error()})
+			}
 		}
 	}
 	return receipt, nil

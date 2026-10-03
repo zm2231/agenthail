@@ -119,6 +119,11 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 			d.log.Printf("dead-letter rejected queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
+		if _, queued, err := d.Registry.FailQueuedDeliveryIntent(item.ID, sendErr.Error()); err != nil {
+			d.log.Printf("record delivery failure for queue item %d: %s", item.ID, err)
+		} else if queued {
+			d.publishEvent("state.changed", session.ID, map[string]string{"source": "delivery-problem"})
+		}
 		return
 	}
 	if err := d.Registry.NackMessage(item.ID, sendErr, now, maxDeliveryAttempts); err != nil {
