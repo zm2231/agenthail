@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -25,6 +26,75 @@ type fixtureProvider struct {
 	createErr    error
 	batch        Batch
 	interrupts   int
+}
+
+type targetFixture struct {
+	session surface.Session
+	sent    []string
+	stream  func(func(surface.StreamEvent))
+	turnID  string
+}
+
+func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
+func (f *targetFixture) List(context.Context) ([]surface.Session, error) {
+	return []surface.Session{f.session}, nil
+}
+func (f *targetFixture) Resolve(_ context.Context, id string) (*surface.Session, error) {
+	if id != f.session.ID {
+		return nil, errors.New("unknown target")
+	}
+	copy := f.session
+	return &copy, nil
+}
+func (f *targetFixture) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
+	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
+}
+func (f *targetFixture) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	f.sent = append(f.sent, message)
+	turnID := f.turnID
+	if turnID == "" {
+		turnID = "target-turn"
+	}
+	return &surface.SendResult{UUID: turnID, Accepted: true}, nil
+}
+func (f *targetFixture) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
+	return &surface.ReplyResult{}, nil
+}
+func (f *targetFixture) Tail(context.Context, *surface.Session, int) ([]surface.Exchange, error) {
+	return nil, nil
+}
+func (f *targetFixture) Stream(_ context.Context, _ *surface.Session, turnID string, callback func(surface.StreamEvent), _ time.Duration) error {
+	if turnID != "target-turn" {
+		return errors.New("wrong turn")
+	}
+	if f.stream != nil {
+		f.stream(callback)
+	}
+	return nil
+}
+func (f *targetFixture) GoalSet(context.Context, *surface.Session, string) error {
+	return surface.ErrUnsupported
+}
+func (f *targetFixture) GoalClear(context.Context, *surface.Session) error {
+	return surface.ErrUnsupported
+}
+func (f *targetFixture) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
+	return nil, surface.ErrUnsupported
+}
+func (f *targetFixture) Compact(context.Context, *surface.Session) error {
+	return surface.ErrUnsupported
+}
+func (f *targetFixture) Model(context.Context, *surface.Session, string) (string, error) {
+	return "", surface.ErrUnsupported
+}
+func (f *targetFixture) Interrupt(context.Context, *surface.Session) error {
+	return surface.ErrUnsupported
+}
+func (f *targetFixture) Steer(context.Context, *surface.Session, string) error {
+	return surface.ErrUnsupported
+}
+func (f *targetFixture) Capabilities() surface.Capabilities {
+	return surface.Capabilities{Send: true, Stream: true}
 }
 
 func (p *fixtureProvider) Create(_ context.Context, cwd, instructions string) (*surface.Session, error) {
@@ -244,6 +314,95 @@ func TestTextUnknownReceiptPreventsDuplicate(t *testing.T) {
 	}
 }
 
+func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}}
+	spoken := make(chan struct{})
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{Kind: "text", Text: "The correlated answer."})
+		close(spoken)
+	}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the current failure"})
+	select {
+	case <-spoken:
+	case <-time.After(time.Second):
+		t.Fatal("correlated target stream did not reach the audio handoff")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !reflect.DeepEqual(target.sent, []string{"Inspect the current failure"}) {
+		t.Fatalf("wrong target dispatch: %v", target.sent)
+	}
+	var spoke bool
+	for _, params := range p.params {
+		if params["text"] == "The correlated answer." {
+			spoke = true
+		}
+	}
+	if !spoke {
+		t.Fatalf("no correlated result was handed to audio: %+v", p.params)
+	}
+	v := s.View("phone")
+	if v.Target == nil || v.Target.ID != "target-a" || v.CodingProvider != "claude" || v.AudioProvider != "openai-realtime-via-codex" {
+		t.Fatalf("capability contract missing from state: %+v", v)
+	}
+}
+
+func TestDelegationBlocksUncorrelatedClaudePeer(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, Name: "Peer", Transport: "uds"}}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		return &Target{Session: resolved, Adapter: target}, err
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "peer-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	if _, err := s.Apply(context.Background(), "phone", Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Do work"}); err == nil || len(target.sent) != 0 {
+		t.Fatalf("uncorrelated peer was dispatched: err=%v sends=%v", err, target.sent)
+	}
+}
+
+func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	spoken := Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}}
+	observeFixture(t, s, p, spoken)
+	observeFixture(t, s, p, spoken)
+	if !reflect.DeepEqual(target.sent, []string{"Inspect this session"}) {
+		t.Fatalf("spoken transcript was not delivered exactly once: %v", target.sent)
+	}
+}
+
 func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	s, p := fixture(t)
 	p.createErr = surface.DeliveryOutcomeUnknown(errors.New("lost creation reply"))
@@ -264,13 +423,13 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	}
 }
 
-func TestRealtimeSettingsUseNativeDelegationSpeechAndNoCredentials(t *testing.T) {
+func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T) {
 	p := StartParams("operator", "call", "offer")
-	if p["codexResponseHandoffMode"] != "bemTags" || p["version"] != "v3" || p["outputModality"] != "audio" {
+	if p["version"] != "v3" || p["outputModality"] != "audio" {
 		t.Fatalf("params=%v", p)
 	}
-	if _, ok := p["clientManagedHandoffs"]; ok {
-		t.Fatal("native response routing was disabled")
+	if _, ok := p["codexResponseHandoffMode"]; ok {
+		t.Fatal("legacy realtime handoff remains enabled")
 	}
 	transport := p["transport"].(map[string]any)
 	if transport["type"] != "webrtc" || transport["sdp"] != "offer" {
@@ -280,6 +439,28 @@ func TestRealtimeSettingsUseNativeDelegationSpeechAndNoCredentials(t *testing.T)
 		if strings.Contains(strings.ToLower(key), "token") || strings.Contains(strings.ToLower(key), "apikey") {
 			t.Fatal("credential in voice params")
 		}
+	}
+}
+
+func TestDelegationHoldsWhenTargetDoesNotProvideAnAuthoritativeTurnID(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the target"})
+	if got := s.View("phone").Message; !strings.Contains(got, "authoritative turn ID") {
+		t.Fatalf("missing correlation hold: %q", got)
 	}
 }
 
