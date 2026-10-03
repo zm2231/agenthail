@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,4 +105,29 @@ func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
 	if removals != 2 {
 		t.Fatalf("removals=%d", removals)
 	}
+}
+
+func TestDiscoveryStreamsFullDashboardSessionRow(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	window, err := registry.CatalogEventsAfter(0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range window.Events {
+		if event.Type != "session.upserted" {
+			continue
+		}
+		var payload struct {
+			Session dashboardSession `json:"session"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Session.ID == "" || payload.Session.Capabilities != d.Surfaces[0].Capabilities() || payload.Session.ObservedAt.IsZero() || payload.Session.HostProject == nil || payload.Session.Checkout == nil {
+			t.Fatalf("payload=%+v", payload.Session)
+		}
+		return
+	}
+	t.Fatal("session.upserted event was not recorded")
 }
