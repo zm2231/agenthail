@@ -37,6 +37,7 @@ type DeliveryIntent struct {
 	TargetSessionID     string
 	ProviderKey         string
 	Message             string
+	QueueID             int64
 	Status              DeliveryIntentStatus
 	Evidence            surface.DeliveryEvidence
 	Failure             string
@@ -129,6 +130,28 @@ func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, fai
 	return n == 1, err
 }
 
+func (r *Registry) BindDeliveryIntentQueue(id, queueID int64) error {
+	_, err := r.db.Exec(`UPDATE delivery_intents SET queue_id=?,updated_at=datetime('now') WHERE id=?`, queueID, id)
+	return err
+}
+
+func (r *Registry) FailQueuedDeliveryIntent(queueID int64, failure string) (int64, bool, error) {
+	var id int64
+	err := r.db.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	changed, err := r.FailDeliveryIntent(id, DeliveryIntentFailed, failure)
+	if err != nil || !changed {
+		return id, false, err
+	}
+	_, queued, err := r.QueueDeliveryFailureNotice(id)
+	return id, queued, err
+}
+
 func (r *Registry) QueueDeliveryFailureNotice(id int64) (int64, bool, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -174,11 +197,11 @@ type deliveryIntentQuerier interface {
 }
 
 func deliveryIntentByID(q deliveryIntentQuerier, id int64) (*DeliveryIntent, error) {
-	return scanDeliveryIntent(q.QueryRow(`SELECT id,sender_session_id,target_session_id,provider_key,message,status,evidence,failure,COALESCE(notification_queue_id,0),created_at,updated_at FROM delivery_intents WHERE id=?`, id))
+	return scanDeliveryIntent(q.QueryRow(`SELECT id,sender_session_id,target_session_id,provider_key,message,queue_id,status,evidence,failure,COALESCE(notification_queue_id,0),created_at,updated_at FROM delivery_intents WHERE id=?`, id))
 }
 
 func deliveryIntentByProviderKey(q deliveryIntentQuerier, targetSessionID, providerKey string) (*DeliveryIntent, bool, error) {
-	intent, err := scanDeliveryIntent(q.QueryRow(`SELECT id,sender_session_id,target_session_id,provider_key,message,status,evidence,failure,COALESCE(notification_queue_id,0),created_at,updated_at FROM delivery_intents WHERE target_session_id=? AND provider_key=?`, targetSessionID, providerKey))
+	intent, err := scanDeliveryIntent(q.QueryRow(`SELECT id,sender_session_id,target_session_id,provider_key,message,queue_id,status,evidence,failure,COALESCE(notification_queue_id,0),created_at,updated_at FROM delivery_intents WHERE target_session_id=? AND provider_key=?`, targetSessionID, providerKey))
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -188,7 +211,7 @@ func deliveryIntentByProviderKey(q deliveryIntentQuerier, targetSessionID, provi
 func scanDeliveryIntent(row *sql.Row) (*DeliveryIntent, error) {
 	var intent DeliveryIntent
 	var status, evidence, createdAt, updatedAt string
-	if err := row.Scan(&intent.ID, &intent.SenderSessionID, &intent.TargetSessionID, &intent.ProviderKey, &intent.Message, &status, &evidence, &intent.Failure, &intent.NotificationQueueID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&intent.ID, &intent.SenderSessionID, &intent.TargetSessionID, &intent.ProviderKey, &intent.Message, &intent.QueueID, &status, &evidence, &intent.Failure, &intent.NotificationQueueID, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	intent.Status = DeliveryIntentStatus(status)
