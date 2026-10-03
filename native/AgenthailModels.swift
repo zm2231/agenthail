@@ -193,6 +193,8 @@ struct DaemonState: Decodable, Equatable {
 struct DashboardSnapshot: Decodable {
     let updatedAt: String
     let eventCursor: UInt64?
+    let hostEpoch: String?
+    let catalogSeq: UInt64?
     let daemon: DaemonState
     let surfaces: [SurfaceState]
     let sessions: [SessionState]
@@ -399,6 +401,12 @@ struct SessionStreamEvent: Decodable {
     let seq: UInt64
     let type: String
     let data: SessionStreamItem
+}
+
+struct CatalogStreamEvent: Decodable {
+    let stream: String
+    let seq: UInt64
+    let type: String
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {

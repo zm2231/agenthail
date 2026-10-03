@@ -126,6 +126,8 @@ final class AgenthailIOSModel: ObservableObject {
     private var token: String?
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
+    private var catalogStreamTask: Task<Void, Never>?
+    private var catalogStreamCursor: UInt64 = 0
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionStreamCursor: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
@@ -162,6 +164,7 @@ final class AgenthailIOSModel: ObservableObject {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
     }
 
@@ -293,6 +296,7 @@ final class AgenthailIOSModel: ObservableObject {
             let loaded = try await api.snapshot(fresh: fresh)
             snapshot = loaded
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
+            catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
             connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The Mac could not refresh its agents.") : nil
             await refreshDeliveries()
             return true
@@ -503,6 +507,7 @@ final class AgenthailIOSModel: ObservableObject {
         connectionTask?.cancel()
         eventTask?.cancel()
         eventRefreshTask?.cancel()
+        catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
         api = nil
         endpoint = nil
@@ -519,6 +524,7 @@ final class AgenthailIOSModel: ObservableObject {
         deliveryStatus = [:]
         deliveryQueueIDs = [:]
         lastEventID = 0
+        catalogStreamCursor = 0
         connectionError = nil
         reconnecting = false
     }
@@ -628,6 +634,37 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    private func startCatalogStream() {
+        catalogStreamTask?.cancel()
+        guard let api else { return }
+        catalogStreamTask = Task {
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled {
+                do {
+                    try await api.streamCatalog(after: catalogStreamCursor, onConnected: {}, onEvent: { [weak self] event in
+                        backoff.reset()
+                        await self?.receiveCatalog(event)
+                    })
+                } catch {
+                    if Task.isCancelled { return }
+                    if case AgenthailAPIError.streamGap = error {
+                        catalogStreamCursor = 0
+                        _ = await refresh(fresh: true)
+                        continue
+                    }
+                    let delay = backoff.nextDelay()
+                    try? await Task.sleep(for: .seconds(delay))
+                }
+            }
+        }
+    }
+
+    private func receiveCatalog(_ event: CatalogStreamEvent) async {
+        guard event.stream == "catalog" else { return }
+        catalogStreamCursor = max(catalogStreamCursor, event.seq)
+        _ = await refresh()
+    }
+
     private func startSessionStream(_ id: String) {
         sessionStreamTask?.cancel()
         guard let api, selectedSessionID == id else { return }
@@ -682,6 +719,7 @@ final class AgenthailIOSModel: ObservableObject {
     func eventStreamConnected() async {
         reconnecting = false
         _ = await refresh(fresh: true)
+        startCatalogStream()
         if let id = selectedSessionID { startSessionStream(id) }
     }
 
