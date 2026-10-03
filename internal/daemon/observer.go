@@ -144,9 +144,9 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		return
 	}
 	if observation.Status == surface.StatusBusy && observation.ActiveTurnID != "" && surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
-		d.holdSessionSource(session, adapter)
+		d.holdSessionSource(session, adapter, "active-turn")
 	} else if observation.Status != surface.StatusBusy || observation.ActiveTurnID == "" {
-		d.releaseSessionSource(session.ID)
+		d.releaseSessionSource(session.ID, "active-turn")
 	}
 	session.Status = observation.Status
 	if session.Source != source || session.Transport != transport {
@@ -229,37 +229,58 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 }
 
-func (d *Daemon) holdSessionSource(session *surface.Session, adapter surface.Surface) {
+func (d *Daemon) holdSessionSource(session *surface.Session, adapter surface.Surface, holder string) {
 	d.sourceHoldMu.Lock()
-	if _, found := d.sourceHolds[session.ID]; found {
+	if holders := d.sourceHolds[session.ID]; holders != nil && holders[holder] != nil {
 		d.sourceHoldMu.Unlock()
 		return
 	}
 	d.sourceHoldMu.Unlock()
-	release, err := d.sources.hold(session, adapter, "active-turn")
+	release, err := d.sources.hold(session, adapter, holder)
 	if err != nil {
 		d.log.Printf("hold session source %s: %s", d.resolveDisplay(session.ID), err)
 		return
 	}
 	d.sourceHoldMu.Lock()
-	if existing, found := d.sourceHolds[session.ID]; found {
+	if holders := d.sourceHolds[session.ID]; holders != nil && holders[holder] != nil {
 		d.sourceHoldMu.Unlock()
 		release()
-		_ = existing
 		return
 	}
-	d.sourceHolds[session.ID] = release
+	if d.sourceHolds[session.ID] == nil {
+		d.sourceHolds[session.ID] = map[string]func(){}
+	}
+	d.sourceHolds[session.ID][holder] = release
 	d.sourceHoldMu.Unlock()
 }
 
-func (d *Daemon) releaseSessionSource(sessionID string) {
+func (d *Daemon) releaseSessionSource(sessionID, holder string) {
 	d.sourceHoldMu.Lock()
-	release := d.sourceHolds[sessionID]
-	delete(d.sourceHolds, sessionID)
+	holders := d.sourceHolds[sessionID]
+	release := holders[holder]
+	delete(holders, holder)
+	if len(holders) == 0 {
+		delete(d.sourceHolds, sessionID)
+	}
 	d.sourceHoldMu.Unlock()
 	if release != nil {
 		release()
 	}
+}
+
+func (d *Daemon) setSessionSourceHold(session *surface.Session, active bool, holder string) {
+	if session == nil {
+		return
+	}
+	if !active {
+		d.releaseSessionSource(session.ID, holder)
+		return
+	}
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil || !surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+		return
+	}
+	d.holdSessionSource(session, adapter, holder)
 }
 
 func completionNotificationEligible(state registry.RuntimeState, observedActive bool) bool {

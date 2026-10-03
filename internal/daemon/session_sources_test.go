@@ -152,7 +152,7 @@ func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
 		t.Fatal("active turn did not hold a source")
 	}
 	d.sourceHoldMu.Lock()
-	_, held := d.sourceHolds[from.ID]
+	_, held := d.sourceHolds[from.ID]["active-turn"]
 	d.sourceHoldMu.Unlock()
 	if !held {
 		t.Fatal("active turn source was not held")
@@ -160,11 +160,29 @@ func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
 	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
 	d.observeSession(context.Background(), adapter, &from)
 	d.sourceHoldMu.Lock()
-	_, held = d.sourceHolds[from.ID]
+	_, held = d.sourceHolds[from.ID]["active-turn"]
 	d.sourceHoldMu.Unlock()
 	if held {
 		t.Fatal("idle session source remained held")
 	}
+}
+
+func TestSourceHoldsAreReferenceCountedByOwner(t *testing.T) {
+	d, _, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
+	adapter.caps.Stream = true
+	d.Surfaces = []surface.Surface{adapter}
+	d.setSessionSourceHold(&from, true, "active-turn")
+	d.setSessionSourceHold(&from, true, "voice")
+	d.setSessionSourceHold(&from, false, "voice")
+	d.sourceHoldMu.Lock()
+	_, active := d.sourceHolds[from.ID]["active-turn"]
+	_, voice := d.sourceHolds[from.ID]["voice"]
+	d.sourceHoldMu.Unlock()
+	if !active || voice {
+		t.Fatalf("active=%v voice=%v", active, voice)
+	}
+	d.setSessionSourceHold(&from, false, "active-turn")
 }
 
 func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {

@@ -88,22 +88,28 @@ type diskState struct {
 }
 
 type Service struct {
-	mu           sync.Mutex
-	provider     Provider
-	path         string
-	state        diskState
-	cursor       Cursor
-	lastSeen     time.Time
-	running      bool
-	register     func(surface.Session) error
-	loadErr      error
-	boundAttempt string
-	eventGap     bool
-	commandPath  string
+	mu                      sync.Mutex
+	provider                Provider
+	path                    string
+	state                   diskState
+	cursor                  Cursor
+	lastSeen                time.Time
+	running                 bool
+	register                func(surface.Session) error
+	loadErr                 error
+	boundAttempt            string
+	eventGap                bool
+	commandPath             string
+	setOperatorSourceActive func(session *surface.Session, active bool)
+	operatorSourceActive    bool
 }
 
 func New(path string, provider Provider, register func(surface.Session) error, commandPath string) *Service {
-	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath}
+	return NewWithOperatorSource(path, provider, register, commandPath, nil)
+}
+
+func NewWithOperatorSource(path string, provider Provider, register func(surface.Session) error, commandPath string, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
+	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, setOperatorSourceActive: setOperatorSourceActive}
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -122,6 +128,7 @@ func New(path string, provider Provider, register func(surface.Session) error, c
 	} else if !errors.Is(err, os.ErrNotExist) {
 		s.loadErr = err
 	}
+	s.syncOperatorSourceActive()
 	return s
 }
 
@@ -131,6 +138,17 @@ func (s *Service) active() bool {
 		return true
 	}
 	return false
+}
+
+func (s *Service) syncOperatorSourceActive() {
+	active := s.active()
+	if active == s.operatorSourceActive {
+		return
+	}
+	s.operatorSourceActive = active
+	if s.state.State.Session != nil && s.setOperatorSourceActive != nil {
+		s.setOperatorSourceActive(s.state.State.Session, active)
+	}
 }
 
 func (s *Service) View(owner string) State {
@@ -215,6 +233,7 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 }
 
 func (s *Service) apply(ctx context.Context, owner string, a Action) error {
+	defer s.syncOperatorSourceActive()
 	v := &s.state.State
 	switch a.Action {
 	case "prepare":
@@ -436,6 +455,7 @@ func (s *Service) observe() {
 }
 
 func (s *Service) poll(ctx context.Context) error {
+	defer s.syncOperatorSourceActive()
 	b, err := s.provider.Poll(ctx, s.cursor, s.state.State.Session.ID)
 	if err != nil {
 		return err
