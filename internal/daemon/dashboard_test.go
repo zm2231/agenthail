@@ -852,6 +852,27 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	}
 }
 
+func TestDashboardChannelSendCountsSubmittedSeparately(t *testing.T) {
+	d, registry, fake, _, to := daemonFixture(t)
+	if _, err := registry.CreateChannel("reviewers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.AddToChannel("reviewers", to.ID); err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
+	d.dashboardActionHandler(response, request)
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("body=%s code=%d err=%v", response.Body.String(), response.Code, err)
+	}
+	if body["submitted"] != float64(1) || body["sent"] != float64(0) {
+		t.Fatalf("body=%v", body)
+	}
+}
+
 func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	d, registry, _, from, _ := daemonFixture(t)
 	if _, err := registry.CreateChannel("reviewers"); err != nil {

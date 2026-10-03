@@ -948,7 +948,11 @@ func (a *App) cmdSend(args []string) error {
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(receipt)
 		}
-		fmt.Printf("delivery submitted (id %d); receipt confirmation is pending\n", receipt.DeliveryID)
+		if receipt.DeliveryID != 0 {
+			fmt.Printf("delivery submitted (id %d); %s\n", receipt.DeliveryID, receipt.Detail)
+		} else {
+			fmt.Printf("delivery submitted; %s\n", receipt.Detail)
+		}
 		return nil
 	}
 	if syntheticNotion && receipt.TurnID != "" {

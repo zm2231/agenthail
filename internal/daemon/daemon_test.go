@@ -414,6 +414,67 @@ func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
 	}
 }
 
+func TestFailedCodexCompletionDoesNotReconcileDeliveryIntent(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-failed", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-failed", Reply: &surface.ReplyResult{Done: true, Error: "model error"}}
+	daemon.observeSession(context.Background(), fake, &from)
+	stored, err := r.DeliveryIntent(intent.ID)
+	if err != nil || stored.Status != registry.DeliveryIntentSent {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
+func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	_, deliveryID, err := r.QueueDeliveryWithIntent(to.ID, "deliver later", "", surface.SendOptions{SourceSessionID: from.ID})
+	if err != nil || deliveryID == 0 {
+		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
+	}
+	fake.turnID = "turn-queued"
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != registry.DeliveryIntentSent || stored.ProviderKey != "turn-queued" {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &to)
+	if err := r.MarkDeliveryStarted(to.ID, "turn-queued", "turn-before"); err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-queued", Reply: &surface.ReplyResult{Done: true, Text: "done"}}
+	daemon.observeSession(context.Background(), fake, &to)
+	stored, err = r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
+func TestQueuedTerminalFailureNotifiesSenderOnce(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	_, deliveryID, err := r.QueueDeliveryWithIntent(to.ID, "deliver later", "", surface.SendOptions{SourceSessionID: from.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != registry.DeliveryIntentFailed || stored.NotificationQueueID == 0 {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	if count := r.QueueCount(from.ID); count != 1 {
+		t.Fatalf("sender notices=%d", count)
+	}
+}
+
 func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)

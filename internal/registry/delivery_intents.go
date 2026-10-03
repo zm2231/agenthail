@@ -112,6 +112,15 @@ func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) 
 }
 
 func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, failure string) (bool, error) {
+	return failDeliveryIntent(r.db, id, status, failure)
+}
+
+type deliveryIntentExecutor interface {
+	deliveryIntentQuerier
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func failDeliveryIntent(q deliveryIntentExecutor, id int64, status DeliveryIntentStatus, failure string) (bool, error) {
 	if status != DeliveryIntentFailed && status != DeliveryIntentExpired {
 		return false, fmt.Errorf("delivery failure status must be failed or expired")
 	}
@@ -122,7 +131,7 @@ func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, fai
 	if status == DeliveryIntentExpired {
 		evidence = surface.EvidenceExpired
 	}
-	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, status, evidence, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
+	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, status, evidence, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
 	if err != nil {
 		return false, err
 	}
@@ -130,34 +139,42 @@ func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, fai
 	return n == 1, err
 }
 
-func (r *Registry) BindDeliveryIntentQueue(id, queueID int64) error {
-	_, err := r.db.Exec(`UPDATE delivery_intents SET queue_id=?,updated_at=datetime('now') WHERE id=?`, queueID, id)
+func insertQueuedDeliveryIntent(tx *sql.Tx, senderSessionID, targetSessionID, message string, queueID int64) (int64, error) {
+	res, err := tx.Exec(`INSERT INTO delivery_intents(sender_session_id,target_session_id,message,queue_id,status,evidence) SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?) AND EXISTS(SELECT 1 FROM sessions WHERE id=?)`, senderSessionID, targetSessionID, boundedIntentMessage(message), queueID, DeliveryIntentQueued, surface.EvidenceQueued, senderSessionID, targetSessionID)
+	if err != nil {
+		return 0, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func queuedDeliveryIntentID(q deliveryIntentQuerier, queueID int64) (int64, error) {
+	var id int64
+	err := q.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
+}
+
+func markQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentStatus, evidence surface.DeliveryEvidence, providerKey string) error {
+	_, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,updated_at=datetime('now') WHERE queue_id=? AND status IN (?,?)`, status, evidence, providerKey, providerKey, queueID, DeliveryIntentQueued, DeliveryIntentUnknown)
 	return err
 }
 
-func (r *Registry) FailQueuedDeliveryIntent(queueID int64, failure string) (int64, bool, error) {
-	return r.finishQueuedDeliveryIntent(queueID, DeliveryIntentFailed, failure)
-}
-
-func (r *Registry) ExpireQueuedDeliveryIntent(queueID int64, failure string) (int64, bool, error) {
-	return r.finishQueuedDeliveryIntent(queueID, DeliveryIntentExpired, failure)
-}
-
-func (r *Registry) finishQueuedDeliveryIntent(queueID int64, status DeliveryIntentStatus, failure string) (int64, bool, error) {
-	var id int64
-	err := r.db.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&id)
-	if err == sql.ErrNoRows {
-		return 0, false, nil
+func finishQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentStatus, failure string) (bool, error) {
+	id, err := queuedDeliveryIntentID(tx, queueID)
+	if err != nil || id == 0 {
+		return false, err
 	}
-	if err != nil {
-		return 0, false, err
-	}
-	changed, err := r.FailDeliveryIntent(id, status, failure)
+	changed, err := failDeliveryIntent(tx, id, status, failure)
 	if err != nil || !changed {
-		return id, false, err
+		return false, err
 	}
-	_, queued, err := r.QueueDeliveryFailureNotice(id)
-	return id, queued, err
+	_, queued, err := queueDeliveryFailureNotice(tx, id)
+	return queued, err
 }
 
 func (r *Registry) QueueDeliveryFailureNotice(id int64) (int64, bool, error) {
@@ -166,6 +183,14 @@ func (r *Registry) QueueDeliveryFailureNotice(id int64) (int64, bool, error) {
 		return 0, false, err
 	}
 	defer tx.Rollback()
+	queueID, queued, err := queueDeliveryFailureNotice(tx, id)
+	if err != nil {
+		return 0, false, err
+	}
+	return queueID, queued, tx.Commit()
+}
+
+func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	intent, err := deliveryIntentByID(tx, id)
 	if err != nil {
 		return 0, false, err
@@ -174,12 +199,12 @@ func (r *Registry) QueueDeliveryFailureNotice(id int64) (int64, bool, error) {
 		return 0, false, nil
 	}
 	if intent.NotificationQueueID != 0 {
-		return intent.NotificationQueueID, false, tx.Commit()
+		return intent.NotificationQueueID, false, nil
 	}
 	notice := fmt.Sprintf("[agenthail delivery failure id=%d target=%s] %s", intent.ID, intent.TargetSessionID, intent.Failure)
 	key := fmt.Sprintf("delivery-intent-notice:%d", intent.ID)
 	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,expires_at_ms,status,updated_at) VALUES(?,?,? ,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key, expiresAt)
+	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,expires_at_ms,status,updated_at) VALUES(?,?,?,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key, expiresAt)
 	if err != nil {
 		return 0, false, err
 	}
@@ -197,7 +222,7 @@ func (r *Registry) QueueDeliveryFailureNotice(id int64) (int64, bool, error) {
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO catalog_events(dedupe_key,type,entity_id,payload,created_at) VALUES(?,?,?,?,datetime('now'))`, fmt.Sprintf("delivery.problem:%d", intent.ID), "delivery.problem", intent.TargetSessionID, payload); err != nil {
 		return 0, false, err
 	}
-	return queueID, true, tx.Commit()
+	return queueID, true, nil
 }
 
 type deliveryIntentQuerier interface {
