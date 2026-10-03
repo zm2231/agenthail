@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,11 @@ type fixtureProvider struct {
 	createErr    error
 	batch        Batch
 	interrupts   int
+	toolCalls    []struct {
+		requestID string
+		success   bool
+		text      string
+	}
 }
 
 type targetFixture struct {
@@ -117,6 +123,17 @@ func (p *fixtureProvider) Poll(context.Context, Cursor, string) (Batch, error) {
 	b := p.batch
 	p.batch.Events = nil
 	return b, nil
+}
+
+func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID string, success bool, text string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.toolCalls = append(p.toolCalls, struct {
+		requestID string
+		success   bool
+		text      string
+	}{requestID, success, text})
+	return nil
 }
 func (p *fixtureProvider) Request(_ context.Context, _ *surface.Session, method string, params map[string]any) error {
 	p.mu.Lock()
@@ -403,6 +420,41 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 	}
 }
 
+func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	observeFixture(t, s, p, Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
+	if got := s.View("phone").Target; got == nil || got.ID != "target-a" {
+		t.Fatalf("transfer did not select target: %+v", got)
+	}
+	p.mu.Lock()
+	if len(p.toolCalls) != 1 || !p.toolCalls[0].success || !strings.Contains(p.toolCalls[0].text, "Build session") {
+		t.Fatalf("transfer response=%+v", p.toolCalls)
+	}
+	p.mu.Unlock()
+	observeFixture(t, s, p, Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-b", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{}}})
+	if got := s.View("phone").Target; got != nil {
+		t.Fatalf("return did not clear target: %+v", got)
+	}
+	p.mu.Lock()
+	if len(p.toolCalls) != 2 || !p.toolCalls[1].success || !strings.Contains(p.toolCalls[1].text, "orchestrator") {
+		t.Fatalf("return response=%+v", p.toolCalls)
+	}
+	p.mu.Unlock()
+}
+
 func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	s, p := fixture(t)
 	p.createErr = surface.DeliveryOutcomeUnknown(errors.New("lost creation reply"))
@@ -423,8 +475,55 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+func TestPrepareMigratesPersistedOperatorWithoutDynamicTools(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "voice", "operator.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	old := diskState{State: State{Protocol: 1, Session: &surface.Session{ID: "old-operator", Surface: surface.KindCodex, Name: "Old operator", Transport: "desktop"}, Phase: "ready", Events: []Event{}}}
+	data, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := &fixtureProvider{}
+	s := New(path, p, nil, "/fixture/agenthail")
+	v := apply(t, s, Action{Action: "prepare"})
+	if p.creates != 1 || v.Session == nil || v.Session.ID == "old-operator" || !v.DynamicTools {
+		t.Fatalf("persisted operator was not migrated: creates=%d state=%+v", p.creates, v)
+	}
+	if !strings.Contains(v.Message, "transfer tools") {
+		t.Fatalf("migration was not visible: %q", v.Message)
+	}
+}
+
+func TestPrepareDoesNotMigrateAnUnknownPersistedCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "voice", "operator.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	old := diskState{State: State{Protocol: 1, Session: &surface.Session{ID: "old-operator", Surface: surface.KindCodex, Name: "Old operator", Transport: "desktop"}, Phase: "connected", AttemptID: "call-a", Events: []Event{}}}
+	data, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := &fixtureProvider{}
+	s := New(path, p, nil, "/fixture/agenthail")
+	if _, err := s.Apply(context.Background(), "phone", Action{Action: "prepare"}); err == nil {
+		t.Fatal("unknown persisted call was replaced during migration")
+	}
+	if p.creates != 0 || s.View("phone").Phase != "unknown" {
+		t.Fatalf("migration changed unknown call: creates=%d state=%+v", p.creates, s.View("phone"))
+	}
+}
+
 func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T) {
-	p := StartParams("operator", "call", "offer")
+	p := StartParams("operator", "call", "offer", false)
 	if p["version"] != "v3" || p["outputModality"] != "audio" {
 		t.Fatalf("params=%v", p)
 	}
@@ -439,6 +538,15 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 		if strings.Contains(strings.ToLower(key), "token") || strings.Contains(strings.ToLower(key), "apikey") {
 			t.Fatal("credential in voice params")
 		}
+	}
+	initial := p["initialItems"].([]map[string]any)
+	if !strings.Contains(initial[0]["text"].(string), "established Agenthail Operations workflow") {
+		t.Fatalf("normal orchestrator instructions=%v", initial)
+	}
+	bound := StartParams("operator", "call", "offer", true)
+	boundInitial := bound["initialItems"].([]map[string]any)
+	if !strings.Contains(boundInitial[0]["text"].(string), "existing Agenthail coding session") {
+		t.Fatalf("session-bound instructions=%v", boundInitial)
 	}
 }
 

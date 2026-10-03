@@ -30,6 +30,9 @@
           ><a href="#operations" data-view="operations">Operations</a>
         </nav>
         <div class="topbar-actions">
+          <button class="button" id="voice-orchestrator" type="button">
+            Talk to orchestrator
+          </button>
           <span class="daemon-presence" id="daemon-presence"
             ><i></i><span id="daemon-status">Connecting</span></span
           ><span class="sync" id="sync">Updating</span
@@ -482,6 +485,29 @@
         </section>
       </section>
     </main>
+    <dialog class="voice-dialog" id="voice-dialog" aria-labelledby="voice-title">
+      <form method="dialog" class="voice-dialog-card">
+        <header>
+          <div>
+            <p class="context-label">Codex Voice</p>
+            <h2 id="voice-title">Talk to orchestrator</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close voice">×</button>
+        </header>
+        <p id="voice-status">Connecting to voice controls.</p>
+        <label class="voice-route">
+          <span>Session route <small>optional</small></span>
+          <input id="voice-target" autocomplete="off" placeholder="Exact session ID or alias" />
+        </label>
+        <p class="voice-help" id="voice-help">Leave blank to use Agenthail’s normal orchestration workflow.</p>
+        <div class="voice-actions">
+          <button class="primary-button" id="voice-call" type="button">Call</button>
+          <button class="soft-button" id="voice-transfer" type="button" hidden>Transfer</button>
+          <button class="soft-button" id="voice-hangup" type="button" hidden>Hang up</button>
+        </div>
+        <audio id="voice-audio" autoplay playsinline></audio>
+      </form>
+    </dialog>
     <div class="toast" id="toast" role="status" hidden></div>
     <script src="/app.js?v=12"></script>
   </body>

@@ -155,6 +155,26 @@ func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 	}
 }
 
+func TestDashboardExposesCookieAuthenticatedDesktopVoiceControls(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/voice", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized voice status=%d", unauthorized.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/voice-peer.js", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "agenthailVoiceNotify") {
+		t.Fatalf("desktop voice script status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "wss:") {
+		t.Fatalf("desktop voice CSP=%q", response.Header().Get("Content-Security-Policy"))
+	}
+}
+
 func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})

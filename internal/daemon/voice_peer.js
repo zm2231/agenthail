@@ -1,6 +1,10 @@
 (() => {
   let peer, stream, channel, generation = 0;
-  const notify = (type, value = "") => window.webkit.messageHandlers.voice.postMessage({type, value});
+  const notify = (type, value = "") => {
+    const message = {type, value};
+    window.webkit?.messageHandlers?.voice?.postMessage(message);
+    if (typeof window.agenthailVoiceNotify === "function") window.agenthailVoiceNotify(message);
+  };
   const audio = document.querySelector("audio");
   const end = () => {
     generation++;
