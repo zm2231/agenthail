@@ -1,0 +1,227 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+const (
+	sessionJournalRetentionCount = 2048
+	sessionJournalRetentionBytes = 8 << 20
+)
+
+type sessionJournalPayload struct {
+	ItemID      string `json:"itemId"`
+	ProviderKey string `json:"providerKey,omitempty"`
+	Version     uint64 `json:"version"`
+	Op          string `json:"op"`
+	Kind        string `json:"kind"`
+	TurnID      string `json:"turnId,omitempty"`
+	TS          string `json:"ts"`
+	Body        string `json:"body,omitempty"`
+	Truncated   bool   `json:"truncated"`
+}
+
+type sessionSourceManager struct {
+	registry *registry.Registry
+	mu       sync.Mutex
+	sources  map[string]*sessionSource
+}
+
+type sessionSource struct {
+	manager      *sessionSourceManager
+	session      *surface.Session
+	adapter      surface.Surface
+	epoch        string
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	subscribers  map[uint64]chan registry.SessionJournalEntry
+	nextID       uint64
+	holders      map[string]int
+	appendBodies map[string]string
+}
+
+type sessionSourceSubscription struct {
+	Entries <-chan registry.SessionJournalEntry
+	Cancel  func()
+}
+
+func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
+	return &sessionSourceManager{registry: store, sources: map[string]*sessionSource{}}
+}
+
+func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {
+	if session == nil || adapter == nil {
+		return sessionSourceSubscription{}, fmt.Errorf("session source requires session and adapter")
+	}
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	start := false
+	if source == nil {
+		epoch, err := m.registry.BeginSessionJournalSource(session.ID)
+		if err != nil {
+			m.mu.Unlock()
+			return sessionSourceSubscription{}, err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		m.sources[session.ID] = source
+		start = true
+	}
+	subscription := source.subscribe("viewer")
+	m.mu.Unlock()
+	if start {
+		go source.run()
+	}
+	return subscription, nil
+}
+
+func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Surface, holder string) (func(), error) {
+	if strings.TrimSpace(holder) == "" {
+		return nil, fmt.Errorf("session source holder is required")
+	}
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	start := false
+	if source == nil {
+		epoch, err := m.registry.BeginSessionJournalSource(session.ID)
+		if err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		m.sources[session.ID] = source
+		start = true
+	}
+	source.mu.Lock()
+	source.holders[holder]++
+	source.mu.Unlock()
+	m.mu.Unlock()
+	if start {
+		go source.run()
+	}
+	return func() { source.releaseHolder(holder) }, nil
+}
+
+func (s *sessionSource) subscribe(holder string) sessionSourceSubscription {
+	s.mu.Lock()
+	s.nextID++
+	id := s.nextID
+	events := make(chan registry.SessionJournalEntry, 64)
+	s.subscribers[id] = events
+	s.holders[holder]++
+	s.mu.Unlock()
+	return sessionSourceSubscription{Entries: events, Cancel: func() {
+		s.mu.Lock()
+		if existing, found := s.subscribers[id]; found {
+			delete(s.subscribers, id)
+			close(existing)
+		}
+		s.holders[holder]--
+		if s.holders[holder] <= 0 {
+			delete(s.holders, holder)
+		}
+		stop := len(s.subscribers) == 0 && len(s.holders) == 0
+		s.mu.Unlock()
+		if stop {
+			s.stop()
+		}
+	}}
+}
+
+func (s *sessionSource) releaseHolder(holder string) {
+	s.mu.Lock()
+	s.holders[holder]--
+	if s.holders[holder] <= 0 {
+		delete(s.holders, holder)
+	}
+	stop := len(s.subscribers) == 0 && len(s.holders) == 0
+	s.mu.Unlock()
+	if stop {
+		s.stop()
+	}
+}
+
+func (s *sessionSource) stop() {
+	s.cancel()
+	s.manager.mu.Lock()
+	if s.manager.sources[s.session.ID] == s {
+		delete(s.manager.sources, s.session.ID)
+	}
+	s.manager.mu.Unlock()
+}
+
+func (s *sessionSource) run() {
+	_ = s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+	s.mu.Lock()
+	for id, subscriber := range s.subscribers {
+		delete(s.subscribers, id)
+		close(subscriber)
+	}
+	s.mu.Unlock()
+	s.manager.mu.Lock()
+	if s.manager.sources[s.session.ID] == s {
+		delete(s.manager.sources, s.session.ID)
+	}
+	s.manager.mu.Unlock()
+}
+
+func (s *sessionSource) append(event surface.StreamEvent) {
+	payload := s.normalize(event)
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	for id, subscriber := range s.subscribers {
+		select {
+		case subscriber <- entry:
+		default:
+			delete(s.subscribers, id)
+			close(subscriber)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *sessionSource) normalize(event surface.StreamEvent) sessionJournalPayload {
+	providerKey := event.ProviderKey
+	if strings.HasPrefix(providerKey, "renderer:") {
+		providerKey = s.epoch + ":" + providerKey
+	}
+	itemID := event.ID
+	if strings.HasPrefix(event.ProviderKey, "renderer:") {
+		itemID = s.epoch + ":" + itemID
+	}
+	if itemID == "" {
+		itemID = providerKey
+	}
+	op := event.Operation
+	if op == "" {
+		op = "append"
+	}
+	body := event.Text
+	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
+		s.appendBodies[providerKey] += body
+		body = s.appendBodies[providerKey]
+		op = "upsert"
+	}
+	at := event.Timestamp
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
+}

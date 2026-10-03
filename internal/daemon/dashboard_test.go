@@ -873,7 +873,7 @@ func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	}
 }
 
-func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
+func TestDashboardStateReadsCatalogWithoutProviderDiscovery(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	dashboard := &dashboardServer{token: "secret"}
 	handler := d.dashboardHandler(dashboard)
@@ -886,8 +886,8 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 			t.Fatalf("state request %d status=%d body=%s", i, res.Code, res.Body.String())
 		}
 	}
-	if got := fake.listCalls.Load(); got != 1 {
-		t.Fatalf("surface list called %d times, want one cached discovery", got)
+	if got := fake.listCalls.Load(); got != 0 {
+		t.Fatalf("surface list called %d times, want snapshot to read only the catalog", got)
 	}
 	d.publishEvent("session.updated", "from", nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
@@ -897,8 +897,8 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("state after event status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := fake.listCalls.Load(); got != 2 {
-		t.Fatalf("surface list called %d times, want event invalidation", got)
+	if got := fake.listCalls.Load(); got != 0 {
+		t.Fatalf("surface list called %d times after event, want snapshot to read only the catalog", got)
 	}
 }
 
@@ -985,15 +985,17 @@ func TestDashboardHistoryIsAuthorizedAndPaginated(t *testing.T) {
 	}
 }
 
-func TestDashboardStatePrefersLiveSurfaceStatus(t *testing.T) {
+func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	d, registry, fake, from, _ := daemonFixture(t)
+	d, registry, _, from, _ := daemonFixture(t)
 	if err := registry.SaveRuntimeState(from.ID, surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	from.Status = surface.StatusBusy
 	from.LastActive = time.Now()
-	fake.sessions[from.ID] = from
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
 
 	state, err := d.dashboardState(context.Background())
 	if err != nil {

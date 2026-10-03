@@ -32,6 +32,7 @@ type Daemon struct {
 	notificationArmed map[string]bool
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
+	sources           *sessionSourceManager
 	dashboard         *dashboardServer
 }
 
@@ -60,7 +61,7 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 }
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		Registry:          reg,
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
@@ -68,7 +69,12 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		events:            newEventHub(reg),
+		sources:           newSessionSourceManager(reg),
 	}
+	if err := reg.EnsureCatalogState(); err != nil {
+		d.log.Printf("catalog state: %s", err)
+	}
+	return d
 }
 
 func (d *Daemon) observationAllowed(sessionID string) bool {

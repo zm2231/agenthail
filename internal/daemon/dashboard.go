@@ -574,40 +574,26 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	for _, item := range attention {
 		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
-	var mu sync.Mutex
-	var wait sync.WaitGroup
+	adapters := make(map[surface.SurfaceKind]surface.Surface, len(d.Surfaces))
 	for _, adapter := range d.Surfaces {
-		adapter := adapter
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			listBudget := 12 * time.Second
-			if deadline, ok := ctx.Deadline(); ok {
-				remaining := time.Until(deadline)
-				if remaining < listBudget {
-					listBudget = remaining
-				}
-			}
-			operationCtx, cancel := context.WithTimeout(ctx, listBudget)
-			sessions, listErr := adapter.List(operationCtx)
-			cancel()
-			entry := d.dashboardSurfaceHealth(ctx, adapter, listErr)
-			mu.Lock()
-			state.Surfaces = append(state.Surfaces, entry)
-			for _, session := range sessions {
-				if registerErr := d.Registry.RegisterSession(session); registerErr != nil {
-					continue
-				}
-				alias, _ := d.Registry.ReverseAlias(session.ID)
-				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
-				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
-				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
-			}
-			mu.Unlock()
-		}()
+		adapters[adapter.Name()] = adapter
+		state.Surfaces = append(state.Surfaces, dashboardSurface{Name: string(adapter.Name()), Connected: true, Health: "cached", Capabilities: adapter.Capabilities()})
 	}
-	wait.Wait()
+	sessions, err := d.Registry.ListSessions(0)
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
+	}
+	for _, session := range sessions {
+		adapter := adapters[session.Surface]
+		if adapter == nil {
+			continue
+		}
+		alias, _ := d.Registry.ReverseAlias(session.ID)
+		open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
+		current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
+		effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
+		state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
+	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	sort.Slice(state.Sessions, func(i, j int) bool {
 		if state.Sessions[i].Status == surface.StatusBusy && state.Sessions[j].Status != surface.StatusBusy {
