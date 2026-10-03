@@ -21,6 +21,42 @@ type CatalogSnapshot struct {
 	HostEpoch  string
 	CatalogSeq uint64
 	Sessions   []CatalogSessionState
+	Surfaces   []CatalogSurfaceState
+}
+
+type CatalogSurfaceState struct {
+	Surface    surface.SurfaceKind
+	Health     string
+	Detail     string
+	ObservedAt time.Time
+}
+
+func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event CatalogEvent) (CatalogEvent, bool, error) {
+	if err := r.EnsureCatalogState(); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if state.Surface == "" || state.Health == "" {
+		return CatalogEvent{}, false, fmt.Errorf("catalog surface and health are required")
+	}
+	if state.ObservedAt.IsZero() {
+		state.ObservedAt = time.Now().UTC()
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO catalog_surfaces(surface,health,detail,observed_at) VALUES(?,?,?,?) ON CONFLICT(surface) DO UPDATE SET health=excluded.health,detail=excluded.detail,observed_at=excluded.observed_at`, string(state.Surface), state.Health, state.Detail, state.ObservedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	persisted, created, err := r.AppendCatalogEventTx(tx, event)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return persisted, created, nil
 }
 
 func (r *Registry) RecordCatalogSession(state CatalogSessionState, event CatalogEvent) (CatalogEvent, bool, error) {
@@ -84,7 +120,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	defer rows.Close()
-	snapshot := CatalogSnapshot{HostEpoch: epoch, Sessions: []CatalogSessionState{}}
+	snapshot := CatalogSnapshot{HostEpoch: epoch, Sessions: []CatalogSessionState{}, Surfaces: []CatalogSurfaceState{}}
 	if latest.Valid {
 		if latest.Int64 < 0 {
 			return CatalogSnapshot{}, fmt.Errorf("invalid catalog sequence")
@@ -113,6 +149,27 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		snapshot.Sessions = append(snapshot.Sessions, state)
 	}
 	if err := rows.Err(); err != nil {
+		return CatalogSnapshot{}, err
+	}
+	surfaceRows, err := tx.Query(`SELECT surface,health,detail,observed_at FROM catalog_surfaces ORDER BY surface`)
+	if err != nil {
+		return CatalogSnapshot{}, err
+	}
+	defer surfaceRows.Close()
+	for surfaceRows.Next() {
+		var state CatalogSurfaceState
+		var observedAt string
+		if err := surfaceRows.Scan(&state.Surface, &state.Health, &state.Detail, &observedAt); err != nil {
+			return CatalogSnapshot{}, err
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+		if err != nil {
+			return CatalogSnapshot{}, fmt.Errorf("parse catalog surface observation: %w", err)
+		}
+		state.ObservedAt = parsed
+		snapshot.Surfaces = append(snapshot.Surfaces, state)
+	}
+	if err := surfaceRows.Err(); err != nil {
 		return CatalogSnapshot{}, err
 	}
 	if err := tx.Commit(); err != nil {

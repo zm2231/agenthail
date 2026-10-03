@@ -585,9 +585,19 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
 	adapters := make(map[surface.SurfaceKind]surface.Surface, len(d.Surfaces))
+	catalogSurface := make(map[surface.SurfaceKind]registry.CatalogSurfaceState, len(catalogSnapshot.Surfaces))
+	for _, record := range catalogSnapshot.Surfaces {
+		catalogSurface[record.Surface] = record
+	}
 	for _, adapter := range d.Surfaces {
 		adapters[adapter.Name()] = adapter
-		state.Surfaces = append(state.Surfaces, dashboardSurface{Name: string(adapter.Name()), Connected: true, Health: "cached", Capabilities: adapter.Capabilities()})
+		entry := dashboardSurface{Name: string(adapter.Name()), Connected: false, Health: "unknown", Capabilities: adapter.Capabilities()}
+		if record, found := catalogSurface[adapter.Name()]; found {
+			entry.Health = record.Health
+			entry.HealthDetail = record.Detail
+			entry.Connected = record.Health == "healthy"
+		}
+		state.Surfaces = append(state.Surfaces, entry)
 	}
 	catalogSessions := map[string]registry.CatalogSessionState{}
 	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))

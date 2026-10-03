@@ -62,6 +62,24 @@ func (h *catalogHub) publishSession(state registry.CatalogSessionState, event re
 	return persisted, true, nil
 }
 
+func (h *catalogHub) publishSurface(state registry.CatalogSurfaceState, event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	persisted, created, err := h.registry.RecordCatalogSurface(state, event)
+	if err != nil || !created {
+		return persisted, created, err
+	}
+	for id, subscriber := range h.subscribers {
+		select {
+		case subscriber <- persisted:
+		default:
+			delete(h.subscribers, id)
+			close(subscriber)
+		}
+	}
+	return persisted, true, nil
+}
+
 func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, <-chan registry.CatalogEvent, func(), error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -175,8 +193,9 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		sessions, err := adapter.List(operationCtx)
 		cancel()
 		if err != nil {
-			payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "unavailable"})
-			_, _, _ = d.catalog.publish(registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":unavailable", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
+			observedAt := time.Now().UTC()
+			payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "unavailable", "detail": "catalog discovery failed", "observedAt": observedAt.Format(time.RFC3339Nano)})
+			_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "unavailable", Detail: "catalog discovery failed", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":unavailable", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 			continue
 		}
 		for _, session := range sessions {
@@ -203,7 +222,8 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			key := fmt.Sprintf("session.upserted:%s:%x", session.ID, fingerprint)
 			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		}
-		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy"})
-		_, _, _ = d.catalog.publish(registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
+		observedAt := time.Now().UTC()
+		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
+		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 	}
 }

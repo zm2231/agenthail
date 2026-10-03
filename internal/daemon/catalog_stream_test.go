@@ -65,4 +65,7 @@ func TestDiscoveryPersistsCatalogBeforeSnapshotReads(t *testing.T) {
 			t.Fatalf("session=%+v", session)
 		}
 	}
+	if len(state.Surfaces) != 1 || state.Surfaces[0].Health != "healthy" || !state.Surfaces[0].Connected {
+		t.Fatalf("surfaces=%+v", state.Surfaces)
+	}
 }

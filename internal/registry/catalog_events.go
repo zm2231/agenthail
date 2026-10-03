@@ -38,6 +38,14 @@ func (r *Registry) EnsureCatalogState() error {
 	)`); err != nil {
 		return err
 	}
+	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (
+		surface TEXT PRIMARY KEY,
+		health TEXT NOT NULL,
+		detail TEXT NOT NULL DEFAULT '',
+		observed_at TEXT NOT NULL
+	)`); err != nil {
+		return err
+	}
 	_, err := r.catalogHostEpoch(true)
 	return err
 }
