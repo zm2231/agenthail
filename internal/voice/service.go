@@ -125,6 +125,8 @@ type Service struct {
 	boundAttempt            string
 	eventGap                bool
 	commandPath             string
+	target                  TargetResolver
+	dispatcher              delivery.Dispatcher
 	setOperatorSourceActive func(session *surface.Session, active bool)
 	operatorSourceActive    bool
 }
@@ -175,9 +177,10 @@ func (s *Service) syncOperatorSourceActive() {
 		return
 	}
 	s.operatorSourceActive = active
-	if s.state.State.Session != nil && s.setOperatorSourceActive != nil {
-		s.setOperatorSourceActive(s.state.State.Session, active)
+	if s.state.State.Session == nil || s.setOperatorSourceActive == nil {
+		return
 	}
+	s.setOperatorSourceActive(s.state.State.Session, active)
 }
 
 func (s *Service) View(owner string) State {
