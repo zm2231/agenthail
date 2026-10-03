@@ -661,6 +661,7 @@ final class AgenthailIOSModel: ObservableObject {
 
     func receiveCatalog(_ event: CatalogStreamEvent) async {
         guard event.stream == "catalog" else { return }
+        guard event.seq > catalogStreamCursor else { return }
         catalogStreamCursor = max(catalogStreamCursor, event.seq)
         guard var current = snapshot else { return }
         switch event.type {
@@ -675,8 +676,13 @@ final class AgenthailIOSModel: ObservableObject {
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
+        case "surface.health":
+            guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
+            let previous = current.surfaces[index]
+            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities)
+            snapshot = current
         default:
-            _ = await refresh()
+            return
         }
     }
 

@@ -196,7 +196,7 @@ struct DashboardSnapshot: Decodable {
     let hostEpoch: String?
     let catalogSeq: UInt64?
     let daemon: DaemonState
-    let surfaces: [SurfaceState]
+    var surfaces: [SurfaceState]
     var sessions: [SessionState]
     var totalSessions: Int
     let queue: [QueueState]
@@ -413,6 +413,9 @@ struct CatalogStreamEvent: Decodable {
 struct CatalogStreamData: Decodable {
     let session: SessionState?
     let sessionId: String?
+    let surface: String?
+    let health: String?
+    let detail: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {
