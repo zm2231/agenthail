@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -312,6 +313,24 @@ func TestDeviceLeaseRejectsTakeoverAndHidesSDP(t *testing.T) {
 		if _, err := s.Apply(context.Background(), "other-phone", Action{Action: action, AttemptID: "call-a"}); err == nil {
 			t.Fatalf("%s takeover accepted", action)
 		}
+	}
+}
+
+func TestOperatorSourceLifecycleTracksOnlyActiveTransitions(t *testing.T) {
+	p := &fixtureProvider{}
+	var calls []string
+	s := NewWithTargetsAndOperatorSource(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", nil, delivery.Dispatcher{}, func(session *surface.Session, active bool) {
+		calls = append(calls, session.ID+":"+strconv.FormatBool(active))
+	})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "stop", AttemptID: "call-a"})
+	observeFixture(t, s, p, Event{Method: "thread/realtime/closed", Params: map[string]any{}})
+	if !reflect.DeepEqual(calls, []string{"operator:true", "operator:false"}) {
+		t.Fatalf("operator source calls=%v", calls)
 	}
 }
 
