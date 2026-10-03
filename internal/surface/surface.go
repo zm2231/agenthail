@@ -322,9 +322,15 @@ type GoalState struct {
 }
 
 type StreamEvent struct {
-	Kind    string        `json:"kind"`
-	Text    string        `json:"text"`
-	Context *ContextUsage `json:"context,omitempty"`
+	ID          string        `json:"id,omitempty"`
+	ProviderKey string        `json:"providerKey,omitempty"`
+	Version     uint64        `json:"version,omitempty"`
+	Operation   string        `json:"operation,omitempty"`
+	TurnID      string        `json:"turnId,omitempty"`
+	Timestamp   time.Time     `json:"timestamp,omitempty"`
+	Kind        string        `json:"kind"`
+	Text        string        `json:"text"`
+	Context     *ContextUsage `json:"context,omitempty"`
 }
 
 type ContextUsage struct {

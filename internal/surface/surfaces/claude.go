@@ -541,11 +541,19 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 			}
 			lastText = turn.Assistant
 			if text != "" {
-				onEvent(surface.StreamEvent{Kind: "text", Text: text})
+				key := turn.MessageID
+				if key == "" {
+					key = turn.UserID
+				}
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: targetID, Kind: "text", Text: text})
 			}
 		}
 		if turn.Done {
-			onEvent(surface.StreamEvent{Kind: "done"})
+			key := turn.MessageID
+			if key == "" {
+				key = turn.UserID
+			}
+			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
 			return nil
 		}
 		if turn.Interrupted {

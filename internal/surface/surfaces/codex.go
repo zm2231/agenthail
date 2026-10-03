@@ -918,7 +918,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			}
 			if usage, ok := c.applyContextEvent(sess, event, lastContext); ok {
 				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+				onEvent(codexStreamEvent(event.Sequence, "context", "", usage, uuid))
 				continue
 			}
 			if uuid != "" && !codexContainsID(event.Params, uuid) {
@@ -929,11 +929,11 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			case strings.Contains(strings.ToLower(method), "agentmessage"):
 				if txt := codexEventText(event.Params); txt != "" {
 					emittedText += txt
-					onEvent(surface.StreamEvent{Kind: "text", Text: txt})
+					onEvent(codexStreamEvent(event.Sequence, "text", txt, nil, uuid))
 				}
 			case strings.Contains(strings.ToLower(method), "tool"):
 				if name := codexEventTool(event.Params); name != "" {
-					onEvent(surface.StreamEvent{Kind: "tool_use", Text: name})
+					onEvent(codexStreamEvent(event.Sequence, "tool_use", name, nil, uuid))
 				}
 			case codexCompletionMethod(method):
 				thread, readErr := c.readObservationThread(ctx, client, sess.ID)
@@ -946,14 +946,14 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				}
 				if turn != nil && turn.Assistant != "" && turn.Assistant != emittedText {
 					if emittedText == "" {
-						onEvent(surface.StreamEvent{Kind: "text", Text: turn.Assistant})
+						onEvent(codexStreamEvent(event.Sequence, "text", turn.Assistant, nil, uuid))
 					} else if strings.HasPrefix(turn.Assistant, emittedText) {
-						onEvent(surface.StreamEvent{Kind: "text", Text: strings.TrimPrefix(turn.Assistant, emittedText)})
+						onEvent(codexStreamEvent(event.Sequence, "text", strings.TrimPrefix(turn.Assistant, emittedText), nil, uuid))
 					} else {
 						return fmt.Errorf("Codex stream history exceeded the retained event buffer; use 'agenthail reply %s' for the complete response", sess.ID)
 					}
 				}
-				onEvent(surface.StreamEvent{Kind: "done"})
+				onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
 				return nil
 			}
 		}
@@ -976,6 +976,15 @@ func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid s
 	}
 	defer client.Close()
 	return c.streamManagedClient(ctx, client, sess, uuid, onEvent, timeout)
+}
+
+func codexStreamEvent(sequence int64, kind, text string, contextUsage *surface.ContextUsage, turnID string) surface.StreamEvent {
+	key := fmt.Sprintf("renderer:%d", sequence)
+	operation := "append"
+	if kind == "context" || kind == "done" {
+		operation = "upsert"
+	}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
 }
 
 func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
