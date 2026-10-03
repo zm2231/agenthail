@@ -53,6 +53,9 @@ final class AgenthailIOSTests: XCTestCase {
     func testCatalogHealthAndDuplicateEventsApplyLocally() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        model.snapshot?.surfaces = [
+            SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
+        ]
         let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":7,"type":"surface.health","data":{"surface":"codex","health":"unavailable","detail":"discovery failed"}}"#.utf8))
         await model.receiveCatalog(event)
         await model.receiveCatalog(event)
