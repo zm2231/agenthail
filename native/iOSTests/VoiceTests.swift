@@ -106,6 +106,32 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testOrchestratorCallDoesNotRequireASessionTarget() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        XCTAssertTrue(model.canCall)
+        await model.call()
+        XCTAssertEqual(api.actions.prefix(2).map(\.action), ["select", "prepare"])
+        XCTAssertEqual(api.actions.first?.targetId, "")
+        XCTAssertEqual(audio.starts, 1)
+    }
+
+    @MainActor
+    func testConnectedCallCanTransferOrReturnThroughTheSharedAction() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","events":[],"occupied":false,"truncated":false}"#.utf8))
+        let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "@builder"
+        await model.refresh()
+        await model.transfer()
+        XCTAssertEqual(api.actions.last?.action, "transfer")
+        XCTAssertEqual(api.actions.last?.targetId, "@builder")
+        model.targetID = ""
+        model.state = api.snapshot
+        await model.transfer()
+        XCTAssertEqual(api.actions.last?.targetId, "")
+    }
+
+    @MainActor
     func testClosedScreenCannotSendTextOrInterrupt() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true

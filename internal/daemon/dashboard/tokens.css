@@ -1854,3 +1854,57 @@ select {
   padding: 10px 12px;
   border-radius: 10px;
 }
+.voice-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  box-shadow: 0 28px 90px var(--shadow-strong);
+}
+.voice-dialog::backdrop {
+  background: oklch(0% 0 0 / 0.56);
+  backdrop-filter: blur(4px);
+}
+.voice-dialog-card {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 24px;
+}
+.voice-dialog-card header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.voice-dialog-card h2,
+.voice-dialog-card p {
+  margin: 0;
+}
+.voice-route {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.voice-route small,
+.voice-help {
+  color: var(--quiet);
+  font-size: 13px;
+  font-weight: 400;
+}
+.voice-route input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--raised);
+}
+.voice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}

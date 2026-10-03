@@ -37,8 +37,15 @@ const codexHookJS = `
     if (data.type === 'mcp-notification' && typeof data.method === 'string') {
       bridge.events.push({sequence: ++bridge.sequence, method: data.method, params: data.params || {}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
+      return;
+    }
+    if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
+      const params = data.request.params || {};
+      bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
+      if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
   });
+  bridge.respondDynamicToolCall = (requestId, success, text) => Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', message:{id:requestId, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}}));
   bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
     const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
     const timer = setTimeout(() => {
@@ -57,6 +64,10 @@ const codexHookJS = `
 func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
 	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.request!=='function')return JSON.stringify({error:{code:'bridge_unavailable',message:'Codex Desktop renderer bridge is unavailable'}});return JSON.stringify(await b.request(%s,%s,%d))}catch(e){return JSON.stringify({error:{code:'desktop_error',message:e&&e.message?e.message:String(e)}})}})()`,
 		strconvQuote(method), paramsJSON, timeout.Milliseconds())
+}
+
+func codexDynamicToolResponseJS(requestID string, success bool, text string) string {
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.respondDynamicToolCall!=='function')return'bridge_unavailable';await b.respondDynamicToolCall(%s,%t,%s);return'ok'}catch(e){return String(e&&e.message||e)}})()`, strconvQuote(requestID), success, strconvQuote(text))
 }
 
 func codexPayloadInitJS(id string) string {

@@ -32,6 +32,7 @@ const app = {
   remoteQRHideTimer: null,
   startModels: {},
   codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
+  voice: { state: null, attemptId: "", localAudio: false, connection: false, channel: false, script: null, requestedTarget: null, poll: null, appliedSDP: "" },
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
 globalThis.escape = (value) =>
@@ -961,7 +962,10 @@ function renderChat() {
   const settings = [`<form class="session-tools" data-tool="alias"><label><span>Conversation name</span><input name="alias" value="${escape(session.alias || "")}" maxlength="80" placeholder="research"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save name</button></div></form>`];
   if (capabilities.goal)
     settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save goal</button>${goal?.objective ? '<button class="soft-button" data-action="goal-clear" type="button">Clear</button>' : ""}</div></form>`);
-  const toolRows = [`<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`];
+  const toolRows = [
+    `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
+    `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
+  ];
   const signature = JSON.stringify([
     session.id,
     exchanges,
@@ -1071,6 +1075,115 @@ async function action(action, extra = {}) {
   if (!response.ok) throw Error(await response.text());
   return response.json();
 }
+async function voiceRequest(action, extra = {}) {
+  const response = await fetch("/api/voice", {
+    method: action ? "POST" : "GET",
+    headers: action ? { "content-type": "application/json" } : undefined,
+    body: action ? JSON.stringify({ action, ...extra }) : undefined,
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    app.voice.state = body.state || app.voice.state;
+    throw Error(body?.error?.message || "Voice action was blocked.");
+  }
+  app.voice.state = body;
+  renderVoice();
+  if (app.voice.localAudio && body.sdp && body.sdp !== app.voice.appliedSDP && window.agenthailVoice) {
+    app.voice.appliedSDP = body.sdp;
+    await window.agenthailVoice.answer(body.sdp);
+  }
+  return body;
+}
+function voiceCallActive() {
+  return ["starting", "negotiating", "connected", "stopping", "unknown"].includes(app.voice.state?.phase);
+}
+function renderVoice() {
+  const state = app.voice.state;
+  const call = $("#voice-call"), transfer = $("#voice-transfer"), hangup = $("#voice-hangup"), status = $("#voice-status"), target = $("#voice-target"), help = $("#voice-help");
+  if (!call || !state) return;
+  const routed = state.target?.name || "Agenthail orchestrator";
+  const active = voiceCallActive();
+  status.textContent = state.message || (active ? `Call active with ${routed}.` : `Ready to talk to ${routed}.`);
+  if (app.voice.requestedTarget !== null) target.value = app.voice.requestedTarget;
+  else if (state.target) target.value = state.target.id;
+  call.hidden = active;
+  transfer.hidden = !active;
+  hangup.hidden = !active;
+  transfer.textContent = target.value.trim() ? "Transfer to session" : "Return to orchestrator";
+  help.textContent = target.value.trim() ? "This routes work only to that exact existing session." : "Leave blank to use Agenthail’s normal orchestration workflow.";
+  $("#voice-title").textContent = state.target ? "Session voice" : "Talk to orchestrator";
+}
+async function ensureVoicePeer() {
+  if (window.agenthailVoice) return;
+  if (!app.voice.script) {
+    app.voice.script = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "/voice-peer.js";
+      script.onload = resolve;
+      script.onerror = () => reject(Error("Could not load browser voice controls."));
+      document.head.append(script);
+    });
+  }
+  await app.voice.script;
+}
+async function openVoice(targetID = "") {
+  const dialog = $("#voice-dialog");
+  app.voice.requestedTarget = targetID;
+  $("#voice-target").value = targetID;
+  if (!dialog.open) dialog.showModal();
+  if (!app.voice.poll) app.voice.poll = setInterval(() => voiceRequest().catch(() => {}), 1000);
+  try {
+    await voiceRequest();
+    if (targetID && !voiceCallActive()) renderVoice();
+  } catch (error) { toast(error.message); }
+}
+async function startVoice() {
+  const targetID = $("#voice-target").value.trim();
+  try {
+    await voiceRequest("select", { targetId: targetID });
+    app.voice.requestedTarget = null;
+    await voiceRequest("prepare");
+    await ensureVoicePeer();
+    app.voice.attemptId = crypto.randomUUID();
+    app.voice.localAudio = true;
+    app.voice.connection = false;
+    app.voice.channel = false;
+    app.voice.appliedSDP = "";
+    await window.agenthailVoice.start();
+  } catch (error) {
+    app.voice.localAudio = false;
+    toast(error.message);
+  }
+}
+async function transferVoice() {
+  try { await voiceRequest("transfer", { targetId: $("#voice-target").value.trim() }); }
+  catch (error) { toast(error.message); }
+}
+async function hangupVoice() {
+  const attemptId = app.voice.attemptId || app.voice.state?.attemptId;
+  window.agenthailVoice?.end();
+  app.voice.localAudio = false;
+  if (!attemptId) return;
+  try { await voiceRequest("stop", { attemptId }); }
+  catch (error) { toast(error.message); }
+}
+window.agenthailVoiceNotify = async ({ type, value }) => {
+  if (type === "ready") return;
+  if (type === "offer") {
+    try {
+      await voiceRequest("start", { attemptId: app.voice.attemptId, sdp: value });
+    } catch (error) { toast(error.message); await hangupVoice(); }
+    return;
+  }
+  if (type === "connection") app.voice.connection = value === "connected";
+  if (type === "channel") app.voice.channel = value === "open";
+  if (app.voice.connection && app.voice.channel && app.voice.attemptId) {
+    try { await voiceRequest("connected", { attemptId: app.voice.attemptId }); }
+    catch (error) { toast(error.message); }
+    app.voice.channel = false;
+  }
+  if (type === "error") { toast(value || "Voice audio failed."); await hangupVoice(); }
+};
 async function send(requestedAction = "send") {
   const message = $("#message").value.trim();
   const composerAction = requestedAction === "send" ? $("#send").dataset.mode : requestedAction;
@@ -1201,6 +1314,8 @@ document.addEventListener("click", async (event) => {
   }
   const sessionButton = event.target.closest("[data-session]");
   if (sessionButton) return selectSession(sessionButton.dataset.session, true);
+  const voiceSession = event.target.closest("[data-voice-session]");
+  if (voiceSession) return openVoice(voiceSession.dataset.voiceSession);
   const surfaceButton = event.target.closest("[data-surface]");
   if (surfaceButton) {
     app.mobileChatOpen = false;
@@ -1553,6 +1668,15 @@ $("#audit-kind-filter").addEventListener("change", (event) => {
 $("#history-more").addEventListener("click", () => loadAudit());
 $("#refresh").addEventListener("click", async () => {
   await load(true);
+});
+$("#voice-orchestrator").addEventListener("click", () => openVoice());
+$("#voice-call").addEventListener("click", startVoice);
+$("#voice-transfer").addEventListener("click", transferVoice);
+$("#voice-hangup").addEventListener("click", hangupVoice);
+$("#voice-dialog").addEventListener("close", () => {
+  if (app.voice.localAudio) hangupVoice();
+  clearInterval(app.voice.poll);
+  app.voice.poll = null;
 });
 window.addEventListener("resize", () => {
   renderSessions();

@@ -29,6 +29,14 @@ func TestVoiceOperatorCreatesDurableDesktopThreadWithInstructionsBeforeAnyTurn(t
 	if _, exists := c.params["approvalPolicy"]; exists {
 		t.Fatal("operator silently changed native approval policy")
 	}
+	tools, ok := c.params["dynamicTools"].([]map[string]any)
+	if !ok || len(tools) != 1 || tools[0]["name"] != "agenthail" {
+		t.Fatalf("dynamic tools=%#v", c.params["dynamicTools"])
+	}
+	namespaceTools, ok := tools[0]["tools"].([]map[string]any)
+	if !ok || len(namespaceTools) != 2 || namespaceTools[0]["name"] != "voice_transfer" || namespaceTools[1]["name"] != "voice_return_to_orchestrator" {
+		t.Fatalf("namespace tools=%#v", tools[0]["tools"])
+	}
 	if s.ID != "fixture-operator" || s.Transport != "desktop" || s.Transcript != "/fixture/rollout.jsonl" {
 		t.Fatalf("session=%+v", s)
 	}
