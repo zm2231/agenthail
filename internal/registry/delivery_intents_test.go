@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -64,6 +65,10 @@ func TestDeliveryIntentFailureQueuesOneSenderNoticeAcrossReopen(t *testing.T) {
 	}
 	if count := second.QueueCount("sender"); count != 1 {
 		t.Fatalf("sender notice count=%d", count)
+	}
+	var events int
+	if err := second.db.QueryRow(`SELECT COUNT(*) FROM catalog_events WHERE dedupe_key=? AND type='delivery.problem'`, "delivery.problem:"+fmt.Sprint(intent.ID)).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("events=%d err=%v", events, err)
 	}
 }
 
