@@ -605,7 +605,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		catalogSessions[record.Session.ID] = record
 		sessions = append(sessions, record.Session)
 	}
-	if len(catalogSnapshot.Sessions) == 0 {
+	if len(catalogSnapshot.Sessions) == 0 && len(catalogSnapshot.Surfaces) == 0 {
 		var err error
 		sessions, err = d.Registry.ListSessions(0)
 		if err != nil {

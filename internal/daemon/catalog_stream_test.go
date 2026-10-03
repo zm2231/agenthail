@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
@@ -67,5 +68,40 @@ func TestDiscoveryPersistsCatalogBeforeSnapshotReads(t *testing.T) {
 	}
 	if len(state.Surfaces) != 1 || state.Surfaces[0].Health != "healthy" || !state.Surfaces[0].Connected {
 		t.Fatalf("surfaces=%+v", state.Surfaces)
+	}
+}
+
+func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	fake.sessions = map[string]surface.Session{}
+	d.discoverCatalog(context.Background())
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 2 {
+		t.Fatalf("first omission sessions=%d", len(state.Sessions))
+	}
+	d.discoverCatalog(context.Background())
+	state, err = d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 0 {
+		t.Fatalf("second omission sessions=%d", len(state.Sessions))
+	}
+	window, err := registry.CatalogEventsAfter(0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removals := 0
+	for _, event := range window.Events {
+		if event.Type == "session.removed" {
+			removals++
+		}
+	}
+	if removals != 2 {
+		t.Fatalf("removals=%d", removals)
 	}
 }

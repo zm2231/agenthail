@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 const catalogStreamReplayLimit = 4096
@@ -78,6 +79,26 @@ func (h *catalogHub) publishSurface(state registry.CatalogSurfaceState, event re
 		}
 	}
 	return persisted, true, nil
+}
+
+func (h *catalogHub) reconcileOmissions(kind surface.SurfaceKind, seen map[string]struct{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	events, err := h.registry.ReconcileCatalogOmissions(kind, seen, 2)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		for id, subscriber := range h.subscribers {
+			select {
+			case subscriber <- event:
+			default:
+				delete(h.subscribers, id)
+				close(subscriber)
+			}
+		}
+	}
+	return nil
 }
 
 func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, <-chan registry.CatalogEvent, func(), error) {
@@ -198,7 +219,9 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "unavailable", Detail: "catalog discovery failed", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":unavailable", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 			continue
 		}
+		seen := make(map[string]struct{}, len(sessions))
 		for _, session := range sessions {
+			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
 			identity := catalogIdentityForSession(identityCtx, session)
 			identityCancel()
@@ -222,6 +245,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			key := fmt.Sprintf("session.upserted:%s:%x", session.ID, fingerprint)
 			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		}
+		_ = d.catalog.reconcileOmissions(adapter.Name(), seen)
 		observedAt := time.Now().UTC()
 		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
 		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})

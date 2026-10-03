@@ -75,6 +75,30 @@ func TestRecordCatalogSessionCommitsStateAndEventTogether(t *testing.T) {
 	}
 }
 
+func TestCatalogOmissionRequiresTwoSuccessfulReconciliations(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "omitted", Surface: surface.KindCodex}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`)}, CatalogEvent{DedupeKey: "omitted:upsert", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != attempt-1 {
+			t.Fatalf("attempt=%d events=%+v", attempt, events)
+		}
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Sessions) != 0 {
+		t.Fatalf("sessions=%+v", snapshot.Sessions)
+	}
+}
+
 func TestSessionJournalSourceEpochChangesOnRestart(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")

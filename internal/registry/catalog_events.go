@@ -34,8 +34,12 @@ func (r *Registry) EnsureCatalogState() error {
 		host_project BLOB NOT NULL,
 		checkout BLOB NOT NULL,
 		unavailable_reason TEXT NOT NULL DEFAULT '',
-		observed_at TEXT NOT NULL
+		observed_at TEXT NOT NULL,
+		misses INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("catalog_sessions", "misses", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (
