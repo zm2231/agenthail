@@ -51,8 +51,9 @@ codesign --verify --strict --verbose=2 "$root/agenthail"
 mkdir -p "$work/home/.claude/skills" "$work/home/.codex"
 mkdir -p "$work/user-skill"
 ln -s "$work/user-skill" "$work/home/.claude/skills/agenthail-operations"
-mkdir -p "$work/home/.hermes/skills"
+mkdir -p "$work/home/.hermes/skills" "$work/home/.codex/skills" "$work/previous-install/skills/agenthail-operations"
 ln -s "$work/removed-install/skills/agenthail-operations" "$work/home/.hermes/skills/agenthail-operations"
+ln -s "$work/previous-install/skills/agenthail-operations" "$work/home/.codex/skills/agenthail-operations"
 env -i HOME="$work/home" AGENTHAIL_ROOT="$root" AGENTHAIL_MAC_APP="$app/Contents/MacOS/Agenthail" PATH=/usr/bin:/bin "$payload/usr/local/bin/agenthail" version --json | jq -e '.version and .revision'
 env -i HOME="$work/home" AGENTHAIL_ROOT="$root" AGENTHAIL_MAC_APP="$app/Contents/MacOS/Agenthail" PATH=/usr/bin:/bin "$payload/usr/local/bin/agenthail" update --help | grep -q 'agenthail update'
 test -L "$work/home/.codex/skills/agenthail-operations"
