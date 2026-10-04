@@ -318,11 +318,6 @@ type Exchange struct {
 	Source    string    `json:"source,omitempty"`
 }
 
-type GoalState struct {
-	Objective string `json:"objective"`
-	Status    string `json:"status"` // "active", "complete", ""
-}
-
 type StreamEvent struct {
 	ID          string        `json:"id,omitempty"`
 	ProviderKey string        `json:"providerKey,omitempty"`
@@ -334,6 +329,7 @@ type StreamEvent struct {
 	Kind        string        `json:"kind"`
 	Text        string        `json:"text"`
 	Context     *ContextUsage `json:"context,omitempty"`
+	Goal        *GoalState    `json:"goal,omitempty"`
 }
 
 type ContextUsage struct {
@@ -356,6 +352,20 @@ type ContextUsage struct {
 
 type ContextUsageProvider interface {
 	ContextUsage(ctx context.Context, sess *Session) (*ContextUsage, error)
+}
+
+// GoalUpdate is the typed control payload supported by Codex thread/goal/set.
+// A nil field is omitted, except ClearTokenBudget, which explicitly sends a
+// JSON null token budget.
+type GoalUpdate struct {
+	Objective        *string `json:"objective,omitempty"`
+	Status           *string `json:"status,omitempty"`
+	TokenBudget      *int64  `json:"tokenBudget,omitempty"`
+	ClearTokenBudget bool    `json:"-"`
+}
+
+type GoalController interface {
+	UpdateGoal(context.Context, *Session, GoalUpdate) error
 }
 
 type Capabilities struct {

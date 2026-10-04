@@ -4,6 +4,7 @@ struct SessionEditingControls: View {
     @ObservedObject var model: AgenthailIOSModel
     let detail: SessionDetail
     @State private var editingGoal = false
+    @State private var editingBudget = false
     @State private var editingName = false
     @State private var text = ""
     @State private var error: String?
@@ -13,31 +14,33 @@ struct SessionEditingControls: View {
             if !detail.readOnly && detail.capabilities.goal {
                 Button(detail.goal?.objective.isEmpty == false ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
                 if detail.goal?.objective.isEmpty == false {
+                    Button(detail.goal?.status == "paused" ? "Resume goal" : "Pause goal", systemImage: detail.goal?.status == "paused" ? "play.fill" : "pause.fill") { Task { await save(detail.goal?.status == "paused" ? "goal-resume" : "goal-pause") } }
+                    Button("Edit token budget", systemImage: "number") { text = detail.goal?.tokenBudget.map(String.init) ?? ""; editingBudget = true }
                     Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } }
                 }
             }
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
         }
         .disabled(model.pendingControls.contains(detail.session.id))
-        .sheet(isPresented: Binding(get: { editingGoal || editingName }, set: { if !$0 { editingGoal = false; editingName = false } })) {
+        .sheet(isPresented: Binding(get: { editingGoal || editingBudget || editingName }, set: { if !$0 { editingGoal = false; editingBudget = false; editingName = false } })) {
             NavigationStack {
                 Form {
-                    TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
+                    TextField(editingName ? "Name" : (editingBudget ? "Token budget" : "Objective"), text: $text, axis: .vertical).lineLimit(2...8)
                         .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
                     if editingName { Text("Use 1–80 characters without spaces, /, or #.").font(.footnote) }
                     if let error { Text(error).foregroundStyle(.red) }
                 }
-                .navigationTitle(editingName ? "Name conversation" : "Edit goal")
+                .navigationTitle(editingName ? "Name conversation" : (editingBudget ? "Edit token budget" : "Edit goal"))
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false }.disabled(model.pendingControls.contains(detail.session.id)) }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingName ? "alias" : "goal-set") } }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
+                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingName ? "alias" : (editingBudget ? "goal-budget" : (detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set"))) } }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
                 }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
             }
         }
     }
     private func save(_ action: String) async {
         error = nil
-        do { try await model.editSession(id: detail.session.id, action: action, text: text); editingName = false; editingGoal = false }
+        do { try await model.editSession(id: detail.session.id, action: action, text: text); editingName = false; editingGoal = false; editingBudget = false }
         catch { self.error = error.localizedDescription }
     }
 }

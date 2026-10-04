@@ -200,7 +200,11 @@ agenthail compact @builder
 agenthail model @builder
 agenthail model @builder <model-name>
 agenthail goal @builder --json
-agenthail goal @builder "Ship the verified fix."
+agenthail goal @builder set "Ship the verified fix."
+agenthail goal @builder pause
+agenthail goal @builder resume
+agenthail goal @builder budget 50000
+agenthail goal @builder budget clear
 agenthail goal @builder clear
 ```
 
