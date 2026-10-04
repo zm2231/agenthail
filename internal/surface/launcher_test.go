@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -170,9 +171,39 @@ func TestCMUXLocateRequiresLivePID(t *testing.T) {
 	}
 }
 
+func TestCMUXLocateUsesAgenthailReceiptAndLiveInventory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newCMUX().(*processLauncher)
+	launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if slices.Contains(args, "sessions") {
+			return []byte(`{"sessions":[]}`), nil
+		}
+		if slices.Contains(args, "tree") {
+			if !reflect.DeepEqual(args, []string{"--json", "--id-format", "both", "tree", "--workspace", "workspace-7"}) {
+				t.Fatalf("tree args=%#v", args)
+			}
+			return []byte(`{"windows":[{"ref":"window:1","workspaces":[{"id":"workspace-7","ref":"workspace:7","panes":[{"ref":"pane:1","surfaces":[{"id":"surface-9","ref":"surface:9","type":"terminal"}]}]}]}]}`), nil
+		}
+		t.Fatalf("unexpected cmux command: %#v", args)
+		return nil, nil
+	}
+	path, err := ManagedCodexLaunchReceiptPath("agenthail-launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-launch", ThreadID: "codex-thread", Cwd: "/work/project", Workspace: "workspace-7", Surface: "surface-9"}); err != nil {
+		t.Fatal(err)
+	}
+	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project"}})
+	want := map[string]Location{"codex-thread": {Workspace: "workspace-7", Surface: "surface-9"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("locations=%#v want=%#v", got, want)
+	}
+}
+
 func TestCMUXAvailabilityProbesCommandsInsteadOfHelpText(t *testing.T) {
 	dir := t.TempDir()
-	writeExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\ncase \"$1 $2\" in\n  'new-workspace --help'|'sessions list --help'|'select-workspace --help'|'focus-panel --help') printf 'supported\\n'; exit 0;;\n  *) printf 'run is only a word here\\n'; exit 0;;\nesac\n")
+	writeExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\ncase \"$1 $2\" in\n  'new-workspace --help'|'sessions list --help'|'tree --help'|'select-workspace --help'|'focus-panel --help') printf 'supported\\n'; exit 0;;\n  *) printf 'run is only a word here\\n'; exit 0;;\nesac\n")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	launcher := newCMUX().(*processLauncher)
 	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -245,6 +276,45 @@ func TestTMUXMalformedPostLaunchOutputIsAcceptedWithoutLocation(t *testing.T) {
 	var acceptedErr LaunchAcceptedError
 	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherTMUX {
 		t.Fatalf("err=%v, want accepted tmux launch error", err)
+	}
+}
+
+func TestTMUXRunnerErrorAfterDispatchIsAcceptedWithLaunchIdentity(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newTMUX().(*processLauncher)
+	launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		sessionIndex := slices.Index(args, "-s")
+		if sessionIndex < 0 || sessionIndex+1 >= len(args) {
+			t.Fatalf("tmux session argument missing: %#v", args)
+		}
+		return []byte(args[sessionIndex+1] + " %1"), errors.New("tmux exited after creating the session")
+	}
+	result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Message: "hello"})
+	var acceptedErr LaunchAcceptedError
+	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherTMUX {
+		t.Fatalf("err=%v, want accepted post-dispatch error", err)
+	}
+	if result.Location == nil || result.Location.Session == "" {
+		t.Fatalf("result=%#v, want launch-owned session identity", result)
+	}
+}
+
+func TestTMUXRunnerStartErrorRemainsDefinitiveFailure(t *testing.T) {
+	for _, startErr := range []error{
+		&exec.Error{Name: "tmux", Err: os.ErrNotExist},
+		&os.PathError{Op: "fork/exec", Path: "/missing/tmux", Err: os.ErrNotExist},
+	} {
+		t.Run(startErr.Error(), func(t *testing.T) {
+			launcher := newTMUX().(*processLauncher)
+			launcher.run = func(context.Context, string, ...string) ([]byte, error) {
+				return nil, startErr
+			}
+			result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Message: "hello"})
+			var acceptedErr LaunchAcceptedError
+			if errors.As(err, &acceptedErr) || err == nil || result.Location != nil {
+				t.Fatalf("result=%#v err=%v, want definitive pre-start failure", result, err)
+			}
+		})
 	}
 }
 
