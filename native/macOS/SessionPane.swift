@@ -73,7 +73,6 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadTask?.cancel()
         detailReloadTask = nil
         metadata = MetadataOverlay(seed: detail)
-        modelCatalogNeeded = false
         startSessionStream(id)
         startDetailLoad(id)
         startMetadataLoad(id)
@@ -265,6 +264,8 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func startMetadataLoad(_ id: String) {
         metadataTask?.cancel()
+        metadata.metadataRequested()
+        modelCatalogNeeded = false
         guard !closed, let api = model.api else { return }
         let selection = selectionGeneration
         metadataTask = Task {

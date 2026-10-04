@@ -29,6 +29,10 @@ struct MetadataOverlay {
         settled = true
     }
 
+    mutating func metadataRequested() {
+        settled = false
+    }
+
     var needsModelCatalog: Bool { settled && models?.isEmpty ?? true }
 
     mutating func metadataFailed() {
