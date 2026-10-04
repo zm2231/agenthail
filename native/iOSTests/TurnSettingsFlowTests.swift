@@ -4,7 +4,7 @@ import XCTest
 
 final class TurnSettingsFlowTests: XCTestCase {
     @MainActor
-    func testSteerExcludesTurnOptionsAndPreservesDraft() async throws {
+    func testBusyDefaultSendCarriesTurnOptionsAndClearsDraft() async throws {
         let fixture = try makeFixture(status: "busy")
         TurnSettingsFlowProtocol.state.reset()
         let model = makeModel()
@@ -16,10 +16,39 @@ final class TurnSettingsFlowTests: XCTestCase {
         model.send(to: fixture.session)
         try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "send")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["effort"] as? String, "high")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["mode"] as? String, "plan")
+        XCTAssertEqual(model.turnSettings(for: fixture.session.id), TurnSettings())
+    }
+
+    @MainActor
+    func testBusyDefaultSendsNormalInstruction() async throws {
+        let fixture = try makeFixture(status: "busy")
+        TurnSettingsFlowProtocol.state.reset()
+        let model = makeModel()
+        model.selectedSessionID = fixture.session.id
+        model.selectedDetail = fixture.detail
+        model.composer = "Queue this instruction"
+
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "send")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["message"] as? String, "Queue this instruction")
+    }
+
+    func testExplicitSteerAPIPathOmitsTurnOptions() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", turnSettings: TurnSettings(effort: "high", mode: .plan))
+
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "steer")
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["effort"])
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["mode"])
-        XCTAssertEqual(model.turnSettings(for: fixture.session.id), TurnSettings(effort: "high", mode: .plan))
     }
 
     @MainActor

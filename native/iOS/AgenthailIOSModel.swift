@@ -68,7 +68,7 @@ final class AgenthailIOSModel: ObservableObject {
         case "queued": return detail ?? "Queued"
         case "transport_accepted", "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
-        case "unknown", nil: return "Delivery outcome unknown. Check activity before retrying."
+        case "unknown", nil: return "Delivery needs review in Inbox. Check the session before sending again."
         case "held": return "Delivery held. Review it in Inbox before retrying."
         case "expired": return "Instruction expired. Review it in Inbox history."
         case "canceled": return "Instruction canceled."
@@ -126,6 +126,10 @@ final class AgenthailIOSModel: ObservableObject {
     func creationModels(surface: String) async throws -> [ModelOption] {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         return try await api.creationModels(surface: surface)
+    }
+    func prepareNewSessionForm() {
+        creationError = nil
+        creationWarning = nil
     }
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -436,7 +440,7 @@ final class AgenthailIOSModel: ObservableObject {
                 switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
                 case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
                 case "queued": deliveryStatus[sessionID] = "Queued for \(item.target); sends when current turn ends."
-                case "unknown": deliveryStatus[sessionID] = "Delivery outcome unknown. Review it in Inbox before sending again."
+                case "unknown": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
                 case "unknown-expired": deliveryStatus[sessionID] = "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again."
                 case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
