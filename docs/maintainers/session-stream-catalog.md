@@ -30,7 +30,10 @@ new `queueCount` in the same transaction, so `catalogSeq` moves with the paging
 membership that reads the live queue and stale page cursors are rejected.
 Clients update the known row's `queueCount` and presence (`current` and
 `currentReason`) from it and ignore it for unknown sessions; the following
-background projection pass also emits a full-row `session.upserted`. A failed discovery records
+background projection pass also emits a full-row `session.upserted`. The registry
+validates the queue count inside the projection transaction before persisting
+that full-row event; if the producer's count is stale, the daemon rebuilds the
+row from the transaction's count before retrying. A failed discovery records
 freshness/health without changing presence rows. A successful omission must
 meet the configured removal threshold before producing `session.removed`.
 
