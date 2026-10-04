@@ -237,8 +237,77 @@ func (a *App) cmdCodex(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve current directory: %w", err)
 	}
+	if receiptPath := strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_RECEIPT")); receiptPath != "" || strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID")) != "" {
+		launchID := strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID"))
+		if launchID == "" || receiptPath == "" {
+			return fmt.Errorf("managed Codex launch identity is incomplete")
+		}
+		expectedReceiptPath, err := surface.ManagedCodexLaunchReceiptPath(launchID)
+		if err != nil || filepath.Clean(receiptPath) != filepath.Clean(expectedReceiptPath) {
+			return fmt.Errorf("managed Codex launch receipt path is not launch-owned")
+		}
+		paneID := strings.TrimSpace(os.Getenv("TMUX_PANE"))
+		if !strings.HasPrefix(paneID, "%") {
+			return fmt.Errorf("managed Codex launch did not receive TMUX_PANE")
+		}
+		model, message, err := managedCodexLaunchArgs(args)
+		if err != nil {
+			return err
+		}
+		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		session, err := surfaces.NewCodex("").PrepareManagedTerminalSession(prepareCtx, cwd, model)
+		if err != nil {
+			return err
+		}
+		if err := surface.WriteManagedCodexLaunchReceipt(receiptPath, surface.ManagedCodexLaunchReceipt{LaunchID: launchID, ThreadID: session.ID, Cwd: cwd, TmuxSession: launchID, TmuxPane: paneID}); err != nil {
+			return err
+		}
+		argv := []string{"resume", session.ID, "--remote", "unix://"}
+		if message != "" {
+			argv = append(argv, "--", message)
+		}
+		return syscall.Exec(path, append([]string{"codex"}, argv...), os.Environ())
+	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
 	return syscall.Exec(path, argv, os.Environ())
+}
+
+func managedCodexLaunchArgs(args []string) (string, string, error) {
+	model := ""
+	message := ""
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			if index+1 >= len(args) {
+				return "", "", fmt.Errorf("managed Codex launch requires a message")
+			}
+			if len(args) != index+2 {
+				return "", "", fmt.Errorf("managed Codex launch accepts one message")
+			}
+			message = args[index+1]
+			break
+		}
+		switch arg {
+		case "--cd", "-C":
+			if index+1 >= len(args) {
+				return "", "", fmt.Errorf("managed Codex launch %s requires a directory", arg)
+			}
+			index++
+		case "--model", "-m":
+			if index+1 >= len(args) {
+				return "", "", fmt.Errorf("managed Codex launch %s requires a model", arg)
+			}
+			model = args[index+1]
+			index++
+		default:
+			return "", "", fmt.Errorf("managed Codex launch does not support argument %q", arg)
+		}
+	}
+	if message == "" {
+		return "", "", fmt.Errorf("managed Codex launch requires a message")
+	}
+	return model, message, nil
 }
 
 func repairManagedCodexRuntime(ctx context.Context) error {
