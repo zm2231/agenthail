@@ -87,9 +87,14 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["Call this session"].exists)
         let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
+        let inspectorAnchor = app.staticTexts["session-inspector-anchor"]
+        XCTAssertTrue(inspectorAnchor.waitForExistence(timeout: 5))
+        let inspector = app.scrollViews.allElementsBoundByIndex.first { $0.identifier != "session-timeline" }
+        XCTAssertNotNil(inspector)
+        guard let inspector else { return }
         for _ in 0..<5 {
-            if waitUntilHittable(inbox, timeout: 0.5) { break }
-            app.scrollViews["session-timeline"].swipeUp()
+            if waitUntilHittable(inbox, timeout: 2) { break }
+            inspector.swipeUp()
         }
         XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
         inbox.tap()
