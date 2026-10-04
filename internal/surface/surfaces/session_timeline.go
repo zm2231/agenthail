@@ -164,6 +164,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		} else {
 			items = codexTimelineItems(record)
 		}
+		decorateTimelineAttachments(items, record, source, offset)
 		if source == "codex" && str(record, "type") == "event_msg" && len(items) == 1 && items[0].Role == "user" && responseUsers[str(record, "timestamp")+"\x00"+items[0].Text] {
 			continue
 		}
@@ -394,15 +395,19 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	}
 	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
 		text := str(payload, "message")
+		items := []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
 		if images, ok := payload["images"].([]any); ok && len(images) > 0 {
-			text += "\n[Image attachment: open the original agent app to view]"
+			for range images {
+				items = append(items, surface.TimelineItem{Kind: "attachment", Role: "user", Title: "Image", Text: "Image attachment"})
+			}
 		}
-		return []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
+		return items
 	}
 	if str(record, "type") != "response_item" {
 		return nil
 	}
 	item := surface.TimelineItem{}
+	messageAttachmentCount := 0
 	switch str(payload, "type") {
 	case "message":
 		item.Kind = "message"
@@ -418,6 +423,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			if text := str(block, "text"); text != "" {
 				parts = append(parts, text)
 			} else if strings.Contains(str(block, "type"), "image") {
+				messageAttachmentCount++
 				parts = append(parts, "[Image attachment: open the original agent app to view]")
 			}
 		}
@@ -458,5 +464,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	default:
 		return nil
 	}
-	return []surface.TimelineItem{item}
+	items := []surface.TimelineItem{item}
+	for i := 0; i < messageAttachmentCount; i++ {
+		items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment"})
+	}
+	return items
 }
