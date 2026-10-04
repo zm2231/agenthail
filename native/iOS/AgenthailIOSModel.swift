@@ -741,6 +741,7 @@ final class AgenthailIOSModel: ObservableObject {
     func eventStreamConnected() async {
         reconnecting = false
         _ = await refresh(fresh: true)
+        if let id = selectedSessionID { await refreshSession(id) }
         startCatalogStream()
         if let id = selectedSessionID { startSessionStream(id) }
     }

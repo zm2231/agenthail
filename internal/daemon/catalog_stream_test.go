@@ -156,11 +156,28 @@ func TestDiscoveryStreamsProjectionChangesIncludingReturnToPriorValue(t *testing
 	if err := json.Unmarshal(changed.Events[0].Payload, &row); err != nil || row.Session.Alias != "reviewer" {
 		t.Fatalf("row=%+v err=%v", row.Session, err)
 	}
+	if err := registry.QueueMessage(from.ID, "pending review"); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(context.Background())
+	queued, err := registry.CatalogEventsAfter(changed.LatestSeq, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued.Events) != 1 || queued.Events[0].Type != "session.upserted" {
+		t.Fatalf("queued=%+v", queued.Events)
+	}
+	row = struct {
+		Session dashboardSession `json:"session"`
+	}{}
+	if err := json.Unmarshal(queued.Events[0].Payload, &row); err != nil || row.Session.QueueCount != 1 || !row.Session.Current {
+		t.Fatalf("row=%+v err=%v", row.Session, err)
+	}
 	if err := registry.RemoveAlias("reviewer"); err != nil {
 		t.Fatal(err)
 	}
 	d.discoverCatalog(context.Background())
-	returned, err := registry.CatalogEventsAfter(changed.LatestSeq, 20)
+	returned, err := registry.CatalogEventsAfter(queued.LatestSeq, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
