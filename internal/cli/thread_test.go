@@ -214,6 +214,24 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	if !queueEvent {
 		t.Fatalf("catalog events missing operator notice: %+v", events.Events)
 	}
+	type problemPayload struct {
+		DeliveryID      int64  `json:"deliveryId"`
+		SessionID       string `json:"sessionId"`
+		SourceSessionID string `json:"sourceSessionId"`
+		Reason          string `json:"reason"`
+	}
+	var problem problemPayload
+	for _, event := range events.Events {
+		if event.Type == "delivery.problem" {
+			if err := json.Unmarshal(event.Payload, &problem); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if problem.DeliveryID != result.DeliveryID || problem.SessionID != "created" || problem.SourceSessionID != registry.OperatorSessionID || problem.Reason != "initial message rejected" {
+		t.Fatalf("problem payload=%+v", problem)
+	}
 }
 
 func TestThreadCreateCodexHumanSubmittedDetailIsNeutral(t *testing.T) {
