@@ -1501,6 +1501,7 @@ struct DetailsTab: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
+    @State private var showTokens = false
     private var modelOptions: [ModelOption] {
         if let options = pane.detail?.models, !options.isEmpty { return options }
         return model.modelCatalog[session.surface] ?? []
@@ -1524,6 +1525,25 @@ struct DetailsTab: View {
                         ProgressView(value: min(ratio, 1))
                             .tint(DesktopPalette.accent)
                     }
+                    if context.compacting {
+                        Text("Compacting context")
+                            .foregroundStyle(DesktopPalette.muted)
+                    }
+                    DisclosureGroup("Token details", isExpanded: $showTokens) {
+                        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
+                            ForEach(ContextBreakdown.rows(context), id: \.label) { row in
+                                GridRow {
+                                    Text(row.label).foregroundStyle(DesktopPalette.text2)
+                                    Text(row.value)
+                                        .monospacedDigit()
+                                        .textSelection(.enabled)
+                                        .gridColumnAlignment(.trailing)
+                                }
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+                    .foregroundStyle(DesktopPalette.text2)
                 }
             }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {
