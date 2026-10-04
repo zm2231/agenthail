@@ -38,6 +38,8 @@ const (
 	firstLineDeadline   = 3 * time.Second
 )
 
+var heartbeatInterval = 2 * time.Second
+
 type Config struct {
 	Home         string
 	RegistryPath string
@@ -561,7 +563,7 @@ func replaceManifest(path string, current, replacement OwnershipManifest) error 
 }
 
 func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *registry.Registry, id string) {
-	t := time.NewTicker(2 * time.Second)
+	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
 	for {
 		select {

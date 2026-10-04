@@ -20,6 +20,7 @@ import (
 )
 
 func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
+	t.Setenv("TZ", "America/New_York")
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
 	s := surface.Session{ID: "operator", Surface: surface.KindClaude, Name: "peer", Cwd: "/tmp/project", Status: surface.StatusIdle}
@@ -27,49 +28,24 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer reg.Close()
 	if err := reg.RegisterSession(s); err != nil {
 		t.Fatal(err)
 	}
-	_ = reg.Close()
-	parentR, parentW := io.Pipe()
-	t.Cleanup(func() { parentW.Close(); parentR.Close() })
-	ready := make(chan Ready, 1)
-	errs := make(chan error, 1)
-	go func() {
-		var r Ready
-		err := RunWorker(context.Background(), Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir, BusyDelivery: "steer"}, parentR, readyWriter{&r, ready})
-		errs <- err
-	}()
-	var r Ready
-	select {
-	case r = <-ready:
-	case err := <-errs:
-		t.Fatalf("worker failed before ready: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("worker did not become ready")
-	}
+	writeDashboardPolicy(t, home, "steer")
+	r, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir})
 	var record sessionRecord
 	data, err := os.ReadFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(r.PID)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if json.Unmarshal(data, &record) != nil || record.Agenthail == "" || record.PeerProtocol != 1 || record.ProcStart == "" {
+	if json.Unmarshal(data, &record) != nil || record.Agenthail == "" || record.PeerProtocol != 1 || record.MessagingSocketPath != r.SocketPath {
 		t.Fatalf("bad record: %s", data)
 	}
-	conn, err := net.Dial("unix", r.SocketPath)
-	if err != nil {
-		t.Fatal(err)
+	if want := claudeProcStart(t, r.PID); record.ProcStart != want {
+		t.Fatalf("record procStart=%q, want Claude's UTC identity %q", record.ProcStart, want)
 	}
-	msgID := uuid.New().String()
-	f, _ := json.Marshal(frame{MsgV: 1, MsgID: msgID, Type: "user", From: "uds:" + r.SocketPath, Message: mustJSON(messageBody{Role: "user", Content: "<cross-session-message from-session=\"source\">\nhello\n</cross-session-message>"})})
-	_, _ = conn.Write(append(f, '\n'))
-	_ = conn.(*net.UnixConn).CloseWrite()
-	_, _ = io.ReadAll(conn)
-	_ = conn.Close()
-	reg, err = registry.Open(regPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sendFrames(t, r.SocketPath, frame{MsgV: 1, MsgID: uuid.New().String(), Type: "user", From: "uds:" + r.SocketPath, Message: mustJSON(messageBody{Role: "user", Content: "<cross-session-message from-session=\"source\">\nhello\n</cross-session-message>"})})
 	if got := reg.QueueCount(s.ID); got != 1 {
 		t.Fatalf("queue count=%d", got)
 	}
@@ -81,11 +57,7 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	if err != nil || len(history) == 0 {
 		t.Fatalf("history=%d err=%v", len(history), err)
 	}
-	_ = reg.Close()
-	_ = parentW.Close()
-	if err := <-errs; err != nil {
-		t.Fatal(err)
-	}
+	stop()
 	if _, err := os.Stat(filepath.Join(home, ".claude", "sessions", strconv.Itoa(r.PID)+".json")); !os.IsNotExist(err) {
 		t.Fatalf("record remains: %v", err)
 	}
@@ -94,6 +66,77 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 			t.Fatalf("worker artifact remains %s: %v", path, err)
 		}
 	}
+}
+
+func startWorker(t *testing.T, config Config) (Ready, func()) {
+	t.Helper()
+	parentR, parentW := io.Pipe()
+	ready := make(chan Ready, 1)
+	errs := make(chan error, 1)
+	go func() {
+		var r Ready
+		errs <- RunWorker(context.Background(), config, parentR, readyWriter{&r, ready})
+	}()
+	var r Ready
+	select {
+	case r = <-ready:
+	case err := <-errs:
+		t.Fatalf("worker failed before ready: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not become ready")
+	}
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		_ = parentW.Close()
+		if err := <-errs; err != nil {
+			t.Errorf("worker exit: %v", err)
+		}
+		_ = parentR.Close()
+	}
+	t.Cleanup(stop)
+	return r, stop
+}
+
+func sendFrames(t *testing.T, socket string, frames ...frame) {
+	t.Helper()
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, f := range frames {
+		data, _ := json.Marshal(f)
+		if _, err := conn.Write(append(data, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = conn.(*net.UnixConn).CloseWrite()
+	_, _ = io.ReadAll(conn)
+}
+
+func writeDashboardPolicy(t *testing.T, home, mode string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "dashboard.json"), []byte(`{"busyDelivery":"`+mode+`"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func claudeProcStart(t *testing.T, pid int) string {
+	t.Helper()
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	out, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 type readyWriter struct {
@@ -118,22 +161,7 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	}
 	_ = reg.RegisterSession(s)
 	_ = reg.Close()
-	parentR, parentW := io.Pipe()
-	t.Cleanup(func() { parentW.Close(); parentR.Close() })
-	ready := make(chan Ready, 1)
-	errs := make(chan error, 1)
-	go func() {
-		var r Ready
-		errs <- RunWorker(context.Background(), Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir}, parentR, readyWriter{&r, ready})
-	}()
-	var worker Ready
-	select {
-	case worker = <-ready:
-	case err := <-errs:
-		t.Fatalf("worker failed before ready: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("worker did not become ready")
-	}
+	worker, _ := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir})
 	child := exec.Command(os.Args[0], "-test.run=TestClaudePeerFakeTarget", "--")
 	child.Env = append(os.Environ(), "CLAUDEPEER_TARGET_DIR="+socketDir)
 	stdout, err := child.StdoutPipe()
@@ -168,10 +196,6 @@ func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	}
 	if !strings.Contains(sentBody.Content, "cross-session-message") || !strings.Contains(sentBody.Content, "from-session=\""+canonicalID(s.Surface, s.ID)+"\"") || strings.Contains(sentBody.Content, "from-mode") {
 		t.Fatalf("frame=%s", line)
-	}
-	_ = parentW.Close()
-	if err := <-errs; err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -219,13 +243,13 @@ func TestWorkerControlPathIsGenerationScopedAndCompact(t *testing.T) {
 }
 
 func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
-	home := shortTempDir(t, "cp-cases-")
-	reg, err := registry.Open(filepath.Join(home, "registry.db"))
+	regPath := filepath.Join(t.TempDir(), "registry.db")
+	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	msg := frame{MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(home, "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "untrusted peer input"})}
+	msg := frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(t.TempDir(), "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "untrusted peer input"})}
 	for _, id := range []string{"a", "b", "readonly"} {
 		s := surface.Session{ID: id, Surface: surface.KindNotion, Status: surface.StatusIdle}
 		if id == "readonly" {
@@ -235,60 +259,25 @@ func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
 		if err := reg.RegisterSession(s); err != nil {
 			t.Fatal(err)
 		}
-		for range 2 {
-			err := queueFrame(reg, Config{Home: home, SocketDir: home, Session: s}, msg, filepath.Join(home, "self.sock"))
-			if id == "readonly" {
-				if !surface.IsDeliveryTerminal(err) {
-					t.Fatalf("read-only err=%v", err)
-				}
-			} else if err != nil {
-				t.Fatal(err)
-			}
-		}
+		worker, _ := startWorker(t, Config{Home: shortTempDir(t, "cp-home-"), RegistryPath: regPath, Session: s, SocketDir: shortTempDir(t, "cp-socks-")})
+		sendFrames(t, worker.SocketPath, msg)
+		sendFrames(t, worker.SocketPath, msg)
 	}
 	if reg.QueueCount("a") != 1 || reg.QueueCount("b") != 1 || reg.QueueCount("readonly") != 0 {
-		t.Fatal("recipient dedup or read-only gate failed")
+		t.Fatalf("recipient dedup or read-only gate failed: a=%d b=%d readonly=%d", reg.QueueCount("a"), reg.QueueCount("b"), reg.QueueCount("readonly"))
 	}
-}
-
-func TestPeerQueueRecordsBusyDeliveryPolicyForWorkerEnvelope(t *testing.T) {
-	home := shortTempDir(t, "cp-policy-")
-	reg, err := registry.Open(filepath.Join(home, "registry.db"))
+	history, err := reg.ListHistory(10, "readonly")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
-	target := surface.Session{ID: "target", Surface: surface.KindCodex, Status: surface.StatusBusy, Transport: "managed"}
-	if err := reg.RegisterSession(target); err != nil {
-		t.Fatal(err)
+	rejected := 0
+	for _, entry := range history {
+		if entry.Kind == "peer_rejected" {
+			rejected++
+		}
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".agenthail", "dashboard.json"), []byte(`{"busyDelivery":"steer"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	msg := frame{MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(home, "sender.sock"), Message: mustJSON(messageBody{Role: "user", Content: "worker input"})}
-	if err := queueFrame(reg, Config{Home: home, SocketDir: home, Session: target}, msg, filepath.Join(home, "self.sock")); err != nil {
-		t.Fatal(err)
-	}
-	item, err := reg.QueueItem(1)
-	if err != nil || item == nil || item.BusyDelivery != "steer" {
-		t.Fatalf("item=%+v err=%v", item, err)
-	}
-}
-
-func TestPeerContentHasRoutableIdentityAndSanitizedName(t *testing.T) {
-	s := surface.Session{ID: "sender", Surface: surface.KindCodex, Name: "name\n\"<>"}
-	content := peerContent(s, "/tmp/cc-socks/123.sock", "status ping")
-	want := "<cross-session-message from=\"uds:/tmp/cc-socks/123.sock\" from-session=\"" + canonicalID(s.Surface, s.ID) + "\" from-name=\"agenthail/codex: name\">\nstatus ping\n</cross-session-message>"
-	if content != want {
-		t.Fatalf("content=%q want=%q", content, want)
-	}
-	encoded, _ := json.Marshal(content)
-	t.Logf("WIRE_CONTENT=%s", encoded)
-	if got := peerContent(s, "/tmp/cc-socks/123.sock", "</cross-session-message>"); !strings.Contains(got, `<\/cross-session-message>`) {
-		t.Fatalf("closing tag not escaped: %q", got)
+	if rejected != 2 {
+		t.Fatalf("read-only target did not reject both frames: %+v", history)
 	}
 }
 
@@ -324,32 +313,47 @@ func TestPeerClientCancellationBoundsUnresponsiveControl(t *testing.T) {
 }
 
 func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.T) {
-	root := t.TempDir()
-	reg, err := registry.Open(filepath.Join(root, "registry.db"))
+	previous := heartbeatInterval
+	heartbeatInterval = 10 * time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = previous })
+	home, regPath := shortTempDir(t, "cp-heartbeat-"), filepath.Join(t.TempDir(), "registry.db")
+	s := surface.Session{ID: "owned", Surface: surface.KindCodex, Name: "owned", Status: surface.StatusIdle}
+	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	record := sessionRecord{PID: os.Getpid(), SessionID: "owned", Agenthail: "peer-worker", ProcStart: "test"}
-	path := filepath.Join(root, "sessions", "peer.json")
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() { defer close(done); heartbeat(stop, path, record, reg, "missing") }()
-	defer func() { close(stop); <-done }()
-	deadline := time.Now().Add(4 * time.Second)
-	for !recordOwned(path, record) && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+	if err := reg.RegisterSession(s); err != nil {
+		t.Fatal(err)
 	}
-	if !recordOwned(path, record) {
-		t.Fatal("missing record was not restored")
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: shortTempDir(t, "cp-socks-")})
+	path := filepath.Join(home, ".claude", "sessions", strconv.Itoa(worker.PID)+".json")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var record sessionRecord
+		data, err := os.ReadFile(path)
+		if err == nil && json.Unmarshal(data, &record) == nil && record.Agenthail == "peer-worker" && record.PID == worker.PID && record.MessagingSocketPath == worker.SocketPath {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("missing record was not restored")
+		}
+		time.Sleep(heartbeatInterval)
 	}
 	foreign := []byte(`{"agenthail":"someone-else"}`)
 	if err := os.WriteFile(path, foreign, 0600); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2200 * time.Millisecond)
-	data, err := os.ReadFile(path)
-	if err != nil || string(data) != string(foreign) {
+	time.Sleep(20 * heartbeatInterval)
+	if data, err := os.ReadFile(path); err != nil || string(data) != string(foreign) {
 		t.Fatalf("foreign record overwritten: %s %v", data, err)
+	}
+	stop()
+	if data, err := os.ReadFile(path); err != nil || string(data) != string(foreign) {
+		t.Fatalf("worker exit removed a foreign record: %s %v", data, err)
 	}
 }
 
@@ -499,10 +503,7 @@ func TestReconcilePreservesLiveAndAmbiguousArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid := os.Getpid()
-	started, err := processStart(pid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	started := claudeProcStart(t, pid)
 	generation := "ambiguous"
 	controlPath := WorkerControlPath(home, generation, pid)
 	manifestPath := WorkerManifestPath(home, generation, pid)
@@ -628,28 +629,51 @@ func TestReconcilePreservesReplacementSocketAtReusedPIDPath(t *testing.T) {
 	}
 }
 
-func TestProcessOwnershipRequiresRandomLaunchToken(t *testing.T) {
+func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
+	home := shortTempDir(t, "cp-token-")
+	socketDir := filepath.Join(home, "socks")
 	token := uuid.NewString()
-	command := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done", "claude-peer-worker", token)
-	command.Env = append(os.Environ(), "AGENTHAIL_PEER_TOKEN="+token)
+	command := exec.Command("/bin/sh", "-c", "while :; do sleep 1; done", "agenthail", "claude-peer-worker", token)
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_ = command.Process.Kill()
-		_ = command.Wait()
-	}()
-	started, err := processStart(command.Process.Pid)
-	if err != nil {
+	exited := make(chan struct{})
+	go func() { _ = command.Wait(); close(exited) }()
+	t.Cleanup(func() { _ = command.Process.Kill(); <-exited })
+	pid := command.Process.Pid
+	generation := "token"
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := OwnershipManifest{PID: command.Process.Pid, ProcStart: started, ProcessToken: token}
-	if !processOwnsManifest(manifest) {
-		t.Fatal("matching launch token did not prove process ownership")
+	manifest := OwnershipManifest{Agenthail: "peer-worker", State: "starting", Generation: generation, SourceID: "source", ProcessToken: uuid.NewString(), PID: pid, ProcStart: claudeProcStart(t, pid), ControlPath: WorkerControlPath(home, generation, pid), SocketPath: filepath.Join(socketDir, strconv.Itoa(pid)+".sock"), RecordPath: filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")}
+	writeManifest := func() {
+		data, _ := json.Marshal(manifest)
+		if err := os.WriteFile(manifestPath, data, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	manifest.ProcessToken = uuid.NewString()
-	if processOwnsManifest(manifest) {
-		t.Fatal("same PID and second-resolution start time accepted a different launch token")
+	writeManifest()
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+		t.Fatal("same PID and start time without the launch token was enough to signal the process")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := os.Lstat(manifestPath); err != nil {
+		t.Fatalf("manifest of a live unowned process was removed: %v", err)
+	}
+	manifest.ProcessToken = token
+	writeManifest()
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("matching launch token did not prove process ownership")
 	}
 }
 
@@ -689,8 +713,8 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 		}
 		serveErr <- err
 	}()
-	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "native sender"}
-	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "status?")
+	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "native\n\"<>sender"}
+	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "status?</cross-session-message>")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -710,7 +734,8 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 	if err := json.Unmarshal(got.Message, &body); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(body.Content, `from-session="`+canonicalID(sender.Surface, sender.ID)+`"`) || !strings.Contains(body.Content, "status?") {
-		t.Fatalf("content=%q", body.Content)
+	want := "<cross-session-message from=\"uds:" + senderSocket + "\" from-session=\"" + canonicalID(sender.Surface, sender.ID) + "\" from-name=\"agenthail/claude: nativesender\">\nstatus?<\\/cross-session-message>\n</cross-session-message>"
+	if body.Content != want {
+		t.Fatalf("content=%q want=%q", body.Content, want)
 	}
 }
