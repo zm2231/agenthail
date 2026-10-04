@@ -1027,7 +1027,7 @@ func printSessionStreamEvent(event sessionstream.Event, bodies map[string]string
 		}
 		return
 	}
-	if event.Role != "assistant" && !(event.Role == "" && (event.Kind == "text" || event.Kind == "assistant")) {
+	if !event.SpokenAssistantContent() {
 		return
 	}
 	if text := streamEventDelta(event, bodies, versions); text != "" {
@@ -1053,7 +1053,7 @@ func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscri
 			if event.TurnID != turnID {
 				continue
 			}
-			if event.Role == "assistant" || (event.Role == "" && (event.Kind == "text" || event.Kind == "assistant")) {
+			if event.SpokenAssistantContent() {
 				if prior := bodies[event.ItemID]; event.Version == 0 || event.Version > versions[event.ItemID] {
 					if event.ItemID != "" && strings.HasPrefix(event.Body, prior) {
 						bodies[event.ItemID] = event.Body
