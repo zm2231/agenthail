@@ -117,13 +117,17 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async throws -> SessionCreationReceipt {
+        if launcher == "tmux" && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+            throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
+        }
         if surface == "codex" {
-            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings)
+            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher)
             return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65)
         }
         var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
         if surface == "claude" { body.merge(claude.fields) { _, value in value } }
+        if let launcher { body["launcher"] = launcher }
         return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
     }
 
@@ -393,8 +397,9 @@ private struct SessionCreateRequest: Encodable {
     let cwd: String
     let model: String
     let turnSettings: TurnSettings
+    let launcher: String?
 
-    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode }
+    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode; case launcher }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -405,6 +410,7 @@ private struct SessionCreateRequest: Encodable {
         try container.encode(model, forKey: .model)
         try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
         try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+        try container.encodeIfPresent(launcher, forKey: .launcher)
     }
 }
 
