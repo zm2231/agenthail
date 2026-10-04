@@ -26,6 +26,7 @@ type daemonSurface struct {
 	sessions       map[string]surface.Session
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
+	nilResult      bool
 	sent           []string
 	steered        []string
 	models         []string
@@ -199,6 +200,9 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.sent = append(f.sent, message)
+	if f.nilResult {
+		return nil, nil
+	}
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
@@ -213,6 +217,9 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.sent = append(f.sent, message)
+	if f.nilResult {
+		return nil, nil
+	}
 	f.models = append(f.models, options.Model)
 	if f.sendErr != nil {
 		return nil, f.sendErr
@@ -1311,6 +1318,23 @@ func TestOutboxDeadLettersUnknownDeliveryWithoutAutomaticRetry(t *testing.T) {
 	daemon.drainMessageQueue(context.Background(), fake, &to)
 	if len(fake.sent) != 1 {
 		t.Fatalf("ambiguous delivery retried %d times", len(fake.sent))
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestOutboxDeadLettersEmptyResultWithoutAutomaticRetry(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	if err := r.QueueMessage("to", "empty result"); err != nil {
+		t.Fatal(err)
+	}
+	fake.nilResult = true
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	if len(fake.sent) != 1 {
+		t.Fatalf("empty result retried %d times", len(fake.sent))
 	}
 	rows, err := r.ListQueue(false)
 	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {
