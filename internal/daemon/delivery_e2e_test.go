@@ -313,6 +313,21 @@ func (h *runningDaemon) queue() []dashboardQueue {
 	return decoded.Items
 }
 
+func (h *runningDaemon) relays() []dashboardRelay {
+	h.t.Helper()
+	status, payload := h.request(http.MethodGet, "/api/v1/snapshot", nil)
+	if status != http.StatusOK {
+		h.t.Fatalf("snapshot status=%d body=%s", status, payload)
+	}
+	var decoded struct {
+		Relays []dashboardRelay `json:"relays"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		h.t.Fatal(err)
+	}
+	return decoded.Relays
+}
+
 func (h *runningDaemon) queueItem(id int64) dashboardQueue {
 	h.t.Helper()
 	for _, item := range h.queue() {
@@ -505,8 +520,8 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	agent.setStatus("target", surface.StatusIdle)
 	eventually(t, "deferred attempt", func() bool { return agent.attemptsFor("target") >= 2 })
 	settle()
-	if item := h.queueItem(id); item.Historical || item.Status == "dead" {
-		t.Fatalf("unavailable delivery lost the message: %+v", item)
+	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts < 1 || item.LastError == "" {
+		t.Fatalf("unavailable delivery was not kept pending with its failure recorded: %+v", item)
 	}
 	agent.failSends("target", nil)
 	eventually(t, "recovered delivery", func() bool { return len(agent.deliveredTo("target")) > 0 })
@@ -605,6 +620,32 @@ func TestOneShotRelayFiresForTheFirstCompletionOnly(t *testing.T) {
 	settle()
 	got := agent.deliveredTo("reviewer")
 	if len(got) != 1 || !strings.Contains(got[0].text, "first result") {
+		t.Fatalf("relayed=%+v", got)
+	}
+	eventually(t, "spent one-shot relay", func() bool {
+		relays := h.relays()
+		return len(relays) == 1 && !relays[0].Active && relays[0].FireCount == 1
+	})
+}
+
+func TestRelayToBusyTargetQueuesOnceThenDeliversOnce(t *testing.T) {
+	agent := newScriptedAgent("worker", "reviewer")
+	agent.setStatus("reviewer", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	settle()
+	h.action(map[string]any{"action": "relay-add", "fromId": "worker", "toId": "reviewer"})
+	settle()
+	agent.complete("worker", "turn-new", "review this while you are busy")
+	eventually(t, "queued relay", func() bool { return len(h.queue()) > 0 })
+	settle()
+	queued := h.queue()
+	if len(queued) != 1 || queued[0].SessionID != "reviewer" || queued[0].Historical || len(agent.deliveredTo("reviewer")) != 0 {
+		t.Fatalf("busy relay target: queue=%+v delivered=%+v", queued, agent.deliveredTo("reviewer"))
+	}
+	agent.setStatus("reviewer", surface.StatusIdle)
+	eventually(t, "delivered relay", func() bool { return h.queueItem(queued[0].ID).Historical })
+	settle()
+	if got := agent.deliveredTo("reviewer"); len(got) != 1 || !strings.Contains(got[0].text, "review this while you are busy") {
 		t.Fatalf("relayed=%+v", got)
 	}
 }
