@@ -1909,11 +1909,23 @@ func (a *App) cmdSteer(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
+	sourceID, err := a.sourceSessionID(ctx, "")
+	if err != nil {
+		return err
+	}
+	if sourceID != "" {
+		ctx = surface.WithSourceSessionID(ctx, sourceID)
+	}
 	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, strings.Join(positional[1:], " "))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("steer %s for %s\n", receipt.Evidence, a.resolveDisplay(sess.ID))
+	target := a.resolveDisplay(sess.ID)
+	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
+		fmt.Printf("Submitted to %s.\n", target)
+	} else {
+		fmt.Printf("Sent to %s.\n", target)
+	}
 	return nil
 }
 

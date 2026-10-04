@@ -166,8 +166,11 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			baselineCompletionID = observation.CompletedTurnID
 		}
 	}
+	var optionSender surface.OptionSender
 	if options.Model != "" || !options.TurnOptions.Empty() {
-		if _, ok := adapter.(surface.OptionSender); !ok {
+		var ok bool
+		optionSender, ok = adapter.(surface.OptionSender)
+		if !ok {
 			return nil, fmt.Errorf("%s does not support per-message model selection", adapter.Name())
 		}
 	}
@@ -181,12 +184,8 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	var result *surface.SendResult
 	var err error
-	if options.Model != "" || !options.TurnOptions.Empty() {
-		sender, ok := adapter.(surface.OptionSender)
-		if !ok { // preflight above makes this unreachable; retain the type guard for future callers.
-			return nil, fmt.Errorf("%s does not support per-message model selection", adapter.Name())
-		}
-		result, err = sender.SendWithOptions(ctx, session, message, options)
+	if optionSender != nil {
+		result, err = optionSender.SendWithOptions(ctx, session, message, options)
 	} else {
 		result, err = adapter.Send(ctx, session, message)
 	}
@@ -312,6 +311,9 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		queueID, deliveryID, err = d.Registry.QueueDeliveryWithIntent(session.ID, message, deliveryKey, options)
 	}
 	if err != nil {
+		if intent != nil {
+			_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, fmt.Sprintf("queue storage failed: %s", err))
+		}
 		return nil, err
 	}
 	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil

@@ -37,6 +37,8 @@ type cliSurface struct {
 	sendWait      bool
 	tailBlock     <-chan struct{}
 	sent          []string
+	steerSource   string
+	steered       []string
 	tail          []surface.Exchange
 	streamEvents  []surface.StreamEvent
 	searchResults []surface.SessionSearchResult
@@ -276,9 +278,13 @@ func (f *cliSurface) Compact(context.Context, *surface.Session) error {
 func (*cliSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "model", nil
 }
-func (*cliSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
-func (*cliSurface) Steer(context.Context, *surface.Session, string) error { return nil }
-func (f *cliSurface) Capabilities() surface.Capabilities                  { return f.caps }
+func (*cliSurface) Interrupt(context.Context, *surface.Session) error { return nil }
+func (f *cliSurface) Steer(ctx context.Context, _ *surface.Session, message string) error {
+	f.steerSource = surface.SourceSessionID(ctx)
+	f.steered = append(f.steered, message)
+	return nil
+}
+func (f *cliSurface) Capabilities() surface.Capabilities { return f.caps }
 func (*cliSurface) EnsureWritable(_ context.Context, session *surface.Session) error {
 	if session.Source == "cli" || session.Transport == "readOnly" {
 		return errors.New(surface.ReadOnlySessionReason(session))
@@ -317,6 +323,41 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 		t.Fatal(readErr)
 	}
 	return string(data), runErr
+}
+
+func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
+	fake := &cliSurface{
+		kind: surface.KindCodex,
+		sessions: map[string]surface.Session{
+			"target": {ID: "target", Name: "Target", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop", Status: surface.StatusBusy},
+		},
+		caps: surface.Capabilities{Steer: true},
+	}
+	app, r := cliFixture(t, fake)
+	source := surface.Session{ID: "source", Name: "Source", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle}
+	if err := r.RegisterSession(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "source")
+	output, err := captureStdout(t, func() error {
+		return app.cmdSteer([]string{"target", "focus now"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.steerSource != "source" || len(fake.steered) != 1 || fake.steered[0] != "focus now" {
+		t.Fatalf("source=%q steered=%v", fake.steerSource, fake.steered)
+	}
+	if output != "Sent to codex/Target.\n" {
+		t.Fatalf("output=%q", output)
+	}
+	intent, err := r.DeliveryIntent(1)
+	if err != nil || intent.SenderSessionID != "source" || intent.Status != registry.DeliveryIntentSent {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
 }
 
 func TestValidateCommandFlags(t *testing.T) {
