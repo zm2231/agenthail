@@ -245,29 +245,40 @@ function startLiveStream() {
   if (app.liveSource && app.liveSessionID === session.id) return;
   stopLiveStream(true);
   app.liveSessionID = session.id;
-  const source = new EventSource(`/api/stream?id=${encodeURIComponent(session.id)}`);
+  const source = new EventSource(`/api/session-stream?id=${encodeURIComponent(session.id)}&after=${app.history.journalSeq || 0}`);
   app.liveSource = source;
-  source.addEventListener("delta", (event) => {
+  source.addEventListener("item", (event) => {
     if (app.liveSessionID !== session.id || app.selected?.id !== session.id) return;
-    const delta = JSON.parse(event.data);
-    if (delta.kind === "context" && delta.context) {
-      app.history.context = delta.context;
-      renderContextUsage(delta.context);
-      return;
+    const envelope = JSON.parse(event.data);
+    const item = envelope.data;
+    app.history.journalSeq = Math.max(app.history.journalSeq || 0, envelope.seq || 0);
+    if (item.kind === "source-error") { app.history.transcriptWarning = item.reason || "Live updates are unavailable."; renderChat(); return; }
+    if (item.kind === "context" && item.context) { app.history.context = item.context; renderContextUsage(item.context); return; }
+    if (!item.itemId || item.op === "reset") return;
+    app.history.transcriptWarning = "";
+    const items = app.history.timeline?.items || [];
+    const index = items.findIndex((value) => value.id === item.itemId);
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef };
+    if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
+    else if (index >= 0) items[index] = projected;
+    else items.push(projected);
+    app.history.timeline = { ...(app.history.timeline || {}), items };
+    const exchanges = [];
+    for (const value of items) {
+      if (value.role === "user") exchanges.push({ user: value.text });
+      else if (value.role === "assistant" || value.kind === "text") {
+        if (!exchanges.length || exchanges.at(-1).assistant) exchanges.push({});
+        exchanges.at(-1).assistant = value.text;
+      }
     }
-    if (delta.kind === "text") app.liveText += delta.text || "";
-    if (delta.kind === "tool_use" && delta.text && !app.liveTools.includes(delta.text)) app.liveTools.push(delta.text);
-    if (delta.kind === "done") {
-      stopLiveStream();
-      load(true).then(() => selectSession(session.id));
-      return;
-    }
-    app.selected.status = "busy";
-    renderLiveTurn();
-    syncComposerAction();
-    $("#chat-subtitle").textContent = conversationMeta(app.selected, app.history?.model);
+    app.history.exchanges = exchanges;
+    renderChat();
   });
-  source.addEventListener("stream-error", () => stopLiveStream());
+  source.addEventListener("error", () => {
+    if (source.readyState !== 2 || app.liveSource !== source || app.selected?.id !== session.id) return;
+    stopLiveStream();
+    selectSession(session.id);
+  });
 }
 function resizeComposer() {
   const input = $("#message");
@@ -909,11 +920,17 @@ async function selectSession(id, focus = false) {
   $("#chat-actions").innerHTML = "";
   try {
     const response = await fetch(
-      `/api/session?id=${encodeURIComponent(id)}&limit=20`,
+      `/api/session?id=${encodeURIComponent(id)}&limit=20&timeline=1`,
     );
     if (!response.ok) throw Error(await response.text());
-    app.history = await response.json();
+    const detail = await response.json();
+    if (app.selected?.id !== id) return;
+    app.history = detail;
     renderChat();
+    fetch(`/api/session-metadata?id=${encodeURIComponent(id)}`)
+      .then((result) => { if (!result.ok) throw Error("Metadata unavailable"); return result.json(); })
+      .then((metadata) => { if (app.selected?.id === id && app.history === detail) { Object.assign(detail, metadata); renderChat(); } })
+      .catch(() => {});
     if (focus && mobileConversationView())
       requestAnimationFrame(() => window.scrollTo(0, 0));
   } catch (error) {

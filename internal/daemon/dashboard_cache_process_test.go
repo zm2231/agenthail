@@ -1,0 +1,82 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+func TestParseClaudeOpenProcessesRequiresPositivePIDAndExactClaudeBasename(t *testing.T) {
+	got := parseClaudeOpenProcesses("" +
+		"0 /Applications/Claude/claude\n" +
+		"not-a-pid /Applications/Claude/claude\n" +
+		"101 /Applications/Claude Code/claude\n" +
+		"102 /usr/local/bin/claude-helper\n" +
+		"103 /Applications/Claude Code/Claude\n" +
+		"104 /Applications/Claude Code/claude\n")
+	if len(got) != 2 || !got[101] || !got[104] {
+		t.Fatalf("parsed=%v", got)
+	}
+}
+
+func TestPublishEventInvalidatesOnlyStateRelevantDashboardEvents(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	d.dashboard = &dashboardServer{}
+
+	for _, eventType := range []string{"transcript.updated", "session.output", "unrelated.event"} {
+		d.publishEvent(eventType, "from", nil)
+	}
+	if got := d.dashboard.stateVersion.Load(); got != 0 {
+		t.Fatalf("non-state events invalidated cache: version=%d", got)
+	}
+	d.publishEvent("session.updated", "from", nil)
+	if got := d.dashboard.stateVersion.Load(); got != 1 {
+		t.Fatalf("state event did not invalidate cache: version=%d", got)
+	}
+}
+
+func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/state?limit=1", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("first status=%d body=%s", response.Code, response.Body.String())
+	}
+	var first dashboardState
+	if err := json.Unmarshal(response.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Sessions) != 1 || first.TotalSessions != 2 || first.NextCursor == "" {
+		t.Fatalf("first page=%+v", first)
+	}
+
+	filtered := httptest.NewRequest(http.MethodGet, "/api/state?limit=1&cursor="+first.NextCursor+"&q=from", nil)
+	filtered.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	filteredResponse := httptest.NewRecorder()
+	handler.ServeHTTP(filteredResponse, filtered)
+	if filteredResponse.Code != http.StatusBadRequest || !contains(filteredResponse.Body.String(), "invalid_cursor") {
+		t.Fatalf("filter mismatch status=%d body=%s", filteredResponse.Code, filteredResponse.Body.String())
+	}
+
+	fake.sessions["third"] = surface.Session{ID: "third", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	d.discoverCatalog(context.Background())
+	stale := httptest.NewRequest(http.MethodGet, "/api/state?limit=1&cursor="+first.NextCursor, nil)
+	stale.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	staleResponse := httptest.NewRecorder()
+	handler.ServeHTTP(staleResponse, stale)
+	if staleResponse.Code != http.StatusConflict || !contains(staleResponse.Body.String(), "catalog_changed") {
+		t.Fatalf("stale cursor status=%d body=%s", staleResponse.Code, staleResponse.Body.String())
+	}
+}
+
+func contains(value, needle string) bool {
+	return strings.Contains(value, needle)
+}

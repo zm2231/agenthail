@@ -1159,6 +1159,22 @@ func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
+	if name == "" {
+		response, err := c.requestSession(ctx, sess, false, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 2*time.Second)
+		if err != nil {
+			return "", err
+		}
+		result, _ := response["result"].(map[string]any)
+		thread, _ := result["thread"].(map[string]any)
+		model := str(thread, "model")
+		if model == "" {
+			model = str(result, "model")
+		}
+		if model == "" {
+			return "", fmt.Errorf("session metadata does not include the active model")
+		}
+		return model, nil
+	}
 	params := map[string]any{"threadId": sess.ID}
 	if name != "" {
 		params["model"] = name

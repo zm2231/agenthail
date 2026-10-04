@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -25,6 +26,29 @@ type sourceCountingSurface struct {
 type restartingSource struct {
 	*daemonSurface
 	calls atomic.Int32
+}
+
+func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(reg)
+	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	body := strings.Repeat("a", sessionStreamBodyBytes-1) + "é rest"
+	source.append(surface.StreamEvent{ID: "unicode", Kind: "text", Text: body})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(payload.Body) || strings.ContainsRune(payload.Body, utf8.RuneError) || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.BodyRef == "" {
+		t.Fatalf("invalid bounded body: %+v", payload)
+	}
+	full, _, err := reg.SessionJournalBody(from.ID, payload.BodyRef, 0, len(body))
+	if err != nil || string(full) != body {
+		t.Fatalf("full body mismatch: err=%v", err)
+	}
 }
 
 func (s *restartingSource) Stream(ctx context.Context, _ *surface.Session, _ string, _ func(surface.StreamEvent), _ time.Duration) error {
@@ -66,6 +90,7 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 		events:        make(chan surface.StreamEvent),
 		streamErr:     errors.New(strings.Repeat("upstream unavailable ", 32)),
 	}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -94,6 +119,7 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	first, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -142,6 +168,7 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -196,6 +223,7 @@ func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 			Timestamp: "2026-10-03T12:00:00Z",
 		}},
 	}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -272,6 +300,7 @@ func TestSourceHoldsAreReferenceCountedByOwner(t *testing.T) {
 func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &restartingSource{daemonSurface: fake}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	release, err := manager.hold(&from, adapter, "active-turn")
 	if err != nil {

@@ -324,6 +324,10 @@ type GoalState struct {
 }
 
 type StreamEvent struct {
+	Role        string        `json:"role,omitempty"`
+	Title       string        `json:"title,omitempty"`
+	Status      string        `json:"status,omitempty"`
+	Truncated   bool          `json:"truncated,omitempty"`
 	ID          string        `json:"id,omitempty"`
 	ProviderKey string        `json:"providerKey,omitempty"`
 	Version     uint64        `json:"version,omitempty"`

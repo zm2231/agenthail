@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -11,8 +12,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,22 +34,58 @@ func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	}
 }
 
-func TestDashboardSessionIncludesContextUsage(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	fake.contextUsage = &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}
+type sessionPageReadProbe struct {
+	*daemonSurface
+	contextCalls atomic.Int32
+	modelCalls   atomic.Int32
+	modelsCalls  atomic.Int32
+	readCalls    atomic.Int32
+}
+
+func (p *sessionPageReadProbe) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
+	p.contextCalls.Add(1)
+	return &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}, nil
+}
+
+func (p *sessionPageReadProbe) Model(context.Context, *surface.Session, string) (string, error) {
+	p.modelCalls.Add(1)
+	return "should-not-be-read", nil
+}
+
+func (p *sessionPageReadProbe) Models(context.Context) ([]surface.ModelOption, error) {
+	p.modelsCalls.Add(1)
+	return []surface.ModelOption{{ID: "should-not-be-read"}}, nil
+}
+
+func (p *sessionPageReadProbe) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	p.readCalls.Add(1)
+	return nil, errors.New("provider session read must not be used")
+}
+
+func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "warm-item", Payload: []byte(`{"itemId":"warm-item","version":1,"op":"upsert","kind":"text","role":"assistant","body":"journal"}`)}, registrypkg.SessionJournalRetention{Count: 8, Bytes: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	probe := &sessionPageReadProbe{daemonSurface: fake}
+	probe.caps.Model = true
+	d := New(registry, []surface.Surface{probe})
 	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from", nil))
+	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	var body struct {
-		Context surface.ContextUsage `json:"context"`
+		Timeline surface.SessionTimeline `json:"timeline"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Context.UsedTokens != 150000 || body.Context.ContextWindow != 200000 || body.Context.CompactionCount != 2 {
-		t.Fatalf("context=%+v", body.Context)
+	if body.Timeline.Source != "journal" || len(body.Timeline.Items) != 1 || body.Timeline.Items[0].Text != "journal" {
+		t.Fatalf("timeline=%+v", body.Timeline)
+	}
+	if got := probe.contextCalls.Load() + probe.modelCalls.Load() + probe.modelsCalls.Load() + probe.readCalls.Load(); got != 0 {
+		t.Fatalf("provider reads=%d (context=%d model=%d models=%d session=%d)", got, probe.contextCalls.Load(), probe.modelCalls.Load(), probe.modelsCalls.Load(), probe.readCalls.Load())
 	}
 }
 
@@ -372,7 +411,7 @@ func TestDashboardShowsCompactContextUsage(t *testing.T) {
 	source := string(dashboardJS) + string(dashboardHTML) + string(dashboardCSS)
 	for _, fragment := range []string{
 		`id="context-usage"`,
-		`delta.kind === "context"`,
+		`item.kind === "context"`,
 		`Context ${compactTokenCount(context.usedTokens)}`,
 		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
 		`.context-usage.critical`,
@@ -578,13 +617,35 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	fake.caps = surface.Capabilities{Stream: true}
 	fake.streamEvents = []surface.StreamEvent{{Kind: "context", Context: &surface.ContextUsage{UsedTokens: 90000, ContextWindow: 200000}}, {Kind: "text", Text: "hello"}, {Kind: "tool_use", Text: "tests"}, {Kind: "done"}}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	request := httptest.NewRequest(http.MethodGet, "/api/stream?id=from", nil)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/session-stream?id=from&after=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	body := response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(body, `"kind":"context"`) || !strings.Contains(body, `"usedTokens":90000`) || !strings.Contains(body, `"kind":"text","text":"hello"`) || !strings.Contains(body, `"kind":"done"`) {
-		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), body)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("status=%d headers=%v", response.StatusCode, response.Header)
+	}
+	reader := bufio.NewReader(response.Body)
+	var body string
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			body = line
+			break
+		}
+	}
+	if !strings.Contains(body, `"kind":"context"`) || !strings.Contains(body, `"usedTokens":90000`) {
+		t.Fatalf("stream body=%s", body)
 	}
 }
 
@@ -631,17 +692,16 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 }
 
 func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"new EventSource(`/api/stream?id=${encodeURIComponent(session.id)}`)",
-		`app.liveSource && app.liveSessionID === session.id`,
-		`app.liveText += delta.text || ""`,
-		`setInterval(() =>`,
-		`}, 30000)`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard live stream missing %q", fragment)
-		}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	script := filepath.Join("..", "..", "scripts", "test-session-journal.mjs")
+	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("session journal browser behavior failed: %v\n%s", err, output)
 	}
 }
 

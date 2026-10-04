@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -73,18 +74,14 @@ fi
 		return detail
 	}
 	pending := readSession()
-	if len(pending["transcriptWarning"]) == 0 || !strings.Contains(string(pending["timeline"]), "unavailableReason") {
-		t.Fatal(string(pending["timeline"]), string(pending["transcriptWarning"]))
+	if !strings.Contains(string(pending["readSource"]), "journal") || strings.Contains(string(pending["exchanges"]), "First instruction") || !strings.Contains(string(pending["timeline"]), `"items":[]`) {
+		t.Fatal(string(pending["readSource"]), string(pending["timeline"]), string(pending["exchanges"]))
 	}
-	transcript := filepath.Join(home, ".claude", "projects", strings.ReplaceAll(home, "/", "-"), receipt.Session.ID+".jsonl")
-	if err := os.MkdirAll(filepath.Dir(transcript), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(transcript, []byte(`{"type":"user","message":{"role":"user","content":"First instruction"}}`+"\n"), 0600); err != nil {
+	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: receipt.Session.ID, Kind: "text", ProviderKey: "mobile-item", Payload: []byte(`{"itemId":"mobile-item","version":1,"op":"upsert","kind":"text","role":"user","body":"First instruction"}`)}, registrypkg.SessionJournalRetention{Count: 20, Bytes: 4096}); err != nil {
 		t.Fatal(err)
 	}
 	ready := readSession()
-	if !strings.Contains(string(ready["exchanges"]), "First instruction") || len(ready["transcriptWarning"]) != 0 {
+	if !strings.Contains(string(ready["exchanges"]), "First instruction") || !strings.Contains(string(ready["readSource"]), "journal") {
 		t.Fatal(string(ready["exchanges"]), string(ready["timeline"]))
 	}
 	args, _ := os.ReadFile(filepath.Join(home, "argv"))

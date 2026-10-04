@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -21,17 +22,21 @@ const (
 )
 
 type sessionJournalPayload struct {
-	ItemID      string `json:"itemId"`
-	ProviderKey string `json:"providerKey,omitempty"`
-	Version     uint64 `json:"version"`
-	Op          string `json:"op"`
-	Kind        string `json:"kind"`
-	TurnID      string `json:"turnId,omitempty"`
-	TS          string `json:"ts"`
-	Body        string `json:"body,omitempty"`
-	Truncated   bool   `json:"truncated"`
-	BodyRef     string `json:"bodyRef,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	Context     *surface.ContextUsage `json:"context,omitempty"`
+	Role        string                `json:"role,omitempty"`
+	Title       string                `json:"title,omitempty"`
+	Status      string                `json:"status,omitempty"`
+	ItemID      string                `json:"itemId"`
+	ProviderKey string                `json:"providerKey,omitempty"`
+	Version     uint64                `json:"version"`
+	Op          string                `json:"op"`
+	Kind        string                `json:"kind"`
+	TurnID      string                `json:"turnId,omitempty"`
+	TS          string                `json:"ts"`
+	Body        string                `json:"body,omitempty"`
+	Truncated   bool                  `json:"truncated"`
+	BodyRef     string                `json:"bodyRef,omitempty"`
+	Reason      string                `json:"reason,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -41,6 +46,8 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
+	seeded        chan struct{}
+	seedErr       error
 	manager       *sessionSourceManager
 	session       *surface.Session
 	adapter       surface.Surface
@@ -79,7 +86,7 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -105,7 +112,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 			return nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -169,6 +176,10 @@ func (s *sessionSource) stop() {
 
 func (s *sessionSource) run() {
 	s.seedJournal()
+	close(s.seeded)
+	if !surface.EffectiveCapabilities(s.session, s.adapter.Capabilities()).Stream {
+		return
+	}
 	for {
 		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
 		if streamErr != nil && s.ctx.Err() == nil {
@@ -194,6 +205,23 @@ func (s *sessionSource) run() {
 		delete(s.manager.sources, s.session.ID)
 	}
 	s.manager.mu.Unlock()
+}
+
+func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
+	release, err := m.hold(session, adapter, "page-seed")
+	if err != nil {
+		return err
+	}
+	defer release()
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	m.mu.Unlock()
+	select {
+	case <-source.seeded:
+		return source.seedErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *sessionSource) appendSourceError(streamErr error) {
@@ -238,6 +266,11 @@ func (s *sessionSource) seedJournal() {
 	defer cancel()
 	read, err := surface.ReadSession(ctx, s.adapter, s.session, surface.SessionReadRequest{Limit: 40})
 	if err != nil || read == nil {
+		if err == nil {
+			err = fmt.Errorf("session source returned no activity result")
+		}
+		s.seedErr = err
+		s.appendSourceError(err)
 		return
 	}
 	for _, item := range read.Items {
@@ -246,6 +279,10 @@ func (s *sessionSource) seedJournal() {
 		}
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
 		s.append(surface.StreamEvent{
+			Role:        item.Role,
+			Title:       item.Title,
+			Status:      item.Status,
+			Truncated:   item.Truncated,
 			ID:          item.ID,
 			ProviderKey: "timeline:" + item.ID,
 			Version:     uint64(len(item.Text)),
@@ -272,7 +309,11 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		if err != nil {
 			return
 		}
-		payload.Body = string(fullBody[:sessionStreamBodyBytes])
+		prefix := fullBody[:sessionStreamBodyBytes]
+		for !utf8.Valid(prefix) {
+			prefix = prefix[:len(prefix)-1]
+		}
+		payload.Body = string(prefix)
 		payload.Truncated = true
 		payload.BodyRef = ref
 		encoded, err = json.Marshal(payload)
@@ -345,5 +386,5 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Truncated: event.Truncated}
 }

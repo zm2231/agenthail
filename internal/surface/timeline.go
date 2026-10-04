@@ -13,6 +13,7 @@ type TimelineItem struct {
 	CallID    string `json:"callId,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Truncated bool   `json:"truncated"`
+	BodyRef   string `json:"bodyRef,omitempty"`
 }
 
 type SessionTimeline struct {
@@ -29,6 +30,7 @@ type SessionReadRequest struct {
 }
 
 type SessionReadResult struct {
+	JournalSeq        uint64         `json:"journalSeq,omitempty"`
 	Items             []TimelineItem `json:"items"`
 	Exchanges         []Exchange     `json:"exchanges"`
 	Reply             *ReplyResult   `json:"reply,omitempty"`

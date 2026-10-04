@@ -865,17 +865,13 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 }
 
 func (r *Registry) QueueCount(sessionID string) int {
-	_ = r.expireMessages(time.Now())
 	var n int
-	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
+	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, time.Now().UnixMilli()).Scan(&n)
 	return n
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	if err := r.expireMessages(time.Now()); err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`)
+	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}

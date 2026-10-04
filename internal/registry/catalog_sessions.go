@@ -201,7 +201,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
 	if err != nil {
@@ -220,7 +220,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		var kind, status, observedAt string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt); err != nil {
+		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint); err != nil {
 			return CatalogSnapshot{}, err
 		}
 		state.Session.Surface = surface.SurfaceKind(kind)

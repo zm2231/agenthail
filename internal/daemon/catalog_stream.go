@@ -253,6 +253,26 @@ func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent)
 }
 
 func (d *Daemon) discoverCatalog(ctx context.Context) {
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		d.log.Printf("catalog config: %s", err)
+		return
+	}
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("catalog queue counts: %s", err)
+		return
+	}
+	aliases, err := d.Registry.ListAliases()
+	if err != nil {
+		d.log.Printf("catalog aliases: %s", err)
+		return
+	}
+	aliasByID := make(map[string]string, len(aliases))
+	for _, alias := range aliases {
+		aliasByID[alias.SessionID] = alias.Name
+	}
+	openClaude := claudeOpenProcesses(ctx)
 	for _, adapter := range d.Surfaces {
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		sessions, err := adapter.List(operationCtx)
@@ -278,7 +298,8 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 				continue
 			}
 			observedAt := time.Now().UTC()
-			row := d.catalogSessionRow(ctx, adapter, session, identity, observedAt)
+			open := session.Surface == surface.KindClaude && openClaude[session.PID]
+			row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], open, config)
 			payload, err := json.Marshal(map[string]any{"session": row})
 			if err != nil {
 				continue
@@ -312,7 +333,11 @@ func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface,
 	if err != nil {
 		config = DashboardConfig{}
 	}
-	current, reason := dashboardSessionPresence(session, d.Registry.QueueCount(session.ID), open, config.CodexRecentHours, observedAt)
+	return d.catalogSessionProjection(adapter, session, identity, observedAt, alias, d.Registry.QueueCount(session.ID), open, config)
+}
+
+func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {
+	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
 	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: d.Registry.QueueCount(session.ID), Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason}
 }
