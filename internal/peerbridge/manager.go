@@ -460,16 +460,15 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 
 func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if existing := m.relays[session.ID]; existing != nil && existing.healthy() {
 		existing.lastUsed = time.Now()
-		m.mu.Unlock()
 		return nil
 	} else if existing != nil {
 		existing.stop(2 * time.Second)
 		existing.cleanup()
 		delete(m.relays, session.ID)
 	}
-	m.mu.Unlock()
 	processToken := uuid.NewString()
 	command := exec.Command(m.executable, "claude-peer-relay", processToken)
 	command.Env = append(os.Environ(), "AGENTHAIL_PEER_TOKEN="+processToken)
@@ -520,13 +519,10 @@ func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) erro
 		}
 	}
 	entry.record = recordOwnership{PID: command.Process.Pid, SessionID: session.ID, ProcStart: "", Agenthail: "peer-relay", ProcessToken: processToken}
-	m.mu.Lock()
 	if m.closed {
-		m.mu.Unlock()
 		return fail(errors.New("peer manager is stopping"))
 	}
 	m.relays[session.ID] = entry
-	m.mu.Unlock()
 	return nil
 }
 
@@ -544,11 +540,6 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 		case <-entry.done:
 			delete(m.children, id)
 			retired = append(retired, entry)
-			if relay := m.relays[id]; relay != nil {
-				delete(m.relays, id)
-				relay.input.Close()
-				retired = append(retired, relay)
-			}
 			continue
 		default:
 		}
@@ -642,7 +633,7 @@ func (c *child) healthy() bool {
 	if err != nil || current.Mode()&os.ModeSocket == 0 || !os.SameFile(owned, current) {
 		return false
 	}
-	conn, err := net.DialTimeout("unix", c.controlPath, 200*time.Millisecond)
+	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
 	if err != nil {
 		return false
 	}

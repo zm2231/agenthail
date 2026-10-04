@@ -398,6 +398,50 @@ func TestReconcileRemovesDeadManifestOwnedArtifacts(t *testing.T) {
 	}
 }
 
+func TestReconcileRemovesDeadRelayManifestWithoutTouchingForeignSocket(t *testing.T) {
+	home := shortTempDir(t, "cp-relay-reconcile-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999999
+	generation := "relay-old"
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	socketPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	socketDevice, socketInode, err := socketIdentity(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-relay", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", SocketPath: socketPath, SocketDevice: socketDevice, SocketInode: socketInode}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	foreignPath := filepath.Join(socketDir, "999998.sock")
+	foreign, err := net.ListenUnix("unix", &net.UnixAddr{Name: foreignPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreign.Close()
+	foreign.SetUnlinkOnClose(false)
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{socketPath, manifestPath} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("dead relay artifact remains %s: %v", path, err)
+		}
+	}
+	if _, err := os.Lstat(foreignPath); err != nil {
+		t.Fatalf("foreign socket was touched: %v", err)
+	}
+}
+
 func TestReconcileRemovesPendingWorkerArtifacts(t *testing.T) {
 	home := shortTempDir(t, "cp-pending-")
 	socketDir := filepath.Join(home, "socks")
