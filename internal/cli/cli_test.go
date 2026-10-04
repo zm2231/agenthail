@@ -39,6 +39,7 @@ type cliSurface struct {
 	streamEvents  []surface.StreamEvent
 	searchResults []surface.SessionSearchResult
 	compactCalls  int
+	goal          *surface.GoalState
 }
 
 type runtimeCLISurface struct {
@@ -64,6 +65,24 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	err := (&App{}).Run([]string{"codex", "--remote", "ws://example.test"})
 	if err == nil || !strings.Contains(err.Error(), "manages the remote transport") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCodexRepairManagedRuntimeRestartsConfiguredRuntime(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "args")
+	script := filepath.Join(root, "codex")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
+	if err := (&App{}).Run([]string{"codex", "--repair-managed-runtime"}); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.ReadFile(logPath)
+	if err != nil || strings.TrimSpace(string(output)) != "app-server daemon restart" {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
@@ -117,8 +136,8 @@ func (f *cliSurface) Stream(_ context.Context, _ *surface.Session, _ string, cal
 }
 func (*cliSurface) GoalSet(context.Context, *surface.Session, string) error { return nil }
 func (*cliSurface) GoalClear(context.Context, *surface.Session) error       { return nil }
-func (*cliSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
-	return &surface.GoalState{Objective: "ship", Status: "active"}, nil
+func (f *cliSurface) GoalGet(context.Context, *surface.Session) (*surface.GoalState, error) {
+	return f.goal, nil
 }
 func (f *cliSurface) Compact(context.Context, *surface.Session) error {
 	f.compactCalls++
