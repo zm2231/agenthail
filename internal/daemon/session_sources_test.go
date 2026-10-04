@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -306,6 +307,57 @@ func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	full, _, err := reg.SessionJournalBody(from.ID, payload.BodyRef, 0, len(body))
 	if err != nil || string(full) != body {
 		t.Fatalf("full body mismatch: err=%v", err)
+	}
+}
+
+func TestSessionJournalPreservesProviderTruncationForSeedAndLive(t *testing.T) {
+	for _, mode := range []string{"seed", "live", "seed-metadata"} {
+		t.Run(mode, func(t *testing.T) {
+			_, reg, fake, from, _ := daemonFixture(t)
+			source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+			item := surface.TimelineItem{ID: "partial", Kind: "event", Text: "bounded preview", Truncated: true, TruncationReason: "timeline text limit"}
+			if mode == "live" {
+				source.append(surface.StreamEvent{ID: item.ID, ProviderKey: "timeline:" + item.ID, Operation: "upsert", Kind: item.Kind, Text: item.Text, Truncated: item.Truncated, TruncationReason: item.TruncationReason})
+			} else {
+				if mode == "seed-metadata" {
+					source.append(surface.StreamEvent{ID: item.ID, ProviderKey: "timeline:" + item.ID, Operation: "upsert", Kind: item.Kind, Text: item.Text})
+				}
+				source.appendSeedItems([]surface.TimelineItem{item})
+			}
+			entry, found, err := reg.SessionJournalEntryByProviderKey(from.ID, "timeline:"+item.ID)
+			if err != nil || !found {
+				t.Fatalf("journal entry found=%v err=%v", found, err)
+			}
+			var payload sessionJournalPayload
+			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if !payload.Truncated || payload.TruncationReason != item.TruncationReason || payload.Body != item.Text {
+				t.Fatalf("journal payload=%+v", payload)
+			}
+			event, err := sessionstream.DecodePayload(entry.Seq, entry.Payload)
+			if err != nil || !event.Truncated || event.TruncationReason != item.TruncationReason {
+				t.Fatalf("stream event=%+v err=%v", event, err)
+			}
+		})
+	}
+}
+
+func TestTruncatedSeedDoesNotMarkRetainedAuthoritativeBodyIncomplete(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "timeline:answer", Operation: "upsert", Kind: "text", Text: "complete answer"})
+	source.appendSeedItems([]surface.TimelineItem{{ID: "answer", Kind: "text", Text: "complete", Truncated: true, TruncationReason: "timeline text limit"}})
+	entry, found, err := reg.SessionJournalEntryByProviderKey(from.ID, "timeline:answer")
+	if err != nil || !found {
+		t.Fatalf("journal entry found=%v err=%v", found, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Body != "complete answer" || payload.Truncated || payload.TruncationReason != "" {
+		t.Fatalf("authoritative payload=%+v", payload)
 	}
 }
 

@@ -471,6 +471,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 				}
 				item.Text = item.Text[:cut]
 				item.Truncated = true
+				item.TruncationReason = "timeline text limit"
 			}
 		}
 		encoded, _ := json.Marshal(items)

@@ -672,20 +672,21 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 			s.mu.Unlock()
 		}
 		s.append(surface.StreamEvent{
-			Role:        item.Role,
-			Title:       item.Title,
-			Status:      item.Status,
-			Truncated:   item.Truncated,
-			ID:          item.ID,
-			ProviderKey: providerKey,
-			Version:     uint64(len(item.Text)),
-			Operation:   operation,
-			TurnID:      item.TurnID,
-			CallID:      item.CallID,
-			Attachment:  item.Attachment,
-			Timestamp:   at,
-			Kind:        item.Kind,
-			Text:        item.Text,
+			Role:             item.Role,
+			Title:            item.Title,
+			Status:           item.Status,
+			Truncated:        item.Truncated,
+			TruncationReason: item.TruncationReason,
+			ID:               item.ID,
+			ProviderKey:      providerKey,
+			Version:          uint64(len(item.Text)),
+			Operation:        operation,
+			TurnID:           item.TurnID,
+			CallID:           item.CallID,
+			Attachment:       item.Attachment,
+			Timestamp:        at,
+			Kind:             item.Kind,
+			Text:             item.Text,
 		})
 	}
 }
@@ -724,10 +725,16 @@ func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation str
 	mergeSeedField(&merged.Status, item.Status)
 	mergeSeedField(&merged.TurnID, item.TurnID)
 	mergeSeedField(&merged.CallID, item.CallID)
+	if body == item.Text && item.Truncated {
+		merged.Truncated = true
+		if merged.TruncationReason == "" {
+			merged.TruncationReason = item.TruncationReason
+		}
+	}
 	if item.Attachment != nil {
 		merged.Attachment = item.Attachment
 	}
-	if merged.Role == payload.Role && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.CallID == payload.CallID && reflect.DeepEqual(merged.Attachment, payload.Attachment) {
+	if merged.Role == payload.Role && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.CallID == payload.CallID && merged.Truncated == payload.Truncated && merged.TruncationReason == payload.TruncationReason && reflect.DeepEqual(merged.Attachment, payload.Attachment) {
 		return true
 	}
 	encoded, err := json.Marshal(merged)
@@ -899,7 +906,7 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated, TruncationReason: event.TruncationReason}
 }
 
 func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surface.Session, adapter surface.Surface) (sessionstream.Subscription, error) {
