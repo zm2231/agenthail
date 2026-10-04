@@ -827,7 +827,7 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 		streamEvents: []surface.StreamEvent{
 			{ID: "managed:turn-a:text", Operation: "append", Version: 3, Kind: "text", Text: "hel"},
 			{ID: "managed:turn-a:text", Operation: "append", Version: 5, Kind: "text", Text: "lo"},
-			{ID: "managed:turn-a:text", Operation: "upsert", Version: 12, Final: true, Kind: "message", Role: "assistant", Text: "hello final"},
+			{ID: "managed:turn-a:text", Operation: "upsert", Version: 11, Final: true, Kind: "message", Role: "assistant", Text: "hello final"},
 			{Kind: "done"},
 		},
 	}
