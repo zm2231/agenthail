@@ -19,7 +19,7 @@ The command is read-only and is the authoritative producer for the session
 catalog, but it does not expose child relationships or wake times.
 
 Claude Code also writes local background-job records at
-`~/.claude/jobs/<job-id>/state.json`. The Claude session-detail API reads these
+`~/.claude/jobs/<job-id>/state.json`. The session-metadata API reads these
 records through `surface.ClaudeRunObserver` and filters them to matching
 session or resume-session IDs. It exposes only fields observed in that
 producer:
@@ -35,7 +35,7 @@ observation. Its observed member was an artifact descriptor (`kind: frame`),
 not a Claude agent identity.
 
 Subagent relationships use a separate local producer. The Claude
-session-detail API exposes only links whose validated parent ID matches the
+session-metadata API exposes only links whose validated parent ID matches the
 requested session:
 `~/.claude/projects/<encoded-cwd>/<parent-session-id>/subagents/agent-<agent-id>.jsonl`.
 `ObserveClaudeSubagentLinks` derives the parent session and agent ID from that
