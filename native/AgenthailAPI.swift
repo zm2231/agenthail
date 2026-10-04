@@ -388,7 +388,7 @@ final class AgenthailAPI: @unchecked Sendable {
                     message = detail
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
-                    throw AgenthailAPIError.historyGap("Older activity is no longer retained on this Mac. Start a new session to continue from current activity.")
+                    throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
                 }
             }
             throw AgenthailAPIError.request(response.statusCode, message)
