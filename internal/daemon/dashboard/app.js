@@ -32,6 +32,7 @@ const app = {
   remoteQRVisible: false,
   remoteQRHideTimer: null,
   startModels: {},
+  launchers: [],
   codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
   voice: { state: null, attemptId: "", localAudio: false, connection: false, channel: false, script: null, requestedTarget: null, poll: null, appliedSDP: "" },
 };
@@ -966,6 +967,8 @@ function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning } = app.history || {};
   const session = app.selected;
   const controls = [];
+  if (session.runtime?.focusable)
+    controls.push('<button data-action="session-focus" type="button">Open session</button>');
   if (session.status === "busy" && capabilities.steer)
     controls.push('<button data-action="steer" type="button">Steer</button>');
   if (session.status === "busy" && capabilities.interrupt)
@@ -1600,6 +1603,26 @@ function syncStartForm() {
       input.disabled = !isCodex;
     });
   });
+  renderStartLaunchers();
+}
+function renderStartLaunchers() {
+  const select = $("#new-conversation-launcher");
+  const current = select.value;
+  const agent = $("#new-conversation-surface").value;
+  const options = app.launchers.filter(item => item.agents.includes(agent));
+  select.innerHTML = '<option value="">Use default</option>' + options.map(item =>
+    `<option value="${escape(item.id)}"${item.available ? "" : " disabled"}>${escape(item.label)}${item.available ? "" : " (unavailable)"}</option>`,
+  ).join("");
+  select.value = options.some(item => item.id === current && item.available) ? current : "";
+  const launcher = options.find(item => item.id === select.value);
+  $("#new-conversation-launcher-detail").textContent = launcher?.detail || "";
+}
+async function loadStartLaunchers() {
+  const response = await fetch("/api/v1/session-options");
+  if (!response.ok) throw Error(await response.text());
+  const options = await response.json();
+  app.launchers = options.launchers || [];
+  renderStartLaunchers();
 }
 async function loadStartModels() {
   const surfaceName = $("#new-conversation-surface").value;
@@ -1626,6 +1649,7 @@ function toggleNewConversationForm(show) {
   if (!show) return;
   renderStartSurfaceOptions();
   loadStartModels().catch((error) => toast(friendlyError(error)));
+  loadStartLaunchers().catch((error) => toast(friendlyError(error)));
   form.querySelector('input[name="alias"]').focus();
 }
 $("#new-conversation-toggle").addEventListener("click", () => toggleNewConversationForm(true));
@@ -1634,6 +1658,7 @@ $("#new-conversation-surface").addEventListener("change", () => {
   syncStartForm();
   loadStartModels().catch((error) => toast(friendlyError(error)));
 });
+$("#new-conversation-launcher").addEventListener("change", renderStartLaunchers);
 $("#new-conversation-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;

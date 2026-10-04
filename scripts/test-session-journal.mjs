@@ -134,4 +134,25 @@ assert.doesNotMatch(indicator.textContent, /%/);
 vm.runInContext('renderContextUsage({usedTokens:400000, contextWindow:1000000, windowEstimated:false})', usageContext);
 assert.match(indicator.textContent, /40%/);
 assert.ok(rendered.chat >= 3);
+const launcherSelect = {value: 'tmux', innerHTML: ''};
+const launcherDetail = {};
+const launcherAgent = {value: 'claude'};
+const launcherContext = vm.createContext({app: {launchers: [
+  {id: 'tmux', label: 'tmux', agents: ['claude', 'codex'], available: true, detail: 'Terminal session'},
+  {id: 'cmux', label: '<cmux>', agents: ['claude', 'codex'], available: false, detail: 'Not installed'},
+  {id: 'codex-app-server', label: 'Codex', agents: ['codex'], available: true, detail: ''},
+]}, $: selector => selector.endsWith('detail') ? launcherDetail : selector.endsWith('surface') ? launcherAgent : launcherSelect,
+escape: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;')});
+const launcherStart = source.indexOf('function renderStartLaunchers()');
+const launcherEnd = source.indexOf('async function loadStartLaunchers()', launcherStart);
+vm.runInContext(source.slice(launcherStart, launcherEnd), launcherContext);
+vm.runInContext('renderStartLaunchers()', launcherContext);
+assert.equal(launcherSelect.value, 'tmux');
+assert.equal(launcherDetail.textContent, 'Terminal session');
+assert.ok(launcherSelect.innerHTML.includes('value="cmux" disabled'));
+assert.ok(launcherSelect.innerHTML.includes('&lt;cmux&gt;'));
+assert.ok(!launcherSelect.innerHTML.includes('codex-app-server'));
+launcherSelect.value = 'cmux';
+vm.runInContext('renderStartLaunchers()', launcherContext);
+assert.equal(launcherSelect.value, '', 'an unavailable launcher cannot remain selected');
 console.log('Session journal browser behavior: stream identity, paging cursor, upserts, roles, context, and switching pass.');
