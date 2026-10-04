@@ -70,3 +70,15 @@ func (e Event) Failed() bool {
 		return false
 	}
 }
+
+func (e Event) SpokenAssistantContent() bool {
+	if e.Role != "assistant" {
+		return false
+	}
+	switch e.Kind {
+	case "message", "text", "assistant":
+		return true
+	default:
+		return false
+	}
+}
