@@ -355,7 +355,7 @@ private enum MenuBarArtwork {
     }()
 }
 
-struct SessionMenuSection: Identifiable {
+private struct SessionMenuSection: Identifiable {
     let title: String
     let sessions: [SessionState]
     var id: String { title }
