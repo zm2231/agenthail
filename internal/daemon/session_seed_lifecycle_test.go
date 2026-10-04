@@ -178,7 +178,7 @@ func TestCodexCatchupRejectsSamePathTranscriptReplacement(t *testing.T) {
 	first.Cancel()
 	waitForSessionSourceGone(t, manager)
 	second, err := manager.prepareStream(context.Background(), &from, adapter)
-	if !errors.Is(err, surface.ErrTranscriptUnavailable) {
+	if !errors.Is(err, surface.ErrTranscriptUnavailable) || !strings.Contains(err.Error(), "replaced during catch-up") {
 		if second.Cancel != nil {
 			second.Cancel()
 		}
