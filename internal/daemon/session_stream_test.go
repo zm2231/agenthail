@@ -76,6 +76,47 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	}
 }
 
+func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
+	adapter.caps.Stream = true
+	d = New(reg, []surface.Surface{adapter})
+	first, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "message-1", Payload: []byte(`{"itemId":"message-1","version":1,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:00Z","body":"first"}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024})
+	if err != nil || !inserted {
+		t.Fatalf("first=%+v inserted=%v err=%v", first, inserted, err)
+	}
+	updated, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "message-1", Payload: []byte(`{"itemId":"message-1","version":2,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:01Z","body":"latest"}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024})
+	if err != nil || inserted || updated.Seq <= first.Seq {
+		t.Fatalf("updated=%+v inserted=%v err=%v", updated, inserted, err)
+	}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after="+strconv.FormatUint(first.Seq, 10), nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			if !strings.Contains(line, `"seq":`+strconv.FormatUint(updated.Seq, 10)) || !strings.Contains(line, `"version":2`) || !strings.Contains(line, `"body":"latest"`) {
+				t.Fatalf("line=%q", line)
+			}
+			return
+		}
+	}
+}
+
 func TestAPISessionStreamReturnsTypedGap(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}

@@ -54,34 +54,6 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		return SessionJournalEntry{}, false, err
 	}
 	defer tx.Rollback()
-	if input.ProviderKey != "" {
-		existing, found, err := sessionJournalByProviderKey(tx, input.SessionID, input.ProviderKey)
-		if err != nil {
-			return SessionJournalEntry{}, false, err
-		}
-		if found {
-			if existing.BodyRef != "" && existing.BodyRef != input.BodyRef {
-				if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref=?`, input.SessionID, existing.BodyRef); err != nil {
-					return SessionJournalEntry{}, false, err
-				}
-			}
-			if _, err := tx.Exec(`UPDATE session_journal SET kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Kind, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
-				return SessionJournalEntry{}, false, err
-			}
-			if err := storeSessionJournalBody(tx, input); err != nil {
-				return SessionJournalEntry{}, false, err
-			}
-			existing.Kind = input.Kind
-			existing.Payload = input.Payload
-			existing.ObservedAt = input.ObservedAt
-			existing.Bytes = input.Bytes
-			existing.BodyRef = input.BodyRef
-			if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
-				return SessionJournalEntry{}, false, err
-			}
-			return existing, false, tx.Commit()
-		}
-	}
 	if _, err := tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes) VALUES(?,0,0) ON CONFLICT(session_id) DO NOTHING`, input.SessionID); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
@@ -93,6 +65,32 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		return SessionJournalEntry{}, false, fmt.Errorf("invalid session journal sequence")
 	}
 	input.Seq = uint64(next + 1)
+	if input.ProviderKey != "" {
+		existing, found, err := sessionJournalByProviderKey(tx, input.SessionID, input.ProviderKey)
+		if err != nil {
+			return SessionJournalEntry{}, false, err
+		}
+		if found {
+			if existing.BodyRef != "" && existing.BodyRef != input.BodyRef {
+				if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref=?`, input.SessionID, existing.BodyRef); err != nil {
+					return SessionJournalEntry{}, false, err
+				}
+			}
+			if _, err := tx.Exec(`UPDATE session_journal SET seq=?,kind=?,payload=?,observed_at=?,bytes=?,body_ref=? WHERE session_id=? AND seq=?`, input.Seq, input.Kind, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef, input.SessionID, existing.Seq); err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			if err := storeSessionJournalBody(tx, input); err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			if _, err := tx.Exec(`UPDATE session_journal_state SET next_seq=? WHERE session_id=?`, input.Seq, input.SessionID); err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			return input, false, tx.Commit()
+		}
+	}
 	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
 		return SessionJournalEntry{}, false, err
 	}
