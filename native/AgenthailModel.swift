@@ -19,6 +19,10 @@ final class AgenthailModel: ObservableObject {
     @Published var operationError: String?
     @Published var loading = false
     @Published var composer = ""
+    @Published private(set) var olderItems: [TimelineItem] = []
+    @Published private(set) var olderCursor: Int64?
+    @Published private(set) var loadingOlder = false
+    @Published private(set) var olderError: String?
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent
     @Published var inspectorVisible = true
@@ -38,12 +42,14 @@ final class AgenthailModel: ObservableObject {
     private var detailLoadedAt: Date?
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
+    private var drafts: [String: String] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var workingSessions: [SessionState] { snapshot?.sessions.filter(\.isWorking) ?? [] }
     var selectedSession: SessionState? { snapshot?.sessions.first { $0.id == selectedSessionID } }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
     var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
     var sessionTree: SessionTree {
         SessionTree.build(snapshot?.sessions ?? [], filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
@@ -120,7 +126,14 @@ final class AgenthailModel: ObservableObject {
 
     func selectSession(_ id: String) {
         guard id != selectedSessionID || detail == nil else { return }
+        if selectedSessionID != id {
+            if let previous = selectedSessionID { drafts[previous] = composer }
+            composer = drafts.removeValue(forKey: id) ?? ""
+        }
         selectedSessionID = id
+        olderItems = []
+        olderCursor = nil
+        olderError = nil
         UserDefaults.standard.set(id, forKey: "lastSelectedSessionID")
         detail = nil
         detailLoadedAt = nil
@@ -138,14 +151,47 @@ final class AgenthailModel: ObservableObject {
             if selectedSessionID == id { detailLoadedAt = startedAt }
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            if olderItems.isEmpty {
+                olderCursor = loaded.timeline?.nextBefore
+            } else {
+                let retained = Set(olderItems.map(\.id) + (loaded.timeline?.items.map(\.id) ?? []))
+                olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
+            }
             detail = loaded
             if let items = loaded.timeline?.items, let sends = localSends[id] {
                 localSends[id] = LocalSend.reconcile(sends, with: items)
             }
             operationError = nil
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
             operationError = error.localizedDescription
+        }
+    }
+
+    func loadOlder() async {
+        guard let api, let id = selectedSessionID, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        do {
+            var next: Int64? = cursor
+            for _ in 0..<8 {
+                guard let before = next, before > 0 else { break }
+                let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: before)
+                guard selectedSessionID == id else { return }
+                guard let timeline = page.timeline, timeline.unavailableReason == nil else {
+                    olderError = page.timeline?.unavailableReason ?? "Older activity is unavailable."
+                    return
+                }
+                let known = Set(timelineItems.map(\.id))
+                let fresh = timeline.items.filter { !known.contains($0.id) }
+                olderItems = fresh + olderItems
+                next = timeline.nextBefore
+                olderCursor = next
+                if !fresh.isEmpty { break }
+            }
+            olderError = nil
+        } catch {
+            if selectedSessionID == id, !error.isCancellation { olderError = error.localizedDescription }
         }
     }
 
@@ -158,6 +204,8 @@ final class AgenthailModel: ObservableObject {
         detailReloadTask = nil
         detailReloadPending = false
         detail = nil
+        if let current = selectedSessionID { drafts[current] = composer }
+        composer = ""
         selectedSessionID = nil
         if let next { selectSession(next) }
     }
@@ -324,7 +372,7 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
             } catch {
                 localSends[sessionID]?.removeAll { $0.id == pending.id }
-                restoreToComposer(text)
+                restoreToComposer(text, sessionID: sessionID)
                 operationError = error.localizedDescription
             }
         }
@@ -347,7 +395,7 @@ final class AgenthailModel: ObservableObject {
                 _ = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message)
                 operationError = nil
             } catch {
-                restoreToComposer(item.message)
+                restoreToComposer(item.message, sessionID: item.sessionId)
                 operationError = "Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(error.localizedDescription)"
             }
             _ = await refresh(fresh: true)
@@ -359,7 +407,7 @@ final class AgenthailModel: ObservableObject {
         Task {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
-                if restoreToComposer { self.restoreToComposer(item.message) }
+                if restoreToComposer { self.restoreToComposer(item.message, sessionID: item.sessionId) }
                 operationError = nil
             } catch {
                 operationError = error.localizedDescription
@@ -392,12 +440,17 @@ final class AgenthailModel: ObservableObject {
 
     func resendDeliveryProblem(_ problem: DeliveryProblem) {
         dismissDeliveryProblem(problem)
-        restoreToComposer(problem.message)
+        restoreToComposer(problem.message, sessionID: problem.sessionId)
     }
 
-    private func restoreToComposer(_ text: String) {
-        let draft = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        composer = draft.isEmpty ? text : "\(composer)\n\n\(text)"
+    private func restoreToComposer(_ text: String, sessionID: String) {
+        let current = sessionID == selectedSessionID ? composer : (drafts[sessionID] ?? "")
+        let restored = current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : "\(current)\n\n\(text)"
+        if sessionID == selectedSessionID {
+            composer = restored
+        } else {
+            drafts[sessionID] = restored
+        }
     }
 
     func interruptSelected() {
@@ -587,5 +640,11 @@ final class AgenthailModel: ObservableObject {
 
     private func clearConnectionError() {
         if connectionError != nil { connectionError = nil }
+    }
+}
+
+extension Error {
+    var isCancellation: Bool {
+        self is CancellationError || (self as? URLError)?.code == .cancelled
     }
 }

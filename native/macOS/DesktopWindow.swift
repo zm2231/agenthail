@@ -276,7 +276,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = model.selectedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, model: model.detail?.model, inspectorVisible: $model.inspectorVisible)
+                ConversationHeader(session: session, model: model.detail?.model, context: model.detail?.context, inspectorVisible: $model.inspectorVisible)
                 TranscriptView(model: model, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         ComposerView(model: model, session: session)
@@ -293,6 +293,7 @@ struct ConversationPane: View {
 struct ConversationHeader: View {
     let session: SessionState
     let model: String?
+    let context: ContextState?
     @Binding var inspectorVisible: Bool
 
     var body: some View {
@@ -314,7 +315,7 @@ struct ConversationHeader: View {
             }
             .font(.system(size: 12))
             .foregroundStyle(DesktopPalette.text2)
-            Text([session.surface.capitalized, model].compactMap { $0 }.joined(separator: " · "))
+            Text(([session.surface.capitalized, model] + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · "))
                 .font(.system(size: 12))
                 .foregroundStyle(DesktopPalette.text2)
             Button {
@@ -341,12 +342,19 @@ struct ConversationHeader: View {
 struct TranscriptView: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var pinned = true
+    @State private var prepending = false
+    @State private var underfilled = false
 
     var body: some View {
-        let blocks = TranscriptBlock.build(model.detail?.timeline?.items ?? [])
+        let blocks = TranscriptBlock.build(model.timelineItems)
         let sends = model.localSends[session.id] ?? []
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
+                if let cursor = model.olderCursor, cursor > 0 {
+                    olderControl
+                }
                 if let error = model.detail?.readError {
                     Text(error)
                         .font(.system(size: 12.5))
@@ -373,12 +381,92 @@ struct TranscriptView: View {
             .padding(.bottom, 12)
             .frame(maxWidth: .infinity)
         }
-        .defaultScrollAnchor(.bottom)
+        .scrollPosition($position)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(pinned || prepending ? .bottom : nil, for: .sizeChanges)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 70
+        } action: { _, atBottom in
+            pinned = atBottom
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height < geometry.containerSize.height * 1.5
+        } action: { _, value in
+            underfilled = value
+            if value { fillViewport() }
+        }
+        .onChange(of: model.olderItems.count) { if underfilled { fillViewport() } }
+        .onChange(of: model.detail?.session.id) { if underfilled { fillViewport() } }
+        .onChange(of: session.id) {
+            pinned = true
+            position.scrollTo(edge: .bottom)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if !pinned {
+                Button {
+                    jumpToLatest()
+                } label: {
+                    Label("Jump to latest", systemImage: "arrow.down")
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(DesktopPalette.raised, in: Capsule())
+                        .overlay(Capsule().strokeBorder(DesktopPalette.line))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .padding(16)
+            }
+        }
+        .background {
+            Button("", action: jumpToLatest)
+                .keyboardShortcut("l", modifiers: .command)
+                .hidden()
+        }
         .overlay {
             if model.detail == nil, model.selectedSessionID == session.id {
                 ProgressView().controlSize(.small)
             }
         }
+    }
+
+    private var olderControl: some View {
+        HStack(spacing: 8) {
+            if model.loadingOlder {
+                ProgressView().controlSize(.mini)
+            } else {
+                Button("Load earlier") {
+                    prepending = true
+                    Task {
+                        await model.loadOlder()
+                        try? await Task.sleep(for: .milliseconds(300))
+                        prepending = false
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.accentText)
+            }
+            if let error = model.olderError {
+                Text(error).foregroundStyle(DesktopPalette.text2)
+            }
+        }
+        .font(.system(size: 12))
+        .frame(maxWidth: .infinity)
+    }
+
+    private func fillViewport() {
+        guard model.detail != nil, let cursor = model.olderCursor, cursor > 0, !model.loadingOlder, model.olderError == nil else { return }
+        prepending = true
+        Task {
+            await model.loadOlder()
+            try? await Task.sleep(for: .milliseconds(300))
+            prepending = false
+        }
+    }
+
+    private func jumpToLatest() {
+        pinned = true
+        withAnimation(.easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
     }
 }
 
@@ -387,6 +475,7 @@ struct TranscriptBlock: Identifiable, Equatable {
         case user(String)
         case assistant(String)
         case tools([TimelineItem])
+        case annotation(String)
     }
 
     let id: String
@@ -406,6 +495,9 @@ struct TranscriptBlock: Identifiable, Equatable {
                 flushTools()
                 guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 blocks.append(TranscriptBlock(id: item.id, kind: item.role == "user" ? .user(item.text) : .assistant(item.text)))
+            case "event" where item.title == "Turn duration":
+                flushTools()
+                blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)")))
             case "context", "done", "phase":
                 continue
             default:
@@ -433,6 +525,10 @@ struct TranscriptBlockView: View {
                 .textSelection(.enabled)
         case .tools(let items):
             ToolRunView(items: items, expanded: $expanded)
+        case .annotation(let text):
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(DesktopPalette.muted)
         }
     }
 }
@@ -440,6 +536,7 @@ struct TranscriptBlockView: View {
 struct UserBubble: View {
     let text: String
     let receipt: String?
+    @State private var expanded = false
 
     var body: some View {
         let envelope = PeerEnvelope(text)
@@ -452,10 +549,17 @@ struct UserBubble: View {
             Text(envelope.body)
                 .font(.system(size: 14))
                 .lineSpacing(3)
+                .lineLimit(expanded ? nil : 8)
                 .textSelection(.enabled)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 9)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 14))
+            if envelope.body.split(separator: "\n", omittingEmptySubsequences: false).count > 8 || envelope.body.count > 700 {
+                Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
             if let receipt {
                 Text(receipt)
                     .font(.system(size: 11))
@@ -472,8 +576,9 @@ struct ToolRunView: View {
     @Binding var expanded: Bool
 
     var body: some View {
-        let calls = items.filter { $0.kind == "toolCall" || $0.kind == "tool" || $0.kind == "command" }
-        let failed = items.filter { $0.status == "failed" || $0.status == "error" }.count
+        let calls = items.filter(ToolRunSummary.isCall)
+        let failedCallIDs = Set(items.filter(ToolRunSummary.isFailure).compactMap(\.callId))
+        let failed = items.filter(ToolRunSummary.isFailure).count
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 expanded.toggle()
@@ -481,7 +586,7 @@ struct ToolRunView: View {
                 HStack(spacing: 7) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                    Text(calls.isEmpty ? "Thought" : calls.count == 1 ? "Ran 1 tool" : "Ran \(calls.count) tools")
+                    Text(ToolRunSummary.label(items))
                     if failed > 0 {
                         Text("· \(failed) failed").foregroundStyle(DesktopPalette.red)
                     }
@@ -493,12 +598,24 @@ struct ToolRunView: View {
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
                 ForEach(calls) { call in
-                    Text(call.text.split(separator: "\n").first.map(String.init) ?? call.title)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(DesktopPalette.text)
-                        .textSelection(.enabled)
+                    let callFailed = call.callId.map(failedCallIDs.contains) ?? false
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(call.title)
+                            .foregroundStyle(callFailed ? DesktopPalette.red : DesktopPalette.text2)
+                            .frame(width: 64, alignment: .leading)
+                        Text(call.text.split(separator: "\n").first.map(String.init) ?? "")
+                            .foregroundStyle(DesktopPalette.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        Button("Copy input") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(call.text, forType: .string)
+                        }
+                    }
                 }
             }
         }
@@ -814,22 +931,40 @@ struct SessionInspector: View {
     }
 }
 
+extension ContextState {
+    var knownRatio: Double? {
+        guard contextWindow > 0 else { return nil }
+        let ratio = Double(usedTokens) / Double(contextWindow)
+        return windowEstimated == true && ratio > 1 ? nil : ratio
+    }
+
+    var headerLabel: String? {
+        guard usedTokens > 0 else { return nil }
+        if let ratio = knownRatio { return "\(ratio.formatted(.percent.precision(.fractionLength(0)))) context" }
+        return "\(usedTokens.formatted(.number.notation(.compactName))) tokens"
+    }
+
+    var usageLabel: String? {
+        guard usedTokens > 0 else { return nil }
+        if let ratio = knownRatio { return ratio.formatted(.percent.precision(.fractionLength(0))) }
+        return "\(usedTokens.formatted(.number.notation(.compactName))) tokens used"
+    }
+}
+
 struct DetailsTab: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let context = model.detail?.context, context.usedTokens > 0 {
-                let ratio = context.contextWindow > 0 ? Double(context.usedTokens) / Double(context.contextWindow) : 0
-                let knownWindow = context.contextWindow > 0 && !(context.windowEstimated == true && ratio > 1)
+            if let context = model.detail?.context, let usage = context.usageLabel {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Context").foregroundStyle(DesktopPalette.text2)
                         Spacer()
-                        Text(knownWindow ? ratio.formatted(.percent.precision(.fractionLength(0))) : "\(context.usedTokens.formatted(.number.notation(.compactName))) tokens used")
+                        Text(usage)
                     }
-                    if knownWindow {
+                    if let ratio = context.knownRatio {
                         ProgressView(value: min(ratio, 1))
                             .tint(DesktopPalette.accent)
                     }
@@ -841,13 +976,21 @@ struct DetailsTab: View {
                 if let modelName = model.detail?.model { detailRow("Model", modelName) }
                 if let project = session.hostProject?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
-                if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", path, monospaced: true) }
+                if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }
             if let goal = model.detail?.goal, !goal.objective.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    SidebarCaption("Goal").padding(.horizontal, -8)
+                    HStack {
+                        SidebarCaption("Goal").padding(.horizontal, -8)
+                        Spacer()
+                        Text(goal.status.capitalized)
+                            .font(.system(size: 11))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(DesktopPalette.selection, in: Capsule())
+                    }
                     Text(goal.objective)
-                    Text(goal.status.capitalized).foregroundStyle(DesktopPalette.text2)
                 }
             }
         }

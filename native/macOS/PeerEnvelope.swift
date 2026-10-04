@@ -4,27 +4,47 @@ struct PeerEnvelope: Equatable {
     let sender: String?
     let body: String
 
+    private static let openTag = "<cross-session-message "
+    private static let closeTag = "</cross-session-message>"
+    private static let preambles = ["Another Claude session sent a message:"]
+    private static let trailerPrefix = "This came from another Claude session"
+
     init(_ text: String) {
-        var remaining = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if remaining.hasPrefix("[Claude peer message from "), let lineEnd = remaining.firstIndex(of: "\n") {
-            remaining = String(remaining[remaining.index(after: lineEnd)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard remaining.hasPrefix("<cross-session-message "),
-              remaining.hasSuffix("</cross-session-message>"),
-              let tagEnd = remaining.firstIndex(of: ">"),
-              let sender = Self.attribute("from-name", in: String(remaining[..<tagEnd])) ?? Self.attribute("from", in: String(remaining[..<tagEnd]))
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let open = trimmed.range(of: Self.openTag),
+              let close = trimmed.range(of: Self.closeTag, options: .backwards),
+              open.upperBound <= close.lowerBound,
+              let tagEnd = trimmed[open.lowerBound..<close.lowerBound].firstIndex(of: ">"),
+              Self.isKnownPreamble(trimmed[..<open.lowerBound]),
+              Self.isKnownTrailer(trimmed[close.upperBound...])
         else {
             self.sender = nil
             self.body = text
             return
         }
-        let inner = remaining[remaining.index(after: tagEnd)...].dropLast("</cross-session-message>".count)
+        let tag = String(trimmed[open.lowerBound..<tagEnd])
+        guard let sender = Self.attribute("from-name", in: tag) ?? Self.attribute("from", in: tag) else {
+            self.sender = nil
+            self.body = text
+            return
+        }
         self.sender = sender
-        self.body = inner.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.body = trimmed[trimmed.index(after: tagEnd)..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isKnownPreamble(_ text: Substring) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty || preambles.contains(value) { return true }
+        return value.hasPrefix("[Claude peer message from ") && value.hasSuffix("]") && !value.contains("\n")
+    }
+
+    private static func isKnownTrailer(_ text: Substring) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty || value.hasPrefix(trailerPrefix)
     }
 
     private static func attribute(_ name: String, in tag: String) -> String? {
-        guard let start = tag.range(of: "\(name)=\"") else { return nil }
+        guard let start = tag.range(of: " \(name)=\"") else { return nil }
         let rest = tag[start.upperBound...]
         guard let end = rest.firstIndex(of: "\"") else { return nil }
         let value = String(rest[..<end])

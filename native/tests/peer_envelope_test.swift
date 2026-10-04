@@ -9,7 +9,12 @@ struct PeerEnvelopeTest {
         expect(parsed.body == "Three more items.\n9. Roles.", "body excludes the envelope")
         let plain = PeerEnvelope("Run the tests")
         expect(plain.sender == nil && plain.body == "Run the tests", "plain text is unchanged")
+        let native = "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1234.sock\" from-session=\"source\" from-name=\"peer-a\">\nstatus ping\n</cross-session-message>\n\nThis came from another Claude session, not typed by your user."
+        let nativeParsed = PeerEnvelope(native)
+        expect(nativeParsed.sender == "peer-a" && nativeParsed.body == "status ping", "native Claude wrapper unwraps: \(nativeParsed)")
         for malformed in [
+            "Please review <cross-session-message from=\"a\">x</cross-session-message>",
+            "<cross-session-message from=\"a\">x</cross-session-message> and also this",
             "<cross-session-message from=\"a\">",
             "<cross-session-message from=\"a\">hello",
             "<cross-session-message>hello</cross-session-message>",

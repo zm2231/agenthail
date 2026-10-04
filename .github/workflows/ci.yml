@@ -92,6 +92,8 @@ jobs:
           "$RUNNER_TEMP/catalog-position-test"
           swiftc -parse-as-library native/macOS/PeerEnvelope.swift native/tests/peer_envelope_test.swift -o "$RUNNER_TEMP/peer-envelope-test"
           "$RUNNER_TEMP/peer-envelope-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/ToolRunSummary.swift native/tests/tool_run_summary_test.swift -o "$RUNNER_TEMP/tool-run-summary-test"
+          "$RUNNER_TEMP/tool-run-summary-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint
