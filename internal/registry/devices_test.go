@@ -1,7 +1,10 @@
 package registry
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,21 +41,44 @@ func TestDevicePairingIsScopedSingleUseAndRevocable(t *testing.T) {
 }
 
 func TestDevicePairingExpiresAndNeverStoresPlaintextSecrets(t *testing.T) {
-	r := openTestRegistry(t)
-	pairing, err := r.CreateDevicePairing("Phone", nil, time.Nanosecond)
+	dir := t.TempDir()
+	r, err := Open(filepath.Join(dir, "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, err := r.CreateDevicePairing("Phone", nil, time.Nanosecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, _, err := r.CompleteDevicePairing(pairing.Secret, ""); !errors.Is(err, ErrPairingExpired) {
+	if _, _, err := r.CompleteDevicePairing(expired.Secret, ""); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("expired pairing err=%v", err)
 	}
-	var stored string
-	if err := r.db.QueryRow(`SELECT secret_hash FROM device_pairings WHERE id=?`, pairing.ID).Scan(&stored); err != nil {
+	pairing, err := r.CreateDevicePairing("Tablet", []string{"read"}, time.Minute)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if stored == pairing.Secret || len(stored) != 64 {
-		t.Fatalf("stored pairing secret=%q", stored)
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "registry.db*"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("files=%v err=%v", files, err)
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range []string{expired.Secret, pairing.Secret, token, strings.TrimPrefix(token, deviceTokenPrefix)} {
+			if bytes.Contains(data, []byte(secret)) {
+				t.Fatalf("%s stores a plaintext pairing secret or device token", filepath.Base(file))
+			}
+		}
 	}
 }
 

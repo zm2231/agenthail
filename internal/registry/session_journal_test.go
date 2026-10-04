@@ -161,12 +161,9 @@ func TestSessionJournalRejectsSingleBodyBeyondRetention(t *testing.T) {
 	if !errors.Is(err, ErrSessionJournalEntryTooLarge) {
 		t.Fatalf("err=%v, want ErrSessionJournalEntryTooLarge", err)
 	}
-	var entries int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM session_journal WHERE session_id=?`, "session").Scan(&entries); err != nil {
-		t.Fatal(err)
-	}
-	if entries != 0 {
-		t.Fatalf("journal entries=%d, want 0 after rejected body", entries)
+	window, err := r.SessionJournalAfter("session", 0, 10)
+	if err != nil || len(window.Entries) != 0 {
+		t.Fatalf("window=%+v err=%v, want no entries after rejected body", window, err)
 	}
 }
 

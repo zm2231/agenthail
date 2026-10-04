@@ -211,17 +211,16 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 	if err := r.QueueMessage("session", "wait"); err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now()
 	for attempt := 0; attempt < 7; attempt++ {
-		item, err := r.ClaimNextMessage("session", time.Now())
+		item, err := r.ClaimNextMessage("session", now)
 		if err != nil || item == nil {
 			t.Fatalf("attempt=%d item=%+v err=%v", attempt, item, err)
 		}
-		if err := r.DeferMessage(item.ID, errors.New("delivery did not start"), time.Now()); err != nil {
+		if err := r.DeferMessage(item.ID, errors.New("delivery did not start"), now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.db.Exec(`UPDATE message_queue SET available_at_ms=0 WHERE id=?`, item.ID); err != nil {
-			t.Fatal(err)
-		}
+		now = now.Add(6 * time.Minute)
 	}
 	item, err := r.QueueItem(1)
 	if err != nil || item.Status != "pending" || item.Attempts != 7 {
@@ -635,10 +634,7 @@ func TestQueuedMessageExpiresAndStopsWatchingSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
-		t.Fatal(err)
-	}
-	if item, err := r.ClaimNextMessage("s", time.Now()); err != nil || item != nil {
+	if item, err := r.ClaimNextMessage("s", time.Now().Add(2*queueMessageTTL)); err != nil || item != nil {
 		t.Fatalf("expired claim=%+v err=%v", item, err)
 	}
 	row, err := r.QueueItem(id)
@@ -654,8 +650,7 @@ func TestQueuedMessageExpiresAndStopsWatchingSession(t *testing.T) {
 func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	id, err := r.QueueMessageWithKey("s", "uncertain old delivery", "expired-unknown")
-	if err != nil {
+	if _, err := r.QueueMessageWithKey("s", "uncertain old delivery", "expired-unknown"); err != nil {
 		t.Fatal(err)
 	}
 	item, err := r.ClaimNextMessage("s", time.Now())
@@ -665,13 +660,12 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 	if err := r.DeadLetterUnknown(item.ID, errors.New("daemon stopped")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
+	afterTTL := time.Now().Add(2 * queueMessageTTL)
+	r.now = func() time.Time { return afterTTL }
+	if _, err := r.ExpireMessages(afterTTL); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.ExpireMessages(time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(false)
@@ -703,9 +697,7 @@ func TestInflightPastExpiryRemainsCurrentUntilFinalized(t *testing.T) {
 	if err != nil || item == nil {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, now.Add(-time.Second).UnixMilli(), item.ID); err != nil {
-		t.Fatal(err)
-	}
+	r.now = func() time.Time { return now.Add(2 * queueMessageTTL) }
 	rows, err := r.ListQueue(false)
 	if err != nil || len(rows) != 1 || rows[0].Status != "inflight" || rows[0].Historical {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
@@ -1013,9 +1005,8 @@ func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
-		t.Fatal(err)
-	}
+	afterTTL := time.Now().Add(2 * queueMessageTTL)
+	r.now = func() time.Time { return afterTTL }
 	beforeHistory, err := r.ListHistory(20, "")
 	if err != nil {
 		t.Fatal(err)
@@ -1046,7 +1037,7 @@ func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
 	if err != nil || len(afterHistory) != len(beforeHistory) {
 		t.Fatalf("history changed before=%+v after=%+v err=%v", beforeHistory, afterHistory, err)
 	}
-	if _, err := r.ExpireMessages(time.Now()); err != nil {
+	if _, err := r.ExpireMessages(afterTTL); err != nil {
 		t.Fatal(err)
 	}
 	expired, err := r.QueueItem(id)
