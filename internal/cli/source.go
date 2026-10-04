@@ -50,14 +50,18 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 	if selector == "" {
 		if id := os.Getenv("AGENTHAIL_SESSION_ID"); id != "" {
 			selector = id
-		} else if id := os.Getenv("CODEX_THREAD_ID"); id != "" {
-			selector = "codex:" + id
 		} else if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
 			selector = "claude:" + id
+		} else if id, err := a.resolveClaudeCaller(ctx); err != nil {
+			return "", err
+		} else if id != "" {
+			return id, nil
+		} else if id := os.Getenv("CODEX_THREAD_ID"); id != "" {
+			selector = "codex:" + id
 		}
 	}
 	if selector == "" {
-		return a.resolveClaudeCaller(ctx)
+		return "", nil
 	}
 	if a.Registry != nil {
 		registrySelector := strings.TrimPrefix(selector, "@")

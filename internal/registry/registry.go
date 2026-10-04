@@ -18,6 +18,8 @@ type Registry struct {
 	path string
 }
 
+var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
+
 const (
 	schemaVersion   = 8
 	queueMessageTTL = time.Hour
@@ -554,6 +556,37 @@ func (r *Registry) ReplaceAlias(name, sessionID string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var existing string
+	if err := tx.QueryRow(`SELECT name FROM aliases WHERE session_id=?`, sessionID).Scan(&existing); err == nil {
+		return existing, tx.Commit()
+	} else if err != sql.ErrNoRows {
+		return "", err
+	}
+	base = generatedAliasCharacters.ReplaceAllString(strings.ToLower(base), "-")
+	base = strings.Trim(base, "- ")
+	if base == "" {
+		base = "agent"
+	}
+	for n := 0; n < 1000; n++ {
+		candidate := base
+		if n > 0 {
+			candidate = fmt.Sprintf("%s-%d", base, n+1)
+		}
+		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?)`, candidate, sessionID); err == nil {
+			return candidate, tx.Commit()
+		} else if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return "", fmt.Errorf("reserve generated alias %q: %w", candidate, err)
+		}
+	}
+	return "", fmt.Errorf("reserve generated alias: exhausted candidates for %q", base)
 }
 
 func (r *Registry) ResolveTarget(target string) (string, error) {
