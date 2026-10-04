@@ -9,6 +9,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var finishedUnseen: Set<String> = []
     @Published private(set) var snapshotLoadedAt: Date?
     @Published var newSessionVisible = false
+    @Published var paletteVisible = false
     @Published private(set) var creationOptions: SessionCreationOptions?
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [SessionSearchItem] = []

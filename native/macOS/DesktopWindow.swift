@@ -25,6 +25,22 @@ struct DesktopWindow: View {
         .sheet(isPresented: $model.newSessionVisible) {
             NewSessionSheet(model: model)
         }
+        .overlay(alignment: .top) {
+            if model.paletteVisible {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                        .onTapGesture { model.paletteVisible = false }
+                    CommandPalette(model: model)
+                        .padding(.top, 72)
+                }
+            }
+        }
+        .background {
+            Button("") { model.paletteVisible.toggle() }
+                .keyboardShortcut("k", modifiers: .command)
+                .hidden()
+        }
         .onAppear {
             NSApplication.shared.setActivationPolicy(.regular)
             NSApplication.shared.activate()
