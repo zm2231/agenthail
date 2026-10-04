@@ -1153,6 +1153,10 @@ struct ComposerView: View {
                         .padding(.bottom, 4)
                         .onSubmit { submit(alternate: false) }
                     HStack(spacing: 4) {
+                        if session.surface == "codex" {
+                            TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
+                                .padding(.leading, 7)
+                        }
                         Spacer()
                         if session.isWorking && hasText {
                             Text(hint)

@@ -41,6 +41,7 @@ final class AgenthailModel: ObservableObject {
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
+    @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
 
     private(set) var api: AgenthailAPI?
     private(set) var mainPane: SessionPane!
@@ -65,6 +66,7 @@ final class AgenthailModel: ObservableObject {
     }()
     private struct PendingSendRequest {
         let busyDelivery: String?
+        let turnSettings: TurnSettings
         let message: String
         let idempotencyKey: String
     }
@@ -522,25 +524,34 @@ final class AgenthailModel: ObservableObject {
         return connected && api != nil
     }
 
-    func send(_ message: String, to sessionID: String, busyDelivery: String? = nil, completion: ((Bool) -> Void)? = nil) {
+    func turnSettings(for sessionID: String) -> TurnSettings {
+        turnSettingsDrafts[sessionID] ?? TurnSettings()
+    }
+
+    func setTurnSettings(_ settings: TurnSettings, for sessionID: String) {
+        if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) } else { turnSettingsDrafts[sessionID] = settings }
+    }
+
+    func send(_ message: String, to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let api else {
             completion?(false)
             return
         }
         let idempotencyKey: String
-        if let retry = pendingSendRequests[sessionID], retry.busyDelivery == busyDelivery, retry.message == text {
+        if let retry = pendingSendRequests[sessionID], retry.busyDelivery == busyDelivery, retry.turnSettings == turnSettings, retry.message == text {
             idempotencyKey = retry.idempotencyKey
         } else {
             idempotencyKey = UUID().uuidString
-            pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, message: text, idempotencyKey: idempotencyKey)
+            pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, turnSettings: turnSettings, message: text, idempotencyKey: idempotencyKey)
         }
         let pending = LocalSend(text: text, sentAt: Date(), status: nil)
         localSends[sessionID, default: []].append(pending)
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, busyDelivery: busyDelivery, idempotencyKey: idempotencyKey)
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, idempotencyKey: idempotencyKey)
                 if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
+                if !turnSettings.isEmpty, turnSettingsDrafts[sessionID] == turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
                 updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
                 operationError = nil
                 completion?(true)

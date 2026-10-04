@@ -214,7 +214,8 @@ final class SessionPane: ObservableObject, Identifiable {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
         let text = composer
         composer = ""
-        model.send(text, to: sessionID, busyDelivery: busyDelivery)
+        let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
+        model.send(text, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
     }
 
     func interrupt() {
