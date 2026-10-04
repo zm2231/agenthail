@@ -314,7 +314,7 @@ func TestPeerClientCancellationBoundsUnresponsiveControl(t *testing.T) {
 
 func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.T) {
 	previous := heartbeatInterval
-	heartbeatInterval = 10 * time.Millisecond
+	heartbeatInterval = 200 * time.Millisecond
 	t.Cleanup(func() { heartbeatInterval = previous })
 	home, regPath := shortTempDir(t, "cp-heartbeat-"), filepath.Join(t.TempDir(), "registry.db")
 	s := surface.Session{ID: "owned", Surface: surface.KindCodex, Name: "owned", Status: surface.StatusIdle}
@@ -341,13 +341,15 @@ func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.
 		if time.Now().After(deadline) {
 			t.Fatal("missing record was not restored")
 		}
-		time.Sleep(heartbeatInterval)
+		time.Sleep(time.Millisecond)
 	}
+	// The restore just completed a heartbeat cycle; writing now keeps the foreign
+	// record clear of the next cycle's ownership check and rename.
 	foreign := []byte(`{"agenthail":"someone-else"}`)
 	if err := os.WriteFile(path, foreign, 0600); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(20 * heartbeatInterval)
+	time.Sleep(3 * heartbeatInterval)
 	if data, err := os.ReadFile(path); err != nil || string(data) != string(foreign) {
 		t.Fatalf("foreign record overwritten: %s %v", data, err)
 	}
