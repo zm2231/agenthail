@@ -166,3 +166,44 @@ func TestSessionPageContinuesIntoProviderHistoryPastSeed(t *testing.T) {
 		t.Fatalf("failed older read reported exhaustion: %+v", failed)
 	}
 }
+
+func TestSessionPageWithPreexistingJournalReportsHistoryGapInsteadOfExhaustion(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "legacy", Payload: []byte(`{"itemId":"legacy","version":1,"op":"upsert","kind":"text","role":"assistant","body":"legacy"}`)}, registrypkg.SessionJournalRetention{Count: 32, Bytes: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.MarkSessionJournalSeed(from.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &providerHistorySurface{daemonSurface: fake}
+	d := New(registry, []surface.Surface{adapter})
+	defer d.sources.shutdown()
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	get := func(query string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if err := d.sources.seed(context.Background(), &from, adapter); err != nil {
+		t.Fatal(err)
+	}
+	response := get("")
+	var body struct {
+		Timeline surface.SessionTimeline `json:"timeline"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if len(body.Timeline.Items) != 3 || body.Timeline.Items[0].Text != "legacy" || body.Timeline.NextBefore == 0 {
+		t.Fatalf("pre-existing journal reported exhausted history: %+v", body.Timeline)
+	}
+	if _, provider := decodeProviderHistoryCursor(body.Timeline.NextBefore); provider {
+		t.Fatalf("re-seed attached a provider boundary below older journal entries: %+v", body.Timeline)
+	}
+	older := get(fmt.Sprintf("&timelineBefore=%d", body.Timeline.NextBefore))
+	if older.Code != http.StatusConflict || !strings.Contains(older.Body.String(), `"history_gap"`) {
+		t.Fatalf("older read code=%d body=%s", older.Code, older.Body.String())
+	}
+}

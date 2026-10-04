@@ -141,6 +141,7 @@ func TestHeldSourceRecoversFromTransientSeedFailure(t *testing.T) {
 	adapter.caps.Stream = true
 	adapter.set(true)
 	manager := newSessionSourceManager(reg)
+	t.Cleanup(manager.shutdown)
 	first, err := manager.subscribe(&from, adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +174,7 @@ func TestNonStreamableSourceRefreshesThroughOneSharedProducer(t *testing.T) {
 	adapter := &flakySeedSurface{daemonSurface: fake}
 	adapter.set(false, surface.TimelineItem{ID: "first", Kind: "message", Role: "assistant", Text: "first"})
 	manager := newSessionSourceManager(reg)
+	t.Cleanup(manager.shutdown)
 	releases := make([]func(), 0, 3)
 	for range 3 {
 		release, err := manager.hold(&from, adapter, "viewer")

@@ -269,10 +269,10 @@ func TestSessionJournalPageExposesProviderHistoryBoundaryUntilPruned(t *testing.
 	reg := openTestRegistry(t)
 	register(t, reg, "s")
 	retention := SessionJournalRetention{Count: 2, Bytes: 4096}
-	if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: "a", Payload: []byte(`{"itemId":"a"}`)}, retention); err != nil {
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 9); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.RecordSessionJournalHistoryBoundary("s", 9); err != nil {
+	if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: "a", Payload: []byte(`{"itemId":"a"}`)}, retention); err != nil {
 		t.Fatal(err)
 	}
 	if err := reg.RecordSessionJournalHistoryBoundary("s", 3); err != nil {
@@ -290,5 +290,28 @@ func TestSessionJournalPageExposesProviderHistoryBoundaryUntilPruned(t *testing.
 	page, err = reg.ReadSessionJournalPage("s", 0, 10)
 	if err != nil || page.HistoryBefore != 0 {
 		t.Fatalf("pruned journal still exposed provider boundary: %+v err=%v", page, err)
+	}
+}
+
+func TestSessionJournalWithoutRecordedBoundaryEndsInHistoryGap(t *testing.T) {
+	reg := openTestRegistry(t)
+	register(t, reg, "s")
+	retention := SessionJournalRetention{Count: 8, Bytes: 4096}
+	for _, key := range []string{"a", "b"} {
+		if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: key, Payload: []byte(`{"itemId":"` + key + `"}`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 5); err != nil {
+		t.Fatal(err)
+	}
+	page, err := reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || len(page.Entries) != 2 || page.HistoryBefore != 0 || page.NextBefore != page.Entries[0].Seq {
+		t.Fatalf("journal with unknown older boundary reported exhaustion: %+v err=%v", page, err)
+	}
+	_, err = reg.ReadSessionJournalPage("s", page.NextBefore, 10)
+	var gap *SessionJournalHistoryGapError
+	if !errors.As(err, &gap) || gap.EarliestSeq != page.Entries[0].Seq {
+		t.Fatalf("older read past unknown boundary err=%v", err)
 	}
 }

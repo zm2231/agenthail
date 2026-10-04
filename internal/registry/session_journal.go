@@ -146,7 +146,8 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 		return SessionJournalPage{}, err
 	}
 	if before > 0 {
-		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) {
+		historyUnknown := !historyBefore.Valid || historyBefore.Int64 < 0
+		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) || (historyUnknown && before <= uint64(earliest.Int64)) {
 			var earliestSeq, latestSeq uint64
 			if earliest.Valid {
 				earliestSeq = uint64(earliest.Int64)
@@ -181,7 +182,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if len(entries) > limit {
 		entries = entries[:limit]
 		next = entries[len(entries)-1].Seq
-	} else if prunedBefore.Valid && prunedBefore.Int64 > 0 && len(entries) > 0 && entries[len(entries)-1].Seq == uint64(earliest.Int64) {
+	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Seq == uint64(earliest.Int64) {
 		next = entries[len(entries)-1].Seq
 	}
 	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
@@ -204,7 +205,7 @@ func (r *Registry) RecordSessionJournalHistoryBoundary(sessionID string, before 
 	if strings.TrimSpace(sessionID) == "" || before < 0 {
 		return fmt.Errorf("invalid session journal history boundary")
 	}
-	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,history_before) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET history_before=CASE WHEN session_journal_state.history_before<0 THEN excluded.history_before ELSE session_journal_state.history_before END`, sessionID, before)
+	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,history_before) SELECT ?,0,0,? WHERE NOT EXISTS (SELECT 1 FROM session_journal WHERE session_id=? AND kind<>'source-error') ON CONFLICT(session_id) DO UPDATE SET history_before=CASE WHEN session_journal_state.history_before<0 AND session_journal_state.pruned_before=0 THEN excluded.history_before ELSE session_journal_state.history_before END`, sessionID, before, sessionID)
 	return err
 }
 
