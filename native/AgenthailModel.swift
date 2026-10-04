@@ -155,7 +155,13 @@ final class AgenthailModel: ObservableObject {
                     detail.metadataErrors = metadata.errors
                     self.detail = detail
                 } catch {
-                    return
+                    guard !Task.isCancelled, let self,
+                          sessionLoadIsCurrent(id, selectedID: self.selectedSessionID), self.sessionRequestID == requestID,
+                          var detail = self.detail, detail.session.id == id else { return }
+                    detail.claudeRuns = nil
+                    detail.claudeSubagents = nil
+                    detail.metadataErrors = nil
+                    self.detail = detail
                 }
             }
         } catch {

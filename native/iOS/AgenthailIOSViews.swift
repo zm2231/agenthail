@@ -545,7 +545,9 @@ struct SessionScreen: View {
                 }
             }
             .sheet(isPresented: $showingInfo) {
-                if let detail { SessionInspector(model: model, session: session, detail: detail) }
+                if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
+                    SessionInspector(model: model, session: session, initialDetail: liveDetail)
+                }
             }
             .sheet(isPresented: $showingVoice) {
                 AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
@@ -926,9 +928,13 @@ struct SessionSummary: View {
 struct SessionInspector: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
-    let detail: SessionDetail
+    let initialDetail: SessionDetail
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
+    private var detail: SessionDetail {
+        guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
+        return liveDetail
+    }
     var body: some View {
         NavigationStack {
             List {
@@ -997,6 +1003,15 @@ struct SessionInspector: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
                                 if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
+                if let errors = detail.metadataErrors, !errors.isEmpty {
+                    Section("Metadata warnings") {
+                        ForEach(errors.keys.sorted(), id: \.self) { key in
+                            if let message = errors[key] {
+                                LabeledContent(key, value: message)
                             }
                         }
                     }

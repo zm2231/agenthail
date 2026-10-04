@@ -302,6 +302,14 @@ struct ConversationHeader: View {
 					}
 				}
 			}
+			if let errors = currentDetail?.metadataErrors, !errors.isEmpty {
+				VStack(alignment: .leading, spacing: 4) {
+					Text("Metadata warnings").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+					ForEach(errors.keys.sorted(), id: \.self) { key in
+						if let message = errors[key] { Text("\(key): \(message)").font(.caption).foregroundStyle(.secondary) }
+					}
+				}
+			}
 		}
 		.padding(24)
 		.sheet(isPresented: Binding(get: { goalEditor.mode != nil }, set: { if !$0 { resetGoalEditor() } })) {
