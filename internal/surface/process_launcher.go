@@ -79,7 +79,8 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		}
 		result, parseErr := parseLaunchResult(l.id, out)
 		if parseErr != nil {
-			return LaunchResult{}, parseErr
+			_ = os.Remove(intentPath)
+			return LaunchResult{}, LaunchAcceptedError{Launcher: l.id, Err: parseErr}
 		}
 		return result, nil
 	}

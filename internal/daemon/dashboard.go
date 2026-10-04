@@ -967,6 +967,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "message is required", http.StatusBadRequest)
 				return
 			}
+			alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
+			if alias != "" && (strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80) {
+				http.Error(w, "name must be 1 to 80 characters without spaces, /, or #", http.StatusBadRequest)
+				return
+			}
 			cwd, cwdErr := dashboardStartCwd(request.Cwd)
 			if cwdErr != nil {
 				http.Error(w, cwdErr.Error(), http.StatusBadRequest)
@@ -990,6 +995,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			defer cancel()
 			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Agent: surface.SurfaceKind(request.Surface), Cwd: cwd, Message: request.Message, Model: request.Model, Name: request.Name})
 			if launchErr != nil {
+				var acceptedErr surface.LaunchAcceptedError
+				if errors.As(launchErr, &acceptedErr) {
+					writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "accepted": true, "retryable": false, "launcher": request.Launcher, "error": launchErr.Error()})
+					return
+				}
 				http.Error(w, launchErr.Error(), http.StatusBadGateway)
 				return
 			}
@@ -1004,7 +1014,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			if session == nil {
-				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, *location)
+				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, alias, *location)
 				if err != nil {
 					http.Error(w, fmt.Sprintf("persist pending launch: %s", err), http.StatusInternalServerError)
 					return
