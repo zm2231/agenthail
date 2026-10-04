@@ -666,11 +666,6 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 		if s.mergeSeedIntoAuthoritativeRow(providerKey, operation, item) {
 			continue
 		}
-		if item.Text != "" && item.Kind != "done" {
-			s.mu.Lock()
-			s.appendBodies[providerKey] = item.Text
-			s.mu.Unlock()
-		}
 		s.append(surface.StreamEvent{
 			Role:             item.Role,
 			Title:            item.Title,
@@ -775,70 +770,73 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		s.mu.Unlock()
 		return
 	}
-	payload := s.normalizeLocked(event)
-	if event.Cursor > 0 && providerKey != "" {
+	payload, bodyKey := s.normalizeLocked(event)
+	s.mu.Unlock()
+	accumulated := payload.Body
+	entry, changed, err := s.persist(payload)
+	if err != nil {
+		s.appendSourceError(fmt.Errorf("session journal append failed: %w", err))
+		return
+	}
+	s.mu.Lock()
+	if bodyKey != "" {
+		s.appendBodies[bodyKey] = accumulated
+	}
+	if event.Cursor > 0 && providerKey != "" && event.Cursor > s.appendCursors[providerKey] {
 		if s.appendCursors == nil {
 			s.appendCursors = map[string]uint64{}
 		}
 		s.appendCursors[providerKey] = event.Cursor
 	}
 	s.mu.Unlock()
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	fullBody := []byte(payload.Body)
-	if len(fullBody) > sessionStreamBodyBytes {
-		prefix := fullBody[:sessionStreamBodyBytes]
-		for !utf8.Valid(prefix) {
-			prefix = prefix[:len(prefix)-1]
-		}
-		payload.Body = string(prefix)
-		payload.Truncated = true
-		ref, refErr := newSessionBodyRef()
-		if refErr == nil {
-			payload.BodyRef = ref
-		}
-		encoded, err = json.Marshal(payload)
-		if err != nil {
-			return
-		}
-		if payload.BodyRef == "" || len(encoded)+len(fullBody) > sessionJournalRetentionBytes {
-			payload.BodyRef = ""
-			payload.TruncationReason = "full_body_not_retained"
-			encoded, err = json.Marshal(payload)
-			if err != nil {
-				return
-			}
-			fullBody = nil
-		}
-		var entry registry.SessionJournalEntry
-		var changed bool
-		entry, changed, err = s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
-		if errors.Is(err, registry.ErrSessionJournalEntryTooLarge) && payload.BodyRef != "" {
-			payload.BodyRef = ""
-			payload.TruncationReason = "full_body_not_retained"
-			fullBody = nil
-			encoded, err = json.Marshal(payload)
-			if err == nil {
-				entry, changed, err = s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
-			}
-		}
-		if err != nil {
-			return
-		}
-		if changed {
-			s.publish(entry)
-		}
-		return
-	}
-	entry, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
-	if err != nil {
-		return
-	}
 	if changed {
 		s.publish(entry)
 	}
+}
+
+func (s *sessionSource) persist(payload sessionJournalPayload) (registry.SessionJournalEntry, bool, error) {
+	retention := registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}
+	fullBody := []byte(payload.Body)
+	if len(fullBody) <= sessionStreamBodyBytes {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return registry.SessionJournalEntry{}, false, err
+		}
+		return s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, retention)
+	}
+	prefix := fullBody[:sessionStreamBodyBytes]
+	for !utf8.Valid(prefix) {
+		prefix = prefix[:len(prefix)-1]
+	}
+	payload.Body = string(prefix)
+	payload.Truncated = true
+	if ref, refErr := newSessionBodyRef(); refErr == nil {
+		payload.BodyRef = ref
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return registry.SessionJournalEntry{}, false, err
+	}
+	if payload.BodyRef == "" || len(encoded)+len(fullBody) > sessionJournalRetentionBytes {
+		payload.BodyRef = ""
+		payload.TruncationReason = "full_body_not_retained"
+		encoded, err = json.Marshal(payload)
+		if err != nil {
+			return registry.SessionJournalEntry{}, false, err
+		}
+		fullBody = nil
+	}
+	entry, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, retention)
+	if !errors.Is(err, registry.ErrSessionJournalEntryTooLarge) || payload.BodyRef == "" {
+		return entry, changed, err
+	}
+	payload.BodyRef = ""
+	payload.TruncationReason = "full_body_not_retained"
+	encoded, err = json.Marshal(payload)
+	if err != nil {
+		return registry.SessionJournalEntry{}, false, err
+	}
+	return s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, retention)
 }
 
 func (s *sessionSource) publish(entry registry.SessionJournalEntry) {
@@ -862,7 +860,7 @@ func newSessionBodyRef() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJournalPayload {
+func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJournalPayload, string) {
 	providerKey := event.ProviderKey
 	if strings.HasPrefix(providerKey, "renderer:") {
 		providerKey = s.epoch + ":" + providerKey
@@ -894,19 +892,20 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 		op = "append"
 	}
 	body := event.Text
+	bodyKey := ""
 	if providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") && op == "upsert" && body != "" {
-		s.appendBodies[providerKey] = body
+		bodyKey = providerKey
 	}
 	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
-		s.appendBodies[providerKey] += body
-		body = s.appendBodies[providerKey]
+		body = s.appendBodies[providerKey] + body
+		bodyKey = providerKey
 		op = "upsert"
 	}
 	at := event.Timestamp
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated, TruncationReason: event.TruncationReason}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated, TruncationReason: event.TruncationReason}, bodyKey
 }
 
 func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surface.Session, adapter surface.Surface) (sessionstream.Subscription, error) {
