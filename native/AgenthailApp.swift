@@ -439,7 +439,7 @@ private struct AgenthailMenuContent: View {
 
     private func sessionItem(_ session: SessionState) -> some View {
         Button {
-            model.selectSession(session.id)
+            model.mainPane.select(session.id)
             open()
         } label: {
             Text("\(session.title)  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))")

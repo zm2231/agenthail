@@ -89,7 +89,7 @@ struct NewSessionSheet: View {
         .frame(width: 520)
         .task {
             await model.loadCreationOptions()
-            if folder.isEmpty { folder = model.selectedSession.flatMap { $0.checkout?.path ?? $0.cwd } ?? folders.first ?? "" }
+            if folder.isEmpty { folder = model.mainPane.selectedSession.flatMap { $0.checkout?.path ?? $0.cwd } ?? folders.first ?? "" }
             selectDefaultLauncher()
         }
         .onChange(of: agent) { selectDefaultLauncher() }

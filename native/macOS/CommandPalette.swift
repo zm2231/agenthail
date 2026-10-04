@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CommandPalette: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
     @State private var query = ""
     @State private var highlightedID: String?
     @FocusState private var fieldFocused: Bool
@@ -41,7 +42,7 @@ struct CommandPalette: View {
                     title: session.title,
                     detail: [session.hostProject?.displayName, session.checkout?.branch, session.surface.capitalized].compactMap { $0 }.joined(separator: " · "),
                     session: session
-                ) { model.selectSession(session.id) }
+                ) { pane.select(session.id) }
             }
         let actions = actionEntries.filter { trimmed.isEmpty || $0.title.localizedCaseInsensitiveContains(trimmed) }
         return sessions + actions
@@ -54,11 +55,11 @@ struct CommandPalette: View {
     private var actionEntries: [Entry] {
         var actions = [
             Entry(id: "new", icon: "square.and.pencil", title: "New session", detail: "", shortcut: "⌘N") { model.newSessionVisible = true },
-            Entry(id: "inspector", icon: "sidebar.right", title: model.inspectorVisible ? "Hide inspector" : "Show inspector", detail: "", shortcut: "⌥⌘I") { model.inspectorVisible.toggle() },
+            Entry(id: "inspector", icon: "sidebar.right", title: pane.inspectorVisible ? "Hide inspector" : "Show inspector", detail: "", shortcut: "⌥⌘I") { pane.inspectorVisible.toggle() },
         ]
-        if let session = model.selectedSession {
+        if let session = pane.selectedSession {
             if session.isWorking {
-                actions.append(Entry(id: "stop", icon: "stop.circle", title: "Stop \(session.title)", detail: "") { model.interruptSelected() })
+                actions.append(Entry(id: "stop", icon: "stop.circle", title: "Stop \(session.title)", detail: "") { pane.interrupt() })
             }
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 actions.append(Entry(id: "focus", icon: "terminal", title: "Open in \(host)", detail: session.title) { model.focusInTerminal(session) })

@@ -4,17 +4,23 @@ import Textual
 
 struct DesktopWindow: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
+
+    init(model: AgenthailModel) {
+        self.model = model
+        self.pane = model.mainPane
+    }
 
     var body: some View {
         NavigationSplitView {
-            SessionSidebar(model: model)
+            SessionSidebar(model: model, pane: pane)
                 .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
         } detail: {
-            ConversationPane(model: model)
+            ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .ignoresSafeArea(.container, edges: .top)
-                .inspector(isPresented: $model.inspectorVisible) {
-                    SessionInspector(model: model)
+                .inspector(isPresented: $pane.inspectorVisible) {
+                    SessionInspector(model: model, pane: pane)
                         .ignoresSafeArea(.container, edges: .top)
                         .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
                 }
@@ -32,7 +38,7 @@ struct DesktopWindow: View {
                     Color.black.opacity(0.18)
                         .ignoresSafeArea()
                         .onTapGesture { model.paletteVisible = false }
-                    CommandPalette(model: model)
+                    CommandPalette(model: model, pane: pane)
                         .padding(.top, 72)
                 }
             }
@@ -54,6 +60,7 @@ struct DesktopWindow: View {
 
 struct SessionSidebar: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
     @State private var expandedProjects: Set<String> = []
     @FocusState private var searchFocused: Bool
 
@@ -147,7 +154,7 @@ struct SessionSidebar: View {
                     }
                     ForEach(tree.projects) { project in
                         let expanded = expandedProjects.contains(project.id)
-                        let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: model.selectedSessionID)
+                        let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
                             ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false)
@@ -241,7 +248,7 @@ extension SessionSidebar {
                         .padding(.vertical, 6)
                         .padding(.horizontal, 14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(model.selectedSessionID == result.session.id ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                        .background(pane.selectedSessionID == result.session.id ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -283,7 +290,7 @@ extension SessionSidebar {
         }
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
-            let shown = expandedProjects.contains(project.id) ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: model.selectedSessionID)
+            let shown = expandedProjects.contains(project.id) ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
             ids += shown.checkouts.flatMap(\.sessions).map(\.id).filter { !ids.contains($0) }
         }
         return ids
@@ -291,19 +298,19 @@ extension SessionSidebar {
 
     private func step(_ order: [String], by offset: Int) {
         guard !order.isEmpty else { return }
-        let current = model.selectedSessionID.flatMap { order.firstIndex(of: $0) }
+        let current = pane.selectedSessionID.flatMap { order.firstIndex(of: $0) }
         let next = current.map { min(max($0 + offset, 0), order.count - 1) } ?? 0
         if let result = model.searchResults.first(where: { $0.session.id == order[next] }) {
             model.openSearchResult(result.session)
         } else {
-            model.selectSession(order[next])
+            pane.select(order[next])
         }
     }
 
     private func sessionButton(_ session: SessionState, needsYou: Bool) -> some View {
-        let selected = model.selectedSessionID == session.id
+        let selected = pane.selectedSessionID == session.id
         return Button {
-            model.selectSession(session.id)
+            pane.select(session.id)
         } label: {
             SessionRowView(session: session, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
@@ -493,21 +500,23 @@ struct ConnectionFooter: View {
 
 struct ConversationPane: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
 
     var body: some View {
-        if let session = model.displayedSession {
+        if let session = pane.displayedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, model: model.detail?.model, context: model.detail?.context, inspectorVisible: $model.inspectorVisible, onFocusTerminal: { model.focusInTerminal(session) })
-                TranscriptView(model: model, session: session)
+                ConversationHeader(session: session, model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, onFocusTerminal: { model.focusInTerminal(session) })
+                TranscriptView(model: model, pane: pane, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if model.removedSession?.id == session.id {
-                            RemovedSessionBar(onClose: model.closeRemovedSession)
+                        if pane.removedSession?.id == session.id {
+                            RemovedSessionBar(onClose: pane.closeRemovedSession)
                         } else {
-                            ComposerView(model: model, session: session)
+                            ComposerView(model: model, pane: pane, session: session)
                         }
                     }
             }
             .background(DesktopPalette.window)
+            .environmentObject(pane)
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -622,6 +631,7 @@ struct ConversationHeader: View {
 
 struct TranscriptView: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
     let session: SessionState
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var pinned = true
@@ -629,14 +639,14 @@ struct TranscriptView: View {
     @State private var underfilled = false
 
     var body: some View {
-        let blocks = TranscriptBlock.build(model.timelineItems)
+        let blocks = TranscriptBlock.build(pane.timelineItems)
         let sends = model.localSends[session.id] ?? []
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                if let cursor = model.olderCursor, cursor > 0 {
+                if let cursor = pane.olderCursor, cursor > 0 {
                     olderControl
                 }
-                if let error = model.detail?.readError {
+                if let error = pane.detail?.readError {
                     Text(error)
                         .font(.system(size: 12.5))
                         .foregroundStyle(DesktopPalette.text2)
@@ -676,8 +686,8 @@ struct TranscriptView: View {
             underfilled = value
             if value { fillViewport() }
         }
-        .onChange(of: model.olderItems.count) { if underfilled { fillViewport() } }
-        .onChange(of: model.detail?.session.id) { if underfilled { fillViewport() } }
+        .onChange(of: pane.olderItems.count) { if underfilled { fillViewport() } }
+        .onChange(of: pane.detail?.session.id) { if underfilled { fillViewport() } }
         .onChange(of: session.id) {
             pinned = true
             position.scrollTo(edge: .bottom)
@@ -705,14 +715,14 @@ struct TranscriptView: View {
                 .hidden()
         }
         .overlay {
-            if model.detail == nil, model.selectedSessionID == session.id {
+            if pane.detail == nil, pane.selectedSessionID == session.id {
                 ProgressView().controlSize(.small)
             }
         }
         .overlay(alignment: .top) {
-            if model.detailStale {
+            if pane.detailStale {
                 HStack(spacing: 6) {
-                    if !model.detailRefreshFailed {
+                    if !pane.detailRefreshFailed {
                         ProgressView().controlSize(.mini)
                         Text("Updating…")
                     } else {
@@ -734,13 +744,13 @@ struct TranscriptView: View {
 
     private var olderControl: some View {
         HStack(spacing: 8) {
-            if model.loadingOlder {
+            if pane.loadingOlder {
                 ProgressView().controlSize(.mini)
             } else {
                 Button("Load earlier") {
                     prepending = true
                     Task {
-                        await model.loadOlder()
+                        await pane.loadOlder()
                         try? await Task.sleep(for: .milliseconds(300))
                         prepending = false
                     }
@@ -748,7 +758,7 @@ struct TranscriptView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.accentText)
             }
-            if let error = model.olderError {
+            if let error = pane.olderError {
                 Text(error).foregroundStyle(DesktopPalette.text2)
             }
         }
@@ -757,10 +767,10 @@ struct TranscriptView: View {
     }
 
     private func fillViewport() {
-        guard model.detail != nil, let cursor = model.olderCursor, cursor > 0, !model.loadingOlder, model.olderError == nil else { return }
+        guard pane.detail != nil, let cursor = pane.olderCursor, cursor > 0, !pane.loadingOlder, pane.olderError == nil else { return }
         prepending = true
         Task {
-            await model.loadOlder()
+            await pane.loadOlder()
             try? await Task.sleep(for: .milliseconds(300))
             prepending = false
         }
@@ -884,6 +894,7 @@ struct TranscriptBlockView: View {
 
 struct AttachmentImageView: View {
     @EnvironmentObject private var model: AgenthailModel
+    @EnvironmentObject private var pane: SessionPane
     let attachment: TimelineAttachment
     @State private var image: NSImage?
     @State private var failed = false
@@ -921,7 +932,7 @@ struct AttachmentImageView: View {
     }
 
     private func load() async {
-        guard let sessionID = model.selectedSessionID else { return }
+        guard let sessionID = pane.displayedSession?.id else { return }
         do {
             let data = try await model.attachmentData(sessionID: sessionID, attachment: attachment)
             if let decoded = NSImage(data: data) { image = decoded } else { failed = true }
@@ -1086,6 +1097,7 @@ struct ToolCallRow: View {
 
 struct ComposerView: View {
     @ObservedObject var model: AgenthailModel
+    let pane: SessionPane
     let session: SessionState
     @AppStorage("followUpDefault") private var followUpDefault = FollowUpAction.queue.rawValue
     @FocusState private var focused: Bool
@@ -1093,10 +1105,11 @@ struct ComposerView: View {
     private var followUp: FollowUpAction { FollowUpAction(rawValue: followUpDefault) ?? .queue }
     @ObservedObject private var draft: ComposerDraft
 
-    init(model: AgenthailModel, session: SessionState) {
+    init(model: AgenthailModel, pane: SessionPane, session: SessionState) {
         self.model = model
+        self.pane = pane
         self.session = session
-        self.draft = model.composerDraft
+        self.draft = pane.composerDraft
     }
 
     private var hasText: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -1158,7 +1171,7 @@ struct ComposerView: View {
                             .keyboardShortcut(.return, modifiers: [.command, .option])
                             .hidden()
                             .frame(width: 0, height: 0)
-                        Button("") { model.interruptSelected() }
+                        Button("") { pane.interrupt() }
                             .keyboardShortcut(".", modifiers: .command)
                             .hidden()
                             .frame(width: 0, height: 0)
@@ -1218,7 +1231,7 @@ struct ComposerView: View {
 
     private func primaryAction() {
         if primaryIsStop {
-            model.interruptSelected()
+            pane.interrupt()
         } else {
             submit(alternate: false)
         }
@@ -1227,8 +1240,7 @@ struct ComposerView: View {
     private func submit(alternate: Bool) {
         guard hasText else { return }
         let steer = session.isWorking && resolvedAction(alternate: alternate) == .steer
-        model.submit(model.composer, steer: steer)
-        model.composer = ""
+        pane.submit(steer: steer)
     }
 }
 
@@ -1316,7 +1328,7 @@ struct QueueDock: View {
                         }
                         Button("Send after this turn (current)") {}
                             .disabled(true)
-                        Button("Interrupt and send now") { model.interruptSelected() }
+                        Button("Interrupt and send now") { model.perform(action: "interrupt", sessionID: item.sessionId) }
                         Divider()
                         Button("Edit") { model.removeQueued(item, restoreToComposer: true) }
                         Button("Copy text") {
@@ -1361,6 +1373,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
 struct SessionInspector: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
     @State private var tab: InspectorTab = .details
 
     var body: some View {
@@ -1379,11 +1392,11 @@ struct SessionInspector: View {
             .padding(.horizontal, 16)
             .frame(height: 52)
             .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
-            if let session = model.displayedSession {
+            if let session = pane.displayedSession {
                 ScrollView {
                     Group {
                         switch tab {
-                        case .details: DetailsTab(model: model, session: session)
+                        case .details: DetailsTab(model: model, pane: pane, session: session)
                         case .delivery: DeliveryTab(model: model, session: session)
                         }
                     }
@@ -1421,11 +1434,12 @@ extension ContextState {
 
 struct DetailsTab: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject var pane: SessionPane
     let session: SessionState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let context = model.detail?.context, let usage = context.usageLabel {
+            if let context = pane.detail?.context, let usage = context.usageLabel {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Context").foregroundStyle(DesktopPalette.text2)
@@ -1441,12 +1455,12 @@ struct DetailsTab: View {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {
                 detailRow("Agent", session.alias.map { "@\($0)" } ?? session.name)
                 detailRow("Surface", session.surface.capitalized)
-                if let modelName = model.detail?.model { detailRow("Model", modelName) }
+                if let modelName = pane.detail?.model { detailRow("Model", modelName) }
                 if let project = session.hostProject?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }
-            if let goal = model.detail?.goal, !goal.objective.isEmpty {
+            if let goal = pane.detail?.goal, !goal.objective.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         SidebarCaption("Goal").padding(.horizontal, -8)

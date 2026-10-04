@@ -1,0 +1,270 @@
+import Foundation
+
+@MainActor
+final class SessionPane: ObservableObject, Identifiable {
+    let id = UUID()
+    let restoresSelection: Bool
+    unowned let model: AgenthailModel
+
+    @Published private(set) var selectedSessionID: String?
+    @Published private(set) var detail: SessionDetail?
+    @Published private(set) var detailStale = false
+    @Published private(set) var detailRefreshFailed = false
+    @Published private(set) var removedSession: SessionState?
+    @Published private(set) var olderItems: [TimelineItem] = []
+    @Published private(set) var olderCursor: Int64?
+    @Published private(set) var loadingOlder = false
+    @Published private(set) var olderError: String?
+    @Published var inspectorVisible = true
+    let composerDraft = ComposerDraft()
+    var composer: String {
+        get { composerDraft.text }
+        set { composerDraft.text = newValue }
+    }
+
+    private var selectedSnapshot: SessionState?
+    private var frozenOlderCursor: Int64?
+    private var sessionStreamTask: Task<Void, Never>?
+    private var sessionCursor: UInt64 = 0
+    private var detailReloadTask: Task<Void, Never>?
+    private var detailReloadPending = false
+    private var detailReloadOwner: UUID?
+    private var detailLoadedAt: Date?
+    private var selectionGeneration: UInt64 = 0
+    private var detailRequestGeneration: UInt64 = 0
+    private var detailAppliedGeneration: UInt64 = 0
+
+    init(model: AgenthailModel, restoresSelection: Bool) {
+        self.model = model
+        self.restoresSelection = restoresSelection
+    }
+
+    var selectedSession: SessionState? { model.knownSessions.first { $0.id == selectedSessionID } }
+    var displayedSession: SessionState? { selectedSession ?? removedSession }
+    var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
+
+    func select(_ id: String) {
+        guard id != selectedSessionID || detail == nil else { return }
+        removedSession = nil
+        selectedSnapshot = model.knownSessions.first { $0.id == id }
+        frozenOlderCursor = nil
+        if selectedSessionID != id {
+            if let previous = selectedSessionID { model.saveDraft(composer, for: previous) }
+            composer = model.takeDraft(for: id)
+        }
+        selectedSessionID = id
+        model.markSeen(id)
+        olderItems = []
+        olderCursor = nil
+        olderError = nil
+        selectionGeneration &+= 1
+        detailAppliedGeneration = detailRequestGeneration
+        if restoresSelection { UserDefaults.standard.set(id, forKey: "lastSelectedSessionID") }
+        detail = model.cachedDetail(id)
+        detailStale = detail != nil
+        detailRefreshFailed = false
+        detailLoadedAt = nil
+        detailReloadPending = false
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        startSessionStream(id)
+        Task { await loadSession(id) }
+    }
+
+    func close() {
+        if let current = selectedSessionID { model.saveDraft(composer, for: current) }
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        sessionStreamTask = nil
+        detailReloadTask = nil
+    }
+
+    func loadSession(_ id: String) async {
+        guard let api = model.api else { return }
+        detailRequestGeneration &+= 1
+        let generation = detailRequestGeneration
+        do {
+            let startedAt = Date()
+            if selectedSessionID == id { detailLoadedAt = startedAt }
+            let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return }
+            detailAppliedGeneration = generation
+            if olderItems.isEmpty {
+                olderCursor = loaded.timeline?.nextBefore
+            } else {
+                let retained = Set(olderItems.map(\.id) + (loaded.timeline?.items.map(\.id) ?? []))
+                olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
+            }
+            detail = loaded
+            detailStale = false
+            detailRefreshFailed = false
+            model.detailLoaded(loaded, for: id)
+        } catch {
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
+            model.operationError = error.localizedDescription
+            if detailStale { detailRefreshFailed = true }
+        }
+    }
+
+    func loadOlder() async {
+        guard let api = model.api, let id = selectedSessionID, !detailStale, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
+        let selection = selectionGeneration
+        loadingOlder = true
+        defer { loadingOlder = false }
+        do {
+            var next: Int64? = cursor
+            for _ in 0..<8 {
+                guard let before = next, before > 0 else { break }
+                let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: before)
+                guard selectionGeneration == selection else { return }
+                guard let timeline = page.timeline, timeline.unavailableReason == nil else {
+                    olderError = page.timeline?.unavailableReason ?? "Older activity is unavailable."
+                    return
+                }
+                let known = Set(timelineItems.map(\.id))
+                let fresh = timeline.items.filter { !known.contains($0.id) }
+                olderItems = fresh + olderItems
+                next = timeline.nextBefore
+                olderCursor = next
+                if !fresh.isEmpty { break }
+            }
+            olderError = nil
+        } catch {
+            if selectionGeneration == selection, !error.isCancellation { olderError = error.localizedDescription }
+        }
+    }
+
+    func reconcile() {
+        guard model.snapshot != nil else { return }
+        let sessions = model.knownSessions
+        if let selected = selectedSessionID {
+            if let live = sessions.first(where: { $0.id == selected }) {
+                selectedSnapshot = live
+                if removedSession != nil {
+                    removedSession = nil
+                    olderCursor = frozenOlderCursor
+                    frozenOlderCursor = nil
+                    startSessionStream(selected)
+                    Task { await loadSession(selected) }
+                }
+            } else if removedSession?.id != selected, selectedSnapshot?.id == selected {
+                removedSession = selectedSnapshot
+                freezeRemovedSession()
+            }
+            if removedSession != nil || sessions.contains(where: { $0.id == selected }) { return }
+        }
+        guard restoresSelection else { return }
+        let next = reconciledSelection(selected: selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID"), sessions: sessions)
+        guard next != selectedSessionID else { return }
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        detailReloadPending = false
+        detail = nil
+        detailStale = false
+        if let current = selectedSessionID { model.saveDraft(composer, for: current) }
+        composer = ""
+        selectedSessionID = nil
+        if let next { select(next) }
+    }
+
+    func closeRemovedSession() {
+        guard removedSession != nil else { return }
+        removedSession = nil
+        selectedSnapshot = nil
+        frozenOlderCursor = nil
+        if let current = selectedSessionID { model.saveDraft(composer, for: current) }
+        sessionStreamTask?.cancel()
+        detail = nil
+        detailStale = false
+        selectedSessionID = nil
+        if restoresSelection { UserDefaults.standard.removeObject(forKey: "lastSelectedSessionID") }
+        reconcile()
+    }
+
+    func sessionChanged(_ id: String) {
+        scheduleDetailReload(id)
+    }
+
+    func submit(steer: Bool) {
+        guard let sessionID = selectedSessionID, removedSession == nil else { return }
+        let text = composer
+        composer = ""
+        model.send(text, to: sessionID, steer: steer)
+    }
+
+    func interrupt() {
+        guard let sessionID = selectedSessionID, removedSession == nil else { return }
+        model.perform(action: "interrupt", sessionID: sessionID)
+    }
+
+    func restoreToComposer(_ text: String) {
+        composer = composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : "\(composer)\n\n\(text)"
+    }
+
+    private func freezeRemovedSession() {
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        detailReloadPending = false
+        detailAppliedGeneration = detailRequestGeneration
+        selectionGeneration &+= 1
+        frozenOlderCursor = olderCursor
+        olderCursor = nil
+        detailStale = false
+        detailRefreshFailed = false
+    }
+
+    private func scheduleDetailReload(_ id: String) {
+        guard selectedSessionID == id, removedSession == nil else { return }
+        detailReloadPending = true
+        guard detailReloadTask == nil else { return }
+        let owner = UUID()
+        detailReloadOwner = owner
+        detailReloadTask = Task {
+            defer {
+                if detailReloadOwner == owner { detailReloadTask = nil }
+            }
+            while detailReloadPending, !Task.isCancelled, selectedSessionID == id {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, selectedSessionID == id else { return }
+                detailReloadPending = false
+                await loadSession(id)
+            }
+        }
+    }
+
+    private func startSessionStream(_ id: String) {
+        sessionStreamTask?.cancel()
+        sessionCursor = 0
+        sessionStreamTask = Task {
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled, selectedSessionID == id {
+                guard let api = model.api else { return }
+                do {
+                    try await api.streamSession(id: id, after: sessionCursor, onConnected: {}, onEvent: { [weak self] event in
+                        backoff.reset()
+                        await self?.receiveSessionEvent(event)
+                    })
+                } catch {
+                    if Task.isCancelled || selectedSessionID != id { return }
+                    if case AgenthailAPIError.streamGap = error {
+                        sessionCursor = 0
+                        scheduleDetailReload(id)
+                        continue
+                    }
+                    try? await Task.sleep(for: .seconds(backoff.nextDelay()))
+                }
+            }
+        }
+    }
+
+    private func receiveSessionEvent(_ event: SessionStreamEvent) {
+        guard event.stream == "session", event.sessionId == selectedSessionID else { return }
+        sessionCursor = max(sessionCursor, event.seq)
+        if let loadedAt = detailLoadedAt, let changedAt = SessionTree.parseTimestamp(event.data.ts), changedAt < loadedAt {
+            return
+        }
+        scheduleDetailReload(event.sessionId)
+    }
+}
