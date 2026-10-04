@@ -247,11 +247,18 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("managed Codex launch receipt path is not launch-owned")
 		}
 		binding := managedCodexLaunchBinding{TmuxPane: strings.TrimSpace(os.Getenv("TMUX_PANE")), Workspace: strings.TrimSpace(os.Getenv("CMUX_WORKSPACE_ID")), Surface: strings.TrimSpace(os.Getenv("CMUX_SURFACE_ID"))}
-		if binding.TmuxPane == "" && (binding.Workspace == "" || binding.Surface == "") {
-			return fmt.Errorf("managed Codex launch did not receive a terminal identity")
-		}
-		if binding.TmuxPane != "" && !strings.HasPrefix(binding.TmuxPane, "%") {
-			return fmt.Errorf("managed Codex launch received invalid TMUX_PANE")
+		if binding.Workspace != "" || binding.Surface != "" {
+			if binding.Workspace == "" || binding.Surface == "" {
+				return fmt.Errorf("managed Codex launch received incomplete CMUX identity")
+			}
+			binding.TmuxPane = ""
+		} else {
+			if binding.TmuxPane == "" {
+				return fmt.Errorf("managed Codex launch did not receive a terminal identity")
+			}
+			if !strings.HasPrefix(binding.TmuxPane, "%") {
+				return fmt.Errorf("managed Codex launch received invalid TMUX_PANE")
+			}
 		}
 		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
