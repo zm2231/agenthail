@@ -2,7 +2,7 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
 
-The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means a post-dispatch response could not be confirmed. A `submitted` receipt carries a `deliveryId` only when Agenthail durably recorded a sender-bound intent; without a resolved sender, no intent is recorded and the receipt has no `deliveryId`. Channel sends count `submitted` members separately from `sent` and `queued`. `submitted` is not acceptance, delivery, failure, or permission to retry. Evidence in Inbox and history remains `submitted`, `queued`, `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, or `canceled`. `transport_accepted` is deliberately weaker than `delivered`; for a Claude peer it means the authenticated socket accepted the frame, while receiver policy and model completion remain pending. `reply_observed` is emitted only after Agenthail reads the completed reply. User interfaces must not relabel either state as a completed delivery.
+The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, and `canceled`. Socket acceptance never proves model completion.
 
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
@@ -30,15 +30,17 @@ a reply that spans several text blocks around tool calls is one exchange with
 its full text. Codex reads the newest page from the native app-server RPC
 first; when that bounded read fails it falls back to the local transcript page
 and reports the RPC failure as a `warning`, and when no transcript exists either
-the RPC failure is part of `readError`. Phone session detail uses the same
-reader and cursor; timeline items always come from the local transcript. A read
-failure never resends a message.
+the RPC failure is part of `readError`. Phone session detail reads the bounded
+per-session journal page, while metadata loads independently. The shared session
+source seeds and updates the journal rather than each viewer reading the provider.
+A read failure never resends a message.
 
-The daemon's retained event journal is the single live-update producer.
-`/api/v1/events` is a replayable SSE view over that journal; consumers use an
-event as an invalidation signal and fetch the bounded session page they need.
-Agenthail does not run a second per-connection session poller or publish a
-separate `/session-stream` contract.
+The shared session source writes a retained journal for each session.
+`/api/v1/session-stream` replays that journal using its session cursor;
+`/api/v1/catalog-events` publishes catalog changes using a separate catalog
+cursor. `/api/v1/events` retains the general event view. None of these viewers
+starts a separate provider poller. See [session stream and catalog](session-stream-catalog.md)
+for paging, replay, gaps and source lifetime.
 
 Busy-target behavior is explicit: `send` delivers immediately when idle and follows
 the persisted `busyDelivery` setting (`queue` by default, or `steer` when the

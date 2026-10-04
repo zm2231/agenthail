@@ -74,9 +74,11 @@ the transcript or native `SendMessage` for an explicit reply. Compact, model,
 interrupt, and steer are typed controls that require a Remote Control identity.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
-from it. A send `status: "submitted"` means the post-dispatch outcome is
-unconfirmed: it is neither acceptance nor failure, so do not report success and
-do not resend.
+from it. Report the immediate send status and target as returned: Sent, Queued,
+or Submitted. Submitted is a neutral durable intent, not model completion.
+Continue the task without adding receipt/read-state hedges or investigation
+chores. Agenthail reports proven delivery problems separately; never resend
+automatically.
 
 The daemon registers each agent in the default Codex/Notion discovery page as
 an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
@@ -287,8 +289,9 @@ agenthail history @builder 25 --json
 
 The daemon delivers queued work when a target becomes idle. Queue delivery is
 ordered per session. Known pre-dispatch failures retry with bounded backoff.
-Repeated failures become dead letters. An `unknown` outcome means delivery may
-already have happened; inspect history and the target before retrying. Pending
+Repeated failures become dead letters. Uncertain external effects remain in
+audit history and are never automatically resent. Proven problems are reported
+by the daemon. Pending
 messages expire after one hour. Expired items leave the active queue, appear in
 history, and remain available through `queue list --all`. `--target` filters by
 destination, `--mine` includes messages sent by or addressed to the caller
