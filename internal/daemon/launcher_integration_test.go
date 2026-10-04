@@ -147,6 +147,13 @@ func TestSessionCreateReportsAcceptedUnresolvedLaunchWithoutRetrySignal(t *testi
 	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"ok":true`) || !strings.Contains(w.Body.String(), `"status":"submitted"`) || !strings.Contains(w.Body.String(), `"accepted":true`) || !strings.Contains(w.Body.String(), `"retryable":false`) || !strings.Contains(w.Body.String(), `"warning":`) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["warning"] != "Submitted to cmux." {
+		t.Fatalf("accepted launch receipt=%s", w.Body.String())
+	}
 }
 
 func TestSessionCreateReportsAcceptedLaunchWhenDiscoveryFails(t *testing.T) {
@@ -174,6 +181,9 @@ func TestSessionCreateReportsAcceptedLaunchWhenDiscoveryFails(t *testing.T) {
 	}
 	if body["ok"] != true || body["status"] != "submitted" || body["accepted"] != true || body["retryable"] != false || body["warning"] == nil {
 		t.Fatalf("body=%s", w.Body.String())
+	}
+	if body["warning"] != "Submitted to cmux." {
+		t.Fatalf("accepted launch receipt=%s", w.Body.String())
 	}
 }
 
