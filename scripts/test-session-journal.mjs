@@ -61,7 +61,7 @@ problemContext.imageItems = [
   problemContext.imageItem,
   {id: 'a1', kind: 'message', role: 'assistant', text: 'After image'},
 ];
-const timelineHTML = vm.runInContext('renderImageTimeline(imageItems, imageSession)', problemContext);
+const timelineHTML = vm.runInContext('renderTimeline(imageItems, imageSession)', problemContext);
 assert.ok(timelineHTML.indexOf('Before image') < timelineHTML.indexOf('<img'));
 assert.ok(timelineHTML.indexOf('<img') < timelineHTML.indexOf('After image'));
 assert.ok(timelineHTML.includes('data-role="user"') && timelineHTML.includes('data-role="agent"'));

@@ -1020,9 +1020,6 @@ function renderTimelineItem(item, session) {
 function renderTimeline(items, session) {
   return items.map(item => renderTimelineItem(item, session)).join("");
 }
-function renderImageTimeline(items, session) {
-  return renderTimeline(items, session);
-}
 function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents) {
   return JSON.stringify([
     session.id,
@@ -1098,7 +1095,7 @@ function renderChat() {
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
-  if (readOnly && session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
+  if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
   const timeline = app.history?.timeline?.items || [];
   const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents);
   if (app.transcriptSignature === signature) return;
