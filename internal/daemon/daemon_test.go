@@ -591,7 +591,7 @@ func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	if events := withoutQueueCatalogEvents(window.Events); err != nil || len(events) != 1 || events[0].Type != "delivery.problem" {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -607,7 +607,7 @@ func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 0 {
+	if err != nil || len(withoutQueueCatalogEvents(window.Events)) != 0 {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -1257,7 +1257,13 @@ func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	problems := 0
+	for _, event := range window.Events {
+		if event.Type == "delivery.problem" {
+			problems++
+		}
+	}
+	if err != nil || problems != 1 {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }

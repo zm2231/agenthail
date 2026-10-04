@@ -403,7 +403,7 @@ func TestManagedStreamTreatsGrowingFinalPhaseAsPartialUntilTerminal(t *testing.T
 	err := NewCodex("").streamManagedClient(context.Background(), client, &surface.Session{ID: "thread", Transport: codexTransportManaged}, "", func(event surface.StreamEvent) {
 		events = append(events, event)
 	}, 2*time.Second)
-	if err != nil || len(events) != 4 || events[0].Text != "hel" || events[1].Text != "lo" || events[2].Text != "hello" || !events[2].Final || events[3].Kind != "done" {
+	if err != nil || len(events) != 4 || events[0].Text != "hel" || events[1].Text != "hello" || events[1].Operation != "upsert" || events[2].Text != "hello" || !events[2].Final || events[3].Kind != "done" {
 		t.Fatalf("err=%v events=%+v", err, events)
 	}
 }
@@ -757,4 +757,29 @@ func isolatedManagedRuntime(t *testing.T) *Codex {
 	codex := NewCodex(server.URL)
 	codex.managed = true
 	return codex
+}
+
+func TestManagedStreamRestartsEmitIdempotentAuthoritativeSnapshots(t *testing.T) {
+	var events []surface.StreamEvent
+	for _, body := range []string{"hello", "hello", "hello world"} {
+		client := &sequenceCodexClient{responses: []map[string]any{
+			managedThreadResponse("turn-1", "inProgress", body),
+			managedThreadResponse("turn-1", "inProgress", body),
+		}}
+		err := NewCodex("").streamManagedClient(context.Background(), client, &surface.Session{ID: "thread", Transport: codexTransportManaged}, "", func(event surface.StreamEvent) {
+			events = append(events, event)
+		}, 20*time.Millisecond)
+		if !errors.Is(err, surface.ErrStreamWindow) {
+			t.Fatalf("window err=%v", err)
+		}
+	}
+	if len(events) != 3 {
+		t.Fatalf("events=%+v", events)
+	}
+	for index, want := range []string{"hello", "hello", "hello world"} {
+		event := events[index]
+		if event.ID != "managed:turn-1:text" || event.Operation != "upsert" || event.Text != want || event.Version != uint64(len(want)) || event.Kind == "done" {
+			t.Fatalf("event %d=%+v", index, event)
+		}
+	}
 }

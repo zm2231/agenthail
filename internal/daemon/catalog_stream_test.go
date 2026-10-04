@@ -214,14 +214,16 @@ func TestActiveCatalogSubscriberReceivesTerminalRelayProblemAndReconnectsWithout
 		t.Fatal(err)
 	}
 	defer stop()
-	if len(window.Events) != 0 {
-		t.Fatalf("replayed=%+v", window.Events)
+	for _, replayed := range window.Events {
+		if replayed.Type != "session.queue" {
+			t.Fatalf("replayed=%+v", window.Events)
+		}
 	}
 	if _, created, err := d.catalog.publish(registry.CatalogEvent{DedupeKey: "session:sender:after-problem", Type: "session.upserted", EntityID: sender.ID, Payload: []byte(`{"id":"sender"}`)}); err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
 	next := receiveCatalogEvent(t, resumed)
-	if next.Seq != first.Seq+1 || next.Type != "session.upserted" {
+	if next.Seq <= first.Seq || next.Type != "session.upserted" {
 		t.Fatalf("first=%+v next=%+v", first, next)
 	}
 }
@@ -297,24 +299,36 @@ func TestCatalogHubClosesStaleSubscribersAndRecoversAfterJournalGap(t *testing.T
 
 func receiveCatalogEvent(t *testing.T, events <-chan registry.CatalogEvent) registry.CatalogEvent {
 	t.Helper()
-	select {
-	case event, open := <-events:
-		if !open {
-			t.Fatal("catalog subscriber closed")
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event, open := <-events:
+			if !open {
+				t.Fatal("catalog subscriber closed")
+			}
+			if event.Type == "session.queue" {
+				continue
+			}
+			return event
+		case <-deadline:
+			t.Fatal("catalog subscriber did not receive an event")
+			return registry.CatalogEvent{}
 		}
-		return event
-	case <-time.After(time.Second):
-		t.Fatal("catalog subscriber did not receive an event")
-		return registry.CatalogEvent{}
 	}
 }
 
 func ensureNoCatalogEvent(t *testing.T, events <-chan registry.CatalogEvent) {
 	t.Helper()
-	select {
-	case event := <-events:
-		t.Fatalf("unexpected catalog event=%+v", event)
-	case <-time.After(100 * time.Millisecond):
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case event := <-events:
+			if event.Type != "session.queue" {
+				t.Fatalf("unexpected catalog event=%+v", event)
+			}
+		case <-deadline:
+			return
+		}
 	}
 }
 
@@ -361,9 +375,13 @@ func receiveCatalogSSE(t *testing.T, reader *bufio.Reader) catalogStreamEnvelope
 				continue
 			}
 			var event catalogStreamEnvelope
-			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil {
-				result <- event
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) != nil {
+				return
 			}
+			if event.Type == "session.queue" {
+				continue
+			}
+			result <- event
 			return
 		}
 	}()
@@ -595,6 +613,7 @@ func TestDiscoveryStreamsProjectionChangesIncludingReturnToPriorValue(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	queued.Events = withoutQueueCatalogEvents(queued.Events)
 	if len(queued.Events) != 1 || queued.Events[0].Type != "session.upserted" {
 		t.Fatalf("queued=%+v", queued.Events)
 	}
@@ -621,4 +640,14 @@ func TestDiscoveryStreamsProjectionChangesIncludingReturnToPriorValue(t *testing
 	if err := json.Unmarshal(returned.Events[0].Payload, &row); err != nil || row.Session.Alias != "" {
 		t.Fatalf("row=%+v err=%v", row.Session, err)
 	}
+}
+
+func withoutQueueCatalogEvents(events []registry.CatalogEvent) []registry.CatalogEvent {
+	filtered := make([]registry.CatalogEvent, 0, len(events))
+	for _, event := range events {
+		if event.Type != "session.queue" {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
 }

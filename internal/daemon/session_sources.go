@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -564,7 +565,7 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 		if item.Kind == "done" {
 			operation = "phase"
 		}
-		if s.journalSupersedesSeed(providerKey, operation, item) {
+		if s.mergeSeedIntoAuthoritativeRow(providerKey, operation, item) {
 			continue
 		}
 		if item.Text != "" && item.Kind != "done" {
@@ -591,19 +592,17 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 	}
 }
 
-func (s *sessionSource) journalSupersedesSeed(providerKey, operation string, item surface.TimelineItem) bool {
+func (s *sessionSource) mergeSeedIntoAuthoritativeRow(providerKey, operation string, item surface.TimelineItem) bool {
+	journalKey := providerKey
 	if operation == "phase" {
-		providerKey += ":phase:" + item.Kind
+		journalKey += ":phase:" + item.Kind
 	}
-	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, providerKey)
+	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, journalKey)
 	if err != nil || !found {
 		return false
 	}
 	var payload sessionJournalPayload
 	if json.Unmarshal(entry.Payload, &payload) != nil || payload.Kind != item.Kind {
-		return false
-	}
-	if item.Attachment != nil && (payload.Attachment == nil || payload.Attachment.ID != item.Attachment.ID) {
 		return false
 	}
 	body := payload.Body
@@ -613,7 +612,41 @@ func (s *sessionSource) journalSupersedesSeed(providerKey, operation string, ite
 		}
 		body = string(entry.FullBody)
 	}
-	return body == item.Text || (item.Truncated && strings.HasPrefix(body, item.Text))
+	if body != item.Text && (!item.Truncated || !strings.HasPrefix(body, item.Text)) {
+		return false
+	}
+	if body != "" && item.Kind != "done" {
+		s.mu.Lock()
+		s.appendBodies[providerKey] = body
+		s.mu.Unlock()
+	}
+	merged := payload
+	mergeSeedField(&merged.Role, item.Role)
+	mergeSeedField(&merged.Title, item.Title)
+	mergeSeedField(&merged.Status, item.Status)
+	mergeSeedField(&merged.TurnID, item.TurnID)
+	mergeSeedField(&merged.CallID, item.CallID)
+	if item.Attachment != nil {
+		merged.Attachment = item.Attachment
+	}
+	if merged.Role == payload.Role && merged.Title == payload.Title && merged.Status == payload.Status && merged.TurnID == payload.TurnID && merged.CallID == payload.CallID && reflect.DeepEqual(merged.Attachment, payload.Attachment) {
+		return true
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return true
+	}
+	updated, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: merged.Kind, ProviderKey: journalKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: entry.FullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	if err == nil && changed {
+		s.publish(updated)
+	}
+	return true
+}
+
+func mergeSeedField(target *string, value string) {
+	if value != "" {
+		*target = value
+	}
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {

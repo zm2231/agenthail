@@ -140,8 +140,8 @@ func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 func catalogCurrentSQL(codexRecentHours int) string {
 	_ = codexRecentHours
 	return `((s.surface='claude' AND (COALESCE(qc.queue_count,0)>0 OR COALESCE(json_extract(cs.projection_fingerprint,'$.open'),0)=1))
-		OR (s.surface='codex' AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.status!='notLoaded' AND s.last_active_ms>0 AND s.last_active_ms>=?))
-		OR (s.surface NOT IN ('claude','codex') AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.last_active_ms>0 AND s.last_active_ms>=?)))`
+		OR (s.surface='codex' AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.status!='notLoaded' AND s.last_active_ms>0 AND s.last_active_ms>=?)))
+		OR (s.surface NOT IN ('claude','codex') AND (s.status='busy' OR COALESCE(qc.queue_count,0)>0 OR (s.last_active_ms>0 AND s.last_active_ms>=?))))`
 }
 
 func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSessionState, error) {

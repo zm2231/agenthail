@@ -253,3 +253,56 @@ func TestRecordCatalogSurfacePublishesEveryHealthTransition(t *testing.T) {
 		t.Fatalf("surface health events=%v want=%v", got, want)
 	}
 }
+
+func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, Name: "Queued", Status: surface.StatusIdle}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"queued-claude","open":false}`}, CatalogEvent{DedupeKey: "session.upserted:queued-claude", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"queued-claude"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	page := func() CatalogPage {
+		t.Helper()
+		current, err := r.CatalogSnapshotPage(CatalogPageRequest{Scope: "current", Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return current
+	}
+	empty := page()
+	if len(empty.Sessions) != 0 {
+		t.Fatalf("idle session listed as current: %+v", empty.Sessions)
+	}
+	if err := r.QueueMessage(session.ID, "first"); err != nil {
+		t.Fatal(err)
+	}
+	queued := page()
+	if queued.CatalogSeq <= empty.CatalogSeq || len(queued.Sessions) != 1 {
+		t.Fatalf("enqueue seq=%d->%d sessions=%d", empty.CatalogSeq, queued.CatalogSeq, len(queued.Sessions))
+	}
+	item, err := r.ClaimNextMessage(session.ID, time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	claimed := page()
+	if claimed.CatalogSeq != queued.CatalogSeq || len(claimed.Sessions) != 1 {
+		t.Fatalf("claim changed membership or watermark: seq=%d->%d sessions=%d", queued.CatalogSeq, claimed.CatalogSeq, len(claimed.Sessions))
+	}
+	if err := r.AckMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	drained := page()
+	if drained.CatalogSeq <= claimed.CatalogSeq || len(drained.Sessions) != 0 {
+		t.Fatalf("drain seq=%d->%d sessions=%d", claimed.CatalogSeq, drained.CatalogSeq, len(drained.Sessions))
+	}
+	if err := r.QueueMessage(session.ID, "expires"); err != nil {
+		t.Fatal(err)
+	}
+	beforeExpiry := page()
+	if expired, err := r.ExpireMessages(time.Now().Add(365 * 24 * time.Hour)); err != nil || expired != 1 {
+		t.Fatalf("expired=%d err=%v", expired, err)
+	}
+	swept := page()
+	if swept.CatalogSeq <= beforeExpiry.CatalogSeq || len(swept.Sessions) != 0 {
+		t.Fatalf("expiry seq=%d->%d sessions=%d", beforeExpiry.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
+	}
+}

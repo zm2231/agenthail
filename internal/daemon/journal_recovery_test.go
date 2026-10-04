@@ -325,3 +325,129 @@ func TestSessionCreateStarterLauncherMatchesDefaultCreationOutcomes(t *testing.T
 		})
 	}
 }
+
+type managedRestartSurface struct {
+	*flakySeedSurface
+	mode  string
+	calls atomic.Int32
+}
+
+func (s *managedRestartSurface) Stream(ctx context.Context, _ *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
+	call := s.calls.Add(1)
+	text := "hello"
+	if call >= 3 {
+		text = "hello world"
+	}
+	onEvent(surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: uint64(len(text)), Operation: "upsert", TurnID: "turn-1", Kind: "text", Role: "assistant", Text: text})
+	switch {
+	case call == 1 && s.mode == "transient":
+		return errors.New("scripted transient stream failure")
+	case call <= 2:
+		return surface.ErrStreamWindow
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestManagedStreamRestartsKeepOneAuthoritativeReplyBody(t *testing.T) {
+	for _, mode := range []string{"window", "transient"} {
+		t.Run(mode, func(t *testing.T) {
+			_, reg, fake, from, _ := daemonFixture(t)
+			adapter := &managedRestartSurface{flakySeedSurface: &flakySeedSurface{daemonSurface: fake}, mode: mode}
+			adapter.caps.Stream = true
+			manager := newSessionSourceManager(reg)
+			subscription, err := manager.subscribe(&from, adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer subscription.Cancel()
+			var bodies []string
+			waitFor(t, 5*time.Second, func() bool {
+				bodies = bodies[:0]
+				for _, payload := range journalPayloads(t, reg, from.ID) {
+					if payload.Kind == "done" {
+						t.Fatalf("restart produced a completion: %+v", payload)
+					}
+					if payload.ProviderKey == "managed:turn-1:text" {
+						bodies = append(bodies, payload.Body)
+					}
+				}
+				return adapter.calls.Load() >= 3 && len(bodies) == 1 && bodies[0] == "hello world"
+			})
+		})
+	}
+}
+
+func TestSeedMergesMetadataChangesIntoAuthoritativeRow(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "merge", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source.append(surface.StreamEvent{ID: "done", ProviderKey: "timeline:done", Operation: "phase", Kind: "done", Status: "completed", TurnID: "turn-1"})
+	source.appendSeedItems([]surface.TimelineItem{{ID: "done", Kind: "done", Status: "cancelled", TurnID: "turn-1"}})
+	full := strings.Repeat("authoritative reply ", 2000)
+	source.append(surface.StreamEvent{ID: "reply", ProviderKey: "timeline:reply", Version: uint64(len(full)), Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: full})
+	source.appendSeedItems([]surface.TimelineItem{{ID: "reply", Kind: "message", Role: "assistant", Status: "edited", CallID: "call-1", Text: full[:4096], Truncated: true}})
+	rows := journalPayloads(t, reg, from.ID)
+	if len(rows) != 2 {
+		t.Fatalf("rows=%+v", rows)
+	}
+	for _, row := range rows {
+		switch row.Kind {
+		case "done":
+			if row.Status != "cancelled" {
+				t.Fatalf("status-only change suppressed: %+v", row)
+			}
+		case "message":
+			if row.Status != "edited" || row.CallID != "call-1" || row.BodyRef == "" || !row.Final || row.Version != uint64(len(full)) {
+				t.Fatalf("metadata merge lost authority: %+v", row)
+			}
+		}
+	}
+}
+
+func TestSkippedSeedKeepsAuthoritativeAppendPrefix(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	writer := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "first", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	writer.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Version: 11, Operation: "upsert", Final: true, Kind: "message", Role: "assistant", Text: "hello world"})
+	restarted := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "second", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	restarted.appendSeedItems([]surface.TimelineItem{{ID: "item", Kind: "message", Role: "assistant", Text: "hello", Truncated: true}})
+	restarted.append(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Operation: "append", Kind: "message", Role: "assistant", Text: "!"})
+	rows := journalPayloads(t, reg, from.ID)
+	if len(rows) != 1 || rows[0].Body != "hello world!" {
+		t.Fatalf("append prefix lost: %+v", rows)
+	}
+}
+
+func TestCatalogQueueProjectionReconcilesAfterStaleDiscoveryWrite(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	d, reg, _, _, to := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	staleRecord := func() registry.CatalogSessionState {
+		snapshot, err := reg.CatalogSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range snapshot.Sessions {
+			if record.Session.ID == to.ID {
+				return record
+			}
+		}
+		t.Fatalf("catalog session %s missing", to.ID)
+		return registry.CatalogSessionState{}
+	}
+	stale := staleRecord()
+	if err := reg.QueueMessage(to.ID, "queued during discovery"); err != nil {
+		t.Fatal(err)
+	}
+	d.publishCatalogQueueCounts()
+	if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: stale.Session, HostProject: stale.HostProject, Checkout: stale.Checkout, ObservedAt: time.Now(), ProjectionFingerprint: stale.ProjectionFingerprint}, registry.CatalogEvent{DedupeKey: "session.upserted:" + to.ID, Type: "session.upserted", EntityID: to.ID, Payload: []byte(`{"session":{}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	d.publishCatalogQueueCounts()
+	var projection dashboardSession
+	if err := json.Unmarshal([]byte(staleRecord().ProjectionFingerprint), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if projection.QueueCount != 1 {
+		t.Fatalf("stale discovery count was not reconciled: %+v", projection)
+	}
+}
