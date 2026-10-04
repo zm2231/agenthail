@@ -134,6 +134,10 @@ final class AgenthailIOSModel: ObservableObject {
         do {
             let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
+            if receipt.accepted == true && receipt.id == nil {
+                creationWarning = receipt.warning ?? "The launcher accepted the request; the conversation is not available yet."
+                return false
+            }
             creationWarning = receipt.warning
             if let id = receipt.id, !id.isEmpty {
                 deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
