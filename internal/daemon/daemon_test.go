@@ -368,6 +368,27 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	}
 }
 
+func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	queueID, err := r.QueueRelayMessageWithOptions(to.ID, "relay with options", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.QueueItem(queueID)
+	if err != nil || item.BusyDelivery != "queue" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	d.drainMessageQueue(context.Background(), fake, &to)
+	if len(fake.steered) != 0 || len(fake.models) != 1 || fake.models[0] != "model-a" || r.QueueCount(to.ID) != 0 {
+		t.Fatalf("steered=%v models=%v queued=%d", fake.steered, fake.models, r.QueueCount(to.ID))
+	}
+}
+
 func TestObservationPublishesOnlyWhenRuntimeStateChanges(t *testing.T) {
 	d, _, fake, from, _ := daemonFixture(t)
 	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1"}
