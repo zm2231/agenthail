@@ -549,6 +549,80 @@ func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 	}
 }
 
+func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	when := "2026-10-04T00:00:00Z"
+	body := strings.Repeat("x", sessionStreamBodyBytes+512)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent, 2),
+		items: []surface.TimelineItem{{
+			ID:        "timeline-1",
+			Kind:      "message",
+			Role:      "assistant",
+			Text:      body,
+			Timestamp: when,
+		}},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(registry)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	seeded, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(seeded.Entries) != 1 || seeded.LatestSeq != 1 {
+		t.Fatalf("seeded=%+v err=%v", seeded, err)
+	}
+	select {
+	case entry := <-subscription.Entries:
+		if entry.Seq != seeded.LatestSeq {
+			t.Fatalf("seed event=%+v, want seq %d", entry, seeded.LatestSeq)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("seed event was not published")
+	}
+	adapter.events <- surface.StreamEvent{ID: "timeline-1", ProviderKey: "timeline:timeline-1", Version: uint64(len(body)), Operation: "upsert", Kind: "message", Role: "assistant", Text: body, Timestamp: timeMustParse(t, when)}
+	select {
+	case entry := <-subscription.Entries:
+		t.Fatalf("identical overlap was published: %+v", entry)
+	case <-time.After(150 * time.Millisecond):
+	}
+	unchanged, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || unchanged.LatestSeq != seeded.LatestSeq || len(unchanged.Entries) != 1 {
+		t.Fatalf("unchanged=%+v err=%v", unchanged, err)
+	}
+	adapter.events <- surface.StreamEvent{ID: "timeline-1", ProviderKey: "timeline:timeline-1", Version: uint64(len(body) + 1), Operation: "upsert", Kind: "message", Role: "assistant", Text: body + "!", Timestamp: timeMustParse(t, when)}
+	select {
+	case entry := <-subscription.Entries:
+		if entry.Seq != seeded.LatestSeq+1 {
+			t.Fatalf("changed entry=%+v, want seq %d", entry, seeded.LatestSeq+1)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("changed overlap was not published")
+	}
+	changed, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || changed.LatestSeq != seeded.LatestSeq+1 || len(changed.Entries) != 1 {
+		t.Fatalf("changed=%+v err=%v", changed, err)
+	}
+}
+
+func timeMustParse(t *testing.T, value string) time.Time {
+	t.Helper()
+	at, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return at
+}
+
 func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
 	d, _, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}

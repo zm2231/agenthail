@@ -20,7 +20,7 @@ func TestSessionJournalReplaysUpsertsAndReportsRetentionGap(t *testing.T) {
 		t.Fatalf("first=%+v inserted=%v err=%v", first, inserted, err)
 	}
 	updated, inserted, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "item-1", Payload: []byte("one updated"), ObservedAt: time.Unix(2, 0)}, retention)
-	if err != nil || inserted || updated.Seq <= first.Seq || !bytes.Equal(updated.Payload, []byte("one updated")) {
+	if err != nil || !inserted || updated.Seq <= first.Seq || !bytes.Equal(updated.Payload, []byte("one updated")) {
 		t.Fatalf("updated=%+v inserted=%v err=%v", updated, inserted, err)
 	}
 	replayed, err := r.SessionJournalAfter("session", first.Seq, 10)
@@ -42,6 +42,45 @@ func TestSessionJournalReplaysUpsertsAndReportsRetentionGap(t *testing.T) {
 	gap, err := r.SessionJournalAfter("session", 1, 10)
 	if err != nil || !gap.Gap || len(gap.Entries) != 0 {
 		t.Fatalf("gap=%+v err=%v", gap, err)
+	}
+}
+
+func TestSessionJournalIdenticalProviderReplayDoesNotAdvanceWatermark(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 4, Bytes: 1024}
+	payload := []byte(`{"itemId":"item-1","providerKey":"item-1","version":7,"kind":"text","ts":"2026-10-04T00:00:00Z","body":"same","bodyRef":"ref-a"}`)
+	first, changed, err := r.AppendSessionJournalEntry(SessionJournalEntry{
+		SessionID:   "session",
+		Kind:        "text",
+		ProviderKey: "item-1",
+		Payload:     payload,
+		BodyRef:     "ref-a",
+		FullBody:    []byte("same full body"),
+		ObservedAt:  time.Unix(1, 0),
+	}, retention)
+	if err != nil || !changed || first.Seq != 1 {
+		t.Fatalf("first=%+v changed=%v err=%v", first, changed, err)
+	}
+	replayedPayload := []byte(`{"itemId":"item-1","providerKey":"item-1","version":7,"kind":"text","ts":"2026-10-04T00:00:00Z","body":"same","bodyRef":"ref-b"}`)
+	replayed, changed, err := r.AppendSessionJournalEntry(SessionJournalEntry{
+		SessionID:   "session",
+		Kind:        "text",
+		ProviderKey: "item-1",
+		Payload:     replayedPayload,
+		BodyRef:     "ref-b",
+		FullBody:    []byte("same full body"),
+		ObservedAt:  time.Unix(2, 0),
+	}, retention)
+	if err != nil || changed || replayed.Seq != first.Seq || !bytes.Equal(replayed.Payload, first.Payload) || replayed.BodyRef != first.BodyRef {
+		t.Fatalf("replayed=%+v changed=%v err=%v", replayed, changed, err)
+	}
+	window, err := r.SessionJournalAfter("session", 0, 10)
+	if err != nil || window.LatestSeq != first.Seq || len(window.Entries) != 1 || window.Entries[0].BodyRef != "ref-a" {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	if _, _, err := r.SessionJournalBody("session", "ref-b", 0, 1); err == nil {
+		t.Fatal("identical replay stored a new body reference")
 	}
 }
 

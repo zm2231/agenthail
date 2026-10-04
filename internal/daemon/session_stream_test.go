@@ -124,7 +124,7 @@ func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T)
 		t.Fatalf("first=%+v inserted=%v err=%v", first, inserted, err)
 	}
 	updated, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "message-1", Payload: []byte(`{"itemId":"message-1","version":2,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:01Z","body":"latest"}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024})
-	if err != nil || inserted || updated.Seq <= first.Seq {
+	if err != nil || !inserted || updated.Seq <= first.Seq {
 		t.Fatalf("updated=%+v inserted=%v err=%v", updated, inserted, err)
 	}
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
