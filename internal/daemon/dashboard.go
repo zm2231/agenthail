@@ -1120,7 +1120,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				}
 				if surface.IsDeliveryOutcomeUnknown(startErr) {
 					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
-					writeSubmittedSession(w, session, intent.ID, "Initial turn outcome is unresolved; no automatic retry will occur.")
+					writeSubmittedSession(w, session, intent.ID, submittedSessionDetail(session, alias))
 					return
 				}
 				_, _ = d.Registry.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, startErr.Error())
@@ -1944,19 +1944,29 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func writeSubmittedSession(w http.ResponseWriter, session *surface.Session, deliveryID int64, warning string) {
+func writeSubmittedSession(w http.ResponseWriter, session *surface.Session, deliveryID int64, detail string) {
 	body := map[string]any{
 		"ok":        true,
 		"status":    "submitted",
 		"accepted":  true,
 		"retryable": false,
 		"session":   session,
-		"warning":   warning,
+		"detail":    detail,
 	}
 	if deliveryID > 0 {
 		body["deliveryId"] = deliveryID
 	}
 	writeDashboardJSON(w, http.StatusAccepted, body)
+}
+
+func submittedSessionDetail(session *surface.Session, alias string) string {
+	target := alias
+	if target != "" {
+		target = "@" + target
+	} else {
+		target = fmt.Sprintf("%s:%s", session.Surface, session.ID)
+	}
+	return "Submitted to " + target + "."
 }
 
 func writeInitialSessionFailure(w http.ResponseWriter, session *surface.Session, deliveryID int64, message string) {

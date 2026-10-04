@@ -636,7 +636,7 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"deliveryId":`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"deliveryId":`) || !strings.Contains(response.Body.String(), `"id":"started"`) || !strings.Contains(response.Body.String(), `"detail":"Submitted to codex:started."`) || strings.Contains(strings.ToLower(response.Body.String()), "unresolved") || strings.Contains(strings.ToLower(response.Body.String()), "confirm") || strings.Contains(strings.ToLower(response.Body.String()), "inspect") || strings.Contains(strings.ToLower(response.Body.String()), "retrying") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := registry.Session("started"); err != nil {
