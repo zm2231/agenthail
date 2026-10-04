@@ -70,6 +70,29 @@ func TestDashboardSessionColdConcurrentReadsShareOneJournalSeed(t *testing.T) {
 	}
 }
 
+func TestSessionPageHandoffReusesSeedWithoutJournalChurn(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	adapter := &coldPageSurface{daemonSurface: fake, started: make(chan struct{}, 1)}
+	adapter.caps.Stream = true
+	t.Cleanup(d.sources.shutdown)
+	if err := d.sources.seed(context.Background(), &from, adapter); err != nil {
+		t.Fatal(err)
+	}
+	first, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscription, err := d.sources.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	second, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || adapter.readCalls.Load() != 1 || first.LatestSeq != second.LatestSeq {
+		t.Fatalf("reads=%d first=%+v second=%+v err=%v", adapter.readCalls.Load(), first, second, err)
+	}
+}
+
 func TestReadJournalPagePreservesPagingIdentityRolesAndBodyReferences(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	retention := registry.SessionJournalRetention{Count: 32, Bytes: 16 << 10}

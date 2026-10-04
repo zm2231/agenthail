@@ -19,6 +19,7 @@ const (
 	sessionJournalRetentionCount = 2048
 	sessionJournalRetentionBytes = 8 << 20
 	sessionStreamBodyBytes       = 16 << 10
+	sessionPageHandoffGrace      = 5 * time.Second
 )
 
 type sessionJournalPayload struct {
@@ -167,12 +168,26 @@ func (s *sessionSource) releaseHolder(holder string) {
 }
 
 func (s *sessionSource) stop() {
-	s.cancel()
 	s.manager.mu.Lock()
+	defer s.manager.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.subscribers) != 0 || len(s.holders) != 0 {
+		return
+	}
+	s.cancel()
 	if s.manager.sources[s.session.ID] == s {
 		delete(s.manager.sources, s.session.ID)
 	}
-	s.manager.mu.Unlock()
+}
+
+func (m *sessionSourceManager) shutdown() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, source := range m.sources {
+		source.cancel()
+		delete(m.sources, id)
+	}
 }
 
 func (s *sessionSource) run() {
@@ -213,7 +228,7 @@ func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Sessio
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer func() { time.AfterFunc(sessionPageHandoffGrace, release) }()
 	m.mu.Lock()
 	source := m.sources[session.ID]
 	m.mu.Unlock()
