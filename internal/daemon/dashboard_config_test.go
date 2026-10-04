@@ -86,3 +86,21 @@ func TestDashboardConfigMigratesMissingCodexRecency(t *testing.T) {
 		t.Fatalf("Codex recent hours=%d, want %d", config.CodexRecentHours, defaultCodexRecentHours)
 	}
 }
+
+func TestDashboardListenIsLoopbackOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
+		if err := SaveDashboardConfig(DashboardConfig{Listen: listen}); err != nil {
+			t.Fatalf("%s: %v", listen, err)
+		}
+	}
+	if err := SaveDashboardConfig(DashboardConfig{Listen: "0.0.0.0:7412"}); err == nil {
+		t.Fatal("non-loopback listener was saved")
+	}
+	if err := os.WriteFile(DashboardConfigPath(), []byte(`{"enabled":true,"listen":"0.0.0.0:7412"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDashboardConfig(); err == nil {
+		t.Fatal("hand-edited non-loopback listener was loaded")
+	}
+}

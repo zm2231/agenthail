@@ -13,6 +13,14 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func serveSessionMetadata(ctx context.Context, d *Daemon) *httptest.ResponseRecorder {
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/session-metadata?id=from", nil)
+	request.Header.Set("Authorization", "Bearer "+dashboardTestToken)
+	response := httptest.NewRecorder()
+	dashboardRouter(d).ServeHTTP(response, request)
+	return response
+}
+
 type timedOutTailSurface struct{ *daemonSurface }
 
 func (s *timedOutTailSurface) Tail(ctx context.Context, _ *surface.Session, _ int) ([]surface.Exchange, error) {
@@ -43,10 +51,7 @@ func TestDashboardSessionMetadataEndpointRetainsProviderMetadata(t *testing.T) {
 	adapter := &timedOutTailSurface{daemonSurface: fake}
 	adapter.caps.Model = true
 	start := time.Now()
-	d := New(registry, []surface.Surface{adapter})
-	request := httptest.NewRequest(http.MethodGet, "/api/session-metadata?id=from", nil)
-	response := httptest.NewRecorder()
-	d.dashboardSessionMetadataHandler(response, request)
+	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{adapter}))
 
 	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
 		t.Fatalf("session metadata exceeded bounded test budget: %s", elapsed)
@@ -114,9 +119,7 @@ func TestDashboardSessionMetadataReportsIndependentProviderErrors(t *testing.T) 
 			fake.caps.Model = true
 			adapter := &metadataErrorSurface{daemonSurface: fake}
 			test.configure(adapter)
-			d := New(registry, []surface.Surface{adapter})
-			response := httptest.NewRecorder()
-			d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id=from", nil))
+			response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{adapter}))
 			if response.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
@@ -166,10 +169,8 @@ func TestDashboardSessionMetadataReturnsOnRequestCancellationWhenProvidersIgnore
 	d := New(registry, []surface.Surface{adapter})
 	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
-	request := httptest.NewRequestWithContext(requestContext, http.MethodGet, "/api/session-metadata?id=from", nil)
-	response := httptest.NewRecorder()
 	started := time.Now()
-	d.dashboardSessionMetadataHandler(response, request)
+	response := serveSessionMetadata(requestContext, d)
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("metadata response waited for ignoring providers: %s", elapsed)
 	}
@@ -207,9 +208,7 @@ func (*nilGoalSurface) GoalGet(context.Context, *surface.Session) (*surface.Goal
 func TestDashboardSessionMetadataExplicitlyClearsNilGoal(t *testing.T) {
 	_, registry, fake, _, _ := daemonFixture(t)
 	fake.caps.Goal = true
-	d := New(registry, []surface.Surface{&nilGoalSurface{daemonSurface: fake}})
-	response := httptest.NewRecorder()
-	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id=from", nil))
+	response := serveSessionMetadata(context.Background(), New(registry, []surface.Surface{&nilGoalSurface{daemonSurface: fake}}))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"goal":null`) || strings.Contains(response.Body.String(), `"errors"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}

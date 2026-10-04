@@ -47,8 +47,7 @@ func TestSessionCreateKnownLauncherIDPreservesProviderSession(t *testing.T) {
 	d.Surfaces = []surface.Surface{fake}
 	launcher := &launcherFixture{id: surface.LauncherClaudeBG, agents: []surface.SurfaceKind{surface.KindClaude}, result: surface.LaunchResult{SessionID: "created", Session: &surface.Session{ID: "created", Surface: surface.KindClaude, Name: "Created", Cwd: "/repo", Status: surface.StatusIdle}}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"claude-bg","message":"hello"}`)))
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"claude-bg","message":"hello"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -84,8 +83,7 @@ func TestSessionCreateStarterLauncherMatchesDefaultCreationOutcomes(t *testing.T
 			d, r, fake, _, _ := daemonFixture(t)
 			fake.startErr = tc.startErr
 			d.SetLaunchers(surface.NewLaunchers([]surface.Surface{fake}))
-			w := httptest.NewRecorder()
-			d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"codex","launcher":"codex-app-server","message":"hello","alias":"starter"}`)))
+			w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","launcher":"codex-app-server","message":"hello","alias":"starter"}`)
 			if w.Code != tc.status || len(fake.startOptions) != 1 {
 				t.Fatalf("status=%d starts=%d body=%s", w.Code, len(fake.startOptions), w.Body.String())
 			}
@@ -139,8 +137,7 @@ func TestSessionCreateTerminalLocationPersistsPendingWithoutGuessingID(t *testin
 	location := &surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, result: surface.LaunchResult{Location: location}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(fmt.Sprintf(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","cwd":%q,"alias":"builder"}`, cwd))))
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", fmt.Sprintf(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","cwd":%q,"alias":"builder"}`, cwd))
 	if w.Code != http.StatusCreated || strings.Contains(w.Body.String(), `"sessionId"`) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -165,8 +162,7 @@ func TestSessionCreateRejectsUnsupportedAdvancedOptionsBeforeLaunch(t *testing.T
 	d.Surfaces = []surface.Surface{fake}
 	launcher := &launcherFixture{id: surface.LauncherClaudeBG, agents: []surface.SurfaceKind{surface.KindClaude}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"claude-bg","message":"hello","worktree":"/tmp/w"}`)))
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"claude-bg","message":"hello","worktree":"/tmp/w"}`)
 	if w.Code != http.StatusBadRequest || launcher.launches != 0 {
 		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
 	}
@@ -227,8 +223,7 @@ func TestSessionCreateRejectsAliasCollisionBeforeLaunch(t *testing.T) {
 	}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","alias":"builder"}`)))
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","alias":"builder"}`)
 	if w.Code != http.StatusBadRequest || launcher.launches != 0 {
 		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
 	}
@@ -244,8 +239,7 @@ func TestSessionCreateRejectsMissingLauncherSurfaceBeforeLaunch(t *testing.T) {
 	d.Surfaces = []surface.Surface{fake}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`)))
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`)
 	if w.Code != http.StatusConflict || launcher.launches != 0 {
 		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
 	}

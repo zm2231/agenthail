@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -199,9 +198,9 @@ func TestDaemonSessionActivityRecoversReplayAfterTransientJournalFailure(t *test
 	})
 	allow()
 	close(adapter.replay)
+	handler := dashboardRouter(d)
 	readTimeline := func() surface.SessionTimeline {
-		response := httptest.NewRecorder()
-		d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", nil))
+		response := serveDashboardRequest(handler, http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", "")
 		if response.Code != http.StatusOK {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}

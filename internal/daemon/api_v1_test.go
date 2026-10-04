@@ -225,23 +225,40 @@ func TestAPIV1SnapshotCursorClosesBootstrapGap(t *testing.T) {
 }
 
 func TestEventHubReplaysAcrossDaemonRestart(t *testing.T) {
-	d, reg, _, _, _ := daemonFixture(t)
-	first, err := d.events.publish("session.updated", "one", map[string]string{"status": "busy"})
+	d, reg, fake, _, _ := daemonFixture(t)
+	if response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"alias","sessionId":"from","alias":"before"}`); response.Code != http.StatusOK {
+		t.Fatalf("alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	first := snapshotEventCursor(t, d.dashboardHandler(&dashboardServer{token: "secret"}))
+	if first == 0 {
+		t.Fatal("action did not publish an event")
+	}
+	restarted := dashboardRouter(New(reg, []surface.Surface{fake}))
+	if response := serveDashboardRequest(restarted, http.MethodPost, "/api/action", `{"action":"alias","sessionId":"from","alias":"after"}`); response.Code != http.StatusOK {
+		t.Fatalf("alias after restart status=%d body=%s", response.Code, response.Body.String())
+	}
+	server := httptest.NewServer(restarted)
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/events", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Last-Event-ID", strconv.FormatUint(first, 10))
+	response, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := newEventHub(reg)
-	second, err := restarted.publish("turn.completed", "one", map[string]string{"turnId": "done"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.ID <= first.ID {
-		t.Fatalf("event ids did not survive restart: first=%d second=%d", first.ID, second.ID)
-	}
-	backlog, _, reset, cancel := restarted.subscribe(first.ID)
-	defer cancel()
-	if reset || len(backlog) != 1 || backlog[0].ID != second.ID {
-		t.Fatalf("reset=%v backlog=%+v", reset, backlog)
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id, found := strings.CutPrefix(strings.TrimSpace(line), "id: "); found {
+			if next, err := strconv.ParseUint(id, 10, 64); err != nil || next <= first {
+				t.Fatalf("event id after restart=%q, want greater than %d", id, first)
+			}
+			return
+		}
 	}
 }
 
@@ -532,19 +549,35 @@ func assertAPIV1Error(t *testing.T, response *httptest.ResponseRecorder, status 
 	}
 }
 
+func snapshotEventCursor(t *testing.T, handler http.Handler) uint64 {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var snapshot struct {
+		EventCursor uint64 `json:"eventCursor"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil {
+		t.Fatalf("snapshot status=%d body=%s", response.Code, response.Body.String())
+	}
+	return snapshot.EventCursor
+}
+
 func TestAPIV1RejectsMutationWithoutPublishingChange(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	before := len(d.events.history)
+	if _, err := d.events.publish("session.updated", "one", nil); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotEventCursor(t, handler)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	if len(d.events.history) != before {
-		t.Fatalf("rejected mutation published %d event(s)", len(d.events.history)-before)
+	assertAPIV1Error(t, response, http.StatusBadRequest, "invalid_request")
+	if after := snapshotEventCursor(t, handler); after != before {
+		t.Fatalf("rejected mutation advanced event cursor %d -> %d", before, after)
 	}
 }
 

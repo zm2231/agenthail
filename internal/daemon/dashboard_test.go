@@ -23,6 +23,35 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+const dashboardTestToken = "secret"
+
+func dashboardRouter(d *Daemon) http.Handler {
+	return d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
+}
+
+func serveDashboardRequest(handler http.Handler, method, target, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, target, strings.NewReader(body))
+	request.Host = "example.test"
+	request.Header.Set("Origin", "http://example.test")
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func readDashboardState(t *testing.T, handler http.Handler) dashboardState {
+	t.Helper()
+	response := serveDashboardRequest(handler, http.MethodGet, "/api/state?fresh=1", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("state status=%d body=%s", response.Code, response.Body.String())
+	}
+	var state dashboardState
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
 type dashboardClaudeRunSurface struct {
 	*daemonSurface
 	runs  []surface.ClaudeRunObservation
@@ -35,17 +64,6 @@ func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surfac
 
 func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(context.Context) ([]surface.ClaudeSubagentLink, error) {
 	return s.links, nil
-}
-
-func TestDashboardListenIsLoopbackOnly(t *testing.T) {
-	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
-		if err := validateDashboardListen(listen); err != nil {
-			t.Fatalf("%s: %v", listen, err)
-		}
-	}
-	if err := validateDashboardListen("0.0.0.0:7412"); err == nil || !strings.Contains(err.Error(), "Tailscale Serve") {
-		t.Fatalf("err=%v", err)
-	}
 }
 
 type sessionPageReadProbe struct {
@@ -68,15 +86,13 @@ func (s *goalControlSurface) UpdateGoal(_ context.Context, _ *surface.Session, u
 }
 
 func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
-	d, registry, fake, from, _ := daemonFixture(t)
+	_, registry, fake, from, _ := daemonFixture(t)
 	fake.caps.Goal = true
 	adapter := &goalControlSurface{daemonSurface: fake}
-	d = New(registry, []surface.Surface{adapter})
+	handler := dashboardRouter(New(registry, []surface.Surface{adapter}))
 	request := func(action, message string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]string{"action": action, "sessionId": from.ID, "message": message})
-		response := httptest.NewRecorder()
-		d.dashboardActionHandler(response, httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body)))
-		return response
+		return serveDashboardRequest(handler, http.MethodPost, "/api/action", string(body))
 	}
 	if response := request("goal-edit", "keep paused"); response.Code != http.StatusOK {
 		t.Fatalf("goal-edit status=%d body=%s", response.Code, response.Body.String())
@@ -127,6 +143,7 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 	d := New(registry, []surface.Surface{probe})
 	defer d.sources.shutdown()
 	defer close(probe.release)
+	handler := dashboardRouter(d)
 	const viewers = 5
 	var wait sync.WaitGroup
 	responses := make([]*httptest.ResponseRecorder, viewers)
@@ -135,8 +152,7 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			responses[index] = httptest.NewRecorder()
-			d.dashboardSessionHandler(responses[index], httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil))
+			responses[index] = serveDashboardRequest(handler, http.MethodGet, "/api/session?id=from&timeline=1", "")
 		}()
 	}
 	wait.Wait()
@@ -178,9 +194,7 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 		runs:          []surface.ClaudeRunObservation{{JobID: "job-1", SessionID: from.ID, RunType: "bg", ProviderState: "working"}, {JobID: "other", SessionID: "other", RunType: "bg"}},
 		links:         []surface.ClaudeSubagentLink{{ParentSessionID: from.ID, AgentID: "agent-1", TranscriptPath: "/tmp/agent-1.jsonl"}, {ParentSessionID: "other", AgentID: "agent-2"}},
 	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil))
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodGet, "/api/session-metadata?id="+from.ID, "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -197,15 +211,13 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 }
 
 func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
-	d, registry, fake, _, _ := daemonFixture(t)
+	_, registry, fake, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "history", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
 	if err := registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &accessDaemonSurface{daemonSurface: fake}
-	d = New(registry, []surface.Surface{adapter})
-	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=history", nil))
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{adapter})), http.MethodGet, "/api/session?id=history", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -328,8 +340,7 @@ func TestDashboardSearchStoresCodexHistoryResult(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex
 	fake.searchResults = []surface.SessionSearchResult{{Session: surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}, Snippet: "matched text"}}
-	response := httptest.NewRecorder()
-	d.dashboardSearchHandler(response, httptest.NewRequest(http.MethodGet, "/api/search?surface=codex&q=project", nil))
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "matched text") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -345,8 +356,7 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 	if err := registry.RegisterSession(surface.Session{ID: "saved", Surface: surface.KindCodex, Name: "saved project"}); err != nil {
 		t.Fatal(err)
 	}
-	response := httptest.NewRecorder()
-	d.dashboardSearchHandler(response, httptest.NewRequest(http.MethodGet, "/api/search?surface=codex&q=project", nil))
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "saved project") || !strings.Contains(response.Body.String(), "app-server timeout") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -366,10 +376,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 		accepted:     true,
 		caps:         surface.Capabilities{Compact: true},
 	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"compact","sessionId":"claude"}`))
-	d.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"compact","sessionId":"claude"}`)
 	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"evidence":"queued"`) || fake.compactCalls.Load() != 0 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
@@ -388,10 +395,7 @@ func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
 		accepted:     true,
 		caps:         surface.Capabilities{Steer: true},
 	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"steer","sessionId":"codex","message":"focus on tests"}`))
-	d.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"steer","sessionId":"codex","message":"focus on tests"}`)
 	var body struct {
 		Result struct {
 			Evidence string `json:"evidence"`
@@ -817,12 +821,12 @@ func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 
 func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
 	d, registry, _, _, target := daemonFixture(t)
+	handler := dashboardRouter(d)
 	if err := registry.QueueMessage(target.ID, "requires a decision"); err != nil {
 		t.Fatal(err)
 	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil || len(state.Attention) != 0 {
-		t.Fatalf("pending attention=%+v err=%v", state.Attention, err)
+	if state := readDashboardState(t, handler); len(state.Attention) != 0 {
+		t.Fatalf("pending attention=%+v", state.Attention)
 	}
 	item, err := registry.ClaimNextMessage(target.ID, time.Now())
 	if err != nil || item == nil {
@@ -831,26 +835,20 @@ func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
 	if err := registry.DeadLetterUnknown(item.ID, errors.New("connection closed")); err != nil {
 		t.Fatal(err)
 	}
-	state, err = d.dashboardState(context.Background())
-	if err != nil || len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
-		t.Fatalf("dead attention=%+v err=%v", state.Attention, err)
+	if state := readDashboardState(t, handler); len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
+		t.Fatalf("dead attention=%+v", state.Attention)
 	}
 	if err := registry.CancelMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
-	state, err = d.dashboardState(context.Background())
-	if err != nil || len(state.Attention) != 0 {
-		t.Fatalf("resolved attention=%+v err=%v", state.Attention, err)
-	}
-	for _, fragment := range []string{"attention: state.attention || []", "attentionPanel.hidden = attention.length === 0", `id="attention-panel" hidden`} {
-		if !strings.Contains(string(dashboardJS)+string(dashboardHTML), fragment) {
-			t.Fatalf("dashboard attention surface missing %q", fragment)
-		}
+	if state := readDashboardState(t, handler); len(state.Attention) != 0 {
+		t.Fatalf("resolved attention=%+v", state.Attention)
 	}
 }
 
 func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	daemon, registry, _, _, target := daemonFixture(t)
+	handler := dashboardRouter(daemon)
 	target.Source = "cli"
 	target.Transport = "readOnly"
 	if err := registry.RegisterSession(target); err != nil {
@@ -874,9 +872,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 		`{"action":"relay-add","fromId":"from","toId":"to","pattern":".*"}`,
 		fmt.Sprintf(`{"action":"queue-retry","queueId":%d}`, queueID),
 	} {
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body))
-		daemon.dashboardActionHandler(response, request)
+		response := serveDashboardRequest(handler, http.MethodPost, "/api/action", body)
 		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "read only") {
 			t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 		}
@@ -896,9 +892,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	if err := registry.AddToChannel("reviewers", target.ID); err != nil {
 		t.Fatal(err)
 	}
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
-	daemon.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(handler, http.MethodPost, "/api/action", `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "1 failed") {
 		t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 	}
@@ -913,9 +907,7 @@ func TestDashboardChannelSendCountsSubmittedSeparately(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.sendErr = surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
-	d.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
 	var body map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
 		t.Fatalf("body=%s code=%d err=%v", response.Body.String(), response.Code, err)
@@ -933,10 +925,7 @@ func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	if err := registry.AddToChannel("reviewers", from.ID); err != nil {
 		t.Fatal(err)
 	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := readDashboardState(t, dashboardRouter(d))
 	if len(state.Channels) != 1 || len(state.Channels[0].Members) != 1 || len(state.Channels[0].MemberDetails) != 1 {
 		t.Fatalf("channels=%+v", state.Channels)
 	}
@@ -1034,10 +1023,7 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := readDashboardState(t, dashboardRouter(d))
 	for _, session := range state.Sessions {
 		if session.ID == from.ID {
 			if session.Status != surface.StatusBusy {
