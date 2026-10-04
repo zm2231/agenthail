@@ -10,6 +10,7 @@ struct NewSessionSheet: View {
     @State private var message = ""
     @State private var starting = false
     @State private var error: String?
+    @State private var submitted: String?
 
     private var launchers: [LauncherOption] {
         (model.creationOptions?.launchers ?? []).filter { $0.agents.contains(agent) }
@@ -32,7 +33,7 @@ struct NewSessionSheet: View {
     }
 
     private var canStart: Bool {
-        !starting && !folder.isEmpty && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !starting && submitted == nil && !folder.isEmpty && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (launchers.isEmpty || launchers.contains { $0.id == launcher && $0.available })
     }
 
@@ -75,14 +76,25 @@ struct NewSessionSheet: View {
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.red)
             }
+            if let submitted {
+                Text(submitted)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button(starting ? "Starting…" : "Start") { start() }
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canStart)
+                if submitted != nil {
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Button(starting ? "Starting…" : "Start") { start() }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canStart)
+                }
             }
         }
         .padding(20)
@@ -114,9 +126,13 @@ struct NewSessionSheet: View {
         error = nil
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
-            let failure = await model.launchSession(launcher: launchers.isEmpty ? nil : launcher, agent: agent, folder: folder, message: text)
+            let outcome = await model.launchSession(launcher: launchers.isEmpty ? nil : launcher, agent: agent, folder: folder, message: text)
             starting = false
-            if let failure { error = failure } else { dismiss() }
+            switch outcome {
+            case .opened: dismiss()
+            case .submitted(let note): submitted = note
+            case .failed(let failure): error = failure
+            }
         }
     }
 }

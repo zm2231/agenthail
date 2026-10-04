@@ -251,8 +251,8 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> String? {
-        guard let api else { return "Agenthail isn't connected." }
+    func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> SessionLaunchOutcome {
+        guard let api else { return .failed("Agenthail isn't connected.") }
         let identity = [agent, folder, message, launcher ?? ""]
         if pendingCreation?.identity != identity {
             pendingCreation = (identity, UUID().uuidString)
@@ -260,17 +260,25 @@ final class AgenthailModel: ObservableObject {
         let idempotencyKey = pendingCreation?.key
         do {
             let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey)
-            if receipt.ok || receipt.accepted == true { pendingCreation = nil }
-            if receipt.unknown == true {
-                if let id = receipt.id { await openCreatedSession(id) }
-                return "Agenthail couldn't confirm the session started. Check the sidebar before trying again."
+            let decision = SessionLaunchDecision(receipt, launcher: launcher, agent: agent)
+            if decision.settlesRetry {
+                pendingCreation = nil
+                operationError = nil
             }
-            guard receipt.ok else { return receipt.error ?? "The session didn't start." }
-            if let id = receipt.id { await openCreatedSession(id) }
-            operationError = nil
-            return nil
+            switch decision {
+            case .open(let id):
+                await openCreatedSession(id)
+                return .opened
+            case .submitted(let note):
+                return .submitted(note)
+            case .unconfirmed(let id):
+                if let id { await openCreatedSession(id) }
+                return .failed("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
+            case .failed(let message):
+                return .failed(message)
+            }
         } catch {
-            return error.localizedDescription
+            return .failed(error.localizedDescription)
         }
     }
 
