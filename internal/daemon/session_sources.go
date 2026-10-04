@@ -359,14 +359,24 @@ func boundedSessionSourceReason(value string) string {
 
 func (s *sessionSource) seedJournal() {
 	seedStatus, statusErr := s.manager.registry.SessionJournalSeedStatus(s.session.ID)
+	localTranscript := false
+	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
+		localTranscript = provider.RequiresLocalTranscript(&s.session)
+	}
 	if statusErr == nil && seedStatus == registry.SessionJournalSeeded {
-		provider, localTranscript := s.adapter.(surface.LocalTranscriptProvider)
-		if !localTranscript || !provider.RequiresLocalTranscript(&s.session) {
+		if !localTranscript {
 			return
 		}
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
+	if seedStatus == registry.SessionJournalSeeded && localTranscript {
+		if err := s.catchUpLocalTranscript(ctx); err != nil {
+			s.seedErr = err
+			s.appendSourceError(err)
+		}
+		return
+	}
 	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
 	if err != nil || read == nil {
 		if err == nil {
@@ -390,7 +400,102 @@ func (s *sessionSource) seedJournal() {
 		s.appendSourceError(err)
 		return
 	}
-	for _, item := range read.Items {
+	s.appendSeedItems(read.Items)
+	if err := s.manager.registry.MarkSessionJournalSeed(s.session.ID, true); err != nil {
+		s.seedErr = err
+		s.appendSourceError(err)
+	}
+}
+
+func (s *sessionSource) catchUpLocalTranscript(ctx context.Context) error {
+	known, err := s.knownJournalItems()
+	if err != nil {
+		return fmt.Errorf("read journal seed identities: %w", err)
+	}
+	pages := make([][]surface.TimelineItem, 0, 2)
+	before := int64(0)
+	for {
+		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
+		if err != nil || read == nil {
+			if err == nil {
+				err = fmt.Errorf("session source returned no activity result")
+			}
+			return err
+		}
+		if !read.TranscriptOffsetSet {
+			return fmt.Errorf("Codex local transcript is unavailable")
+		}
+		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
+			s.session.TranscriptOffset = read.TranscriptOffset
+			s.session.TranscriptOffsetSet = true
+			s.session.CodexPendingEventUser = read.CodexPendingEventUser
+			s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
+			s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+			s.session.TranscriptIdentity = read.TranscriptIdentity
+		}
+		pages = append(pages, read.Items)
+		if timelineItemsOverlapJournal(read.Items, known) || read.NextBefore == 0 {
+			break
+		}
+		before = read.NextBefore
+	}
+	for index := len(pages) - 1; index >= 0; index-- {
+		s.appendSeedItems(pages[index])
+	}
+	if err := s.manager.registry.MarkSessionJournalSeed(s.session.ID, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *sessionSource) knownJournalItems() (map[string]struct{}, error) {
+	known := map[string]struct{}{}
+	before := uint64(0)
+	for {
+		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
+		if err != nil {
+			var gap *registry.SessionJournalHistoryGapError
+			if errors.As(err, &gap) {
+				return known, nil
+			}
+			return nil, err
+		}
+		for _, entry := range page.Entries {
+			var payload sessionJournalPayload
+			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+				continue
+			}
+			if payload.ItemID != "" {
+				known[payload.ItemID] = struct{}{}
+			}
+			if payload.ProviderKey != "" {
+				known[payload.ProviderKey] = struct{}{}
+			}
+		}
+		if page.NextBefore == 0 {
+			return known, nil
+		}
+		before = page.NextBefore
+	}
+}
+
+func timelineItemsOverlapJournal(items []surface.TimelineItem, known map[string]struct{}) bool {
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		if _, ok := known[item.ID]; ok {
+			return true
+		}
+		if _, ok := known["timeline:"+item.ID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
+	for _, item := range items {
 		if item.ID == "" {
 			continue
 		}
@@ -420,10 +525,6 @@ func (s *sessionSource) seedJournal() {
 			Kind:        item.Kind,
 			Text:        item.Text,
 		})
-	}
-	if err := s.manager.registry.MarkSessionJournalSeed(s.session.ID, true); err != nil {
-		s.seedErr = err
-		s.appendSourceError(err)
 	}
 }
 
