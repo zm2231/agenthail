@@ -62,7 +62,7 @@ struct SpotlightIndexTest {
 
         let store = FakeStore()
         var failures = 0
-        let sync = SpotlightSync(store: store, retryDelay: .milliseconds(20)) { _ in failures += 1 }
+        let sync = SpotlightSync(store: store, retryDelay: .milliseconds(20), failed: { _ in failures += 1 })
         store.hold = "deleteAll"
         sync.update([builder, plain])
         for _ in 0..<5 { await Task.yield() }
