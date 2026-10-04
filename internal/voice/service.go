@@ -678,7 +678,7 @@ func (s *Service) watchJournalDelegation(ctx context.Context, attemptID, message
 				continue
 			}
 			seenVersion[event.ItemID] = event.Version
-			if event.Role == "assistant" || (event.Role == "" && (event.Kind == "text" || event.Kind == "assistant")) {
+			if event.SpokenAssistantContent() {
 				previous := lastBody[event.ItemID]
 				body := event.Body
 				lastBody[event.ItemID] = body

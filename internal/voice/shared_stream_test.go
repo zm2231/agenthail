@@ -49,6 +49,8 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 		t.Fatal("journal subscription was not prepared before dispatch")
 	}
 	stream.events <- sessionstream.Event{ItemID: "other", Version: 1, Kind: "text", Role: "assistant", TurnID: "other-turn", Body: "unrelated"}
+	stream.events <- sessionstream.Event{ItemID: "reasoning", Version: 1, Kind: "reasoning", Role: "assistant", TurnID: "turn-a", Body: "internal reasoning"}
+	stream.events <- sessionstream.Event{ItemID: "tool-call", Version: 1, Kind: "tool_call", Role: "assistant", TurnID: "turn-a", Body: "tool arguments"}
 	stream.events <- sessionstream.Event{ItemID: "answer", Version: 1, Kind: "text", Role: "assistant", TurnID: "turn-a", Body: "answer"}
 	stream.events <- sessionstream.Event{ItemID: "answer", Version: 2, Kind: "text", Role: "assistant", TurnID: "turn-a", Body: "answer final", Final: true}
 	stream.events <- sessionstream.Event{ItemID: "later-answer", Version: 1, Kind: "message", Role: "assistant", TurnID: "turn-a", Body: "later"}
@@ -78,7 +80,10 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 	var spoken []string
 	for _, params := range p.params {
 		if text, ok := params["text"].(string); ok {
-			if text == "answer" || text == " final" || text == "later" || text == "unrelated" {
+			if text == "internal reasoning" || text == "tool arguments" || text == "unrelated" {
+				t.Fatalf("non-spoken journal content reached voice: %q", text)
+			}
+			if text == "answer" || text == " final" || text == "later" {
 				spoken = append(spoken, text)
 			}
 		}
