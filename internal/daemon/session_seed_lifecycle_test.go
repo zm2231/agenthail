@@ -131,7 +131,7 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 	fmt.Fprintln(&missed, `{"type":"event_msg","payload":{"type":"user_message","message":"after restart"}}`)
 	fmt.Fprintln(&missed, `{"type":"response_item","payload":{"id":"restart-user","type":"message","role":"user","content":[{"type":"input_text","text":"after restart"}]}}`)
 	fmt.Fprintln(&missed, `{"type":"response_item","payload":{"id":"restart-answer","type":"message","role":"assistant","content":[{"type":"output_text","text":"restart answer"}]}}`)
-	for index := 0; index < 43; index++ {
+	for index := 0; index < 100; index++ {
 		fmt.Fprintf(&missed, `{"type":"response_item","payload":{"id":"gap-%02d","type":"message","role":"assistant","content":[{"type":"output_text","text":"gap-%02d"}]}}`+"\n", index, index)
 	}
 	if err := appendFile(t, transcript, missed.String()); err != nil {
@@ -164,7 +164,7 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 			t.Fatalf("reseed duplicated body %q count=%d seed=%+v page=%+v", body, seen[body], seedPage, page)
 		}
 	}
-	for index := 0; index < 43; index++ {
+	for index := 0; index < 100; index++ {
 		body := fmt.Sprintf("gap-%02d", index)
 		if seen[body] != 1 {
 			t.Fatalf("offline interval body %q count=%d page=%+v", body, seen[body], page)
