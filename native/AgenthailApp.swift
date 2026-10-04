@@ -270,15 +270,17 @@ final class NotificationRoute: ObservableObject {
     }
 
     static let shared = NotificationRoute()
-    @Published private(set) var pending: Request?
+    @Published private(set) var latest: Request?
+    private var handledID: UUID?
 
     func open(sessionID: String?) {
-        pending = Request(sessionID: sessionID)
+        latest = Request(sessionID: sessionID)
     }
 
-    func take() -> Request? {
-        defer { pending = nil }
-        return pending
+    func claim() -> Request? {
+        guard let latest, latest.id != handledID else { return nil }
+        handledID = latest.id
+        return latest
     }
 }
 
@@ -298,11 +300,11 @@ private struct MenuBarLabel: View {
             }
         }
         .onAppear(perform: handleRoute)
-        .onChange(of: route.pending) { handleRoute() }
+        .onChange(of: route.latest) { handleRoute() }
     }
 
     private func handleRoute() {
-        guard let request = route.take() else { return }
+        guard let request = route.claim() else { return }
         if let sessionID = request.sessionID { model.openNotifiedSession(sessionID) }
         NSApplication.shared.activate()
         openWindow(id: "main")
