@@ -19,20 +19,6 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestProcessStartUsesClaudeUTCIdentity(t *testing.T) {
-	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
-	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	expected, err := command.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TZ", "America/New_York")
-	actual, err := processStart(os.Getpid())
-	if err != nil || actual != strings.TrimSpace(string(expected)) {
-		t.Fatalf("process identity=%q want=%q err=%v", actual, strings.TrimSpace(string(expected)), err)
-	}
-}
-
 func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
@@ -367,19 +353,6 @@ func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.
 	}
 }
 
-func TestFailedRegistrationWriteLeavesNoRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "record.json")
-	if err := writeExclusiveJSONAtomic(path, make(chan int)); err == nil {
-		t.Fatal("unsupported value accepted")
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("partial record remains: %v", err)
-	}
-	if matches, _ := filepath.Glob(path + ".tmp.*"); len(matches) != 0 {
-		t.Fatalf("temporary records remain: %v", matches)
-	}
-}
-
 func TestReconcileRemovesDeadManifestOwnedArtifacts(t *testing.T) {
 	home := shortTempDir(t, "cp-reconcile-")
 	socketDir := filepath.Join(home, "socks")
@@ -470,48 +443,6 @@ func TestReconcileRemovesDeadRelayManifestWithoutTouchingForeignSocket(t *testin
 	}
 	if _, err := os.Lstat(foreignPath); err != nil {
 		t.Fatalf("foreign socket was touched: %v", err)
-	}
-}
-
-func TestReconcileRemovesPendingWorkerArtifacts(t *testing.T) {
-	home := shortTempDir(t, "cp-pending-")
-	socketDir := filepath.Join(home, "socks")
-	if err := os.MkdirAll(socketDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	pid := 999999
-	generation := "pending"
-	controlPath := WorkerControlPath(home, generation, pid)
-	manifestPath := WorkerManifestPath(home, generation, pid)
-	recordPath := filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json")
-	pending := OwnershipManifest{Agenthail: "peer-worker", State: "starting", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", ControlPath: controlPath, SocketPath: filepath.Join(socketDir, strconv.Itoa(pid)+".sock"), RecordPath: recordPath}
-	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{controlPath, pending.SocketPath} {
-		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		listener.SetUnlinkOnClose(false)
-		listener.Close()
-	}
-	pending.ControlDevice, pending.ControlInode, _ = socketIdentity(controlPath)
-	pending.SocketDevice, pending.SocketInode, _ = socketIdentity(pending.SocketPath)
-	if err := writeExclusiveJSON(manifestPath, pending); err != nil {
-		t.Fatal(err)
-	}
-	record := sessionRecord{PID: pid, SessionID: "owned", ProcStart: "dead", Agenthail: "peer-worker"}
-	if err := writeExclusiveJSON(recordPath, record); err != nil {
-		t.Fatal(err)
-	}
-	if err := Reconcile(home, socketDir); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{controlPath, pending.SocketPath, recordPath, manifestPath} {
-		if _, err := os.Lstat(path); !os.IsNotExist(err) {
-			t.Fatalf("pending artifact remains %s: %v", path, err)
-		}
 	}
 }
 

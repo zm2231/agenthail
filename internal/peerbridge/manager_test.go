@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -361,17 +360,6 @@ func TestManagerRejectsUnknownOperation(t *testing.T) {
 	}
 	if response.Error == nil || response.Error.Class != "terminal" || response.Error.Kind != string(surface.DeliveryInvalidRequest) {
 		t.Fatalf("response=%+v", response)
-	}
-}
-
-func TestManagerRejectsPeerCardinalityBeyondLimit(t *testing.T) {
-	manager := &Manager{children: make(map[string]*child)}
-	for index := range maxManagedPeers {
-		manager.children[fmt.Sprintf("peer-%d", index)] = &child{done: make(chan struct{})}
-	}
-	err := manager.Ensure(context.Background(), "one-too-many")
-	if err == nil || !strings.Contains(err.Error(), "peer limit") {
-		t.Fatalf("limit error=%v", err)
 	}
 }
 

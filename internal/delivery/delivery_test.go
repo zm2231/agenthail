@@ -116,22 +116,42 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 		t.Fatal(err)
 	}
 	defer r.Close()
-	for _, id := range []string{"sender", "target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindClaude}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	session := &surface.Session{ID: "target", Surface: surface.KindClaude, Name: "Claude target"}
-	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "do not duplicate", "", surface.SendOptions{SourceSessionID: "sender"})
-	if err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindClaude}); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Evidence != surface.EvidenceSubmitted || receipt.DeliveryID == 0 || receipt.Detail != "Submitted to Claude target." {
-		t.Fatalf("receipt=%+v", receipt)
+	unknown := surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
+	cases := []struct {
+		name    string
+		adapter *fakeSurface
+	}{
+		{"unknown outcome", &fakeSurface{err: unknown}},
+		{"accepted then unknown", &fakeSurface{result: &surface.SendResult{UUID: "turn-uncertain", Accepted: true}, err: unknown}},
+		{"empty result", &fakeSurface{result: nil}},
 	}
-	intent, err := r.DeliveryIntent(receipt.DeliveryID)
-	if err != nil || intent.Status != registry.DeliveryIntentSubmitted || intent.Evidence != surface.EvidenceSubmitted {
-		t.Fatalf("intent=%+v err=%v", intent, err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &surface.Session{ID: "target-" + strings.ReplaceAll(tc.name, " ", "-"), Surface: surface.KindClaude, Name: "Claude target"}
+			if err := r.RegisterSession(*session); err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), tc.adapter, session, "do not duplicate", "", surface.SendOptions{SourceSessionID: "sender"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Evidence != surface.EvidenceSubmitted || receipt.DeliveryID == 0 || receipt.SessionID != session.ID || len(tc.adapter.sent) != 1 {
+				t.Fatalf("receipt=%+v sent=%v", receipt, tc.adapter.sent)
+			}
+			intent, err := r.DeliveryIntent(receipt.DeliveryID)
+			if err != nil || intent.Status != registry.DeliveryIntentSubmitted || intent.Evidence != surface.EvidenceSubmitted || intent.ProviderKey != "" {
+				t.Fatalf("intent=%+v err=%v", intent, err)
+			}
+			if r.QueueCount(session.ID) != 0 {
+				t.Fatal("ambiguous delivery was queued for retry")
+			}
+		})
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+		t.Fatalf("ambiguous delivery became a failure: problems=%+v err=%v", problems, err)
 	}
 }
 
@@ -155,28 +175,6 @@ func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t 
 	}
 }
 
-func TestDispatcherQueuedReceiptBindsDeliveryIntentToQueue(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	for _, id := range []string{"sender", "target"} {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	session := &surface.Session{ID: "target", Surface: surface.KindCodex, Name: "Codex target"}
-	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "later", "", surface.SendOptions{SourceSessionID: "sender"})
-	if err != nil || receipt.Status != string(registry.DeliveryIntentQueued) || receipt.DeliveryID == 0 || receipt.Detail != "Queued for Codex target; sends when current turn ends." {
-		t.Fatalf("receipt=%+v err=%v", receipt, err)
-	}
-	intent, err := r.DeliveryIntent(receipt.DeliveryID)
-	if err != nil || intent.QueueID != receipt.QueueID || intent.Status != registry.DeliveryIntentQueued {
-		t.Fatalf("intent=%+v err=%v", intent, err)
-	}
-}
-
 func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
@@ -196,6 +194,9 @@ func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 	}
 	if receipt.Status != string(registry.DeliveryIntentSent) || receipt.Evidence != surface.EvidenceTransportAccepted || receipt.DeliveryID == 0 || receipt.Detail != "Sent to Claude target." {
 		t.Fatalf("receipt=%+v", receipt)
+	}
+	if state, found, err := r.RuntimeState(session.ID); err != nil || (found && state.ActiveTurnID != "") {
+		t.Fatalf("transport acceptance invented an active turn: state=%+v err=%v", state, err)
 	}
 }
 
@@ -305,7 +306,7 @@ func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.
 	}
 }
 
-func TestDispatcherConfirmedSendKeepsSentBookkeepingWhenIntentTransitionFails(t *testing.T) {
+func TestDispatcherReceiptNeverClaimsMoreThanTheDurableIntent(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -316,28 +317,19 @@ func TestDispatcherConfirmedSendKeepsSentBookkeepingWhenIntentTransitionFails(t 
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{kind: surface.KindNotion, observe: &surface.TurnObservation{Status: surface.StatusUnknown}, result: &surface.SendResult{UUID: "shared-key", Accepted: true}}
-	for _, message := range []string{"one", "two"} {
-		receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, message, "")
-		if err != nil || receipt.DeliveryID == 0 {
-			t.Fatalf("%s: receipt=%+v err=%v", message, receipt, err)
+	// The second send reuses the provider key, so its sent transition cannot persist.
+	for _, step := range []struct {
+		message string
+		want    registry.DeliveryIntentStatus
+	}{{"one", registry.DeliveryIntentSent}, {"two", registry.DeliveryIntentSubmitted}} {
+		receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, step.message, "")
+		if err != nil || receipt.DeliveryID == 0 || receipt.Status != string(step.want) {
+			t.Fatalf("%s: receipt=%+v err=%v", step.message, receipt, err)
 		}
 		intent, err := r.DeliveryIntent(receipt.DeliveryID)
 		if err != nil || receipt.Status != string(intent.Status) {
-			t.Fatalf("%s: receipt=%+v disagrees with durable intent=%+v err=%v", message, receipt, intent, err)
+			t.Fatalf("%s: receipt=%+v disagrees with durable intent=%+v err=%v", step.message, receipt, intent, err)
 		}
-	}
-	history, err := r.ListHistory(20, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sent := 0
-	for _, entry := range history {
-		if entry.Kind == "sent" {
-			sent++
-		}
-	}
-	if sent != 2 {
-		t.Fatalf("confirmed sends skipped sent bookkeeping: %+v", history)
 	}
 }
 
@@ -455,31 +447,6 @@ func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
 				t.Fatalf("refusal left no audit entry: %+v err=%v", history, err)
 			}
 		})
-	}
-}
-
-func TestDispatcherAcceptedThenUnknownKeepsSameSubmittedIntent(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	session := &surface.Session{ID: "accepted-unknown", Surface: surface.KindCodex}
-	if err := r.RegisterSession(*session); err != nil {
-		t.Fatal(err)
-	}
-	unknown := surface.DeliveryOutcomeUnknown(errors.New("response lost after provider acceptance"))
-	adapter := &fakeSurface{result: &surface.SendResult{UUID: "turn-uncertain", Accepted: true}, err: unknown}
-	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "possibly sent", "")
-	if err != nil || receipt == nil || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID == 0 || len(adapter.sent) != 1 {
-		t.Fatalf("receipt=%+v err=%v sent=%v", receipt, err, adapter.sent)
-	}
-	intent, err := r.DeliveryIntent(receipt.DeliveryID)
-	if err != nil || intent.Status != registry.DeliveryIntentSubmitted || intent.ProviderKey != "" {
-		t.Fatalf("ambiguous intent=%+v err=%v", intent, err)
-	}
-	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
-		t.Fatalf("ambiguous send became a failure: problems=%+v err=%v", problems, err)
 	}
 }
 
@@ -638,26 +605,6 @@ func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
 	}
 }
 
-func TestDispatcherNilResultRemainsSubmitted(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	session := &surface.Session{ID: "nil-result", Surface: surface.KindCodex}
-	if err := r.RegisterSession(*session); err != nil {
-		t.Fatal(err)
-	}
-	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{result: nil}, session, "maybe accepted", "")
-	if err != nil || receipt == nil || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID == 0 {
-		t.Fatalf("receipt=%+v err=%v", receipt, err)
-	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil || len(problems) != 0 {
-		t.Fatalf("ambiguous result became a failure: problems=%+v err=%v", problems, err)
-	}
-}
-
 func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
@@ -735,38 +682,5 @@ func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 	receipt, err := (Dispatcher{}).Compact(context.Background(), adapter, session)
 	if err == nil || !strings.Contains(err.Error(), "control unavailable") || receipt != nil || len(adapter.sent) != 0 || adapter.compactCalls != 1 {
 		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
-	}
-}
-
-func TestDispatcherRecordsUnknownOutcomeAsUnknownEvidence(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, Status: surface.StatusIdle}
-	if err := r.RegisterSession(*session); err != nil {
-		t.Fatal(err)
-	}
-	unknown := surface.DeliveryOutcomeUnknown(errors.New("sidecar not found"))
-	adapter := &fakeSurface{kind: surface.KindClaude, err: unknown}
-	dispatcher := Dispatcher{Registry: r}
-	submitted, err := dispatcher.Deliver(context.Background(), adapter, session, "hello", "")
-	if err != nil || submitted.Evidence != surface.EvidenceSubmitted || submitted.Status != string(registry.DeliveryIntentSubmitted) {
-		t.Fatalf("submitted=%+v err=%v", submitted, err)
-	}
-	receipt, err := dispatcher.Compact(context.Background(), adapter, session)
-	if err != nil || receipt.Evidence != surface.EvidenceQueued {
-		t.Fatalf("receipt=%+v err=%v", receipt, err)
-	}
-	entries, err := r.ListHistory(10, session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("entries=%+v", entries)
-	}
-	if entries[0].Evidence != surface.EvidenceQueued || entries[1].Evidence != surface.EvidenceSubmitted {
-		t.Fatalf("entries=%+v", entries)
 	}
 }

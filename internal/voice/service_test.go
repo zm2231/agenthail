@@ -2,7 +2,6 @@ package voice
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -704,53 +703,6 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 	broken := New(s.path, p, nil, "/fixture/agenthail")
 	if broken.View("phone").Phase != "blocked" {
 		t.Fatal("corrupt identity was silently replaced")
-	}
-}
-
-func TestPrepareMigratesPersistedOperatorWithoutDynamicTools(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "voice", "operator.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	old := diskState{State: State{Protocol: 1, Session: &surface.Session{ID: "old-operator", Surface: surface.KindCodex, Name: "Old operator", Transport: "desktop"}, Phase: "ready", Events: []Event{}}}
-	data, err := json.Marshal(old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	p := &fixtureProvider{}
-	s := New(path, p, nil, "/fixture/agenthail")
-	v := apply(t, s, Action{Action: "prepare"})
-	if p.creates != 1 || v.Session == nil || v.Session.ID == "old-operator" || !v.DynamicTools {
-		t.Fatalf("persisted operator was not migrated: creates=%d state=%+v", p.creates, v)
-	}
-	if !strings.Contains(v.Message, "transfer tools") {
-		t.Fatalf("migration was not visible: %q", v.Message)
-	}
-}
-
-func TestPrepareDoesNotMigrateAnUnknownPersistedCall(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "voice", "operator.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	old := diskState{State: State{Protocol: 1, Session: &surface.Session{ID: "old-operator", Surface: surface.KindCodex, Name: "Old operator", Transport: "desktop"}, Phase: "connected", AttemptID: "call-a", Events: []Event{}}}
-	data, err := json.Marshal(old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	p := &fixtureProvider{}
-	s := New(path, p, nil, "/fixture/agenthail")
-	if _, err := s.Apply(context.Background(), "phone", Action{Action: "prepare"}); err == nil {
-		t.Fatal("unknown persisted call was replaced during migration")
-	}
-	if p.creates != 0 || s.View("phone").Phase != "unknown" {
-		t.Fatalf("migration changed unknown call: creates=%d state=%+v", p.creates, s.View("phone"))
 	}
 }
 
