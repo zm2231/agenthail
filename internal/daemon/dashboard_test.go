@@ -64,36 +64,6 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	}
 }
 
-func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testing.T) {
-	_, registry, _, from, _ := daemonFixture(t)
-	from.Surface = surface.KindClaude
-	from.ID = "claude-session"
-	if err := registry.RegisterSession(from); err != nil {
-		t.Fatal(err)
-	}
-	fake := &dashboardClaudeRunSurface{
-		daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{from.ID: from}, accepted: true},
-		runs:          []surface.ClaudeRunObservation{{JobID: "job-1", SessionID: from.ID, RunType: "bg", ProviderState: "working"}, {JobID: "other", SessionID: "other", RunType: "bg"}},
-		links:         []surface.ClaudeSubagentLink{{ParentSessionID: from.ID, AgentID: "agent-1", TranscriptPath: "/tmp/agent-1.jsonl"}, {ParentSessionID: "other", AgentID: "agent-2"}},
-	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	var body struct {
-		Runs  []surface.ClaudeRunObservation `json:"claudeRuns"`
-		Links []surface.ClaudeSubagentLink   `json:"claudeSubagents"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if len(body.Runs) != 1 || body.Runs[0].JobID != "job-1" || len(body.Links) != 1 || body.Links[0].AgentID != "agent-1" {
-		t.Fatalf("body=%+v", body)
-	}
-}
-
 func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "history", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}

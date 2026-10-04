@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -604,7 +603,6 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 	deadline := time.Now().Add(timeout)
 	currentTurnID := ""
 	for time.Now().Before(deadline) {
-		var index uint64
 		lineOffset := offset
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			var record map[string]any
@@ -613,20 +611,20 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 			}
 			turnID := currentTurnID
 			if str(record, "type") == "user" && str(record, "uuid") != "" {
-				message, _ := record["message"].(map[string]any)
-				if _, hasToolResult := message["content"].([]any); !hasToolResult {
+				if !claudeRecordHasToolResult(record) {
 					currentTurnID = str(record, "uuid")
 					turnID = currentTurnID
 				}
 			}
 			items := claudeTimelineItems(record)
+			var index uint64
 			for _, item := range items {
 				key := claudeLiveTimelineKey(lineOffset, line, item, index)
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
 				}
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Kind: item.Kind, Text: item.Text})
 				index++
 			}
 			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
@@ -650,8 +648,19 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 }
 
 func claudeLiveTimelineKey(offset int64, line []byte, item surface.TimelineItem, index uint64) string {
-	digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
-	return fmt.Sprintf("%d-%s-%d", offset, digest, index)
+	return stableTimelineItemID(offset, line, int(index))
+}
+
+func claudeRecordHasToolResult(record map[string]any) bool {
+	message, _ := record["message"].(map[string]any)
+	blocks, _ := message["content"].([]any)
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if str(block, "type") == "tool_result" {
+			return true
+		}
+	}
+	return str(message, "tool_use_id") != ""
 }
 
 func strNested(record map[string]any, object, field string) string {

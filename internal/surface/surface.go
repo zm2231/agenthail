@@ -325,17 +325,25 @@ type GoalState struct {
 }
 
 type StreamEvent struct {
-	ID          string        `json:"id,omitempty"`
-	ProviderKey string        `json:"providerKey,omitempty"`
-	Version     uint64        `json:"version,omitempty"`
-	Operation   string        `json:"operation,omitempty"`
-	Final       bool          `json:"final,omitempty"`
-	TurnID      string        `json:"turnId,omitempty"`
-	Role        string        `json:"role,omitempty"`
-	Timestamp   time.Time     `json:"timestamp,omitempty"`
-	Kind        string        `json:"kind"`
-	Text        string        `json:"text"`
-	Context     *ContextUsage `json:"context,omitempty"`
+	ID           string        `json:"id,omitempty"`
+	ProviderKey  string        `json:"providerKey,omitempty"`
+	Version      uint64        `json:"version,omitempty"`
+	Operation    string        `json:"operation,omitempty"`
+	Final        bool          `json:"final,omitempty"`
+	TurnID       string        `json:"turnId,omitempty"`
+	Role         string        `json:"role,omitempty"`
+	AttachmentID string        `json:"attachmentId,omitempty"`
+	MediaType    string        `json:"mediaType,omitempty"`
+	Width        int           `json:"width,omitempty"`
+	Height       int           `json:"height,omitempty"`
+	Bytes        int64         `json:"bytes,omitempty"`
+	Title        string        `json:"title,omitempty"`
+	CallID       string        `json:"callId,omitempty"`
+	Status       string        `json:"status,omitempty"`
+	Timestamp    time.Time     `json:"timestamp,omitempty"`
+	Kind         string        `json:"kind"`
+	Text         string        `json:"text"`
+	Context      *ContextUsage `json:"context,omitempty"`
 }
 
 type ContextUsage struct {
