@@ -75,21 +75,39 @@ enum AppCommand: String, CaseIterable, Identifiable {
     }
 }
 
+enum ShortcutOwner: Equatable {
+    case command(AppCommand)
+    case anyApp
+
+    var title: String {
+        switch self {
+        case .command(let command): command.title
+        case .anyApp: "Open sessions from any app"
+        }
+    }
+}
+
+struct AnyAppShortcut {
+    let current: () -> StoredShortcut?
+    let clear: () -> Void
+}
+
 @MainActor
 final class ShortcutStore: ObservableObject {
     enum Change: Equatable {
         case saved
-        case taken(AppCommand)
+        case taken(ShortcutOwner)
     }
 
     static let defaultsKey = "keyboardShortcuts"
-    static let shared = ShortcutStore(defaults: .standard)
 
     @Published private(set) var overrides: [String: StoredShortcut?]
     private let defaults: UserDefaults
+    private let anyApp: AnyAppShortcut
 
-    init(defaults: UserDefaults) {
+    init(defaults: UserDefaults, anyApp: AnyAppShortcut = AnyAppShortcut(current: { nil }, clear: {})) {
         self.defaults = defaults
+        self.anyApp = anyApp
         overrides = defaults.data(forKey: Self.defaultsKey).flatMap { try? JSONDecoder().decode([String: StoredShortcut?].self, from: $0) } ?? [:]
     }
 
@@ -102,13 +120,16 @@ final class ShortcutStore: ObservableObject {
         overrides[command.rawValue] != nil
     }
 
-    func command(using shortcut: StoredShortcut, except excluded: AppCommand? = nil) -> AppCommand? {
-        AppCommand.allCases.first { $0 != excluded && self.shortcut(for: $0) == shortcut }
+    func owner(of shortcut: StoredShortcut, except excluded: ShortcutOwner? = nil) -> ShortcutOwner? {
+        if let command = AppCommand.allCases.first(where: { .command($0) != excluded && self.shortcut(for: $0) == shortcut }) {
+            return .command(command)
+        }
+        return excluded != .anyApp && anyApp.current() == shortcut ? .anyApp : nil
     }
 
     @discardableResult
     func set(_ shortcut: StoredShortcut?, for command: AppCommand) -> Change {
-        if let shortcut, let other = self.command(using: shortcut, except: command) { return .taken(other) }
+        if let shortcut, let other = owner(of: shortcut, except: .command(command)) { return .taken(other) }
         if shortcut == command.defaultShortcut {
             overrides.removeValue(forKey: command.rawValue)
         } else {
@@ -118,8 +139,8 @@ final class ShortcutStore: ObservableObject {
         return .saved
     }
 
-    func defaultBlocker(_ command: AppCommand) -> AppCommand? {
-        command.defaultShortcut.flatMap { self.command(using: $0, except: command) }
+    func defaultBlocker(_ command: AppCommand) -> ShortcutOwner? {
+        command.defaultShortcut.flatMap { owner(of: $0, except: .command(command)) }
     }
 
     @discardableResult
@@ -131,8 +152,13 @@ final class ShortcutStore: ObservableObject {
     }
 
     func resetAll() {
+        anyApp.clear()
         overrides = [:]
         save()
+    }
+
+    func anyAppChanged() {
+        objectWillChange.send()
     }
 
     private func save() {

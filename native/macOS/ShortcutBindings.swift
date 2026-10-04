@@ -16,6 +16,11 @@ extension StoredShortcut {
 }
 
 extension ShortcutStore {
+    static let shared = ShortcutStore(defaults: .standard, anyApp: AnyAppShortcut(
+        current: { KeyboardShortcuts.getShortcut(for: .openPalette).map(StoredShortcut.init) },
+        clear: { KeyboardShortcuts.reset(.openPalette) }
+    ))
+
     func keyboardShortcut(_ command: AppCommand) -> KeyboardShortcut? {
         shortcut(for: command)?.recorded.toSwiftUI
     }
@@ -42,10 +47,10 @@ struct KeyboardSettings: View {
         Form {
             Section {
                 LabeledContent("Open sessions from any app") {
-                    KeyboardShortcuts.Recorder(for: .openPalette)
+                    KeyboardShortcuts.Recorder(for: .openPalette) { _ in store.anyAppChanged() }
                         .shortcutValidation { shortcut in
-                            guard let command = store.command(using: StoredShortcut(shortcut)) else { return .allow }
-                            return .disallow(reason: "\(shortcut.description) is already used by \(command.title).")
+                            guard let owner = store.owner(of: StoredShortcut(shortcut), except: .anyApp) else { return .allow }
+                            return .disallow(reason: "\(shortcut.description) is already used by \(owner.title).")
                         }
                 }
                 Text("Brings Agenthail forward with the session palette open, from any app.")
@@ -63,7 +68,7 @@ struct KeyboardSettings: View {
                 HStack {
                     Spacer()
                     Button("Restore Defaults") { store.resetAll() }
-                        .disabled(store.overrides.isEmpty)
+                        .disabled(store.overrides.isEmpty && KeyboardShortcuts.getShortcut(for: .openPalette) == nil)
                 }
             }
         }
@@ -85,14 +90,8 @@ struct KeyboardSettings: View {
                     set: { store.set($0.map(StoredShortcut.init), for: command) }
                 ))
                 .shortcutValidation { shortcut in
-                    let stored = StoredShortcut(shortcut)
-                    if let other = store.command(using: stored, except: command) {
-                        return .disallow(reason: "\(shortcut.description) is already used by \(other.title).")
-                    }
-                    if KeyboardShortcuts.getShortcut(for: .openPalette) == shortcut {
-                        return .disallow(reason: "\(shortcut.description) already opens sessions from any app.")
-                    }
-                    return .allow
+                    guard let owner = store.owner(of: StoredShortcut(shortcut), except: .command(command)) else { return .allow }
+                    return .disallow(reason: "\(shortcut.description) is already used by \(owner.title).")
                 }
                 .accessibilityLabel(command.title)
             }
