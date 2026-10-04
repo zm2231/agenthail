@@ -500,7 +500,8 @@ final class AgenthailIOSModel: ObservableObject {
                 guard !Task.isCancelled else { return }
                 self?.applySessionMetadata(metadata, for: id, requestID: requestID)
             } catch {
-                return
+                guard !Task.isCancelled else { return }
+                self?.clearSessionMetadata(for: id, requestID: requestID)
             }
         }
     }
@@ -515,6 +516,15 @@ final class AgenthailIOSModel: ObservableObject {
         detail.claudeRuns = metadata.claudeRuns
         detail.claudeSubagents = metadata.claudeSubagents
         detail.metadataErrors = metadata.errors
+        selectedDetail = detail
+    }
+
+    private func clearSessionMetadata(for id: String, requestID: UUID) {
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
+              var detail = selectedDetail, detail.session.id == id else { return }
+        detail.claudeRuns = nil
+        detail.claudeSubagents = nil
+        detail.metadataErrors = nil
         selectedDetail = detail
     }
 

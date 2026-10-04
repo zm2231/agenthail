@@ -104,6 +104,19 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Session inbox"].exists)
     }
 
+    func testClaudeMetadataAppearsInSessionDetails() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-inspector", "--preview-metadata"]
+        app.launch()
+
+        for _ in 0..<5 { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Claude runs"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["job-1"].exists)
+        XCTAssertTrue(app.staticTexts["Claude subagents"].exists)
+        XCTAssertTrue(app.staticTexts["agent-1"].exists)
+        XCTAssertTrue(app.staticTexts["/Users/demo/.claude/agents/agent-1.jsonl"].exists)
+    }
+
     func testExpiredInstructionsAreOnlyInHistory() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app"]
