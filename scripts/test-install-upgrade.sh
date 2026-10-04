@@ -176,7 +176,8 @@ test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "9"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "10"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('launcher_pending') WHERE name='alias'")" = "1"
 
 test -f "$DATA_DIR/skills/agenthail-operations/SKILL.md"
 test ! -e "$TEST_HOME/.claude"

@@ -446,7 +446,7 @@ func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID 
 		return err
 	}
 	if alias != "" {
-		if err := replaceAliasTx(tx, alias, s.ID); err != nil {
+		if err := setAliasTx(tx, alias, s.ID); err != nil {
 			return err
 		}
 	}
@@ -618,7 +618,40 @@ func (r *Registry) LookupAlias(name string) (string, error) {
 }
 
 func (r *Registry) SetAlias(name, sessionID string) error {
-	return r.ReplaceAlias(name, sessionID)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := setAliasTx(tx, name, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type AliasTakenError struct {
+	Name  string
+	Owner string
+}
+
+func (e AliasTakenError) Error() string {
+	return fmt.Sprintf("alias %q is already assigned to session %q", e.Name, e.Owner)
+}
+
+func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+	var owner string
+	err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil && owner != sessionID {
+		return AliasTakenError{Name: name, Owner: owner}
+	}
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, name, sessionID)
+	return err
 }
 
 func (r *Registry) ReplaceAlias(name, sessionID string) error {

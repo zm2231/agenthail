@@ -119,7 +119,7 @@ func TestSessionCreateReportsAcceptedUnresolvedLaunchWithoutRetrySignal(t *testi
 	d.SetLaunchers([]surface.Launcher{launcher})
 	w := httptest.NewRecorder()
 	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`)))
-	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"accepted":true`) || !strings.Contains(w.Body.String(), `"retryable":false`) {
+	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"ok":true`) || !strings.Contains(w.Body.String(), `"status":"submitted"`) || !strings.Contains(w.Body.String(), `"accepted":true`) || !strings.Contains(w.Body.String(), `"retryable":false`) || !strings.Contains(w.Body.String(), `"warning":`) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }

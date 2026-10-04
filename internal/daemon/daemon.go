@@ -27,6 +27,7 @@ type Daemon struct {
 	log               *log.Logger
 	errorMu           sync.Mutex
 	observeErrors     map[string]observedError
+	pendingAliasWarns map[int64]bool
 	retryMu           sync.Mutex
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
@@ -75,6 +76,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors:     map[string]observedError{},
+		pendingAliasWarns: map[int64]bool{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		events:            newEventHub(reg),

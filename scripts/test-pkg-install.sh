@@ -202,7 +202,8 @@ test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_tabl
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "9"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "10"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('launcher_pending') WHERE name='alias'")" = "1"
 sleep 2
 test "$({ pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$' || true; } | wc -l | tr -d ' ')" = 1
 upgraded_menu_pid="$(pgrep -u "$UID" -f '^/Applications/Agenthail.app/Contents/MacOS/Agenthail$')"
