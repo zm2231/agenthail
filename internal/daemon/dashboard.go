@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -116,6 +117,7 @@ type dashboardState struct {
 	History          []dashboardHistory   `json:"history"`
 	Attention        []dashboardAttention `json:"attention"`
 	CodexRecentHours int                  `json:"codexRecentHours"`
+	BusyDelivery     string               `json:"busyDelivery"`
 }
 
 type dashboardAttention struct {
@@ -144,6 +146,7 @@ type dashboardQueue struct {
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       registry.QueueOperation  `json:"operation"`
+	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 }
 
 type dashboardChannel struct {
@@ -292,6 +295,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 	var request struct {
 		Action           string `json:"action"`
 		CodexRecentHours int    `json:"codexRecentHours"`
+		BusyDelivery     string `json:"busyDelivery"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid settings request", http.StatusBadRequest)
@@ -304,6 +308,9 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		config, err = DisableRemoteAccess(config)
 	case "dashboard-config":
 		config.CodexRecentHours = request.CodexRecentHours
+		if request.BusyDelivery != "" {
+			config.BusyDelivery = deliverypolicy.Mode(request.BusyDelivery)
+		}
 		err = SaveDashboardConfig(config)
 	case "notifications-enable":
 		_, err = EnableNotifications()
@@ -649,9 +656,9 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation})
+		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -899,6 +906,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Message         string                     `json:"message"`
 		Alias           string                     `json:"alias"`
 		Model           string                     `json:"model"`
+		BusyDelivery    string                     `json:"busyDelivery"`
 		QueueID         int64                      `json:"queueId"`
 		Channel         string                     `json:"channel"`
 		TargetID        string                     `json:"targetId"`
@@ -1289,7 +1297,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, TurnOptions: request.TurnOptions})
+		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

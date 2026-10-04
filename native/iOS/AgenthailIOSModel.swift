@@ -473,9 +473,8 @@ final class AgenthailIOSModel: ObservableObject {
         guard !message.isEmpty, let api,
               let detail = selectedDetail, detail.session.id == session.id,
               !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
-        let working = detail.session.status == "busy"
-        let action = working && detail.capabilities.steer ? "steer" : "send"
-        guard action == "steer" || detail.capabilities.send else { return }
+        let action = "send"
+        guard detail.capabilities.send else { return }
         let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
         sendingSessionIDs.insert(session.id)
         deliveryQueueIDs.removeValue(forKey: session.id)

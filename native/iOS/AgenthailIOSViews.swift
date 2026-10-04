@@ -587,7 +587,7 @@ struct IOSComposer: View {
     @State private var showingTurnSettings = false
     @State private var loadedModels: [ModelOption]?
 
-    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer }
+    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     private var canSend: Bool {
