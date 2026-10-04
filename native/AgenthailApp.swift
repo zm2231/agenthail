@@ -342,6 +342,7 @@ final class NotificationRoute: ObservableObject {
         var newSession = false
         var sharedText: String?
         var reply: String?
+        var palette = false
     }
 
     static let shared = NotificationRoute()
@@ -354,6 +355,10 @@ final class NotificationRoute: ObservableObject {
 
     func share(_ text: String) {
         latest = Request(sessionID: nil, sharedText: text)
+    }
+
+    func showPalette() {
+        latest = Request(sessionID: nil, palette: true)
     }
 
     func reply(_ text: String, to sessionID: String) {
@@ -379,6 +384,7 @@ private struct MenuBarLabel: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject private var route = NotificationRoute.shared
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
+    @AppStorage(GlobalShortcut.preferenceKey) private var globalShortcut = GlobalShortcut.off.rawValue
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -395,6 +401,11 @@ private struct MenuBarLabel: View {
         .onChange(of: route.latest) { handleRoute() }
         .onChange(of: model.snapshot?.sessions, initial: true) { syncSpotlight() }
         .onChange(of: spotlightSessions) { syncSpotlight() }
+        .onChange(of: globalShortcut, initial: true) {
+            GlobalShortcutCenter.shared.register(GlobalShortcut(rawValue: globalShortcut) ?? .off) {
+                NotificationRoute.shared.showPalette()
+            }
+        }
     }
 
     private func syncSpotlight() {
@@ -418,6 +429,7 @@ private struct MenuBarLabel: View {
         NSApplication.shared.activate()
         openWindow(id: "main")
         if request.newSession { model.newSessionVisible = true }
+        if request.palette { model.paletteVisible = true }
         if let text = request.sharedText { model.receiveSharedText(text) }
     }
 }

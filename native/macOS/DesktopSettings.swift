@@ -40,6 +40,8 @@ struct GeneralSettings: View {
     @ObservedObject var model: AgenthailModel
     @AppStorage("followUpDefault") private var followUpDefault = FollowUpAction.queue.rawValue
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
+    @AppStorage(GlobalShortcut.preferenceKey) private var globalShortcut = GlobalShortcut.off.rawValue
+    @ObservedObject private var shortcuts = GlobalShortcutCenter.shared
 
     var body: some View {
         Form {
@@ -72,6 +74,20 @@ struct GeneralSettings: View {
                 Text("⌥⌘↩ always does the other one. Agents that can't be steered mid-turn send queued messages after the turn.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
+            }
+            Section("Shortcut") {
+                Picker("Open sessions from any app", selection: $globalShortcut) {
+                    ForEach(GlobalShortcut.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                if let unavailable = shortcuts.unavailable {
+                    Text("\(unavailable.label) couldn't be turned on. Choose a different shortcut.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DesktopPalette.amber)
+                } else {
+                    Text("Brings Agenthail forward with the session palette open.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DesktopPalette.text2)
+                }
             }
             Section("Spotlight") {
                 Toggle("Show sessions in Spotlight", isOn: $spotlightSessions)
