@@ -48,19 +48,15 @@ struct DesktopWindow: View {
                 .keyboardShortcut("k", modifiers: .command)
                 .hidden()
         }
-        .onAppear {
-            NSApplication.shared.setActivationPolicy(.regular)
-            NSApplication.shared.activate()
-        }
-        .onDisappear {
-            NSApplication.shared.setActivationPolicy(.accessory)
-        }
+        .onAppear { model.windowAppeared() }
+        .onDisappear { model.windowDisappeared() }
     }
 }
 
 struct SessionSidebar: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
+    @Environment(\.openWindow) private var openWindow
     @State private var expandedProjects: Set<String> = []
     @FocusState private var searchFocused: Bool
 
@@ -321,6 +317,9 @@ extension SessionSidebar {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .contextMenu {
+            Button("Open in New Window") { openWindow(id: "session", value: session.id) }
+        }
     }
 }
 
@@ -501,11 +500,12 @@ struct ConnectionFooter: View {
 struct ConversationPane: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
+    var headerInset: CGFloat = 22
 
     var body: some View {
         if let session = pane.displayedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, onFocusTerminal: { model.focusInTerminal(session) })
+                ConversationHeader(session: session, model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) })
                 TranscriptView(model: model, pane: pane, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if pane.removedSession?.id == session.id {
@@ -577,6 +577,7 @@ struct ConversationHeader: View {
     let model: String?
     let context: ContextState?
     @Binding var inspectorVisible: Bool
+    var leadingInset: CGFloat = 22
     var onFocusTerminal: () -> Void = {}
 
     var body: some View {
@@ -622,7 +623,7 @@ struct ConversationHeader: View {
             .accessibilityLabel("Toggle inspector")
             .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
         }
-        .padding(.leading, 22)
+        .padding(.leading, leadingInset)
         .padding(.trailing, 14)
         .frame(height: 52)
         .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }

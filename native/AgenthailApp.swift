@@ -464,6 +464,15 @@ private struct AgenthailMenuBarApp: App {
         .defaultSize(width: 1440, height: 900)
         .windowStyle(.hiddenTitleBar)
 
+        WindowGroup("Session", id: "session", for: String.self) { $sessionID in
+            if let sessionID {
+                SessionWindow(model: model, sessionID: sessionID)
+                    .frame(minWidth: 620, minHeight: 480)
+            }
+        }
+        .defaultSize(width: 900, height: 820)
+        .windowStyle(.hiddenTitleBar)
+
         Settings {
             DesktopSettings(model: model)
         }

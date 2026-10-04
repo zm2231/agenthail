@@ -3,6 +3,7 @@ import SwiftUI
 struct CommandPalette: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
+    @Environment(\.openWindow) private var openWindow
     @State private var query = ""
     @State private var highlightedID: String?
     @FocusState private var fieldFocused: Bool
@@ -61,6 +62,7 @@ struct CommandPalette: View {
             if session.isWorking {
                 actions.append(Entry(id: "stop", icon: "stop.circle", title: "Stop \(session.title)", detail: "") { pane.interrupt() })
             }
+            actions.append(Entry(id: "window", icon: "macwindow.badge.plus", title: "Open \(session.title) in new window", detail: "") { openWindow(id: "session", value: session.id) })
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 actions.append(Entry(id: "focus", icon: "terminal", title: "Open in \(host)", detail: session.title) { model.focusInTerminal(session) })
             }

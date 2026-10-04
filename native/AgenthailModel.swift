@@ -40,6 +40,7 @@ final class AgenthailModel: ObservableObject {
     private(set) var api: AgenthailAPI?
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
+    private var visibleWindows = 0
     private var connectionTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -81,6 +82,18 @@ final class AgenthailModel: ObservableObject {
         let pane = SessionPane(model: self, restoresSelection: false)
         panes.append(pane)
         return pane
+    }
+
+    func windowAppeared() {
+        visibleWindows += 1
+        guard visibleWindows == 1 else { return }
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate()
+    }
+
+    func windowDisappeared() {
+        visibleWindows = max(0, visibleWindows - 1)
+        if visibleWindows == 0 { NSApplication.shared.setActivationPolicy(.accessory) }
     }
 
     func closePane(_ pane: SessionPane) {
