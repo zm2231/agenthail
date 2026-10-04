@@ -1289,7 +1289,7 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 		context.Background(),
 		[]string{"--model", "o4-mini", "--", "hello"},
 		"/work/project", "agenthail-launch", receiptPath,
-		managedCodexLaunchBinding{Workspace: "workspace:7", Surface: "surface:9"},
+		managedCodexLaunchBinding{Runtime: surface.LauncherCMUX, Workspace: "workspace:7", Surface: "surface:9"},
 		func(_ context.Context, cwd, model string) (*surface.Session, error) {
 			prepared.cwd, prepared.model = cwd, model
 			return &surface.Session{ID: "provider-thread"}, nil
@@ -1316,5 +1316,33 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 	}
 	if receiptAtExec.LaunchID != "agenthail-launch" || receiptAtExec.ThreadID != "provider-thread" || receiptAtExec.Workspace != "workspace:7" || receiptAtExec.Surface != "surface:9" || receiptAtExec.TmuxPane != "" {
 		t.Fatalf("receipt=%+v", receiptAtExec)
+	}
+}
+
+func TestManagedCodexLaunchBindingSelectsDeclaredTMUXRuntime(t *testing.T) {
+	t.Setenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME", surface.LauncherTMUX)
+	t.Setenv("TMUX_PANE", "%17")
+	t.Setenv("CMUX_WORKSPACE_ID", "workspace:7")
+	t.Setenv("CMUX_SURFACE_ID", "surface:9")
+	binding, err := managedCodexLaunchBindingFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.Runtime != surface.LauncherTMUX || binding.TmuxPane != "%17" || binding.Workspace != "" || binding.Surface != "" {
+		t.Fatalf("binding=%+v", binding)
+	}
+}
+
+func TestManagedCodexLaunchBindingSelectsDeclaredCMUXRuntime(t *testing.T) {
+	t.Setenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME", surface.LauncherCMUX)
+	t.Setenv("TMUX_PANE", "%17")
+	t.Setenv("CMUX_WORKSPACE_ID", "workspace:7")
+	t.Setenv("CMUX_SURFACE_ID", "surface:9")
+	binding, err := managedCodexLaunchBindingFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.Runtime != surface.LauncherCMUX || binding.TmuxPane != "" || binding.Workspace != "workspace:7" || binding.Surface != "surface:9" {
+		t.Fatalf("binding=%+v", binding)
 	}
 }

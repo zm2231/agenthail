@@ -82,7 +82,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 			return LaunchResult{}, err
 		}
 		if receiptPath != "" {
-			command = withLauncherEnvironment(command, "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath)
+			command = withLauncherEnvironment(command, "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath, "AGENTHAIL_CODEX_LAUNCH_RUNTIME="+LauncherCMUX)
 		}
 		args := []string{"new-workspace", "--json", "--cwd", request.Cwd, "--command", command}
 		if request.Name != "" {
@@ -112,7 +112,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		if receiptErr != nil {
 			return LaunchResult{}, receiptErr
 		}
-		argv = managedCodexLaunchArgv(argv, sessionName, receiptPath)
+		argv = managedCodexLaunchArgv(argv, sessionName, receiptPath, LauncherTMUX)
 	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", request.Cwd, "-P", "-F", "#{session_name} #{pane_id}"}
 	if request.Name != "" {
@@ -140,7 +140,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		if receiptErr != nil && !errors.Is(receiptErr, os.ErrNotExist) {
 			return result, LaunchAcceptedError{Launcher: l.id, Err: receiptErr}
 		}
-		if receiptErr == nil && (receipt.LaunchID != sessionName || receipt.TmuxSession != sessionName || filepath.Clean(receipt.Cwd) != filepath.Clean(request.Cwd) || receipt.TmuxPane != result.Location.Pane) {
+		if receiptErr == nil && (receipt.Runtime != LauncherTMUX || receipt.LaunchID != sessionName || receipt.TmuxSession != sessionName || filepath.Clean(receipt.Cwd) != filepath.Clean(request.Cwd) || receipt.TmuxPane != result.Location.Pane) {
 			return result, LaunchAcceptedError{Launcher: l.id, Err: errors.New("tmux launch receipt does not match the launch result")}
 		}
 	}
@@ -156,9 +156,9 @@ func launchCommandStarted(err error) bool {
 	return !errors.As(err, &startErr)
 }
 
-func managedCodexLaunchArgv(argv []string, launchID, receiptPath string) []string {
-	args := make([]string, 0, len(argv)+3)
-	args = append(args, "env", "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath)
+func managedCodexLaunchArgv(argv []string, launchID, receiptPath, runtime string) []string {
+	args := make([]string, 0, len(argv)+4)
+	args = append(args, "env", "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath, "AGENTHAIL_CODEX_LAUNCH_RUNTIME="+runtime)
 	return append(args, argv...)
 }
 
@@ -354,7 +354,7 @@ func (l *processLauncher) locateCMUX(ctx context.Context, sessions []Session) ma
 					continue
 				}
 				receipt, err := ReadManagedCodexLaunchReceipt(path)
-				if err != nil || receipt.LaunchID != launchID || receipt.Workspace == "" || receipt.Surface == "" {
+				if err != nil || receipt.Runtime != LauncherCMUX || receipt.LaunchID != launchID || receipt.Workspace == "" || receipt.Surface == "" {
 					continue
 				}
 				session, ok := wantedSessions[receipt.ThreadID]
@@ -377,56 +377,52 @@ func (l *processLauncher) cmuxSurfacePresent(ctx context.Context, workspace, sur
 	if err != nil {
 		return false, err
 	}
-	var value any
-	if err := json.Unmarshal(out, &value); err != nil {
-		return false, err
+	var tree cmuxTreeInventory
+	if err := json.Unmarshal(out, &tree); err != nil || len(tree.Windows) == 0 {
+		if err == nil {
+			err = errors.New("cmux tree inventory is empty")
+		}
+		return false, fmt.Errorf("invalid cmux tree inventory: %w", err)
 	}
-	return cmuxJSONContainsWorkspaceSurface(value, workspace, surface), nil
+	for _, window := range tree.Windows {
+		for _, candidate := range window.Workspaces {
+			if candidate.ID != workspace && candidate.Ref != workspace {
+				continue
+			}
+			for _, pane := range candidate.Panes {
+				for _, candidateSurface := range pane.Surfaces {
+					if candidateSurface.ID == surface || candidateSurface.Ref == surface {
+						return true, nil
+					}
+				}
+			}
+			return false, nil
+		}
+	}
+	return false, nil
 }
 
-func cmuxJSONContainsWorkspaceSurface(value any, workspace, surface string) bool {
-	switch typed := value.(type) {
-	case []any:
-		for _, child := range typed {
-			if cmuxJSONContainsWorkspaceSurface(child, workspace, surface) {
-				return true
-			}
-		}
-	case map[string]any:
-		workspaceMatch := typed["id"] == workspace || typed["ref"] == workspace || typed["workspace_id"] == workspace || typed["workspace_ref"] == workspace
-		if workspaceMatch {
-			if cmuxJSONContainsSurface(typed, surface) {
-				return true
-			}
-		}
-		for _, child := range typed {
-			if cmuxJSONContainsWorkspaceSurface(child, workspace, surface) {
-				return true
-			}
-		}
-	}
-	return false
+type cmuxTreeInventory struct {
+	Windows []cmuxTreeWindow `json:"windows"`
 }
 
-func cmuxJSONContainsSurface(value any, wanted string) bool {
-	switch typed := value.(type) {
-	case []any:
-		for _, child := range typed {
-			if cmuxJSONContainsSurface(child, wanted) {
-				return true
-			}
-		}
-	case map[string]any:
-		for key, child := range typed {
-			if (key == "id" || key == "surface_id" || key == "surface_ref" || key == "surface") && child == wanted {
-				return true
-			}
-			if cmuxJSONContainsSurface(child, wanted) {
-				return true
-			}
-		}
-	}
-	return false
+type cmuxTreeWindow struct {
+	Workspaces []cmuxTreeWorkspace `json:"workspaces"`
+}
+
+type cmuxTreeWorkspace struct {
+	ID    string         `json:"id"`
+	Ref   string         `json:"ref"`
+	Panes []cmuxTreePane `json:"panes"`
+}
+
+type cmuxTreePane struct {
+	Surfaces []cmuxTreeSurface `json:"surfaces"`
+}
+
+type cmuxTreeSurface struct {
+	ID  string `json:"id"`
+	Ref string `json:"ref"`
 }
 
 type tmuxPane struct {

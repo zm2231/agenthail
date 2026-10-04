@@ -246,19 +246,9 @@ func (a *App) cmdCodex(args []string) error {
 		if err != nil || filepath.Clean(receiptPath) != filepath.Clean(expectedReceiptPath) {
 			return fmt.Errorf("managed Codex launch receipt path is not launch-owned")
 		}
-		binding := managedCodexLaunchBinding{TmuxPane: strings.TrimSpace(os.Getenv("TMUX_PANE")), Workspace: strings.TrimSpace(os.Getenv("CMUX_WORKSPACE_ID")), Surface: strings.TrimSpace(os.Getenv("CMUX_SURFACE_ID"))}
-		if binding.Workspace != "" || binding.Surface != "" {
-			if binding.Workspace == "" || binding.Surface == "" {
-				return fmt.Errorf("managed Codex launch received incomplete CMUX identity")
-			}
-			binding.TmuxPane = ""
-		} else {
-			if binding.TmuxPane == "" {
-				return fmt.Errorf("managed Codex launch did not receive a terminal identity")
-			}
-			if !strings.HasPrefix(binding.TmuxPane, "%") {
-				return fmt.Errorf("managed Codex launch received invalid TMUX_PANE")
-			}
+		binding, err := managedCodexLaunchBindingFromEnv()
+		if err != nil {
+			return err
 		}
 		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -273,9 +263,34 @@ func (a *App) cmdCodex(args []string) error {
 type managedCodexPreparer func(context.Context, string, string) (*surface.Session, error)
 type managedCodexExec func(string, []string, []string) error
 type managedCodexLaunchBinding struct {
+	Runtime   string
 	TmuxPane  string
 	Workspace string
 	Surface   string
+}
+
+func managedCodexLaunchBindingFromEnv() (managedCodexLaunchBinding, error) {
+	binding := managedCodexLaunchBinding{
+		Runtime:   strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME")),
+		TmuxPane:  strings.TrimSpace(os.Getenv("TMUX_PANE")),
+		Workspace: strings.TrimSpace(os.Getenv("CMUX_WORKSPACE_ID")),
+		Surface:   strings.TrimSpace(os.Getenv("CMUX_SURFACE_ID")),
+	}
+	switch binding.Runtime {
+	case surface.LauncherTMUX:
+		if binding.TmuxPane == "" || !strings.HasPrefix(binding.TmuxPane, "%") {
+			return managedCodexLaunchBinding{}, fmt.Errorf("managed Codex tmux launch did not receive valid TMUX_PANE")
+		}
+		binding.Workspace, binding.Surface = "", ""
+	case surface.LauncherCMUX:
+		if binding.Workspace == "" || binding.Surface == "" {
+			return managedCodexLaunchBinding{}, fmt.Errorf("managed Codex CMUX launch received incomplete identity")
+		}
+		binding.TmuxPane = ""
+	default:
+		return managedCodexLaunchBinding{}, fmt.Errorf("managed Codex launch runtime is missing or unsupported")
+	}
+	return binding, nil
 }
 
 func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string) error {
@@ -290,8 +305,8 @@ func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, re
 	if session == nil || session.ID == "" {
 		return errors.New("managed Codex launch returned no provider thread ID")
 	}
-	receipt := surface.ManagedCodexLaunchReceipt{LaunchID: launchID, ThreadID: session.ID, Cwd: cwd, TmuxSession: launchID, TmuxPane: binding.TmuxPane, Workspace: binding.Workspace, Surface: binding.Surface}
-	if receipt.TmuxPane == "" {
+	receipt := surface.ManagedCodexLaunchReceipt{LaunchID: launchID, ThreadID: session.ID, Cwd: cwd, Runtime: binding.Runtime, TmuxSession: launchID, TmuxPane: binding.TmuxPane, Workspace: binding.Workspace, Surface: binding.Surface}
+	if binding.Runtime == surface.LauncherCMUX {
 		receipt.TmuxSession = ""
 	}
 	if err := surface.WriteManagedCodexLaunchReceipt(receiptPath, receipt); err != nil {

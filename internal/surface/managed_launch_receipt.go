@@ -14,6 +14,7 @@ type ManagedCodexLaunchReceipt struct {
 	LaunchID    string `json:"launchId"`
 	ThreadID    string `json:"threadId"`
 	Cwd         string `json:"cwd"`
+	Runtime     string `json:"runtime"`
 	TmuxSession string `json:"tmuxSession"`
 	TmuxPane    string `json:"tmuxPane"`
 	Workspace   string `json:"workspace,omitempty"`
@@ -47,7 +48,7 @@ func ReclaimManagedCodexLaunchReceipts(liveSessions map[string]struct{}, verifyC
 		return errors.New("managed Codex receipt reclaim requires current-session verification")
 	}
 	return reclaimManagedCodexLaunchReceipts(".reclaim-cursor", func(receipt ManagedCodexLaunchReceipt) (bool, error) {
-		if receipt.TmuxSession == "" || receipt.TmuxPane == "" {
+		if receipt.Runtime != LauncherTMUX || receipt.TmuxSession == "" || receipt.TmuxPane == "" {
 			return true, nil
 		}
 		if _, live := liveSessions[receipt.TmuxSession]; live {
@@ -62,7 +63,7 @@ func ReclaimManagedCodexCMUXLaunchReceipts(verifyCurrent func(string, string) (b
 		return errors.New("managed Codex CMUX receipt reclaim requires current-surface verification")
 	}
 	return reclaimManagedCodexLaunchReceipts(".cmux-reclaim-cursor", func(receipt ManagedCodexLaunchReceipt) (bool, error) {
-		if receipt.Workspace == "" || receipt.Surface == "" {
+		if receipt.Runtime != LauncherCMUX || receipt.Workspace == "" || receipt.Surface == "" {
 			return true, nil
 		}
 		return verifyCurrent(receipt.Workspace, receipt.Surface)
@@ -203,5 +204,11 @@ func managedCodexLaunchReceiptComplete(receipt ManagedCodexLaunchReceipt) bool {
 	if receipt.LaunchID == "" || receipt.ThreadID == "" || receipt.Cwd == "" {
 		return false
 	}
-	return receipt.TmuxSession != "" && receipt.TmuxPane != "" || receipt.Workspace != "" && receipt.Surface != ""
+	if receipt.Runtime == LauncherTMUX {
+		return receipt.TmuxSession != "" && receipt.TmuxPane != "" && receipt.Workspace == "" && receipt.Surface == ""
+	}
+	if receipt.Runtime == LauncherCMUX {
+		return receipt.Workspace != "" && receipt.Surface != "" && receipt.TmuxSession == "" && receipt.TmuxPane == ""
+	}
+	return false
 }
