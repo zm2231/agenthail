@@ -23,6 +23,7 @@ const (
 
 type sessionJournalPayload struct {
 	Context     *surface.ContextUsage `json:"context,omitempty"`
+	Goal        *surface.GoalState    `json:"goal"`
 	Role        string                `json:"role,omitempty"`
 	Title       string                `json:"title,omitempty"`
 	Status      string                `json:"status,omitempty"`
@@ -386,5 +387,5 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Truncated: event.Truncated}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Truncated: event.Truncated}
 }

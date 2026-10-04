@@ -14,11 +14,7 @@ struct SessionEditingControls: View {
             Button("Name conversation", systemImage: "pencil") { text = detail.alias ?? ""; editingName = true }
             if !detail.readOnly && detail.capabilities.goal {
                 Button(detail.goal?.objective.isEmpty == false ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
-                if detail.goal?.objective.isEmpty == false {
-                    Button(detail.goal?.status == "paused" ? "Resume goal" : "Pause goal", systemImage: detail.goal?.status == "paused" ? "play.fill" : "pause.fill") { Task { await save(detail.goal?.status == "paused" ? "goal-resume" : "goal-pause") } }
-                    Button("Edit token budget", systemImage: "number") { text = detail.goal?.tokenBudget.map(String.init) ?? ""; editingBudget = true }
-                    Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } }
-                }
+                if detail.goal?.objective.isEmpty == false { Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } } }
                 if let goal = detail.goal {
                     if goal.status == "active" {
                         Button("Pause goal", systemImage: "pause.fill") { Task { await save("goal-pause") } }
@@ -43,7 +39,7 @@ struct SessionEditingControls: View {
                     if editingBudget {
                         TextField("Token budget", text: $budgetText).keyboardType(.numberPad)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Text("Leave blank to clear the budget.").font(.footnote)
+                        Text("Use Clear token budget to remove the current limit.").font(.footnote)
                     } else {
                         TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
                             .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
@@ -54,7 +50,7 @@ struct SessionEditingControls: View {
                 .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingBudget ? "goal-budget" : editingName ? "alias" : "goal-set", text: editingBudget ? budgetText : text) } }.disabled((editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
+                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingBudget ? "goal-budget" : editingName ? "alias" : editingGoal && detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set", text: editingBudget ? budgetText : text) } }.disabled((editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
                 }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
             }
         }

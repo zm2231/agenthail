@@ -254,6 +254,7 @@ function startLiveStream() {
     app.history.journalSeq = Math.max(app.history.journalSeq || 0, envelope.seq || 0);
     if (item.kind === "source-error") { app.history.transcriptWarning = item.reason || "Live updates are unavailable."; renderChat(); return; }
     if (item.kind === "context" && item.context) { app.history.context = item.context; renderContextUsage(item.context); return; }
+    if (item.kind === "goal") { app.history.goal = item.goal || null; renderChat(); return; }
     if (!item.itemId || item.op === "reset") return;
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
@@ -977,8 +978,16 @@ function renderChat() {
   renderContextUsage(context);
   startLiveStream();
   const settings = [`<form class="session-tools" data-tool="alias"><label><span>Conversation name</span><input name="alias" value="${escape(session.alias || "")}" maxlength="80" placeholder="research"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save name</button></div></form>`];
-  if (capabilities.goal)
-    settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save goal</button>${goal?.objective ? '<button class="soft-button" data-action="goal-clear" type="button">Clear</button>' : ""}</div></form>`);
+  if (capabilities.goal) {
+    const goalActions = [];
+    if (goal?.status === "active") goalActions.push('<button class="soft-button" data-action="goal-pause" type="button">Pause</button>');
+    if (goal?.status === "paused") goalActions.push('<button class="soft-button" data-action="goal-resume" type="button">Resume</button>');
+    if (goal?.objective) goalActions.push('<button class="soft-button" data-action="goal-clear" type="button">Clear</button>');
+    if (goal?.tokenBudget != null) goalActions.push('<button class="soft-button" data-action="goal-budget" data-goal-budget-clear="true" type="button">Clear budget</button>');
+    const metrics = goal ? `<div class="session-tool-note">Status: ${escape(goalStatusLabel(goal.status))}${goal.timeUsedSeconds != null ? ` · Elapsed: ${escape(formatGoalDuration(goal.timeUsedSeconds))}` : ""}${goal.tokensUsed != null ? ` · Tokens: ${compactTokenCount(goal.tokensUsed)}` : ""}${goal.tokenBudget != null ? ` · Budget: ${compactTokenCount(goal.tokenBudget)}` : ""}${goal.createdAt ? ` · Created: ${escape(goal.createdAt)}` : ""}${goal.updatedAt ? ` · Updated: ${escape(goal.updatedAt)}` : ""}</div>` : "";
+    settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label>${metrics}<div class="session-tool-actions"><button class="soft-button" type="submit">${goal?.objective ? "Edit goal" : "Save goal"}</button>${goalActions.join("")}</div></form>`);
+    settings.push(`<form class="session-tools" data-tool="goal-budget"><label><span>Token budget</span><input name="tokenBudget" type="number" min="0" step="1" value="${goal?.tokenBudget ?? ""}" placeholder="Optional"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save budget</button></div></form>`);
+  }
   const toolRows = [
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
@@ -986,7 +995,7 @@ function renderChat() {
   const signature = JSON.stringify([
     session.id,
     exchanges,
-    goal?.objective || "",
+    JSON.stringify(goal || null),
     Boolean(capabilities.goal),
     transcriptWarning,
   ]);
@@ -1042,6 +1051,17 @@ function compactTokenCount(value) {
   if (count >= 1000000) return `${(count / 1000000).toFixed(count >= 10000000 ? 0 : 1).replace(/\.0$/, "")}m`;
   if (count >= 1000) return `${Math.round(count / 1000)}k`;
   return String(count);
+}
+function goalStatusLabel(status) {
+  return ({ active: "Active", paused: "Paused", blocked: "Blocked", usageLimited: "Usage limited", budgetLimited: "Budget limited", complete: "Complete" })[status] || status || "Unknown";
+}
+function formatGoalDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return "Unknown";
+  if (value < 60) return `${value}s`;
+  const minutes = Math.floor(value / 60);
+  if (minutes < 60) return `${minutes}m ${value % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 function renderContextUsage(context) {
   const indicator = $("#context-usage");
@@ -1390,7 +1410,7 @@ document.addEventListener("click", async (event) => {
   control.disabled = true;
   try {
     const result = await action(control.dataset.action, {
-      message: $("#message").value.trim(),
+      message: control.dataset.goalBudgetClear === "true" ? "" : $("#message").value.trim(),
     });
     const queued = result?.result?.evidence === "queued";
     if (control.dataset.action === "compact" && app.history?.context) {
@@ -1427,8 +1447,12 @@ document.addEventListener("submit", async (event) => {
       await action("alias", { alias: input.value.trim() });
       toast("Conversation name saved.");
       await load();
+    } else if (tool === "goal-budget") {
+      const value = input.value.trim();
+      await action("goal-budget", { message: value });
+      toast(value ? "Token budget saved." : "Token budget cleared.");
     } else {
-      await action("goal-set", { message: input.value.trim() });
+      await action(app.history?.goal?.objective ? "goal-edit" : "goal-set", { message: input.value.trim() });
       toast("Goal saved.");
     }
     await selectSession(app.selected.id);

@@ -41,12 +41,24 @@ func TestCodexGoalSetParamsRejectsUnknownStatusAndNegativeBudget(t *testing.T) {
 	}
 }
 
+func TestCodexGoalStatusesAreExactlyTheSupportedSix(t *testing.T) {
+	statuses := []string{surface.GoalStatusActive, surface.GoalStatusPaused, surface.GoalStatusBlocked, surface.GoalStatusUsageLimited, surface.GoalStatusBudgetLimited, surface.GoalStatusComplete}
+	if len(statuses) != 6 {
+		t.Fatalf("status count=%d", len(statuses))
+	}
+	for _, status := range statuses {
+		if !validCodexGoalStatus(status) {
+			t.Fatalf("status %q is not accepted", status)
+		}
+	}
+}
+
 func TestParseCodexGoalNotificationsPreservesUpdatedAndCleared(t *testing.T) {
 	updated, ok := ParseCodexGoalNotification("thread/goal/updated", map[string]any{
 		"threadId": "thread", "turnId": "turn",
 		"goal": map[string]any{"objective": "verify", "status": "budgetLimited", "timeUsedSeconds": float64(12), "tokensUsed": float64(34), "tokenBudget": float64(55), "createdAt": float64(100), "updatedAt": float64(110)},
 	})
-	if !ok || updated.Goal == nil || updated.Goal.Status != surface.GoalStatusBudgetLimited || updated.Goal.TimeUsedSeconds != 12 || updated.Goal.TokensUsed != 34 || *updated.Goal.TokenBudget != 55 || !updated.Goal.CreatedAt.Equal(time.Unix(100, 0).UTC()) || updated.TurnID == nil || *updated.TurnID != "turn" {
+	if !ok || updated.Goal == nil || updated.Goal.Status != surface.GoalStatusBudgetLimited || updated.Goal.TimeUsedSeconds != 12 || updated.Goal.TokensUsed != 34 || *updated.Goal.TokenBudget != 55 || !updated.Goal.CreatedAt.Equal(time.Unix(100, 0).UTC()) || !updated.Goal.UpdatedAt.Equal(time.Unix(110, 0).UTC()) || updated.TurnID == nil || *updated.TurnID != "turn" {
 		t.Fatalf("updated=%+v ok=%v", updated, ok)
 	}
 	cleared, ok := ParseCodexGoalNotification("thread/goal/cleared", map[string]any{"threadId": "thread"})

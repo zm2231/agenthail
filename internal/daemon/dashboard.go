@@ -1313,12 +1313,49 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result, err = (delivery.Dispatcher{Registry: d.Registry}).Compact(ctx, adapter, session)
-	case "goal-set":
-		if !effective.Goal || strings.TrimSpace(request.Message) == "" {
-			http.Error(w, "this session cannot accept a goal", http.StatusBadRequest)
+	case "goal-set", "goal-edit", "goal-pause", "goal-resume", "goal-budget":
+		controller, ok := adapter.(surface.GoalController)
+		if !effective.Goal || !ok {
+			http.Error(w, "this session does not support typed goal controls", http.StatusBadRequest)
 			return
 		}
-		err = adapter.GoalSet(ctx, session, request.Message)
+		var update surface.GoalUpdate
+		switch request.Action {
+		case "goal-set":
+			objective := strings.TrimSpace(request.Message)
+			if objective == "" {
+				http.Error(w, "goal objective is required", http.StatusBadRequest)
+				return
+			}
+			status := surface.GoalStatusActive
+			update = surface.GoalUpdate{Objective: &objective, Status: &status}
+		case "goal-edit":
+			objective := strings.TrimSpace(request.Message)
+			if objective == "" {
+				http.Error(w, "goal objective is required", http.StatusBadRequest)
+				return
+			}
+			update = surface.GoalUpdate{Objective: &objective}
+		case "goal-pause", "goal-resume":
+			status := surface.GoalStatusPaused
+			if request.Action == "goal-resume" {
+				status = surface.GoalStatusActive
+			}
+			update = surface.GoalUpdate{Status: &status}
+		case "goal-budget":
+			budget := strings.TrimSpace(request.Message)
+			if budget == "" {
+				update = surface.GoalUpdate{ClearTokenBudget: true}
+				break
+			}
+			value, parseErr := strconv.ParseInt(budget, 10, 64)
+			if parseErr != nil || value < 0 {
+				http.Error(w, "token budget must be a non-negative integer", http.StatusBadRequest)
+				return
+			}
+			update = surface.GoalUpdate{TokenBudget: &value}
+		}
+		err = controller.UpdateGoal(ctx, session, update)
 	case "goal-clear":
 		if !effective.Goal {
 			http.Error(w, "this session does not support goals", http.StatusBadRequest)
