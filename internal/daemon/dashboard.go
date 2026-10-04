@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -102,22 +103,23 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt        time.Time            `json:"updatedAt"`
-	EventCursor      uint64               `json:"eventCursor"`
-	HostEpoch        string               `json:"hostEpoch"`
-	CatalogSeq       uint64               `json:"catalogSeq"`
-	Daemon           map[string]any       `json:"daemon"`
-	Surfaces         []dashboardSurface   `json:"surfaces"`
-	Sessions         []dashboardSession   `json:"sessions"`
-	TotalSessions    int                  `json:"totalSessions"`
-	NextCursor       string               `json:"nextCursor,omitempty"`
-	Queue            []dashboardQueue     `json:"queue"`
-	Channels         []dashboardChannel   `json:"channels"`
-	Relays           []dashboardRelay     `json:"relays"`
-	History          []dashboardHistory   `json:"history"`
-	Attention        []dashboardAttention `json:"attention"`
-	CodexRecentHours int                  `json:"codexRecentHours"`
-	BusyDelivery     string               `json:"busyDelivery"`
+	UpdatedAt        time.Time                  `json:"updatedAt"`
+	EventCursor      uint64                     `json:"eventCursor"`
+	HostEpoch        string                     `json:"hostEpoch"`
+	CatalogSeq       uint64                     `json:"catalogSeq"`
+	Daemon           map[string]any             `json:"daemon"`
+	Surfaces         []dashboardSurface         `json:"surfaces"`
+	Sessions         []dashboardSession         `json:"sessions"`
+	TotalSessions    int                        `json:"totalSessions"`
+	NextCursor       string                     `json:"nextCursor,omitempty"`
+	Queue            []dashboardQueue           `json:"queue"`
+	Channels         []dashboardChannel         `json:"channels"`
+	Relays           []dashboardRelay           `json:"relays"`
+	History          []dashboardHistory         `json:"history"`
+	Attention        []dashboardAttention       `json:"attention"`
+	DeliveryProblems []registry.DeliveryProblem `json:"deliveryProblems"`
+	CodexRecentHours int                        `json:"codexRecentHours"`
+	BusyDelivery     string                     `json:"busyDelivery"`
 }
 
 type dashboardAttention struct {
@@ -656,7 +658,11 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
+	deliveryProblems, err := d.Registry.ListDeliveryProblems()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read delivery problems: %w", err)
+	}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
 	}
@@ -915,12 +921,34 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Pattern         string                     `json:"pattern"`
 		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
+		DeliveryID      int64                      `json:"deliveryId"`
 		Surface         string                     `json:"surface"`
 		Cwd             string                     `json:"cwd"`
 		Approval        string                     `json:"approvalPolicy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
+		return
+	}
+	if request.Action == "delivery-dismiss" {
+		if request.DeliveryID <= 0 {
+			http.Error(w, "deliveryId is required", http.StatusBadRequest)
+			return
+		}
+		dismissed, err := d.Registry.DismissDeliveryProblem(request.DeliveryID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "delivery problem not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := d.catalog.flushCommitted(); err != nil {
+			http.Error(w, fmt.Sprintf("publish delivery dismissal: %s", err), http.StatusInternalServerError)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "dismissed": dismissed})
 		return
 	}
 	if request.Action == "session-create" {

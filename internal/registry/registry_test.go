@@ -160,6 +160,34 @@ func TestOpenAddsQueueOperationToExistingDatabase(t *testing.T) {
 	}
 }
 
+func TestOpenAddsDeliveryDismissedAtToExistingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-delivery.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.Exec(`ALTER TABLE delivery_intents DROP COLUMN dismissed_at; PRAGMA user_version=8`); err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var dismissedAt sql.NullString
+	if err := second.db.QueryRow(`SELECT dismissed_at FROM delivery_intents LIMIT 1`).Scan(&dismissedAt); err != sql.ErrNoRows {
+		t.Fatalf("dismissed_at query err=%v", err)
+	}
+	var version int
+	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("version=%d err=%v", version, err)
+	}
+}
+
 func TestQueueCompactIsTypedAndDeduplicated(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
