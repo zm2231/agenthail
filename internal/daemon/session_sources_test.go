@@ -30,6 +30,27 @@ type restartingSource struct {
 	calls atomic.Int32
 }
 
+func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "upsert", Kind: "text", Role: "assistant", Text: "The complete answer", Version: 19})
+	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "phase", Kind: "done", Version: 19})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var body, phase sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(page.Entries[1].Payload, &phase); err != nil {
+		t.Fatal(err)
+	}
+	if body.Kind != "text" || body.Body != "The complete answer" || body.ItemID == phase.ItemID || phase.Kind != "done" {
+		t.Fatalf("body=%+v phase=%+v", body, phase)
+	}
+}
+
 func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(reg)

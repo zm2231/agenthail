@@ -434,6 +434,12 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 		itemID = fmt.Sprintf("%s:anonymous:%d", s.epoch, s.anonymous)
 		providerKey = itemID
 	}
+	if event.Operation == "phase" {
+		itemID += ":phase:" + event.Kind
+		if providerKey != "" {
+			providerKey += ":phase:" + event.Kind
+		}
+	}
 	op := event.Operation
 	if op == "" {
 		op = "append"
