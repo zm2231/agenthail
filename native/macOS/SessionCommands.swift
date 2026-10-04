@@ -30,9 +30,11 @@ struct SessionCommands: Commands {
             }
             .disabled(session == nil)
             Divider()
-            Button("Stop") { pane?.interrupt() }
-                .keyboardShortcut(".", modifiers: .command)
-                .disabled(!writable || session?.isWorking != true)
+            Button("Stop") {
+                if let pane, pane.canStop { pane.interrupt() }
+            }
+            .keyboardShortcut(".", modifiers: .command)
+            .disabled(pane?.canStop != true)
         }
         CommandGroup(before: .sidebar) {
             ForEach(SessionFilter.allCases) { filter in

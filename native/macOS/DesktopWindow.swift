@@ -1227,7 +1227,7 @@ struct ComposerView: View {
         .onAppear { focused = true }
     }
 
-    private var primaryIsStop: Bool { session.isWorking && !hasText }
+    private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draft: draft.text) }
     private var primarySymbol: String {
         if primaryIsStop { return "stop.fill" }
         if session.isWorking && resolvedAction(alternate: false) == .queue { return "text.line.last.and.arrowtriangle.forward" }

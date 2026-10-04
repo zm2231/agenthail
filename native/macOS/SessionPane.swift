@@ -243,6 +243,13 @@ final class SessionPane: ObservableObject, Identifiable {
         model.send(text, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
     }
 
+    static func stopAvailable(_ session: SessionState?, removed: Bool, draft: String) -> Bool {
+        guard let session, !removed, !session.isReadOnly, session.isWorking else { return false }
+        return draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var canStop: Bool { Self.stopAvailable(displayedSession, removed: removedSession != nil, draft: composer) }
+
     func interrupt() {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
         model.perform(action: "interrupt", sessionID: sessionID)

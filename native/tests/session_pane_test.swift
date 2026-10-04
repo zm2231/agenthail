@@ -33,6 +33,15 @@ struct SessionPaneTest {
         model.setTurnSettings(TurnSettings(), for: "A")
         check(model.turnSettings(for: "A").isEmpty, "resetting removes a session's next-turn settings")
 
+        let working = SessionState(id: "W", surface: "codex", name: "w", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        check(SessionPane.stopAvailable(working, removed: false, draft: "  \n"), "an empty draft lets Stop interrupt a working session")
+        check(!SessionPane.stopAvailable(working, removed: false, draft: "follow up"), "a draft turns Stop into queue or steer")
+        check(!SessionPane.stopAvailable(working, removed: true, draft: ""), "a removed session cannot be stopped")
+        let readOnly = SessionState(id: "R", surface: "codex", name: "r", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: true, readOnlyReason: nil)
+        check(!SessionPane.stopAvailable(readOnly, removed: false, draft: ""), "a read-only session cannot be stopped")
+        let idle = SessionState(id: "I", surface: "codex", name: "i", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        check(!SessionPane.stopAvailable(idle, removed: false, draft: "") && !SessionPane.stopAvailable(nil, removed: false, draft: ""), "nothing to stop when idle or unselected")
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }

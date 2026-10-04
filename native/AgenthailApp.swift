@@ -495,7 +495,6 @@ private struct AgenthailMenuContent: View {
             open()
             model.newSessionVisible = true
         }
-        .keyboardShortcut("n")
         Button("Open Agenthail") { open() }
             .keyboardShortcut("o")
         SettingsLink { Text("Settings…") }
