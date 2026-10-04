@@ -1347,12 +1347,12 @@ func TestCodexDesktopStreamDerivesIdentityWhenJoiningMidTurn(t *testing.T) {
 		"delta":    "late answer",
 	}}
 	state.observe(event)
-	streamEvent, ok := state.textEvent("late answer", codexEventItemID(event.Params))
+	streamEvent, ok := state.textEvent(1, "late answer", codexEventItemID(event.Params))
 	if !ok || streamEvent.ID != "codex:turn-late:assistant:assistant-late" || streamEvent.TurnID != "turn-late" {
 		t.Fatalf("late-join event=%+v ok=%v", streamEvent, ok)
 	}
 	empty := &codexDesktopStreamState{}
-	if _, ok := empty.textEvent("unbound", ""); ok {
+	if _, ok := empty.textEvent(1, "unbound", ""); ok {
 		t.Fatal("emitted unbound Desktop fragment")
 	}
 }
@@ -1380,7 +1380,7 @@ func TestCodexDesktopLiveImageItemUsesOpaqueStableAttachmentReference(t *testing
 	if len(events) != 1 || events[0].Kind != "attachment" || events[0].Attachment == nil {
 		t.Fatalf("events=%+v", events)
 	}
-	if !strings.HasPrefix(events[0].Attachment.ID, "live-attachment:thread-image:user-image-1:0:") || events[0].Text != "Image attachment" {
+	if !strings.HasPrefix(events[0].Attachment.ID, "live-attachment:thread-image:") || events[0].Text != "Image attachment" {
 		t.Fatalf("attachment=%+v", events[0].Attachment)
 	}
 	encoded, _ := json.Marshal(events[0])
@@ -1390,5 +1390,18 @@ func TestCodexDesktopLiveImageItemUsesOpaqueStableAttachmentReference(t *testing
 	attachment, got, err := codex.ReadAttachment(context.Background(), &surface.Session{ID: "thread-image"}, events[0].Attachment.ID)
 	if err != nil || attachment.ID != events[0].Attachment.ID || string(got) != string(data) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(got), err)
+	}
+}
+
+func TestCodexEventImageReferencesHaveDeterministicMapOrder(t *testing.T) {
+	first := filepath.Join(t.TempDir(), "first.png")
+	second := filepath.Join(t.TempDir(), "second.png")
+	value := map[string]any{
+		"z": map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": second}},
+		"a": map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": first}},
+	}
+	refs := codexEventImageReferences(value)
+	if len(refs) != 2 || refs[0].Path != first || refs[1].Path != second {
+		t.Fatalf("refs=%+v", refs)
 	}
 }

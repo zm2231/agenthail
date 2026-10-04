@@ -249,7 +249,8 @@ liveObserved:
 
 func TestSessionSourceSeedAndLiveAttachmentShareOneSSEIdentity(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	attachmentID := "live-attachment:from:user-image-1:0:hash"
+	attachmentHash := strings.Repeat("a", 64)
+	attachmentID := "attachment:0:1:" + attachmentHash
 	adapter := &sourceCountingSurface{
 		daemonSurface: fake,
 		started:       make(chan struct{}, 1),
@@ -279,7 +280,7 @@ func TestSessionSourceSeedAndLiveAttachmentShareOneSSEIdentity(t *testing.T) {
 	if err := json.Unmarshal(window.Entries[0].Payload, &seed); err != nil {
 		t.Fatal(err)
 	}
-	if seed.ProviderKey != "codex:turn-image:attachment:user-image-1:0" || seed.Attachment == nil || seed.Attachment.ID != attachmentID {
+	if seed.ProviderKey != "codex:turn-image:attachment:user-image-1:0" || seed.Attachment == nil || seed.Attachment.ID != "live-attachment:"+from.ID+":"+attachmentHash {
 		t.Fatalf("seed=%+v", seed)
 	}
 	adapter.events <- surface.StreamEvent{ID: seed.ItemID, ProviderKey: seed.ProviderKey, Version: 2, Operation: "upsert", TurnID: "turn-image", Kind: "attachment", Role: "user", Text: "Image attachment", Attachment: seed.Attachment}
@@ -290,7 +291,7 @@ func TestSessionSourceSeedAndLiveAttachmentShareOneSSEIdentity(t *testing.T) {
 			var payload sessionJournalPayload
 			if json.Unmarshal(entry.Payload, &payload) == nil && payload.Version == 2 {
 				window, err = reg.SessionJournalAfter(from.ID, 0, 10)
-				if err != nil || len(window.Entries) != 1 || payload.Attachment == nil || payload.Attachment.ID != attachmentID {
+				if err != nil || len(window.Entries) != 1 || payload.Attachment == nil || payload.Attachment.ID != seed.Attachment.ID {
 					t.Fatalf("live window=%+v payload=%+v err=%v", window, payload, err)
 				}
 				return
@@ -676,7 +677,7 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 			ID:        "codex:turn-1:assistant:item-1",
 			Kind:      "text",
 			Role:      "assistant",
-			Text:      "Hello",
+			Text:      "ha",
 			Timestamp: "2026-10-04T00:00:00Z",
 		}},
 	}
@@ -684,9 +685,9 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 	source.seedJournal()
 
 	for _, event := range []surface.StreamEvent{
-		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Version: 3, Operation: "append", Kind: "text", Role: "assistant", Text: "Hel"},
-		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Version: 5, Operation: "append", Kind: "text", Role: "assistant", Text: "lo"},
-		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Version: 6, Operation: "append", Kind: "text", Role: "assistant", Text: " world"},
+		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 10, Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
+		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 9, Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
+		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 11, Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
 	} {
 		source.append(event)
 	}
@@ -699,7 +700,7 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.ProviderKey != "codex:turn-1:assistant:item-1" || payload.Body != "Hello world" || payload.Version != 6 {
+	if payload.ProviderKey != "codex:turn-1:assistant:item-1" || payload.Body != "hahaha" || payload.Version != 2 {
 		t.Fatalf("payload=%+v", payload)
 	}
 }

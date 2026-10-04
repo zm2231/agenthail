@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -341,8 +342,13 @@ func codexEventImageReferences(value any) []attachmentReference {
 					refs = append(refs, ref)
 				}
 			}
-			for _, child := range value {
-				visit(child)
+			keys := make([]string, 0, len(value))
+			for key := range value {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				visit(value[key])
 			}
 		case []any:
 			for _, child := range value {

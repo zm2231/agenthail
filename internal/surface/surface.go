@@ -26,19 +26,19 @@ const (
 )
 
 type Session struct {
-	ID              string          `json:"id"`
-	Surface         SurfaceKind     `json:"surface"`
-	Name            string          `json:"name"`
-	Cwd             string          `json:"cwd"`
-	PID             int             `json:"pid"`
-	Status          SessionStatus   `json:"status"`
-	Transcript      string          `json:"transcript"`
-	HasLocal        bool            `json:"hasLocal"`
-	Source          string          `json:"source,omitempty"`
-	Transport       string          `json:"transport,omitempty"`
-	ConfiguredModel string          `json:"configuredModel,omitempty"`
-	LastActive      time.Time       `json:"lastActive"`
-	Runtime         *Runtime `json:"runtime,omitempty"`
+	ID              string        `json:"id"`
+	Surface         SurfaceKind   `json:"surface"`
+	Name            string        `json:"name"`
+	Cwd             string        `json:"cwd"`
+	PID             int           `json:"pid"`
+	Status          SessionStatus `json:"status"`
+	Transcript      string        `json:"transcript"`
+	HasLocal        bool          `json:"hasLocal"`
+	Source          string        `json:"source,omitempty"`
+	Transport       string        `json:"transport,omitempty"`
+	ConfiguredModel string        `json:"configuredModel,omitempty"`
+	LastActive      time.Time     `json:"lastActive"`
+	Runtime         *Runtime      `json:"runtime,omitempty"`
 }
 
 type SessionSearchResult struct {
@@ -333,6 +333,7 @@ type StreamEvent struct {
 	Truncated   bool          `json:"truncated,omitempty"`
 	ID          string        `json:"id,omitempty"`
 	ProviderKey string        `json:"providerKey,omitempty"`
+	Cursor      uint64        `json:"cursor,omitempty"`
 	Version     uint64        `json:"version,omitempty"`
 	Operation   string        `json:"operation,omitempty"`
 	Final       bool          `json:"final,omitempty"`
