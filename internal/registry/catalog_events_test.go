@@ -53,7 +53,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 	row := snapshot.Sessions[0]
-	if !row.Freshness.Stale || row.Freshness.Generation != 2 || row.Session.ID != "catalog-session" || row.Session.Cwd != "/work" {
+	if !row.Freshness.Stale || row.Freshness.Generation != 2 || !row.Freshness.ObservedAt.Equal(observed) || row.Session.ID != "catalog-session" || row.Session.Cwd != "/work" {
 		t.Fatalf("row=%+v", row)
 	}
 	var payload struct {
@@ -70,6 +70,26 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 	recovered, err := r.CatalogSnapshot()
 	if err != nil || recovered.Sessions[0].Freshness.Stale || recovered.Sessions[0].Freshness.Generation != 3 {
 		t.Fatalf("recovered=%+v err=%v", recovered, err)
+	}
+}
+
+func TestFailedDiscoveryDoesNotAdvanceSuccessfulOmissionCount(t *testing.T) {
+	r := openTestRegistry(t)
+	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-after-failure", Surface: surface.KindCodex}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-after-failure","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-after-failure:initial", Type: "session.upserted", EntityID: "omission-after-failure", Payload: []byte(`{"session":{"id":"omission-after-failure"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Duration(attempt+1)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2); err != nil || len(events) != 0 {
+		t.Fatalf("first successful omission events=%+v err=%v", events, err)
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil || len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].Freshness.Stale || !snapshot.Sessions[0].Freshness.ObservedAt.Equal(observed) {
+		t.Fatalf("after failure plus omission snapshot=%+v err=%v", snapshot, err)
 	}
 }
 
