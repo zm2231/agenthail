@@ -415,6 +415,12 @@ type TurnInterrupter interface {
 	InterruptTurn(context.Context, *Session, string) error
 }
 
+// CatalogListCompleteness declares whether a successful List result is a
+// complete enumeration suitable for omission reconciliation.
+type CatalogListCompleteness interface {
+	CatalogListComplete() bool
+}
+
 func DeriveName(explicit, preview string, maxLen int) string {
 	if explicit != "" {
 		return truncate(explicit, maxLen)

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,18 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+type boundedCatalogSurface struct{ *daemonSurface }
+
+func (boundedCatalogSurface) CatalogListComplete() bool { return false }
+
+func (s *boundedCatalogSurface) List(ctx context.Context) ([]surface.Session, error) {
+	sessions, err := s.daemonSurface.List(ctx)
+	if len(sessions) > 50 {
+		sessions = sessions[:50]
+	}
+	return sessions, err
+}
 
 func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
@@ -104,6 +117,44 @@ func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
 	}
 	if removals != 2 {
 		t.Fatalf("removals=%d", removals)
+	}
+}
+
+func TestDiscoveryRetainsSessionsOutsideBoundedProviderLists(t *testing.T) {
+	for kind := range map[surface.SurfaceKind]struct{}{surface.KindCodex: {}, surface.KindNotion: {}} {
+		d, registry, fake, _, _ := daemonFixture(t)
+		fake.kind = kind
+		for id, session := range fake.sessions {
+			session.Surface = kind
+			fake.sessions[id] = session
+		}
+		for index := 0; index < 51; index++ {
+			id := fmt.Sprintf("session-%02d", index)
+			fake.sessions[id] = surface.Session{ID: id, Surface: kind, Name: id, Status: surface.StatusIdle}
+		}
+		expectedSessions := len(fake.sessions)
+		d.discoverCatalog(context.Background())
+		bounded := &boundedCatalogSurface{daemonSurface: fake}
+		d.Surfaces = []surface.Surface{bounded}
+		for pass := 0; pass < 2; pass++ {
+			d.discoverCatalog(context.Background())
+		}
+		state, err := registry.CatalogSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(state.Sessions) != expectedSessions {
+			t.Fatalf("kind=%s retained sessions=%d expected=%d", kind, len(state.Sessions), expectedSessions)
+		}
+		window, err := registry.CatalogEventsAfter(0, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range window.Events {
+			if event.Type == "session.removed" {
+				t.Fatalf("kind=%s removed=%+v", kind, event)
+			}
+		}
 	}
 }
 

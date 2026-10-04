@@ -18,6 +18,12 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func TestCodexCatalogListIsNotComplete(t *testing.T) {
+	if NewCodex("").CatalogListComplete() {
+		t.Fatal("Codex List is bounded and must not reconcile omissions")
+	}
+}
+
 func startManagedCodexFixture(t *testing.T) string {
 	t.Helper()
 	home, err := os.MkdirTemp("/tmp", "ah-")

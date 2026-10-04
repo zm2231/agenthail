@@ -49,6 +49,8 @@ func (c *Codex) Capabilities() surface.Capabilities {
 	}
 }
 
+func (c *Codex) CatalogListComplete() bool { return false }
+
 func (c *Codex) Health(ctx context.Context) error {
 	if err := c.Ready(ctx); err != nil {
 		return fmt.Errorf("Codex session discovery is unavailable: %w", err)

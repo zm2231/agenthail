@@ -248,7 +248,13 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			key := "session.upserted:" + session.ID
 			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		}
-		_ = d.catalog.reconcileOmissions(adapter.Name(), seen)
+		complete := true
+		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
+			complete = bounded.CatalogListComplete()
+		}
+		if complete {
+			_ = d.catalog.reconcileOmissions(adapter.Name(), seen)
+		}
 		observedAt := time.Now().UTC()
 		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
 		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})

@@ -174,6 +174,8 @@ func (n *Notion) Capabilities() surface.Capabilities {
 	}
 }
 
+func (n *Notion) CatalogListComplete() bool { return false }
+
 func (n *Notion) headers() map[string]string {
 	return map[string]string{
 		"content-type":                "application/json",
