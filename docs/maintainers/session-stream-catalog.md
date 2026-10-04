@@ -23,7 +23,14 @@ full-row `session.upserted`, `session.removed`, `session.unavailable`, and
 `surface.health` catalog deltas. A proven delivery problem is one idempotent
 `delivery.problem` catalog event with `deliveryId`, target and source session
 IDs, bounded message or body reference, reason and timestamp; it is committed
-with the delivery failure/notice state. A failed discovery records
+with the delivery failure/notice state. Every queue mutation that changes a
+session's pending or in-flight count (enqueue, drain, cancel, retry, dead
+letter, expiry sweep) commits a `session.queue` event with `sessionId` and the
+new `queueCount` in the same transaction, so `catalogSeq` moves with the paging
+membership that reads the live queue and stale page cursors are rejected.
+Clients update the known row's `queueCount` and presence (`current` and
+`currentReason`) from it and ignore it for unknown sessions; the following
+background projection pass also emits a full-row `session.upserted`. A failed discovery records
 freshness/health without changing presence rows. A successful omission must
 meet the configured removal threshold before producing `session.removed`.
 

@@ -71,6 +71,7 @@ type sessionSource struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	mu              sync.Mutex
+	providerMu      sync.Mutex
 	subscribers     map[uint64]chan registry.SessionJournalEntry
 	nextID          uint64
 	holders         map[string]int
@@ -340,6 +341,30 @@ func (m *sessionSourceManager) refresh(session *surface.Session, adapter surface
 	time.AfterFunc(sessionPageHandoffGrace, release)
 }
 
+func (m *sessionSourceManager) readHistory(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int) (*surface.SessionReadResult, error) {
+	source, release, err := m.holdSource(session, adapter, "history-read")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { time.AfterFunc(sessionPageHandoffGrace, release) }()
+	select {
+	case <-source.seeded:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	source.providerMu.Lock()
+	defer source.providerMu.Unlock()
+	request := *session
+	read, err := surface.ReadSession(ctx, adapter, &request, surface.SessionReadRequest{Before: before, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	if read == nil {
+		return nil, fmt.Errorf("session source returned no older activity")
+	}
+	return read, nil
+}
+
 func (s *sessionSource) appendSourceError(streamErr error) {
 	_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
 	s.mu.Lock()
@@ -406,7 +431,9 @@ func (s *sessionSource) loadSeed() error {
 	if seedStatus == registry.SessionJournalSeeded && localTranscript {
 		return s.catchUpLocalTranscript(ctx, trustedIdentity)
 	}
+	s.providerMu.Lock()
 	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
+	s.providerMu.Unlock()
 	if err != nil || read == nil {
 		if err == nil {
 			err = fmt.Errorf("session source returned no activity result")
@@ -430,6 +457,9 @@ func (s *sessionSource) loadSeed() error {
 		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	s.appendSeedItems(read.Items)
+	if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {
+		return err
+	}
 	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
 }
 
@@ -463,7 +493,9 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	before := int64(0)
 	transcriptIdentity := trustedIdentity
 	for {
+		s.providerMu.Lock()
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
+		s.providerMu.Unlock()
 		if err != nil || read == nil {
 			if err == nil {
 				err = fmt.Errorf("session source returned no activity result")

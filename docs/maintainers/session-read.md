@@ -7,6 +7,16 @@ their identity, role, title, status and retained body reference. If retention
 has pruned history needed by `timelineBefore`, the endpoint returns `409` with
 `error.code` set to `history_gap` and the retained `earliestSeq`/`latestSeq`.
 
+`timeline.nextBefore` is opaque; clients pass it back unchanged and treat `0`
+as the end of history. The bounded seed records the provider's older-history
+boundary. When a journal page reaches the oldest journal entry and the provider
+reported older history, `nextBefore` addresses that provider history.
+Requesting it reads one bounded provider page through the session's shared
+source, serialized with its seed and refresh reads, and returns those items
+with `readSource` set to the provider source and the next provider cursor. The
+session open never preloads the whole transcript. A failed older read reports
+`timeline.unavailableReason` instead of returning an empty page.
+
 `journalSeq` is the session watermark captured in the same SQLite read
 transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journalSeq>`
 to receive subsequent changes rather than replaying the entire retained journal.
@@ -15,7 +25,8 @@ An older-page request does not change the active stream cursor.
 A cold journal is initialized by the shared session source, with at most two
 seconds of waiting for the initial page. The page never calls a provider's
 metadata methods. Saved, non-streaming sessions can still initialize their
-journal through that source. Provider read failures are reported separately
+journal through that source; a warm journal page is served immediately while
+the shared source refreshes it in the background. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and
 bound inline bodies; retained body fetches remain session-scoped. Full body
 references count toward the journal byte budget. If a full body cannot fit,

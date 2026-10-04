@@ -147,6 +147,9 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("session_journal_state", "seed_identity", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("session_journal_state", "history_before", `INTEGER NOT NULL DEFAULT -1`); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -382,7 +385,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	pruned_before INTEGER NOT NULL DEFAULT 0,
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
 	seed_seq INTEGER NOT NULL DEFAULT 0,
-	seed_identity TEXT NOT NULL DEFAULT ''
+	seed_identity TEXT NOT NULL DEFAULT '',
+	history_before INTEGER NOT NULL DEFAULT -1
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,

@@ -48,9 +48,10 @@ type SessionJournalWindow struct {
 }
 
 type SessionJournalPage struct {
-	Entries    []SessionJournalEntry
-	NextBefore uint64
-	LatestSeq  uint64
+	Entries       []SessionJournalEntry
+	NextBefore    uint64
+	LatestSeq     uint64
+	HistoryBefore int64
 }
 
 const (
@@ -140,8 +141,8 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if err := tx.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
 		return SessionJournalPage{}, err
 	}
-	var prunedBefore sql.NullInt64
-	if err := tx.QueryRow(`SELECT pruned_before FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&prunedBefore); err != nil && err != sql.ErrNoRows {
+	var prunedBefore, historyBefore sql.NullInt64
+	if err := tx.QueryRow(`SELECT pruned_before,history_before FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&prunedBefore, &historyBefore); err != nil && err != sql.ErrNoRows {
 		return SessionJournalPage{}, err
 	}
 	if before > 0 {
@@ -192,7 +193,19 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if err := tx.Commit(); err != nil {
 		return SessionJournalPage{}, err
 	}
-	return SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latest.Int64)}, nil
+	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latest.Int64)}
+	if next == 0 && (!prunedBefore.Valid || prunedBefore.Int64 == 0) && historyBefore.Valid && historyBefore.Int64 > 0 {
+		page.HistoryBefore = historyBefore.Int64
+	}
+	return page, nil
+}
+
+func (r *Registry) RecordSessionJournalHistoryBoundary(sessionID string, before int64) error {
+	if strings.TrimSpace(sessionID) == "" || before < 0 {
+		return fmt.Errorf("invalid session journal history boundary")
+	}
+	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,history_before) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET history_before=CASE WHEN session_journal_state.history_before<0 THEN excluded.history_before ELSE session_journal_state.history_before END`, sessionID, before)
+	return err
 }
 
 func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, bool, error) {
