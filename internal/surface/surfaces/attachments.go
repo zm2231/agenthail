@@ -190,14 +190,31 @@ func readAttachmentReference(ctx context.Context, ref attachmentReference) ([]by
 	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
 		return nil, ErrAttachmentNotFound
 	}
-	data, err := io.ReadAll(io.LimitReader(f, maxAttachmentBytes+1))
-	if err != nil {
-		return nil, ErrAttachmentNotFound
+	data := make([]byte, 0, 64*1024)
+	chunk := make([]byte, 64*1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		read, readErr := f.Read(chunk)
+		if read > 0 {
+			if int64(len(data)+read) > maxAttachmentBytes {
+				return nil, ErrAttachmentTooLarge
+			}
+			data = append(data, chunk[:read]...)
+		}
+		if readErr == io.EOF {
+			return data, nil
+		}
+		if readErr != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, ErrAttachmentNotFound
+		}
 	}
-	if int64(len(data)) > maxAttachmentBytes {
-		return nil, ErrAttachmentTooLarge
-	}
-	return data, nil
 }
 
 func validateAttachment(data []byte) (string, int, int, error) {

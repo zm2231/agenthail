@@ -409,7 +409,7 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			item.Kind = "toolResult"
 			item.Title = "Tool result"
 			item.CallID = str(block, "tool_use_id")
-			item.Text = timelineValue(block["content"])
+			item.Text = timelineToolResultText(block["content"])
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
 			}
@@ -421,8 +421,86 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			continue
 		}
 		items = append(items, item)
+		if str(block, "type") == "tool_result" {
+			for range toolResultImageContent(block["content"]) {
+				items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: str(block, "tool_use_id")})
+			}
+		}
 	}
 	return items
+}
+
+func toolResultImageContent(value any) []map[string]any {
+	content, _ := value.([]any)
+	images := make([]map[string]any, 0)
+	for _, raw := range content {
+		block, _ := raw.(map[string]any)
+		if str(block, "type") == "image" {
+			images = append(images, block)
+		}
+	}
+	return images
+}
+
+func timelineToolResultText(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	if content, ok := value.([]any); ok {
+		var textParts []string
+		textOnly := true
+		for _, entry := range content {
+			block, isBlock := entry.(map[string]any)
+			if isBlock && str(block, "type") == "image" {
+				continue
+			}
+			if isBlock && str(block, "type") == "text" && str(block, "text") != "" {
+				textParts = append(textParts, str(block, "text"))
+				continue
+			}
+			textOnly = false
+		}
+		if textOnly && len(textParts) > 0 {
+			return strings.Join(textParts, "\n\n")
+		}
+	}
+	clean := sanitizeToolResultValue(value)
+	if clean == nil {
+		return ""
+	}
+	return timelineValue(clean)
+}
+
+func sanitizeToolResultValue(value any) any {
+	switch value := value.(type) {
+	case []any:
+		clean := make([]any, 0, len(value))
+		for _, entry := range value {
+			if block, ok := entry.(map[string]any); ok && str(block, "type") == "image" {
+				continue
+			}
+			if sanitized := sanitizeToolResultValue(entry); sanitized != nil {
+				clean = append(clean, sanitized)
+			}
+		}
+		return clean
+	case map[string]any:
+		if str(value, "type") == "image" {
+			return nil
+		}
+		clean := make(map[string]any, len(value))
+		for key, entry := range value {
+			if key == "data" && strings.Contains(strings.ToLower(str(value, "media_type")), "image/") {
+				continue
+			}
+			if sanitized := sanitizeToolResultValue(entry); sanitized != nil {
+				clean[key] = sanitized
+			}
+		}
+		return clean
+	default:
+		return value
+	}
 }
 
 func codexTimelineItems(record map[string]any) []surface.TimelineItem {

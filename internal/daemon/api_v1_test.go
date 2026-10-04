@@ -404,7 +404,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	if err := os.WriteFile(imagePath, imageBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"path","path":` + quoteJSON(imagePath) + `}}]}}` + "\n"
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"caption"},{"type":"image","source":{"type":"path","path":` + quoteJSON(imagePath) + `}}]}]}}` + "\n"
 	if err := os.WriteFile(transcript, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -415,10 +415,10 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	claude := surfaces.NewClaude("", t.TempDir())
 	d.Surfaces = []surface.Surface{claude}
 	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
-	if err != nil || len(read.Items) != 1 || read.Items[0].Attachment == nil {
+	if err != nil || len(read.Items) != 2 || read.Items[1].Attachment == nil || read.Items[0].Text != "caption" || read.Items[1].CallID != "call-1" {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	id := read.Items[0].Attachment.ID
+	id := read.Items[1].Attachment.ID
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil))

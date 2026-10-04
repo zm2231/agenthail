@@ -64,6 +64,19 @@ func TestSessionSourceRefreshesConfiguredModelBeforeContextEmission(t *testing.T
 	}
 }
 
+func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source.append(surface.StreamEvent{ID: "tool-result", ProviderKey: "tool-result", Kind: "toolResult", Role: "user", Title: "Tool result", CallID: "call-1", Text: "caption", Attachment: &surface.Attachment{ID: "attachment:0:0:hash", MediaType: "image/png", Bytes: 4}})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if strings.Contains(string(page.Entries[0].Payload), "base64") || !strings.Contains(string(page.Entries[0].Payload), `"callId":"call-1"`) || !strings.Contains(string(page.Entries[0].Payload), `"attachment"`) {
+		t.Fatalf("payload=%s", page.Entries[0].Payload)
+	}
+}
+
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
