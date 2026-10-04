@@ -3,7 +3,7 @@ import SwiftUI
 struct CommandPalette: View {
     @ObservedObject var model: AgenthailModel
     @State private var query = ""
-    @State private var highlighted = 0
+    @State private var highlightedID: String?
     @FocusState private var fieldFocused: Bool
 
     private struct Entry: Identifiable {
@@ -70,6 +70,7 @@ struct CommandPalette: View {
 
     var body: some View {
         let items = entries
+        let highlighted = items.firstIndex { $0.id == highlightedID } ?? 0
         VStack(spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass")
@@ -78,9 +79,9 @@ struct CommandPalette: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .focused($fieldFocused)
-                    .onSubmit { run(items) }
-                    .onKeyPress(.downArrow) { move(1, count: items.count); return .handled }
-                    .onKeyPress(.upArrow) { move(-1, count: items.count); return .handled }
+                    .onSubmit { run(items, at: highlighted) }
+                    .onKeyPress(.downArrow) { move(1, from: highlighted, in: items); return .handled }
+                    .onKeyPress(.upArrow) { move(-1, from: highlighted, in: items); return .handled }
                     .onKeyPress(.escape) { model.paletteVisible = false; return .handled }
             }
             .padding(.horizontal, 14)
@@ -98,14 +99,14 @@ struct CommandPalette: View {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
                             row(entry, highlighted: index == highlighted)
                                 .id(entry.id)
-                                .onTapGesture { highlighted = index; run(items) }
-                                .onHover { if $0 { highlighted = index } }
+                                .onTapGesture { run(items, at: index) }
+                                .onHover { if $0 { highlightedID = entry.id } }
                         }
                     }
                     .padding(6)
                 }
-                .onChange(of: highlighted) { _, index in
-                    if items.indices.contains(index) { proxy.scrollTo(items[index].id) }
+                .onChange(of: highlightedID) { _, id in
+                    if let id { proxy.scrollTo(id) }
                 }
             }
             .frame(maxHeight: 360)
@@ -115,7 +116,7 @@ struct CommandPalette: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(DesktopPalette.line2))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
         .task { fieldFocused = true }
-        .onChange(of: query) { highlighted = 0 }
+        .onChange(of: query) { highlightedID = nil }
     }
 
     private func row(_ entry: Entry, highlighted: Bool) -> some View {
@@ -152,15 +153,14 @@ struct CommandPalette: View {
         .contentShape(Rectangle())
     }
 
-    private func move(_ offset: Int, count: Int) {
-        guard count > 0 else { return }
-        highlighted = min(max(highlighted + offset, 0), count - 1)
+    private func move(_ offset: Int, from index: Int, in items: [Entry]) {
+        guard !items.isEmpty else { return }
+        highlightedID = items[min(max(index + offset, 0), items.count - 1)].id
     }
 
-    private func run(_ items: [Entry]) {
-        guard items.indices.contains(highlighted) else { return }
-        let entry = items[highlighted]
+    private func run(_ items: [Entry], at index: Int) {
+        guard items.indices.contains(index) else { return }
         model.paletteVisible = false
-        entry.run()
+        items[index].run()
     }
 }

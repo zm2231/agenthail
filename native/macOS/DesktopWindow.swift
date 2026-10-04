@@ -19,6 +19,7 @@ struct DesktopWindow: View {
                         .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
                 }
         }
+        .disabled(model.paletteVisible)
         .background(DesktopPalette.window)
         .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
@@ -456,6 +457,8 @@ struct ConnectionFooter: View {
     @ObservedObject var model: AgenthailModel
 
     private var offlineLabel: String {
+        if model.daemonSlow { return "Agenthail is slow to respond" }
+        if model.loading && model.connectionError == nil { return "Loading sessions…" }
         guard model.snapshot != nil, let loadedAt = model.snapshotLoadedAt else { return "Agenthail isn't running" }
         return "Offline · as of \(relativeAge(loadedAt.formatted(.iso8601)))"
     }
@@ -468,7 +471,7 @@ struct ConnectionFooter: View {
                 .accessibilityHidden(true)
             Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : offlineLabel)
             Spacer()
-            if !model.isConnected && !model.reconnecting {
+            if !model.isConnected && !model.reconnecting && !model.daemonSlow {
                 Button("Start") { model.restartDaemon() }
                     .buttonStyle(.plain)
                     .foregroundStyle(DesktopPalette.accentText)
@@ -503,11 +506,23 @@ struct ConversationPane: View {
             .background(DesktopPalette.window)
         } else {
             ContentUnavailableView {
-                Label(model.isConnected ? "Select a session" : "Agenthail isn't running", systemImage: model.isConnected ? "bubble.left.and.bubble.right" : "bolt.horizontal.circle")
+                if model.isConnected {
+                    Label("Select a session", systemImage: "bubble.left.and.bubble.right")
+                } else if model.daemonSlow {
+                    Label("Waiting for Agenthail", systemImage: "hourglass")
+                } else {
+                    Label("Agenthail isn't running", systemImage: "bolt.horizontal.circle")
+                }
             } description: {
-                Text(model.isConnected ? "Choose a session from the sidebar." : model.connectionError ?? "The app can't reach the Agenthail daemon.")
+                if model.isConnected {
+                    Text("Choose a session from the sidebar.")
+                } else if model.daemonSlow {
+                    Text("Agenthail is running but took too long to answer. Retrying.")
+                } else {
+                    Text(model.connectionError ?? "The app can't reach the Agenthail daemon.")
+                }
             } actions: {
-                if !model.isConnected {
+                if !model.isConnected && !model.daemonSlow {
                     Button("Start Agenthail") { model.restartDaemon() }
                 }
             }

@@ -28,6 +28,7 @@ final class AgenthailModel: ObservableObject {
     @Published var auditQuery = ""
     @Published var auditKind = ""
     @Published var connectionError: String?
+    @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
     @Published var operationError: String?
     @Published var loading = false
@@ -110,16 +111,15 @@ final class AgenthailModel: ObservableObject {
                     let api = try AgenthailAPI()
                     _ = try await api.version()
                     self.api = api
-                    connectionError = nil
+                    clearConnectionError()
                     lastEventID = 0
-                    guard await refresh(fresh: true) else {
-                        throw AgenthailAPIError.unavailable(connectionError ?? "Agenthail could not connect.")
+                    if await refresh(fresh: true) {
+                        startEvents()
+                        startStatusRefresh()
+                        return
                     }
-                    startEvents()
-                    startStatusRefresh()
-                    return
                 } catch {
-                    connectionError = error.localizedDescription
+                    connectionFailed(error)
                     if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
                         return
                     }
@@ -147,7 +147,7 @@ final class AgenthailModel: ObservableObject {
             clearConnectionError()
             reconcileSelection()
         } catch {
-            connectionError = error.localizedDescription
+            connectionFailed(error)
             setLoading(false)
             return false
         }
@@ -489,6 +489,7 @@ final class AgenthailModel: ObservableObject {
                 let failure = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 let message = failure.isEmpty ? "Agenthail could not restart." : failure
                 connectionError = message
+                daemonSlow = false
                 operationError = message
                 return
             }
@@ -716,10 +717,10 @@ final class AgenthailModel: ObservableObject {
                         _ = try await reloadedAPI.version()
                         if Task.isCancelled { return }
                         self.api = reloadedAPI
-                        connectionError = nil
+                        clearConnectionError()
                     } catch {
                         if Task.isCancelled { return }
-                        connectionError = error.localizedDescription
+                        connectionFailed(error)
                         if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
                             reconnecting = false
                             return
@@ -777,12 +778,22 @@ final class AgenthailModel: ObservableObject {
 
     private func clearConnectionError() {
         if connectionError != nil { connectionError = nil }
+        if daemonSlow { daemonSlow = false }
+    }
+
+    private func connectionFailed(_ error: Error) {
+        connectionError = error.localizedDescription
+        daemonSlow = error.isTimeout
     }
 }
 
 extension Error {
     var isCancellation: Bool {
         self is CancellationError || (self as? URLError)?.code == .cancelled
+    }
+
+    var isTimeout: Bool {
+        (self as? URLError)?.code == .timedOut
     }
 }
 

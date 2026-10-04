@@ -356,7 +356,7 @@ private struct AgenthailMenuContent: View {
 
     var body: some View {
         let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: model.attentionSessionIDs, now: Date())
-        let working = model.knownSessions.filter(\.isWorking).sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let working = model.knownSessions.filter { $0.isWorking && !model.attentionSessionIDs.contains($0.id) }.sorted { SessionTree.activity($0) > SessionTree.activity($1) }
         let recent = model.knownSessions
             .filter { !$0.isWorking && !model.attentionSessionIDs.contains($0.id) }
             .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
