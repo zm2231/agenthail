@@ -778,6 +778,7 @@ struct TranscriptBlock: Identifiable, Equatable {
         case assistant(String)
         case tools([TimelineItem])
         case annotation(String)
+        case notice(String)
         case image(TimelineAttachment)
     }
 
@@ -811,6 +812,10 @@ struct TranscriptBlock: Identifiable, Equatable {
                 } else {
                     blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached")))
                 }
+            case "notice":
+                flushTools()
+                let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text))) }
             case "event" where item.title == "Turn duration":
                 flushTools()
                 blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)")))
@@ -856,6 +861,21 @@ struct TranscriptBlockView: View {
             Text(text)
                 .font(.system(size: 11.5))
                 .foregroundStyle(DesktopPalette.muted)
+        case .notice(let text):
+            Button { expanded.toggle() } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "info.circle")
+                    Text(text)
+                        .lineLimit(expanded ? nil : 1)
+                        .multilineTextAlignment(.leading)
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(DesktopPalette.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expanded ? "" : text)
         case .image(let attachment):
             AttachmentImageView(attachment: attachment)
         }
