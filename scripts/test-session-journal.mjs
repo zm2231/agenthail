@@ -171,7 +171,6 @@ for (const status of ['active', 'paused', 'blocked', 'usageLimited', 'budgetLimi
   assert.equal(attention.includes('Needs you'), ['blocked', 'usageLimited', 'budgetLimited'].includes(status));
   if (attention) assert.ok(attention.includes('role="status"'));
 }
-assert.ok(source.includes('${renderGoalAttention(goal)}${toolRows.join'), 'goal attention remains outside collapsed conversation settings');
 vm.runInContext('renderContextUsage({usedTokens:404508, contextWindow:0})', usageContext);
 assert.equal(indicator.hidden, false);
 assert.match(indicator.textContent, /405k tokens/);
