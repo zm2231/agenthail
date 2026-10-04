@@ -65,26 +65,6 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 			d.log.Printf("load busy delivery policy for relay %d: %s", route.ID, policyErr)
 			continue
 		}
-		if target.Status == surface.StatusBusy && busyDelivery == deliverypolicy.Steer && surface.EffectiveCapabilities(target, adapter.Capabilities()).Steer {
-			reserved, reserveErr := d.Registry.RecordRelayDelivery(route.ID, completionID)
-			if reserveErr != nil || !reserved {
-				if reserveErr != nil {
-					d.log.Printf("reserve relay %d: %s", route.ID, reserveErr)
-				}
-				continue
-			}
-			if steerErr := adapter.Steer(context.Background(), target, payload); steerErr == nil {
-				if route.Once {
-					if err := d.Registry.DeactivateRoute(route.ID); err != nil {
-						d.log.Printf("deactivate one-shot relay %d: %s", route.ID, err)
-					}
-				}
-				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, CompletionID: completionID, Message: text, Result: "steered"})
-				d.log.Printf("relay %d %s -> %s (steered)", route.ID, d.resolveDisplay(from.ID), d.resolveDisplay(route.ToSession))
-				continue
-			}
-			_ = d.Registry.ForgetRelayDelivery(route.ID, completionID)
-		}
 		queueID, err := d.Registry.QueueRelayMessageWithOptions(route.ToSession, payload, key, hops+1, surface.SendOptions{SourceSessionID: from.ID, BusyDelivery: string(busyDelivery)})
 		if err != nil {
 			d.log.Printf("queue relay %d: %s", route.ID, err)

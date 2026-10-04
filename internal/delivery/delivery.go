@@ -82,6 +82,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
+	claudePeer := session.Surface == surface.KindClaude && session.Transport == "uds"
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
@@ -99,6 +100,15 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	busyMode, modeErr := d.busyMode(options)
 	if modeErr != nil {
 		return nil, modeErr
+	}
+	if claudePeer {
+		observation, observeErr := adapter.Observe(ctx, session)
+		if observeErr != nil {
+			return nil, observeErr
+		}
+		if observation != nil && observation.Status == surface.StatusBusy {
+			return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "")
+		}
 	}
 	baselineCompletionID := ""
 	if d.Registry != nil {
@@ -147,7 +157,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if result.Accepted {
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
-		peerTransport := session.Surface == surface.KindClaude && session.Transport == "uds"
+		peerTransport := claudePeer
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
@@ -172,26 +182,25 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		d.record(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result.UUID})
 		return receipt, nil
 	}
-	if !allowQueue {
-		if busyMode == deliverypolicy.Steer && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
-			if steerErr := adapter.Steer(ctx, session, message); steerErr != nil {
-				d.record(registry.HistoryEntry{Kind: failureKind(steerErr, "control-failed"), SessionID: session.ID, Message: message, Error: steerErr.Error()})
-				return nil, steerErr
-			}
-			d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
-			return &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: "target busy; steered"}, nil
-		}
-		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
-		return nil, ErrTargetBusy
+	return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, result.UUID)
+}
+
+func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool, busyMode deliverypolicy.Mode, turnID string) (*Receipt, error) {
+	target := session.Name
+	if target == "" {
+		target = session.ID
 	}
 	if busyMode == deliverypolicy.Steer && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
-		if steerErr := adapter.Steer(ctx, session, message); steerErr == nil {
-			d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
-			return &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: "target busy; steered"}, nil
-		} else {
+		if steerErr := adapter.Steer(ctx, session, message); steerErr != nil {
 			d.record(registry.HistoryEntry{Kind: failureKind(steerErr, "control-failed"), SessionID: session.ID, Message: message, Error: steerErr.Error()})
 			return nil, steerErr
 		}
+		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
+		return &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: fmt.Sprintf("Sent to %s.", target)}, nil
+	}
+	if !allowQueue {
+		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
+		return nil, ErrTargetBusy
 	}
 	if d.Registry == nil {
 		err := fmt.Errorf("%s is busy and no registry is available for queuing", adapter.Name())
@@ -203,7 +212,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err != nil {
 		return nil, err
 	}
-	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil
+	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil
 }
 
 func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, error) {
