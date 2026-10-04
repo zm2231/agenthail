@@ -1,6 +1,7 @@
 package surfaces
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -83,5 +84,19 @@ func TestAttachmentRejectsMidRecordOffsetAndHonorsCancellation(t *testing.T) {
 	_, _, err = NewClaude("", t.TempDir()).ReadAttachment(ctx, &surface.Session{Transcript: path}, "attachment:0:0:"+hashBytes(data))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled err=%v", err)
+	}
+}
+
+func TestAttachmentRecordAboveLegacyTimelineWindowIsProjected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data, _ := base64.StdEncoding.DecodeString(testPNG)
+	data = append(data, bytes.Repeat([]byte{'x'}, 4<<20)...)
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + base64.StdEncoding.EncodeToString(data) + `"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Attachment == nil || page.Items[0].Attachment.Bytes != int64(len(data)) {
+		t.Fatalf("items=%+v err=%v", page.Items, err)
 	}
 }

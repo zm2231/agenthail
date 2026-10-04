@@ -30,6 +30,40 @@ type restartingSource struct {
 	calls atomic.Int32
 }
 
+type contextRefreshSurface struct {
+	*daemonSurface
+	seen chan string
+}
+
+func (s *contextRefreshSurface) ContextUsage(_ context.Context, session *surface.Session) (*surface.ContextUsage, error) {
+	s.seen <- session.ConfiguredModel
+	return &surface.ContextUsage{UsedTokens: 10, ContextWindow: 100}, nil
+}
+
+func TestSessionSourceRefreshesConfiguredModelBeforeContextEmission(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.ConfiguredModel = "claude-opus-5-5[1m]"
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &contextRefreshSurface{daemonSurface: fake, seen: make(chan string, 1)}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", appendBodies: map[string]string{}}
+	updated := from
+	updated.ConfiguredModel = "claude-sonnet-4"
+	if err := reg.RegisterSession(updated); err != nil {
+		t.Fatal(err)
+	}
+	source.append(surface.StreamEvent{ID: "context", Kind: "context", Context: &surface.ContextUsage{UsedTokens: 1}})
+	select {
+	case model := <-adapter.seen:
+		if model != updated.ConfiguredModel {
+			t.Fatalf("context model=%q, want %q", model, updated.ConfiguredModel)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("context provider was not refreshed")
+	}
+}
+
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
