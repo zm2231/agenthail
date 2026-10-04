@@ -404,14 +404,17 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 || events[0].Kind != "text" || events[0].Text != "answer" || events[1].Kind != "done" {
+	if len(events) != 3 || events[0].Kind != "text" || events[0].Text != "answer" || events[1].Kind != "text" || !events[1].Final || events[1].Text != "answer" || events[2].Kind != "done" {
 		t.Fatalf("events=%+v", events)
 	}
 	if events[0].ProviderKey != "m1" || events[0].ID != "m1" || events[0].Operation != "append" || events[0].Version != 6 || events[0].TurnID != "u1" {
 		t.Fatalf("text event=%+v", events[0])
 	}
-	if events[1].ProviderKey != "m1" || events[1].Operation != "phase" || events[1].TurnID != "u1" {
-		t.Fatalf("done event=%+v", events[1])
+	if events[1].ProviderKey != "m1" || events[1].ID != "m1" || events[1].Operation != "upsert" {
+		t.Fatalf("final event=%+v", events[1])
+	}
+	if events[2].ProviderKey != "m1" || events[2].Operation != "phase" || events[2].TurnID != "u1" {
+		t.Fatalf("done event=%+v", events[2])
 	}
 }
 

@@ -376,6 +376,9 @@ func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
 	spoken := make(chan struct{})
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{Kind: "text", Text: "The correlated answer."})
+		callback(surface.StreamEvent{ID: "partial-upsert", Operation: "upsert", Kind: "text", Text: "The partial answer."})
+		callback(surface.StreamEvent{ID: "final-item", Operation: "upsert", Final: true, Kind: "text", Text: "The authoritative answer."})
+		callback(surface.StreamEvent{ID: "final-item", Operation: "upsert", Final: true, Kind: "text", Text: "The authoritative answer."})
 		close(spoken)
 	}
 	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
@@ -402,18 +405,79 @@ func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
 	if !reflect.DeepEqual(target.sent, []string{"Inspect the current failure"}) {
 		t.Fatalf("wrong target dispatch: %v", target.sent)
 	}
-	var spoke bool
+	var spoke, finalCount bool
+	finalSpeechCount := 0
+	partialSpeechCount := 0
+	interimSpeechCount := 0
 	for _, params := range p.params {
 		if params["text"] == "The correlated answer." {
 			spoke = true
+			interimSpeechCount++
+		}
+		if params["text"] == "The authoritative answer." {
+			finalSpeechCount++
+		}
+		if params["text"] == "The partial answer." {
+			partialSpeechCount++
 		}
 	}
 	if !spoke {
 		t.Fatalf("no correlated result was handed to audio: %+v", p.params)
 	}
+	if interimSpeechCount != 1 || partialSpeechCount != 1 {
+		t.Fatalf("interim speech counts correlated=%d partial=%d: %+v", interimSpeechCount, partialSpeechCount, p.params)
+	}
+	finalCount = finalSpeechCount == 1
+	if !finalCount {
+		t.Fatalf("authoritative final spoken %d times: %+v", finalSpeechCount, p.params)
+	}
 	v := s.View("phone")
 	if v.Target == nil || v.Target.ID != "target-a" || v.CodingProvider != "claude" || v.AudioProvider != "openai-realtime-via-codex" {
 		t.Fatalf("capability contract missing from state: %+v", v)
+	}
+}
+
+func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}}
+	streamed := make(chan struct{})
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "codex:target-turn:done", Operation: "phase", TurnID: "target-turn", Kind: "done"})
+		close(streamed)
+	}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the tool only"})
+	select {
+	case <-streamed:
+	case <-time.After(time.Second):
+		t.Fatal("tool-only target stream did not complete")
+	}
+	time.Sleep(100 * time.Millisecond)
+	v := s.View("phone")
+	for _, event := range v.Events {
+		if event.Method == "voice/delegation/failed" {
+			t.Fatalf("completed tool-only turn surfaced a delegation failure: %+v", event)
+		}
+	}
+	if strings.Contains(v.Message, "ended without an authoritative final") {
+		t.Fatalf("completed tool-only turn recorded a failure message: %q", v.Message)
+	}
+	for _, params := range p.params {
+		if role, _ := params["role"].(string); role == "developer" {
+			t.Fatalf("empty turn handed text to realtime audio: %+v", params)
+		}
 	}
 }
 

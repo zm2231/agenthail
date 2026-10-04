@@ -573,8 +573,33 @@ func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string)
 		s.recordDelegationFailure(attemptID, messageID, targetID, err)
 		return
 	}
+	finalSpoken := false
+	terminalDone := false
+	interimText := ""
 	err = target.Adapter.Stream(ctx, target.Session, turnID, func(event surface.StreamEvent) {
+		if event.Kind == "done" {
+			terminalDone = true
+			return
+		}
 		if event.Kind == "text" && strings.TrimSpace(event.Text) != "" {
+			if event.Final {
+				if finalSpoken {
+					return
+				}
+				finalSpoken = true
+				if event.Text == interimText {
+					return
+				}
+				text := event.Text
+				if strings.HasPrefix(text, interimText) {
+					text = strings.TrimPrefix(text, interimText)
+				}
+				if strings.TrimSpace(text) != "" {
+					s.speakDelegation(attemptID, messageID, target.Session, turnID, text, "final")
+				}
+				return
+			}
+			interimText += event.Text
 			s.speakDelegation(attemptID, messageID, target.Session, turnID, event.Text, "interim")
 		}
 	}, 5*time.Minute)
@@ -582,7 +607,9 @@ func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string)
 		s.recordDelegationFailure(attemptID, messageID, targetID, err)
 		return
 	}
-	s.speakDelegation(attemptID, messageID, target.Session, turnID, "The selected worker has finished its response.", "final")
+	if !finalSpoken && !terminalDone {
+		s.recordDelegationFailure(attemptID, messageID, targetID, errors.New("selected worker stream ended without an authoritative final"))
+	}
 }
 
 func (s *Service) speakDelegation(attemptID, messageID string, target *surface.Session, turnID, text, stage string) {
