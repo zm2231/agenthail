@@ -17,6 +17,9 @@ journal through that source. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and
 bound inline bodies; retained body fetches remain session-scoped.
 
+The initial-page source has a five-second handoff lease so opening its stream
+reuses the same reader instead of fetching and journaling the history twice.
+
 `GET /api/v1/session-metadata?id=<session>` returns independent optional
 `context`, `goal`, `model`, and `models` fields, plus an `errors` map when a
 category is unavailable. The request has its own three-second deadline.

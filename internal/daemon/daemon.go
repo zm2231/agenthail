@@ -165,6 +165,7 @@ func (d *Daemon) logRuntimeError(key string, err error) {
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
+	defer d.sources.shutdown()
 	d.log.Printf("started; %d surfaces", len(d.Surfaces))
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)
