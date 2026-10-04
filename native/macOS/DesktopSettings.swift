@@ -70,7 +70,7 @@ struct GeneralSettings: View {
                 .pickerStyle(.radioGroup)
                 Text("⌥⌘↩ always does the other one. Agents that can't be steered mid-turn send queued messages after the turn.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DesktopPalette.text2)
             }
             SettingsError(model: model)
         }
@@ -102,7 +102,7 @@ struct DevicesSettings: View {
                 if let remote = model.settings?.remoteAccess {
                     Text(remote.enabled ? "Reachable privately through Tailscale\(remote.dnsName.map { " at \($0)" } ?? "")." : remote.error ?? "Your iPhone can reach this Mac only while phone access is on.")
                         .font(.system(size: 12))
-                        .foregroundStyle(remote.error == nil ? Color.secondary : DesktopPalette.amber)
+                        .foregroundStyle(remote.error == nil ? DesktopPalette.text2 : DesktopPalette.amber)
                 }
             }
             Section("Pair an iPhone") {
@@ -114,7 +114,7 @@ struct DevicesSettings: View {
             }
             Section("Paired devices") {
                 if model.devices.isEmpty {
-                    Text("No devices are paired.").foregroundStyle(.secondary)
+                    Text("No devices are paired.").foregroundStyle(DesktopPalette.text2)
                 }
                 ForEach(model.devices) { device in
                     HStack {
@@ -122,7 +122,7 @@ struct DevicesSettings: View {
                             Text(device.name)
                             Text([device.pushEnabled ? "Notifications on" : "Notifications off", device.lastSeenAt.map { "seen \(relativeAge($0))" }].compactMap { $0 }.joined(separator: " · "))
                                 .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(DesktopPalette.text2)
                         }
                         Spacer()
                         Button("Revoke", role: .destructive) { model.revokeDevice(device.id) }
@@ -147,7 +147,7 @@ private struct PairingCode: View {
                 Text("Scan with Agenthail on iPhone")
                 Text("The code expires in five minutes and works once.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DesktopPalette.text2)
                 Text(pairing.endpoint)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
@@ -186,7 +186,7 @@ struct NotificationSettings: View {
                 }
                 Text(detail(status))
                     .font(.system(size: 12))
-                    .foregroundStyle(status?.error == nil ? Color.secondary : DesktopPalette.amber)
+                    .foregroundStyle(status?.error == nil ? DesktopPalette.text2 : DesktopPalette.amber)
                 HStack {
                     Button("Send Test Notification") { model.updateNotifications("notifications-test") }
                         .disabled(status?.enabled != true)
@@ -197,7 +197,7 @@ struct NotificationSettings: View {
             } footer: {
                 Text("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DesktopPalette.text2)
             }
             SettingsError(model: model)
         }
@@ -229,7 +229,7 @@ struct DeliverySettings: View {
         Form {
             Section("Waiting to go out") {
                 if (model.snapshot?.queue ?? []).isEmpty {
-                    Text("No messages are waiting.").foregroundStyle(.secondary)
+                    Text("No messages are waiting.").foregroundStyle(DesktopPalette.text2)
                 }
                 ForEach(model.snapshot?.queue ?? []) { item in
                     HStack(alignment: .top) {
@@ -237,7 +237,7 @@ struct DeliverySettings: View {
                             Text(item.target)
                             Text(PeerEnvelope(item.message).summary)
                                 .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(DesktopPalette.text2)
                                 .lineLimit(2)
                         }
                         Spacer()
@@ -258,7 +258,7 @@ struct DeliverySettings: View {
                             Text("\(relay.from) → \(relay.to)")
                             Text(relay.pattern)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(DesktopPalette.text2)
                                 .lineLimit(1)
                         }
                         Spacer()
@@ -283,7 +283,7 @@ struct DeliverySettings: View {
             } footer: {
                 Text("When one session finishes with matching text, Agenthail sends its reply to another.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DesktopPalette.text2)
             }
             Section("Channels") {
                 HStack {
@@ -308,7 +308,7 @@ struct DeliverySettings: View {
                         }
                     }
                     if channel.memberDetails == nil && !channel.members.isEmpty {
-                        Text(channel.members.joined(separator: ", ")).foregroundStyle(.secondary)
+                        Text(channel.members.joined(separator: ", ")).foregroundStyle(DesktopPalette.text2)
                     }
                     HStack {
                         Picker("Add", selection: $channelTarget) {
@@ -357,7 +357,7 @@ struct ActivitySettings: View {
             }
             Section {
                 if model.audit.isEmpty {
-                    Text("No matching activity.").foregroundStyle(.secondary)
+                    Text("No matching activity.").foregroundStyle(DesktopPalette.text2)
                 }
                 ForEach(model.audit) { entry in
                     VStack(alignment: .leading, spacing: 3) {
@@ -366,14 +366,14 @@ struct ActivitySettings: View {
                             Spacer()
                             Text(relativeAge(entry.createdAt))
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(DesktopPalette.text2)
                                 .help(entry.createdAt)
                         }
                         if let target = entry.target, !target.isEmpty {
-                            Text(target).font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text(target).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2)
                         }
                         if let message = entry.message, !message.isEmpty {
-                            Text(PeerEnvelope(message).summary).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                            Text(PeerEnvelope(message).summary).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2).lineLimit(2)
                         }
                         if let error = entry.error, !error.isEmpty {
                             Text(error).font(.system(size: 12)).foregroundStyle(DesktopPalette.red).lineLimit(3)
