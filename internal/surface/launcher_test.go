@@ -205,7 +205,14 @@ func TestCMUXLocateUsesAgenthailReceiptAndLiveInventory(t *testing.T) {
 }
 
 func TestCMUXInventoryRejectsUnknownShape(t *testing.T) {
-	for _, payload := range []string{`{}`, `{"windows":[]}`} {
+	for _, payload := range []string{
+		`{}`,
+		`{"windows":[]}`,
+		`{"windows":[{}]}`,
+		`{"windows":[{"workspaces":[{"id":"workspace:7"}]}]}`,
+		`{"windows":[{"workspaces":[{"id":"workspace:7","panes":[{}]}]}]}`,
+		`{"windows":[{"workspaces":{}}]}`,
+	} {
 		t.Run(payload, func(t *testing.T) {
 			launcher := newCMUX().(*processLauncher)
 			launcher.run = func(context.Context, string, ...string) ([]byte, error) {
@@ -216,6 +223,28 @@ func TestCMUXInventoryRejectsUnknownShape(t *testing.T) {
 				t.Fatalf("present=%v err=%v, want typed invalid-inventory error", present, err)
 			}
 		})
+	}
+}
+
+func TestCMUXLocatePreservesReceiptOnDegradedNestedInventory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newCMUX().(*processLauncher)
+	launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if slices.Contains(args, "sessions") {
+			return []byte(`{"sessions":[]}`), nil
+		}
+		return []byte(`{"windows":[{"workspaces":[{"id":"workspace:7"}]}]}`), nil
+	}
+	path, err := ManagedCodexLaunchReceiptPath("agenthail-degraded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-degraded", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherCMUX, Workspace: "workspace:7", Surface: "surface:9"}); err != nil {
+		t.Fatal(err)
+	}
+	launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project"}})
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("receipt was deleted after degraded nested inventory: %v", err)
 	}
 }
 
