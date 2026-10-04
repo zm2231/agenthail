@@ -49,12 +49,6 @@ enum ToolRunSummary {
         return invocations
     }
 
-    static func outputText(_ text: String) -> String {
-        guard text.hasPrefix("["), let blocks = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]], !blocks.isEmpty else { return text }
-        let texts = blocks.compactMap { $0["text"] as? String }
-        return texts.count == blocks.count ? texts.joined() : text
-    }
-
     static func outputPreview(_ text: String) -> String {
         String(text.split(separator: "\n", omittingEmptySubsequences: false).prefix(24).joined(separator: "\n").prefix(3000))
     }

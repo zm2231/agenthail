@@ -1113,7 +1113,7 @@ struct ToolCallRow: View {
         .contextMenu {
             Button("Copy input") { copyToPasteboard(call.text) }
             if !results.isEmpty {
-                Button("Copy output") { copyToPasteboard(results.map { ToolRunSummary.outputText($0.text) }.joined(separator: "\n\n")) }
+                Button("Copy output") { copyToPasteboard(results.map(\.text).joined(separator: "\n\n")) }
             }
         }
     }
@@ -1125,7 +1125,7 @@ struct ToolOutputBlock: View {
 
     var body: some View {
         let failed = ToolRunSummary.isFailure(result)
-        let text = ToolRunSummary.outputText(result.text)
+        let text = result.text
         let preview = ToolRunSummary.outputPreview(text)
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {

@@ -24,9 +24,6 @@ struct ToolRunSummaryTest {
         expect(ToolRunSummary.outputPreview(long).split(separator: "\n").count == 24, "preview keeps the first 24 lines")
         expect(ToolRunSummary.outputPreview(String(repeating: "x", count: 5000)).count == 3000, "preview caps characters")
         expect(ToolRunSummary.outputPreview("short") == "short", "short output is its own preview")
-        expect(ToolRunSummary.outputText(#"[{"text":"Script completed\n","type":"input_text"},{"text":"body","type":"input_text"}]"#) == "Script completed\nbody", "content blocks unwrap to their text")
-        expect(ToolRunSummary.outputText(#"[{"text":"a"},{"image":"x"}]"#) == #"[{"text":"a"},{"image":"x"}]"#, "mixed blocks stay raw")
-        expect(ToolRunSummary.outputText("[1, 2]") == "[1, 2]" && ToolRunSummary.outputText("plain") == "plain", "other output is unchanged")
         print("tool run summary tests passed")
     }
 
