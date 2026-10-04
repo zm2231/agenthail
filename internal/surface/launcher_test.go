@@ -328,6 +328,9 @@ func TestTMUXMalformedPostLaunchOutputIsAcceptedWithoutLocation(t *testing.T) {
 
 func TestTMUXRunnerErrorAfterDispatchIsAcceptedWithLaunchIdentity(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	claude := filepath.Join(t.TempDir(), "claude")
+	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
 	launcher := newTMUX().(*processLauncher)
 	launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		sessionIndex := slices.Index(args, "-s")

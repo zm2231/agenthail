@@ -26,7 +26,7 @@ func TestCodexCatalogListIsNotComplete(t *testing.T) {
 
 func startManagedCodexFixture(t *testing.T) string {
 	t.Helper()
-	home, err := os.MkdirTemp("", "ah-")
+	home, err := os.MkdirTemp("/tmp", "ah-")
 	if err != nil {
 		t.Fatal(err)
 	}
