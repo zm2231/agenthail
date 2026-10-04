@@ -116,8 +116,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), idempotencyKey: String? = nil) async throws -> ActionReceipt {
-        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
@@ -183,6 +183,10 @@ final class AgenthailAPI: @unchecked Sendable {
 
     func settings() async throws -> DashboardSettingsState {
         try await get("/api/v1/settings")
+    }
+
+    func updateBusyDelivery(_ mode: String, codexRecentHours: Int) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": mode])
     }
 
     func updateSettings(action: String) async throws {
@@ -425,14 +429,16 @@ private struct InstructionRequest: Encodable {
     let sessionID: String
     let message: String
     let turnSettings: TurnSettings
+    var busyDelivery: String? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(action, forKey: .action)
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)

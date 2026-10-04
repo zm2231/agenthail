@@ -64,7 +64,7 @@ final class AgenthailModel: ObservableObject {
         return cache
     }()
     private struct PendingSendRequest {
-        let action: String
+        let busyDelivery: String?
         let message: String
         let idempotencyKey: String
     }
@@ -503,7 +503,7 @@ final class AgenthailModel: ObservableObject {
             return false
         }
         return await withCheckedContinuation { continuation in
-            send(text, to: sessionID, steer: false) { continuation.resume(returning: $0) }
+            send(text, to: sessionID) { continuation.resume(returning: $0) }
         }
     }
 
@@ -522,25 +522,24 @@ final class AgenthailModel: ObservableObject {
         return connected && api != nil
     }
 
-    func send(_ message: String, to sessionID: String, steer: Bool, completion: ((Bool) -> Void)? = nil) {
+    func send(_ message: String, to sessionID: String, busyDelivery: String? = nil, completion: ((Bool) -> Void)? = nil) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let api else {
             completion?(false)
             return
         }
-        let action = steer ? "steer" : "send"
         let idempotencyKey: String
-        if let retry = pendingSendRequests[sessionID], retry.action == action, retry.message == text {
+        if let retry = pendingSendRequests[sessionID], retry.busyDelivery == busyDelivery, retry.message == text {
             idempotencyKey = retry.idempotencyKey
         } else {
             idempotencyKey = UUID().uuidString
-            pendingSendRequests[sessionID] = PendingSendRequest(action: action, message: text, idempotencyKey: idempotencyKey)
+            pendingSendRequests[sessionID] = PendingSendRequest(busyDelivery: busyDelivery, message: text, idempotencyKey: idempotencyKey)
         }
         let pending = LocalSend(text: text, sentAt: Date(), status: nil)
         localSends[sessionID, default: []].append(pending)
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: action, sessionID: sessionID, message: text, idempotencyKey: idempotencyKey)
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, busyDelivery: busyDelivery, idempotencyKey: idempotencyKey)
                 if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
                 updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
                 operationError = nil
@@ -551,6 +550,21 @@ final class AgenthailModel: ObservableObject {
                 operationError = error.localizedDescription
                 completion?(false)
             }
+        }
+    }
+
+    var busyDelivery: FollowUpAction { FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue }
+
+    func setBusyDelivery(_ mode: FollowUpAction) {
+        guard let api, let snapshot, mode != busyDelivery else { return }
+        Task {
+            do {
+                try await api.updateBusyDelivery(mode.rawValue, codexRecentHours: snapshot.codexRecentHours)
+                operationError = nil
+            } catch {
+                operationError = error.localizedDescription
+            }
+            _ = await refresh(fresh: true)
         }
     }
 
@@ -795,6 +809,11 @@ extension Error {
 }
 
 @MainActor
+enum FollowUpAction: String {
+    case queue
+    case steer
+}
+
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
 

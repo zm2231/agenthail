@@ -38,7 +38,6 @@ private struct SettingsError: View {
 
 struct GeneralSettings: View {
     @ObservedObject var model: AgenthailModel
-    @AppStorage("followUpDefault") private var followUpDefault = FollowUpAction.queue.rawValue
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @AppStorage(GlobalShortcut.preferenceKey) private var globalShortcut = GlobalShortcut.off.rawValue
     @ObservedObject private var shortcuts = GlobalShortcutCenter.shared
@@ -66,12 +65,13 @@ struct GeneralSettings: View {
                 }
             }
             Section("Sending while an agent works") {
-                Picker("⌘↩", selection: $followUpDefault) {
-                    Text("Queue the message (default)").tag(FollowUpAction.queue.rawValue)
-                    Text("Steer the running turn").tag(FollowUpAction.steer.rawValue)
+                Picker("⌘↩", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
+                    Text("Queue the message (default)").tag(FollowUpAction.queue)
+                    Text("Steer the running turn").tag(FollowUpAction.steer)
                 }
                 .pickerStyle(.radioGroup)
-                Text("⌥⌘↩ always does the other one. Agents that can't be steered mid-turn send queued messages after the turn.")
+                .disabled(model.snapshot == nil)
+                Text("⌥⌘↩ always does the other one. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }

@@ -209,11 +209,11 @@ final class SessionPane: ObservableObject, Identifiable {
         scheduleDetailReload(id)
     }
 
-    func submit(steer: Bool) {
+    func submit(busyDelivery: String?) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
         let text = composer
         composer = ""
-        model.send(text, to: sessionID, steer: steer)
+        model.send(text, to: sessionID, busyDelivery: busyDelivery)
     }
 
     func interrupt() {

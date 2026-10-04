@@ -67,6 +67,19 @@ final class TurnSettingsFlowTests: XCTestCase {
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["message"] as? String }, ["Retry this normally", "Retry this normally"])
     }
 
+    func testSendCarriesExplicitBusyDeliveryOnlyWhenChosen() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Follow the default")
+        _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Steer now", busyDelivery: "steer")
+
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["action"] as? String }, ["send", "send"])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["busyDelivery"] as? String }, [nil, "steer"])
+    }
+
     func testActionGetsGeneratedKeyButReadsDoNot() async throws {
         TurnSettingsFlowProtocol.state.reset()
         let configuration = URLSessionConfiguration.ephemeral

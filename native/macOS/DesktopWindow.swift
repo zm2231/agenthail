@@ -1103,11 +1103,10 @@ struct ComposerView: View {
     @ObservedObject var model: AgenthailModel
     let pane: SessionPane
     let session: SessionState
-    @AppStorage("followUpDefault") private var followUpDefault = FollowUpAction.queue.rawValue
     @FocusState private var focused: Bool
     @State private var dropTargeted = false
 
-    private var followUp: FollowUpAction { FollowUpAction(rawValue: followUpDefault) ?? .queue }
+    private var followUp: FollowUpAction { model.busyDelivery }
     @ObservedObject private var draft: ComposerDraft
 
     init(model: AgenthailModel, pane: SessionPane, session: SessionState) {
@@ -1228,10 +1227,12 @@ struct ComposerView: View {
     private var primaryHelp: String {
         if primaryIsStop { return "Stop ⌘." }
         if !session.isWorking { return "Send ⌘↩" }
+        guard canSteer else { return "Queue ⌘↩" }
         return resolvedAction(alternate: false) == .queue ? "Queue ⌘↩ · Steer ⌥⌘↩" : "Steer ⌘↩ · Queue ⌥⌘↩"
     }
     private var hint: String {
-        resolvedAction(alternate: false) == .queue ? "Sends after this turn · ⌥⌘↩ steers now" : "Steers now · ⌥⌘↩ queues"
+        guard canSteer else { return "Sends after this turn" }
+        return resolvedAction(alternate: false) == .queue ? "Sends after this turn · ⌥⌘↩ steers now" : "Steers now · ⌥⌘↩ queues"
     }
 
     private func resolvedAction(alternate: Bool) -> FollowUpAction {
@@ -1250,8 +1251,8 @@ struct ComposerView: View {
 
     private func submit(alternate: Bool) {
         guard hasText else { return }
-        let steer = session.isWorking && resolvedAction(alternate: alternate) == .steer
-        pane.submit(steer: steer)
+        let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
+        pane.submit(busyDelivery: explicit)
     }
 }
 
@@ -1366,13 +1367,6 @@ struct QueueDock: View {
         .background(DesktopPalette.dock, in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
         .overlay(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14).strokeBorder(DesktopPalette.line))
     }
-}
-
-enum FollowUpAction: String, CaseIterable, Identifiable {
-    case queue
-    case steer
-
-    var id: String { rawValue }
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
