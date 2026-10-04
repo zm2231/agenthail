@@ -139,22 +139,69 @@ func (c *Codex) readDurableLiveAttachment(ctx context.Context, session *surface.
 	if path == "" {
 		path = codexTranscriptPath(session)
 	}
-	page, err := readTranscriptPage(ctx, path, "codex", 0, timelineItemLimit)
+	return readCodexLiveAttachmentFromTranscript(ctx, path, id, digest)
+}
+
+func readCodexLiveAttachmentFromTranscript(ctx context.Context, path, id, digest string) (*surface.Attachment, []byte, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, ErrAttachmentNotFound
 	}
-	for _, item := range page.Items {
-		if item.Attachment == nil || !strings.HasSuffix(item.Attachment.ID, ":"+digest) {
-			continue
+	defer file.Close()
+	reader := bufio.NewReaderSize(file, 64*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
 		}
-		meta, data, err := readTranscriptAttachment(ctx, session, item.Attachment.ID, "codex")
-		if err != nil || hashBytes(data) != digest {
-			continue
+		line, err := readBoundedLine(reader)
+		if len(line) > 0 {
+			var record map[string]any
+			if json.Unmarshal(line, &record) == nil {
+				items := codexTimelineItems(record)
+				refs := codexAttachmentReferences(record)
+				refIndex := 0
+				for _, item := range items {
+					if item.Kind != "attachment" {
+						continue
+					}
+					if refIndex >= len(refs) {
+						break
+					}
+					ref := refs[refIndex]
+					refIndex++
+					data, readErr := readAttachmentReference(ctx, ref)
+					if readErr != nil || hashBytes(data) != digest {
+						continue
+					}
+					media, width, height, validateErr := validateAttachment(data)
+					if validateErr != nil {
+						continue
+					}
+					return &surface.Attachment{ID: id, MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}, data, nil
+				}
+			}
 		}
-		meta.ID = id
-		return meta, data, nil
+		if errors.Is(err, io.EOF) {
+			return nil, nil, ErrAttachmentNotFound
+		}
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	return nil, nil, ErrAttachmentNotFound
+}
+
+func readBoundedLine(reader *bufio.Reader) ([]byte, error) {
+	var line []byte
+	for {
+		part, err := reader.ReadSlice('\n')
+		if int64(len(line))+int64(len(part)) > maxAttachmentRecordBytes {
+			return nil, ErrAttachmentTooLarge
+		}
+		line = append(line, part...)
+		if err != bufio.ErrBufferFull {
+			return line, err
+		}
+	}
 }
 
 func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, source string) (*surface.Attachment, []byte, error) {

@@ -1244,6 +1244,8 @@ func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *te
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
 	eventReads := 0
+	requestedAfterBarrier := false
+	requestedExpression := ""
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
@@ -1268,6 +1270,8 @@ func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *te
 			case expression == codexEventCursorJS:
 				value = float64(0)
 			case strings.Contains(expression, "events:b.events.filter"):
+				requestedExpression = expression
+				requestedAfterBarrier = requestedAfterBarrier || strings.Contains(expression, "sequence>7")
 				eventReads++
 				var batch codexEventBatch
 				if eventReads == 1 {
@@ -1298,14 +1302,14 @@ func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *te
 	defer server.Close()
 
 	var events []surface.StreamEvent
-	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1"}, "", func(event surface.StreamEvent) {
+	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1", StreamCursor: 7, StreamCursorSet: true}, "", func(event surface.StreamEvent) {
 		events = append(events, event)
 	}, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if eventReads < 2 || len(events) != 9 {
-		t.Fatalf("event_reads=%d events=%+v", eventReads, events)
+	if eventReads < 2 || !requestedAfterBarrier || len(events) != 9 {
+		t.Fatalf("event_reads=%d requested_after_barrier=%v expression=%q events=%+v", eventReads, requestedAfterBarrier, requestedExpression, events)
 	}
 	if events[0].ID != "codex:turn-1:message:user-1" || events[0].Role != "user" || events[0].Text != "question" {
 		t.Fatalf("user item=%+v", events[0])

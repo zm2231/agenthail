@@ -62,6 +62,30 @@ func (c *Codex) Capabilities() surface.Capabilities {
 	}
 }
 
+func (c *Codex) StreamCursor(ctx context.Context, _ *surface.Session) (uint64, error) {
+	if c.managed {
+		return 0, surface.ErrUnsupported
+	}
+	client, err := c.openDesktop(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer client.Close()
+	desktop, ok := client.(*desktopCodexClient)
+	if !ok {
+		return 0, fmt.Errorf("Codex stream cursor requires the Desktop transport")
+	}
+	value, err := desktop.conn.evaluate(ctx, codexEventCursorJS, 2*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	cursor, ok := value.(float64)
+	if !ok || cursor < 0 {
+		return 0, fmt.Errorf("Codex stream cursor is unavailable")
+	}
+	return uint64(cursor), nil
+}
+
 func (c *Codex) CatalogListComplete() bool { return false }
 
 func (c *Codex) Health(ctx context.Context) error {
@@ -899,11 +923,16 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 	if !ok {
 		return fmt.Errorf("Codex Desktop stream requires the Desktop transport")
 	}
-	cursorValue, err := desktop.conn.evaluate(ctx, codexEventCursorJS, 2*time.Second)
-	if err != nil {
-		return err
+	var cursor float64
+	if sess.StreamCursorSet {
+		cursor = float64(sess.StreamCursor)
+	} else {
+		cursorValue, err := desktop.conn.evaluate(ctx, codexEventCursorJS, 2*time.Second)
+		if err != nil {
+			return err
+		}
+		cursor, _ = cursorValue.(float64)
 	}
-	cursor, _ := cursorValue.(float64)
 	if uuid != "" {
 		cursor = 0
 	}
