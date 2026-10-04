@@ -8,7 +8,7 @@ The Mac app keeps your connected conversations in one window.
 
 - **Sessions** sit in the sidebar, grouped by Mac workspace, with **Running**, **Recent**, and **All** (⌘1, ⌘2, ⌘3). Sessions that need you appear first. Search (⌘F) filters the list; typing at least three characters also searches older Codex history.
 - **Conversations** open at the latest work. You can send, steer, stop (⌘.), and jump to latest (⌘L). ⌘↩ queues a message while an agent works and ⌥⌘↩ steers the running turn; Settings can swap the two. Drafts belong to their session.
-- The **inspector** (⌥⌘I) shows a session's details, context, controls, and delivery work.
+- The **inspector** (⌥⌘I) shows a session's details, context, and delivery work, and lets you set, edit, pause, budget, or clear its goal when the agent supports goals.
 - **⌘K** opens a command palette for jumping to any session, starting a new one (⌘N), and session actions.
 - Any session can open in its own window from its context menu or the palette. Windows showing the same session share its draft.
 - A session that disappears from the host stays readable with a notice until you close it.
