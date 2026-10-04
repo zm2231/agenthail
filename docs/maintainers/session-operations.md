@@ -25,14 +25,13 @@ includes `nextBefore`. A page holds at most `count` exchanges and the activity
 recorded alongside them, and `nextBefore` addresses the record before the oldest
 exchange on the page, so `--before <nextBefore>` reads the preceding page with
 no gap.
-Claude reads the bounded local transcript page and groups exchanges by turn, so
-a reply that spans several text blocks around tool calls is one exchange with
-its full text. Codex reads the newest page from the native app-server RPC
-first; when that bounded read fails it falls back to the local transcript page
-and reports the RPC failure as a `warning`, and when no transcript exists either
-the RPC failure is part of `readError`. Phone session detail reads the bounded
-per-session journal page, while metadata loads independently. The shared session
-source seeds and updates the journal rather than each viewer reading the provider.
+With the daemon running, phone detail, `last`, and `reply` read the same bounded
+per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
+error does not fall back to a second provider reader. Metadata loads independently.
+The shared session source seeds and updates the journal rather than each viewer
+reading the provider. Only when the daemon is offline does the CLI use the bounded
+provider reader: Claude reads its local transcript, and Codex tries its native
+RPC then its local transcript. The source and any read warning remain explicit.
 A read failure never resends a message.
 
 The shared session source writes a retained journal for each session.
