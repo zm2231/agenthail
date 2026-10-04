@@ -49,6 +49,7 @@ struct NewSessionSheet: View {
                         ForEach(launchers) { option in
                             Text(option.available ? option.label : "\(option.label) (unavailable)")
                                 .tag(Optional(option.id))
+                                .selectionDisabled(!option.available)
                                 .help(option.detail ?? "")
                         }
                     }

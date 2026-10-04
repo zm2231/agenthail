@@ -14,7 +14,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
     @Published private(set) var searchError: String?
-    @Published private(set) var openedSearchSessions: [SessionState] = []
+    @Published private(set) var pinnedSessions: [SessionState] = []
     private var searchTask: Task<Void, Never>?
     @Published var selectedSessionID: String?
     @Published var detail: SessionDetail?
@@ -65,14 +65,14 @@ final class AgenthailModel: ObservableObject {
     var knownSessions: [SessionState] {
         let listed = snapshot?.sessions ?? []
         let listedIDs = Set(listed.map(\.id))
-        return listed + openedSearchSessions.filter { !listedIDs.contains($0.id) }
+        return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var selectedSession: SessionState? { knownSessions.first { $0.id == selectedSessionID } }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
     var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
     var sessionTree: SessionTree {
-        SessionTree.build(snapshot?.sessions ?? [], filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
+        SessionTree.build(knownSessions, filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
 
     init() {
@@ -222,14 +222,25 @@ final class AgenthailModel: ObservableObject {
         guard let api else { return "Agenthail isn't connected." }
         do {
             let receipt = try await api.launchSession(launcher: launcher, surface: agent, message: message, cwd: folder)
-            if let error = receipt.error, !receipt.ok, receipt.unknown != true { return error }
-            await refresh(fresh: true)
-            if let id = receipt.id, knownSessions.contains(where: { $0.id == id }) { selectSession(id) }
+            if receipt.unknown == true {
+                if let id = receipt.id { await openCreatedSession(id) }
+                return "Agenthail couldn't confirm the session started. Check the sidebar before trying again."
+            }
+            guard receipt.ok else { return receipt.error ?? "The session didn't start." }
+            if let id = receipt.id { await openCreatedSession(id) }
             operationError = nil
             return nil
         } catch {
             return error.localizedDescription
         }
+    }
+
+    private func openCreatedSession(_ id: String) async {
+        await refresh(fresh: true)
+        if !knownSessions.contains(where: { $0.id == id }), let api, let detail = try? await api.sessionDetail(id: id) {
+            pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
+        }
+        if knownSessions.contains(where: { $0.id == id }) { selectSession(id) }
     }
 
     func focusInTerminal(_ session: SessionState) {
@@ -262,10 +273,14 @@ final class AgenthailModel: ObservableObject {
     }
 
     func openSearchResult(_ session: SessionState) {
-        if !(snapshot?.sessions.contains { $0.id == session.id } ?? false), !openedSearchSessions.contains(where: { $0.id == session.id }) {
-            openedSearchSessions.append(session)
-        }
+        pin(session)
         selectSession(session.id)
+    }
+
+    private func pin(_ session: SessionState) {
+        if !(snapshot?.sessions.contains { $0.id == session.id } ?? false), !pinnedSessions.contains(where: { $0.id == session.id }) {
+            pinnedSessions.append(session)
+        }
     }
 
     func loadOlder() async {
