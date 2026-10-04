@@ -409,6 +409,12 @@ type Surface interface {
 	Capabilities() Capabilities
 }
 
+// TurnInterrupter accepts interruption only when the adapter can verify the
+// exact active turn selected by the caller.
+type TurnInterrupter interface {
+	InterruptTurn(context.Context, *Session, string) error
+}
+
 func DeriveName(explicit, preview string, maxLen int) string {
 	if explicit != "" {
 		return truncate(explicit, maxLen)

@@ -1218,6 +1218,14 @@ func stringList(value any, objectKey string) []string {
 }
 
 func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
+	return c.interruptTurn(ctx, sess, "")
+}
+
+func (c *Codex) InterruptTurn(ctx context.Context, sess *surface.Session, expectedTurnID string) error {
+	return c.interruptTurn(ctx, sess, expectedTurnID)
+}
+
+func (c *Codex) interruptTurn(ctx context.Context, sess *surface.Session, expectedTurnID string) error {
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
@@ -1231,15 +1239,23 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
-	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
+	return c.interruptActiveTurn(ctx, conn, sess.ID, expectedTurnID)
+}
+
+func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threadID, expectedTurnID string) error {
+	turnID, err := c.activeTurnID(ctx, conn, threadID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to interrupt")
 	}
+	if expectedTurnID != "" && turnID != expectedTurnID {
+		return fmt.Errorf("selected turn changed before interruption; confirm the active turn again")
+	}
 	_, err = conn.Request(ctx, "turn/interrupt", map[string]any{
-		"threadId": sess.ID,
+		"threadId": threadID,
+		"turnId":   turnID,
 	}, 5*time.Second)
 	return err
 }
