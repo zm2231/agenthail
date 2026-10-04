@@ -16,11 +16,9 @@ if [ -f "$skill/SKILL.md" ]; then
 		[ -d "$runtime" ] || continue
 		link="$runtime/skills/agenthail-operations"
 		mkdir -p "$runtime/skills"
-		case "$(readlink "$link" 2>/dev/null)" in
-		"$skill") ;;
-		*/skills/agenthail-operations) ln -sfn "$skill" "$link" ;;
-		*) [ -e "$link" ] || ln -sfn "$skill" "$link" ;;
-		esac
+		if [ ! -e "$link" ]; then
+			ln -sfn "$skill" "$link"
+		fi
 	done
 fi
 

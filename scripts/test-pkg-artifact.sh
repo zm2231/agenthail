@@ -49,16 +49,15 @@ codesign --verify --deep --strict --verbose=2 "$app"
 codesign --verify --strict --verbose=2 "$root/agenthail"
 
 mkdir -p "$work/home/.claude/skills" "$work/home/.codex"
-mkdir -p "$work/user-skill"
-ln -s "$work/user-skill" "$work/home/.claude/skills/agenthail-operations"
-mkdir -p "$work/home/.hermes/skills" "$work/home/.codex/skills" "$work/previous-install/skills/agenthail-operations"
+mkdir -p "$work/checkout/skills/agenthail-operations"
+ln -s "$work/checkout/skills/agenthail-operations" "$work/home/.claude/skills/agenthail-operations"
+mkdir -p "$work/home/.hermes/skills"
 ln -s "$work/removed-install/skills/agenthail-operations" "$work/home/.hermes/skills/agenthail-operations"
-ln -s "$work/previous-install/skills/agenthail-operations" "$work/home/.codex/skills/agenthail-operations"
 env -i HOME="$work/home" AGENTHAIL_ROOT="$root" AGENTHAIL_MAC_APP="$app/Contents/MacOS/Agenthail" PATH=/usr/bin:/bin "$payload/usr/local/bin/agenthail" version --json | jq -e '.version and .revision'
 env -i HOME="$work/home" AGENTHAIL_ROOT="$root" AGENTHAIL_MAC_APP="$app/Contents/MacOS/Agenthail" PATH=/usr/bin:/bin "$payload/usr/local/bin/agenthail" update --help | grep -q 'agenthail update'
 test -L "$work/home/.codex/skills/agenthail-operations"
 test "$(readlink "$work/home/.codex/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
-test "$(readlink "$work/home/.claude/skills/agenthail-operations")" = "$work/user-skill"
+test "$(readlink "$work/home/.claude/skills/agenthail-operations")" = "$work/checkout/skills/agenthail-operations"
 test "$(readlink "$work/home/.hermes/skills/agenthail-operations")" = "$root/skills/agenthail-operations"
 PYTHONPATH="$root/pydeps" PYTHONDONTWRITEBYTECODE=1 "$root/runtime/python/bin/python3" -c 'from curl_cffi import requests; assert requests'
 (cd "$root" && PATH="$root/runtime/node/bin:/usr/bin:/bin" "$root/runtime/node/bin/node" -e "import('@steipete/sweet-cookie').then(module => { if (!module.getCookies) process.exit(1) })")

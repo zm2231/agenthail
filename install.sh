@@ -370,15 +370,10 @@ if [ "$INSTALL_SKILL" -eq 1 ] && [ -f "$SKILL_SOURCE/SKILL.md" ]; then
 	for runtime_dir in "$HOME/.claude" "$HOME/.codex" "$HOME/.hermes"; do
 		[ -d "$runtime_dir" ] || continue
 		link="$runtime_dir/skills/agenthail-operations"
-		case "$(readlink "$link" 2>/dev/null)" in
-		*/skills/agenthail-operations) ;;
-		*)
-			if [ -e "$link" ]; then
-				echo "warning: $link exists and is not an agenthail symlink; leaving it alone" >&2
-				continue
-			fi
-			;;
-		esac
+		if [ -e "$link" ] && [ "$(readlink "$link" 2>/dev/null)" != "$SKILL_SOURCE" ]; then
+			echo "warning: $link exists and is not an agenthail symlink; leaving it alone" >&2
+			continue
+		fi
 		mkdir -p "$runtime_dir/skills"
 		ln -sfn "$SKILL_SOURCE" "$link"
 		SKILL_LINKS+=("$link")
