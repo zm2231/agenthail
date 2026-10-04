@@ -306,6 +306,29 @@ func codexEventItemBody(value any) string {
 	return codexEventText(value)
 }
 
+func codexEventCallID(value any) string {
+	if current, ok := value.(map[string]any); ok {
+		for _, key := range []string{"callId", "callID", "call_id", "toolCallId", "toolUseId", "tool_use_id"} {
+			if id, ok := current[key].(string); ok && id != "" {
+				return id
+			}
+		}
+		for _, child := range current {
+			if id := codexEventCallID(child); id != "" {
+				return id
+			}
+		}
+	}
+	if current, ok := value.([]any); ok {
+		for _, child := range current {
+			if id := codexEventCallID(child); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
 func codexEventNamedString(value any, keys ...string) string {
 	switch current := value.(type) {
 	case map[string]any:

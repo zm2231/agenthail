@@ -50,6 +50,17 @@ func TestClaudeTimelinePreservesOrderedToolActivity(t *testing.T) {
 	}
 }
 
+func TestClaudeTimelineKeepsNonCodexProviderIdentity(t *testing.T) {
+	path := timelineFixture(t, `{"type":"assistant","uuid":"claude-message-1","timestamp":"2026-09-07T10:00:00Z","message":{"id":"claude-message-1","content":[{"type":"text","text":"answer"}]}}`+"\n")
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if strings.HasPrefix(page.Items[0].ID, "codex:") || page.Items[0].ID == "" {
+		t.Fatalf("Claude item got Codex identity: %+v", page.Items[0])
+	}
+}
+
 func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	var content strings.Builder
 	for i := 0; i < 450; i++ {

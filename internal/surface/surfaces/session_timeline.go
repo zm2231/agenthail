@@ -176,7 +176,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		for i := range items {
 			if source == "claude" {
 				items[i].ID = stableTimelineItemID(offset, line, i)
-			} else {
+			} else if source == "codex" {
 				items[i].ID = codexTranscriptItemKey(record, items[i], i)
 			}
 			if items[i].ID == "" {
