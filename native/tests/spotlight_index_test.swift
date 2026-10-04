@@ -102,6 +102,16 @@ struct SpotlightIndexTest {
         await patient.settle()
         check(slow.operations == ["deleteAll", "deleteAll"] && patient.indexed.isEmpty, "a new target does not wait out the retry delay")
 
+        let unsupported = FakeStore()
+        let stopped = SpotlightSync(store: unsupported, retryDelay: .milliseconds(1), permanent: { $0 is FakeStore.Failure })
+        unsupported.failNext = "deleteAll"
+        stopped.update([builder])
+        await stopped.settle()
+        check(unsupported.operations == ["deleteAll"], "a permanent failure is not retried")
+        stopped.update([builder])
+        await stopped.settle()
+        check(unsupported.operations == ["deleteAll", "deleteAll", "index a"], "a new catalog tries again after a permanent failure")
+
         store.operations = []
         store.failNext = "deleteAll"
         sync.clear()

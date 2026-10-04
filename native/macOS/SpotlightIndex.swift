@@ -42,17 +42,20 @@ final class SpotlightSync {
 
     private let store: SpotlightStore
     private let retryDelay: Duration
+    private let permanent: (Error) -> Bool
     private let failed: (Error) -> Void
     private var target: Target?
     private var generation = 0
     private var drainTask: Task<Void, Never>?
     private var retryWait: Task<Void, Never>?
     private var cleared = false
+    private var consecutiveFailures = 0
     private(set) var indexed: [String: SpotlightEntry] = [:]
 
-    init(store: SpotlightStore, retryDelay: Duration = .seconds(30), failed: @escaping (Error) -> Void = { _ in }) {
+    init(store: SpotlightStore, retryDelay: Duration = .seconds(30), permanent: @escaping (Error) -> Bool = { _ in false }, failed: @escaping (Error) -> Void = { _ in }) {
         self.store = store
         self.retryDelay = retryDelay
+        self.permanent = permanent
         self.failed = failed
     }
 
@@ -86,15 +89,20 @@ final class SpotlightSync {
             do {
                 try await apply(target)
                 applied = current
+                consecutiveFailures = 0
             } catch {
                 failed(error)
-                if generation == current { await waitBeforeRetry() }
+                consecutiveFailures += 1
+                guard generation == current else { continue }
+                if permanent(error) { return }
+                await waitBeforeRetry()
             }
         }
     }
 
     private func waitBeforeRetry() async {
-        let wait = Task { [retryDelay] in _ = try? await Task.sleep(for: retryDelay) }
+        let delay = retryDelay * (1 << min(consecutiveFailures - 1, 5))
+        let wait = Task { _ = try? await Task.sleep(for: delay) }
         retryWait = wait
         await wait.value
         retryWait = nil
@@ -155,7 +163,7 @@ struct CoreSpotlightStore: SpotlightStore {
 enum SpotlightIndex {
     static let preferenceKey = "spotlightSessions"
     private static let log = Logger(subsystem: "com.agenthail.app", category: "spotlight")
-    static let shared = SpotlightSync(store: CoreSpotlightStore()) { error in
+    static let shared = SpotlightSync(store: CoreSpotlightStore(), permanent: { ($0 as? CSIndexError)?.code == .indexingUnsupported }) { error in
         log.error("Spotlight index update failed: \(error.localizedDescription, privacy: .public)")
     }
 }
