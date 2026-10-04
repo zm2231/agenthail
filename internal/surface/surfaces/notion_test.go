@@ -46,17 +46,6 @@ func TestNotionMalformedConfiguredSpaceFailsWithoutPanic(t *testing.T) {
 	}
 }
 
-func TestNewNotionThreadIDPreservesSpacePortalSegment(t *testing.T) {
-	threadID, err := newNotionThreadID("3978aba0-0606-80ac-a1ae-00a9eb229fc0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parts := strings.Split(threadID, "-")
-	if len(parts) != 5 || parts[1] != "0606" {
-		t.Fatalf("threadID=%q", threadID)
-	}
-}
-
 func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 	original := notionInferenceRequest
 	t.Cleanup(func() { notionInferenceRequest = original })

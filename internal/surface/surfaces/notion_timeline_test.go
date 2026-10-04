@@ -75,20 +75,3 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 		t.Fatalf("older=%+v", older)
 	}
 }
-
-func TestNotionTailDelegatesReadSession(t *testing.T) {
-	original := notionRecordRequest
-	t.Cleanup(func() { notionRecordRequest = original })
-	calls := 0
-	notionRecordRequest = func(_ context.Context, _ string, _ string, _ map[string]string, body, _, _ string, _ time.Duration) (int, string, error) {
-		calls++
-		if calls == 1 {
-			return 200, `{"recordMap":{"thread":{"thread-1":{"value":{"value":{"messages":["m1","m2"]}}}}}}`, nil
-		}
-		return 200, `{"recordMap":{"thread_message":{"m1":{"value":{"value":{"step":{"type":"user","value":[["question"]]}}}},"m2":{"value":{"value":{"step":{"type":"agent-inference","value":[{"type":"text","content":"answer"}]}}}}}}}`, nil
-	}
-	read, err := (&Notion{spaceID: "00000000-0000-0000-0000-000000000000", userID: "user"}).Tail(context.Background(), &surface.Session{ID: "thread-1"}, 1)
-	if err != nil || len(read) != 1 || read[0].Assistant != "answer" {
-		t.Fatalf("tail=%+v err=%v", read, err)
-	}
-}

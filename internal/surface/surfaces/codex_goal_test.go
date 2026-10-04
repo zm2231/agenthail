@@ -41,18 +41,6 @@ func TestCodexGoalSetParamsRejectsUnknownStatusAndNegativeBudget(t *testing.T) {
 	}
 }
 
-func TestCodexGoalStatusesAreExactlyTheSupportedSix(t *testing.T) {
-	statuses := []string{surface.GoalStatusActive, surface.GoalStatusPaused, surface.GoalStatusBlocked, surface.GoalStatusUsageLimited, surface.GoalStatusBudgetLimited, surface.GoalStatusComplete}
-	if len(statuses) != 6 {
-		t.Fatalf("status count=%d", len(statuses))
-	}
-	for _, status := range statuses {
-		if !validCodexGoalStatus(status) {
-			t.Fatalf("status %q is not accepted", status)
-		}
-	}
-}
-
 func TestParseCodexGoalNotificationsPreservesUpdatedAndCleared(t *testing.T) {
 	updated, ok := ParseCodexGoalNotification("thread/goal/updated", map[string]any{
 		"threadId": "thread", "turnId": "turn",

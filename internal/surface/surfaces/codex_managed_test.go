@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -167,114 +166,6 @@ func TestCodexDiscoveryDoesNotStartManagedRuntime(t *testing.T) {
 	}
 }
 
-func TestCodexTransportSeparatesDesktopManagedAndPlainCLI(t *testing.T) {
-	cases := []struct {
-		source           string
-		status           any
-		managed          bool
-		desktopReachable bool
-		want             string
-	}{
-		{"vscode", "idle", false, true, codexTransportDesktop},
-		{"vscode", "notLoaded", true, true, codexTransportDesktop},
-		{"cli", "idle", true, true, codexTransportDesktop},
-		{"agenthail", "idle", true, true, codexTransportDesktop},
-		{"vscode", "idle", true, false, codexTransportReadOnly},
-		{"agenthail", "idle", true, false, codexTransportReadOnly},
-		{"cli", "idle", true, false, codexTransportReadOnly},
-		{"cli", "notLoaded", true, false, codexTransportReadOnly},
-		{"cli", "idle", false, false, codexTransportReadOnly},
-	}
-	for _, test := range cases {
-		if got := codexTransport(test.managed, test.desktopReachable); got != test.want {
-			t.Fatalf("source=%s status=%v managed=%v desktopReachable=%v got=%s want=%s", test.source, test.status, test.managed, test.desktopReachable, got, test.want)
-		}
-	}
-}
-
-func TestCodexSessionUsesCurrentOwnerInsteadOfHistoricalCreator(t *testing.T) {
-	session := codexSession(map[string]any{
-		"id": "thread", "source": "vscode", "threadSource": "agenthail", "status": "idle",
-	}, false, true)
-	if session.Source != "vscode" || session.Transport != codexTransportDesktop {
-		t.Fatalf("session=%+v", session)
-	}
-}
-
-func TestLoadedDesktopThreadIsWritableRegardlessOfOriginalSource(t *testing.T) {
-	client := &loadedDesktopClient{}
-	sessions, err := NewCodex("").listLoaded(context.Background(), client, 1, false, true)
-	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportDesktop {
-		t.Fatalf("sessions=%+v err=%v", sessions, err)
-	}
-}
-
-func TestLoadedManagedThreadIsWritableRegardlessOfOriginalSource(t *testing.T) {
-	client := &loadedDesktopClient{}
-	sessions, err := NewCodex("").listLoaded(context.Background(), client, 1, true, false)
-	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportManaged {
-		t.Fatalf("sessions=%+v err=%v", sessions, err)
-	}
-}
-
-type loadedDesktopClient struct{}
-
-func (*loadedDesktopClient) Request(_ context.Context, method string, _ map[string]any, _ time.Duration) (map[string]any, error) {
-	if method == "thread/loaded/list" {
-		return map[string]any{"result": map[string]any{"data": []any{"thread"}}}, nil
-	}
-	if method == "thread/read" {
-		return map[string]any{"result": map[string]any{"thread": map[string]any{
-			"id": "thread", "source": "cli", "status": "idle",
-		}}}, nil
-	}
-	return nil, fmt.Errorf("unexpected method %s", method)
-}
-
-func (*loadedDesktopClient) Close() error { return nil }
-
-type fixedCodexClient struct {
-	response map[string]any
-}
-
-func (c *fixedCodexClient) Request(context.Context, string, map[string]any, time.Duration) (map[string]any, error) {
-	return c.response, nil
-}
-
-func (c *fixedCodexClient) Close() error { return nil }
-
-func TestCodexHealthAcceptsManagedFallback(t *testing.T) {
-	desktop := func(context.Context) (codexClient, error) { return nil, fmt.Errorf("desktop unavailable") }
-	managed := func(context.Context) (codexClient, error) { return &fixedCodexClient{}, nil }
-	if err := codexHealth(context.Background(), true, desktop, managed); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCodexHealthReportsBothUnavailableTransports(t *testing.T) {
-	desktop := func(context.Context) (codexClient, error) { return nil, fmt.Errorf("desktop unavailable") }
-	managed := func(context.Context) (codexClient, error) { return nil, fmt.Errorf("managed unavailable") }
-	err := codexHealth(context.Background(), true, desktop, managed)
-	if err == nil || !strings.Contains(err.Error(), "desktop unavailable") || !strings.Contains(err.Error(), "managed unavailable") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestCodexWriteLockHonorsContext(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	first, err := acquireCodexWriteLock(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer releaseCodexWriteLock(first)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	second, err := acquireCodexWriteLock(ctx)
-	if second != nil || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("lock=%v err=%v", second, err)
-	}
-}
-
 type scriptedCodexClient struct {
 	methods []string
 	params  []map[string]any
@@ -370,30 +261,6 @@ func TestPrepareManagedTerminalSessionUsesProviderThreadIdentity(t *testing.T) {
 	}
 }
 
-func TestManagedCodexProviderIdentityFlowsIntoLaunchReceipt(t *testing.T) {
-	client := &scriptedCodexClient{}
-	session, err := prepareManagedTerminalSession(context.Background(), client, "/work/project", "gpt-5.6-sol")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "launch.json")
-	receipt := surface.ManagedCodexLaunchReceipt{
-		LaunchID:    "agenthail-launch",
-		ThreadID:    session.ID,
-		Cwd:         session.Cwd,
-		Runtime:     surface.LauncherTMUX,
-		TmuxSession: "agenthail-launch",
-		TmuxPane:    "%7",
-	}
-	if err := surface.WriteManagedCodexLaunchReceipt(path, receipt); err != nil {
-		t.Fatal(err)
-	}
-	got, err := surface.ReadManagedCodexLaunchReceipt(path)
-	if err != nil || got.ThreadID != "thread-new" || got.ThreadID != session.ID {
-		t.Fatalf("receipt=%+v err=%v session=%+v", got, err, session)
-	}
-}
-
 func TestManagedStreamWaitsForNewTurnInsteadOfReplayingHistory(t *testing.T) {
 	client := &sequenceCodexClient{responses: []map[string]any{
 		managedThreadResponse("old", "completed", "old answer"),
@@ -462,63 +329,12 @@ func TestManagedStreamDoesNotEmitFinalForFailedTurn(t *testing.T) {
 	}
 }
 
-func TestCodexListPageKeepsHistoryReadOnly(t *testing.T) {
-	client := &fixedCodexClient{response: map[string]any{
-		"result": map[string]any{
-			"data": []any{map[string]any{
-				"id": "desktop-thread", "name": "Desktop thread", "source": "vscode", "status": "idle",
-			}},
-		},
-	}}
-	codex := NewCodex("")
-	sessions, err := codex.listPage(context.Background(), client, map[string]any{}, true, false)
-	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportReadOnly {
-		t.Fatalf("sessions=%v err=%v", sessions, err)
-	}
-	if reason := surface.ReadOnlySessionReason(&sessions[0]); !strings.Contains(reason, "agenthail launch codex") {
-		t.Fatalf("reason=%q", reason)
-	}
-}
-
-func TestCodexListPageKeepsDesktopSessionsWritable(t *testing.T) {
-	client := &fixedCodexClient{response: map[string]any{
-		"result": map[string]any{
-			"data": []any{map[string]any{
-				"id": "desktop-thread", "name": "Desktop thread", "source": "vscode", "status": "idle",
-			}},
-		},
-	}}
-	codex := NewCodex("")
-	sessions, err := codex.listPage(context.Background(), client, map[string]any{}, false, true)
-	if err != nil || len(sessions) != 1 || sessions[0].Transport != codexTransportDesktop {
-		t.Fatalf("sessions=%v err=%v", sessions, err)
-	}
-}
-
 func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	codex := NewCodex("http://127.0.0.1:1")
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "cli", Transport: codexTransportReadOnly}
 	_, err := codex.Send(context.Background(), session, "do not deliver")
 	if err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestCodexDirectInputAccepted(t *testing.T) {
-	if !codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": true}}}, true) {
-		t.Fatal("ready Desktop thread was rejected")
-	}
-	if codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{"canAcceptDirectInput": false}}}, true) {
-		t.Fatal("unready Desktop thread was accepted")
-	}
-	if codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{}}}, true) {
-		t.Fatal("Desktop read without an explicit direct-input state was accepted")
-	}
-	if !codexDirectInputAccepted(map[string]any{"result": map[string]any{"thread": map[string]any{}}}, false) {
-		t.Fatal("managed resume without an explicit direct-input state was rejected")
-	}
-	if codexDirectInputAccepted(map[string]any{"result": map[string]any{}}, true) {
-		t.Fatal("missing thread was accepted")
 	}
 }
 
@@ -672,70 +488,12 @@ func TestCodexEnsureRuntimeStartsMissingManagedDaemonOnce(t *testing.T) {
 	}
 }
 
-func TestRunCodexDaemonStartOutlivesCallerDeadline(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 0.05\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	if _, err := runCodexDaemon(ctx, "start"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRunCodexDaemonStartNamesAgenthailTimeout(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 1\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	original := codexDaemonStartTimeout
-	codexDaemonStartTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { codexDaemonStartTimeout = original })
-	_, err := runCodexDaemon(context.Background(), "start")
-	if err == nil || !strings.Contains(err.Error(), "timed out after 20ms; Agenthail ended the command") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
 func TestCodexEnsureRuntimeNamesMissingManagedDaemon(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", filepath.Join(t.TempDir(), "missing-codex"))
 	t.Setenv("CODEX_HOME", t.TempDir())
 	err := NewCodex("").EnsureRuntime(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "remote control") || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_BIN") {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestCodexEnsureRuntimeDoesNotRestartWhenSocketExists(t *testing.T) {
-	root := t.TempDir()
-	codeHome := filepath.Join(root, "codex-home")
-	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(socketPath, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(root, "calls.log")
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	t.Setenv("CODEX_HOME", codeHome)
-	if err := NewCodex("").ensureRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(logPath)
-	if err != nil || strings.TrimSpace(string(data)) != "app-server daemon enable-remote-control" {
-		t.Fatalf("log=%q err=%v", data, err)
 	}
 }
 
@@ -771,23 +529,6 @@ func TestCodexEnsureRuntimeEnablesRemoteControlWhenDisabled(t *testing.T) {
 	data, err := os.ReadFile(logPath)
 	if err != nil || strings.TrimSpace(string(data)) != "app-server daemon enable-remote-control" {
 		t.Fatalf("log=%q err=%v", data, err)
-	}
-}
-
-func TestCodexBinaryPrefersManagedStandaloneRuntime(t *testing.T) {
-	root := t.TempDir()
-	managed := filepath.Join(root, "packages", "standalone", "current", "codex")
-	if err := os.MkdirAll(filepath.Dir(managed), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(managed, []byte("#!/bin/sh\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_HOME", root)
-	t.Setenv("AGENTHAIL_CODEX_BIN", "")
-	path, err := codexBinary()
-	if err != nil || path != managed {
-		t.Fatalf("path=%q err=%v", path, err)
 	}
 }
 

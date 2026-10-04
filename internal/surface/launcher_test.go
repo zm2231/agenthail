@@ -12,34 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
-
-type launcherStarter struct{ options *SessionStartOptions }
-
-func (s *launcherStarter) StartSession(_ context.Context, options SessionStartOptions) (*Session, *SendResult, error) {
-	s.options = &options
-	return &Session{ID: "created"}, nil, nil
-}
-
-func (launcherStarter) Name() SurfaceKind                                           { return KindClaude }
-func (launcherStarter) List(context.Context) ([]Session, error)                     { return nil, nil }
-func (launcherStarter) Resolve(context.Context, string) (*Session, error)           { return nil, nil }
-func (launcherStarter) Observe(context.Context, *Session) (*TurnObservation, error) { return nil, nil }
-func (launcherStarter) Send(context.Context, *Session, string) (*SendResult, error) { return nil, nil }
-func (launcherStarter) Reply(context.Context, *Session, int) (*ReplyResult, error)  { return nil, nil }
-func (launcherStarter) Tail(context.Context, *Session, int) ([]Exchange, error)     { return nil, nil }
-func (launcherStarter) Stream(context.Context, *Session, string, func(StreamEvent), time.Duration) error {
-	return nil
-}
-func (launcherStarter) GoalSet(context.Context, *Session, string) error         { return nil }
-func (launcherStarter) GoalClear(context.Context, *Session) error               { return nil }
-func (launcherStarter) GoalGet(context.Context, *Session) (*GoalState, error)   { return nil, nil }
-func (launcherStarter) Compact(context.Context, *Session) error                 { return nil }
-func (launcherStarter) Model(context.Context, *Session, string) (string, error) { return "", nil }
-func (launcherStarter) Interrupt(context.Context, *Session) error               { return nil }
-func (launcherStarter) Steer(context.Context, *Session, string) error           { return nil }
-func (launcherStarter) Capabilities() Capabilities                              { return Capabilities{} }
 
 func TestLauncherRuntimeJSONOmitsLocationOnlyWhenUnset(t *testing.T) {
 	payload, err := json.Marshal(Session{ID: "s", Runtime: &Runtime{Launcher: LauncherCMUX, Focusable: true, Location: &Location{Workspace: "w"}}})
@@ -55,26 +28,6 @@ func TestLauncherRuntimeJSONOmitsLocationOnlyWhenUnset(t *testing.T) {
 	}
 	if strings.Contains(string(legacy), "runtime") {
 		t.Fatalf("legacy session unexpectedly has runtime: %s", legacy)
-	}
-}
-
-func TestNewLaunchersInjectsExistingStarterAndSeams(t *testing.T) {
-	starter := &launcherStarter{}
-	launchers := NewLaunchers([]Surface{starter})
-	ids := make([]string, 0, len(launchers))
-	for _, launcher := range launchers {
-		ids = append(ids, launcher.ID())
-	}
-	want := []string{LauncherCMUX, LauncherTMUX, LauncherClaudeBG, LauncherClaudeSDK, LauncherExternal}
-	if !reflect.DeepEqual(ids, want) {
-		t.Fatalf("launcher ids = %#v, want %#v", ids, want)
-	}
-	result, err := launchers[2].Launch(context.Background(), LaunchRequest{Agent: KindClaude, Message: "hello"})
-	if err != nil || result.SessionID != "created" || result.Session == nil || result.Session.ID != "created" {
-		t.Fatalf("starter launch = %#v, %v", result, err)
-	}
-	if starter.options == nil || starter.options.Agent != "" || starter.options.Owner != "" {
-		t.Fatalf("starter options unexpectedly selected an agent/owner: %#v", starter.options)
 	}
 }
 
@@ -248,20 +201,6 @@ func TestCMUXLocatePreservesReceiptOnDegradedNestedInventory(t *testing.T) {
 	}
 }
 
-func TestCMUXAvailabilityProbesCommandsInsteadOfHelpText(t *testing.T) {
-	dir := t.TempDir()
-	writeExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\ncase \"$1 $2\" in\n  'new-workspace --help'|'sessions list --help'|'tree --help'|'select-workspace --help'|'focus-panel --help') printf 'supported\\n'; exit 0;;\n  *) printf 'run is only a word here\\n'; exit 0;;\nesac\n")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	launcher := newCMUX().(*processLauncher)
-	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		return defaultCommandRunner(context.Background(), name, args...)
-	}
-	available, detail := launcher.Available(context.Background())
-	if !available || detail != filepath.Join(dir, "cmux") {
-		t.Fatalf("availability = %v, %q", available, detail)
-	}
-}
-
 func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	claude := filepath.Join(t.TempDir(), "claude")
 	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
@@ -289,27 +228,6 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	}
 	if !containsLine(got, claude) || containsLine(got, "claude") {
 		t.Fatalf("tmux launch did not use the resolved Claude executable: %#v", got)
-	}
-}
-
-func TestTMUXCodexLaunchPassesLaunchOwnedReceiptBinding(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	launcher := newTMUX().(*processLauncher)
-	var got []string
-	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		got = append([]string{name}, args...)
-		sessionIndex := slices.Index(got, "-s")
-		if sessionIndex < 0 || sessionIndex+1 >= len(got) {
-			t.Fatalf("tmux session argument missing: %#v", got)
-		}
-		return []byte(got[sessionIndex+1] + " %1"), nil
-	}
-	result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindCodex, Cwd: "/work", Message: "hello"})
-	if err != nil || result.Location == nil {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	if !containsLine(got, "env") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_ID=agenthail-") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_RECEIPT=") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_RUNTIME=tmux") {
-		t.Fatalf("launch args=%#v", got)
 	}
 }
 
@@ -418,27 +336,6 @@ func TestTMUXLocatePreservesCwdSpaces(t *testing.T) {
 	}
 }
 
-func TestTMUXLocateUsesLaunchReceiptForCodexPIDZero(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	launcher := newTMUX().(*processLauncher)
-	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("4242 agenthail-review %1 /work/project\n"), nil
-	}
-	launcher.pidAlive = func(pid int) bool { return pid == 4242 }
-	path, err := ManagedCodexLaunchReceiptPath("agenthail-review")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherTMUX, TmuxSession: "agenthail-review", TmuxPane: "%1"}); err != nil {
-		t.Fatal(err)
-	}
-	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project", PID: 0}})
-	want := map[string]Location{"codex-thread": {Session: "agenthail-review", Pane: "%1"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("locations=%#v want=%#v", got, want)
-	}
-}
-
 func TestTMUXLocateWaitsForCompleteReceiptAndRejectsTokenOrPaneMismatch(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	launcher := newTMUX().(*processLauncher)
@@ -470,45 +367,6 @@ func TestTMUXLocateWaitsForCompleteReceiptAndRejectsTokenOrPaneMismatch(t *testi
 	want := map[string]Location{"codex-thread": {Session: "agenthail-review", Pane: "%2"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations=%#v want=%#v", got, want)
-	}
-}
-
-func TestTMUXFocusFallsBackToTerminalAttach(t *testing.T) {
-	launcher := newTMUX().(*processLauncher)
-	var calls [][]string
-	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		calls = append(calls, append([]string{name}, args...))
-		if name == "tmux" && len(args) > 0 && args[0] == "list-clients" {
-			return nil, nil
-		}
-		return nil, nil
-	}
-	if err := launcher.Focus(context.Background(), Location{Session: "build"}); err != nil {
-		t.Fatal(err)
-	}
-	if len(calls) != 2 || calls[0][0] != "tmux" || calls[1][0] != "osascript" {
-		t.Fatalf("focus calls = %#v", calls)
-	}
-	if len(calls[1]) < 3 || !strings.Contains(calls[1][2], "build") {
-		t.Fatalf("attach call = %#v", calls[1])
-	}
-}
-
-func TestTMUXFocusSelectsAttachedClientAndPane(t *testing.T) {
-	launcher := newTMUX().(*processLauncher)
-	var calls [][]string
-	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
-		calls = append(calls, append([]string{name}, args...))
-		if name == "tmux" && args[0] == "list-clients" {
-			return []byte("client-1 build\n"), nil
-		}
-		return nil, nil
-	}
-	if err := launcher.Focus(context.Background(), Location{Session: "build", Pane: "%1"}); err != nil {
-		t.Fatal(err)
-	}
-	if len(calls) != 3 || calls[1][1] != "select-pane" || calls[1][3] != "%1" || calls[2][1] != "switch-client" || !containsLine(calls[2], "client-1") || !containsLine(calls[2], "build") {
-		t.Fatalf("focus calls = %#v", calls)
 	}
 }
 

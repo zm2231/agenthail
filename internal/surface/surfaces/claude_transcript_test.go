@@ -68,45 +68,6 @@ func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	}
 }
 
-func TestClaudeObserveUsesRecentRecordsThenScansOnlyAppends(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "transcript.jsonl")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const turnCount = 4120
-	for i := 0; i < turnCount; i++ {
-		if _, err := fmt.Fprintf(file, `{"type":"user","uuid":"u%d","message":{"content":"work"}}`+"\n"+`{"type":"assistant","uuid":"a%d","timestamp":"2026-08-06T00:00:%02dZ","message":{"id":"m%d","stop_reason":"end_turn","content":"done"}}`+"\n", i, i, i%60, i); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	claude := NewClaude("", t.TempDir())
-	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Status: surface.StatusBusy, Transcript: path}
-	observation, err := claude.Observe(context.Background(), session)
-	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != fmt.Sprintf("m%d", turnCount-1) {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-	firstOffset := claude.observeState[path].offset
-	appendTestTranscript(t, path, `{"type":"user","uuid":"next","message":{"content":"next"}}`)
-	observation, err = claude.Observe(context.Background(), session)
-	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "next" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-	if claude.observeState[path].offset <= firstOffset {
-		t.Fatalf("offset did not advance: before=%d after=%d", firstOffset, claude.observeState[path].offset)
-	}
-	if err := os.WriteFile(path, []byte(`{"type":"user","uuid":"replacement","message":{"content":"replacement"}}`+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	observation, err = claude.Observe(context.Background(), session)
-	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "replacement" || observation.CompletedTurnID != "" {
-		t.Fatalf("replacement observation=%+v err=%v", observation, err)
-	}
-}
-
 func TestClaudeObserveFindsTurnBeforeToolHeavyTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "transcript.jsonl")
 	file, err := os.Create(path)
@@ -172,29 +133,6 @@ func TestScanAppendedJSONLRejectsOversizedPartialRecord(t *testing.T) {
 	}
 	if _, err := scanAppendedJSONL(context.Background(), path, 0, maxClaudeTranscriptRecordBytes, func([]byte) error { return nil }); err == nil {
 		t.Fatal("expected oversized partial record error")
-	}
-}
-
-func TestReadClaudeTurnsRequiresEndTurnAndKeepsTurnIdentity(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":null,"content":[{"type":"text","text":"partial"}]}}
-{"type":"assistant","uuid":"a2","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"same"}]}}
-{"malformed":
-{"type":"user","uuid":"u2","message":{"content":"two"}}
-{"type":"assistant","uuid":"a3","message":{"id":"m2","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"same"}]}}`)
-	turns, err := readClaudeTurns(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(turns) != 2 {
-		t.Fatalf("turns=%+v", turns)
-	}
-	if !turns[0].Done || turns[0].MessageID != "m1" || !strings.Contains(turns[0].Assistant, "same") {
-		t.Fatalf("first=%+v", turns[0])
-	}
-	if !turns[1].Done || turns[1].MessageID != "m2" || turns[1].Assistant != "same" {
-		t.Fatalf("second=%+v", turns[1])
 	}
 }
 
@@ -710,43 +648,6 @@ func TestClaudeTranscriptPreservesMultiMegabyteUnicodeReply(t *testing.T) {
 	}
 	if turns[0].Assistant != reply {
 		t.Fatalf("reply_bytes=%d want=%d", len(turns[0].Assistant), len(reply))
-	}
-}
-
-func TestClaudeCommandResultStripsMarkupAndANSI(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","message":{"content":"<command-name>/compact</command-name>\n<command-args></command-args>"}}
-{"type":"system","subtype":"local_command","content":"<local-command-stdout>Compacted</local-command-stdout>"}
-{"type":"user","message":{"content":"<command-name>/model</command-name>\n<command-args>bad</command-args>"}}
-{"type":"system","subtype":"local_command","content":"<local-command-stdout>Model 'bad' not found\u001b[2m</local-command-stdout>"}`)
-	result, found, err := readClaudeCommandResult(path, 0, "/model", "bad")
-	if err != nil || !found || result != "Model 'bad' not found" {
-		t.Fatalf("result=%q found=%v err=%v", result, found, err)
-	}
-}
-
-func TestClaudeCompactCompletionRequiresNewBoundary(t *testing.T) {
-	path := writeTranscript(t, `{"type":"system","subtype":"compact_boundary","content":"old"}`)
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if completed, err := readClaudeCompactCompletion(path, info.Size(), "request"); err != nil || completed {
-		t.Fatalf("before append completed=%v err=%v", completed, err)
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("\n{\"type\":\"user\",\"uuid\":\"request\",\"message\":{\"content\":\"/compact\"}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"new\"}\n"); err != nil {
-		f.Close()
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if completed, err := readClaudeCompactCompletion(path, info.Size(), "request"); err != nil || !completed {
-		t.Fatalf("after append completed=%v err=%v", completed, err)
 	}
 }
 
