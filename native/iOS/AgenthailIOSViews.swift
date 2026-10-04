@@ -922,7 +922,7 @@ struct SessionInspector: View {
                     Section("Goal") {
                         if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }
                         LabeledContent("Status", value: goalStatusLabel(goal.status))
-                        if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatDuration(value)) }
+                        if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatGoalDuration(value)) }
                         if let value = goal.tokensUsed { LabeledContent("Tokens used", value: value.formatted()) }
                         if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
                         if let value = goal.createdAt { LabeledContent("Created", value: value) }
@@ -972,12 +972,12 @@ private func goalStatusLabel(_ status: String) -> String {
     }
 }
 
-private func formatDuration(_ seconds: Int) -> String {
-    if seconds < 60 { return "(seconds)s" }
+func formatGoalDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "\(seconds)s" }
     let minutes = seconds / 60
     let remainingSeconds = seconds % 60
-    if minutes < 60 { return "(minutes)m (remainingSeconds)s" }
-    return "(minutes / 60)h (minutes % 60)m"
+    if minutes < 60 { return "\(minutes)m \(remainingSeconds)s" }
+    return "\(minutes / 60)h \(minutes % 60)m"
 }
 
 extension ISO8601DateFormatter {

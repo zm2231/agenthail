@@ -2,6 +2,12 @@ import XCTest
 @testable import Agenthail
 
 final class AgenthailIOSTests: XCTestCase {
+    func testGoalDurationFormatsElapsedCounters() {
+        XCTAssertEqual(formatGoalDuration(7), "7s")
+        XCTAssertEqual(formatGoalDuration(125), "2m 5s")
+        XCTAssertEqual(formatGoalDuration(3720), "1h 2m")
+    }
+
     func testEmptyEventStreamMarksConnectionHealthy() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [EmptyEventStreamURLProtocol.self]
