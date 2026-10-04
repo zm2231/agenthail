@@ -162,15 +162,7 @@ extension SessionSidebar {
     @ViewBuilder
     private var searchResults: some View {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let local = model.knownSessions
-            .filter { session in
-                [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
-                    .compactMap { $0 }
-                    .contains { $0.localizedCaseInsensitiveContains(query) }
-            }
-            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
-        let localIDs = Set(local.map(\.id))
-        let remote = model.searchResults.filter { !localIDs.contains($0.session.id) }
+        let (local, remote) = searchMatches
         VStack(alignment: .leading, spacing: 2) {
             SidebarCaption("Sessions")
             ForEach(local) { session in
@@ -230,7 +222,25 @@ extension SessionSidebar {
         }
     }
 
+    private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
+        let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let local = model.knownSessions
+            .filter { session in
+                [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
+                    .compactMap { $0 }
+                    .contains { $0.localizedCaseInsensitiveContains(query) }
+            }
+            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let localIDs = Set(local.map(\.id))
+        let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) } : []
+        return (local, remote)
+    }
+
     private func visibleOrder(_ tree: SessionTree) -> [String] {
+        if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let matches = searchMatches
+            return matches.local.map(\.id) + matches.remote.map(\.session.id)
+        }
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
             let shown = expandedProjects.contains(project.id) ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: model.selectedSessionID)
@@ -243,7 +253,11 @@ extension SessionSidebar {
         guard !order.isEmpty else { return }
         let current = model.selectedSessionID.flatMap { order.firstIndex(of: $0) }
         let next = current.map { min(max($0 + offset, 0), order.count - 1) } ?? 0
-        model.selectSession(order[next])
+        if let result = model.searchResults.first(where: { $0.session.id == order[next] }) {
+            model.openSearchResult(result.session)
+        } else {
+            model.selectSession(order[next])
+        }
     }
 
     private func sessionButton(_ session: SessionState, needsYou: Bool) -> some View {
