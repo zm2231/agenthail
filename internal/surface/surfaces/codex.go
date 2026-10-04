@@ -1046,7 +1046,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
 }
 
 func codexTurnByID(thread *codexThread, turnID string) *codexTurn {

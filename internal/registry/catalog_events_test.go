@@ -224,3 +224,32 @@ func TestSessionJournalSourceEpochChangesOnRestart(t *testing.T) {
 		t.Fatalf("second=%q first=%q err=%v", second, first, err)
 	}
 }
+
+func TestRecordCatalogSurfacePublishesEveryHealthTransition(t *testing.T) {
+	r := openTestRegistry(t)
+	start := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	for index, health := range []string{"healthy", "unavailable", "healthy", "healthy", "unavailable"} {
+		observedAt := start.Add(time.Duration(index) * time.Second)
+		if _, _, err := r.RecordCatalogSurface(CatalogSurfaceState{Surface: surface.KindCodex, Health: health, ObservedAt: observedAt}, CatalogEvent{DedupeKey: "surface.health:codex:" + health, Type: "surface.health", EntityID: "codex", Payload: []byte(`{"health":"` + health + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, event := range window.Events {
+		var payload struct {
+			Health string `json:"health"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, payload.Health)
+	}
+	want := []string{"healthy", "unavailable", "healthy", "unavailable"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("surface health events=%v want=%v", got, want)
+	}
+}

@@ -264,6 +264,12 @@ func attachmentReferenceFromValue(v any) (attachmentReference, bool) {
 		if media == "" {
 			media = str(x, "mediaType")
 		}
+		switch imageURL := x["image_url"].(type) {
+		case string:
+			return attachmentReferenceFromValue(imageURL)
+		case map[string]any:
+			return attachmentReferenceFromValue(str(imageURL, "url"))
+		}
 		if data := str(x, "data"); data != "" {
 			if strings.HasPrefix(data, "data:") {
 				return attachmentReference{MediaType: media, Data: data}, true
@@ -286,15 +292,10 @@ func claudeAttachmentReferences(record map[string]any) []attachmentReference {
 		b, _ := raw.(map[string]any)
 		switch str(b, "type") {
 		case "image":
-			if r, ok := attachmentReferenceFromValue(b["source"]); ok {
-				out = append(out, r)
-			}
+			out = appendAttachmentReference(out, b["source"])
 		case "tool_result":
-			content, _ := b["content"].([]any)
-			for _, v := range content {
-				if r, ok := attachmentReferenceFromValue(v); ok {
-					out = append(out, r)
-				}
+			for _, image := range toolResultImageContent(b["content"]) {
+				out = appendAttachmentReference(out, image)
 			}
 		}
 	}
@@ -305,21 +306,21 @@ func codexAttachmentReferences(record map[string]any) []attachmentReference {
 	var out []attachmentReference
 	if images, ok := payload["images"].([]any); ok {
 		for _, v := range images {
-			if r, ok := attachmentReferenceFromValue(v); ok {
-				out = append(out, r)
-			}
+			out = appendAttachmentReference(out, v)
 		}
 	}
 	blocks, _ := payload["content"].([]any)
 	for _, v := range blocks {
 		b, _ := v.(map[string]any)
-		if strings.Contains(str(b, "type"), "image") {
-			if r, ok := attachmentReferenceFromValue(b); ok {
-				out = append(out, r)
-			}
+		if str(b, "text") == "" && strings.Contains(str(b, "type"), "image") {
+			out = appendAttachmentReference(out, b)
 		}
 	}
 	return out
+}
+func appendAttachmentReference(out []attachmentReference, value any) []attachmentReference {
+	ref, _ := attachmentReferenceFromValue(value)
+	return append(out, ref)
 }
 func timelineItemsForSource(record map[string]any, source string) []surface.TimelineItem {
 	if source == "claude" {

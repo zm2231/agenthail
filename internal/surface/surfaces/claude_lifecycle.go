@@ -24,7 +24,7 @@ type claudeBackground struct {
 }
 
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
-	binary, err := claudeBinary(c.home)
+	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
 		return nil, err
 	}

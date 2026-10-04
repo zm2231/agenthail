@@ -245,8 +245,12 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 	}
 	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "interrupt with context", "", surface.SendOptions{BusyDelivery: "steer"})
-	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.Detail != "Sent to builder." || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.Detail != "Sent to builder." || receipt.DeliveryID <= 0 || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
 		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.Status != registry.DeliveryIntentSent || intent.TargetSessionID != session.ID {
+		t.Fatalf("steer intent=%+v err=%v", intent, err)
 	}
 }
 

@@ -55,9 +55,23 @@ func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO catalog_surfaces(surface,health,detail,observed_at) VALUES(?,?,?,?) ON CONFLICT(surface) DO UPDATE SET health=excluded.health,detail=excluded.detail,observed_at=excluded.observed_at`, string(state.Surface), state.Health, state.Detail, state.ObservedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	var priorHealth, priorDetail string
+	err = tx.QueryRow(`SELECT health,detail FROM catalog_surfaces WHERE surface=?`, string(state.Surface)).Scan(&priorHealth, &priorDetail)
+	if err != nil && err != sql.ErrNoRows {
 		return CatalogEvent{}, false, err
 	}
+	changed := err == sql.ErrNoRows || priorHealth != state.Health || priorDetail != state.Detail
+	observedAt := state.ObservedAt.UTC().Format(time.RFC3339Nano)
+	if _, err := tx.Exec(`INSERT INTO catalog_surfaces(surface,health,detail,observed_at) VALUES(?,?,?,?) ON CONFLICT(surface) DO UPDATE SET health=excluded.health,detail=excluded.detail,observed_at=excluded.observed_at`, string(state.Surface), state.Health, state.Detail, observedAt); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if !changed {
+		if err := tx.Commit(); err != nil {
+			return CatalogEvent{}, false, err
+		}
+		return CatalogEvent{}, false, nil
+	}
+	event.DedupeKey = event.DedupeKey + ":" + observedAt
 	persisted, created, err := r.AppendCatalogEventTx(tx, event)
 	if err != nil {
 		return CatalogEvent{}, false, err

@@ -1111,14 +1111,19 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 			defer cancel()
 			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Agent: surface.SurfaceKind(request.Surface), Cwd: cwd, Message: request.Message, Model: request.Model, Name: request.Name})
+			startWarning := ""
 			if launchErr != nil {
 				var acceptedErr surface.LaunchAcceptedError
-				if errors.As(launchErr, &acceptedErr) {
+				switch {
+				case launchResult.Session != nil:
+					startWarning = fmt.Sprintf("session was created, but its initial turn did not confirm: %s; check the session before retrying", launchErr)
+				case errors.As(launchErr, &acceptedErr):
 					writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "submitted", "accepted": true, "retryable": false, "launcher": request.Launcher, "warning": launchErr.Error()})
 					return
+				default:
+					http.Error(w, launchErr.Error(), http.StatusBadGateway)
+					return
 				}
-				http.Error(w, launchErr.Error(), http.StatusBadGateway)
-				return
 			}
 			session, location, launchErr := locateLaunchedSession(ctx, launcher, adapter, launchResult)
 			if launchErr != nil {
@@ -1154,6 +1159,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but its name could not be persisted: %s; check the catalog before retrying", err))
 					return
 				}
+			}
+			if startWarning != "" {
+				writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "submitted", "accepted": true, "retryable": false, "launcher": request.Launcher, "location": location, "sessionId": session.ID, "warning": startWarning})
+				return
 			}
 			writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location, "sessionId": session.ID})
 			return

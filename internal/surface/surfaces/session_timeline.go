@@ -559,8 +559,11 @@ func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, in
 		turnID = str(record, "turnId")
 	}
 	kind := codexDesktopKeyKind(item.Kind)
-	if kind == "" {
+	switch kind {
+	case "":
 		kind = fmt.Sprintf("item%d", index)
+	case "attachment":
+		kind = fmt.Sprintf("attachment%d", index)
 	}
 	if turnID == "" {
 		return "codex:" + kind + ":" + semanticID

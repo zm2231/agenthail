@@ -67,6 +67,31 @@ func TestSessionCreateKnownLauncherIDPreservesProviderSession(t *testing.T) {
 	}
 }
 
+func TestSessionCreateStarterLauncherKeepsCreatedSessionWhenTurnOutcomeIsUnknown(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.startErr = surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out"))
+	d.SetLaunchers(surface.NewLaunchers([]surface.Surface{fake}))
+	w := httptest.NewRecorder()
+	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"codex","launcher":"codex-app-server","message":"hello","alias":"starter"}`)))
+	if w.Code != http.StatusAccepted || len(fake.startOptions) != 1 {
+		t.Fatalf("status=%d starts=%d body=%s", w.Code, len(fake.startOptions), w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["ok"] != true || body["accepted"] != true || body["retryable"] != false || body["sessionId"] != "started" || body["warning"] == nil {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+	created, err := r.Session("started")
+	if err != nil || created.Runtime == nil || created.Runtime.Launcher != surface.LauncherCodexAppServer {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	if alias, err := r.ReverseAlias("started"); err != nil || alias != "starter" {
+		t.Fatalf("alias=%q err=%v", alias, err)
+	}
+}
+
 func TestSessionCreateTerminalLocationPersistsPendingWithoutGuessingID(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindClaude
