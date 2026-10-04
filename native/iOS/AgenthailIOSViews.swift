@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import ImageIO
 
 private let orange = SessionStyle.accent
 
@@ -428,10 +430,10 @@ struct SessionScreen: View {
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                             if activityOnly {
-                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }).id($0.id) }
+                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
                             } else {
                                 ForEach(TimelineGroup.make(items)) { group in
-                                    CompactActivityGroup(group: group) { followingLatest = false }.id(group.id)
+                                    CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
                                 }
                             }
                             if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
@@ -754,6 +756,7 @@ struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
 	var bodyLoader: ((TimelineItem) async -> RetainedBodyResult?)? = nil
+    var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
 	@State private var retainedBody: RetainedBodyResult?
@@ -764,6 +767,8 @@ struct IOSTimelineRow: View {
         } else if item.kind == "message" {
             IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp)
             if item.truncated { shortened }
+        } else if item.kind == "attachment" {
+            AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
         } else if item.kind == "toolCall" {
             ToolActivityRow(call: item, results: [], standaloneRecord: true)
         } else if item.kind == "event" {
@@ -829,6 +834,44 @@ struct IOSTimelineRow: View {
     }
     private var shortened: some View {
         Label("Content shortened by the host", systemImage: "text.badge.ellipsis").font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+struct AttachmentRow: View {
+    let item: TimelineItem
+    let loader: (() async -> Data?)?
+    @State private var data: Data?
+    @State private var attempted = false
+    @State private var retryCount = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let data, let image = Self.downsampledImage(data) {
+                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(.secondary)
+                if attempted, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
+            }
+            if let id = item.callId { Text("Call \(id)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+            SessionTimestamp(value: item.timestamp)
+        }
+        .padding(.vertical, 4)
+        .task(id: "\(item.id)-\(retryCount)") {
+            guard let loader, data == nil else { return }
+            attempted = true
+            data = await loader()
+        }
+    }
+
+    private static func downsampledImage(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2048
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
     }
 }
 

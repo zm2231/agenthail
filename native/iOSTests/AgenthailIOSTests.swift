@@ -129,13 +129,16 @@ final class AgenthailIOSTests: XCTestCase {
         detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
         model.selectedSessionID = detail.session.id
         model.selectedDetail = detail
-        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"message-1","version":1,"kind":"message","op":"append","role":"user","title":"user","status":"complete","turnId":"turn-1","ts":"2026-10-03T12:00:00Z","body":"journal body","truncated":false,"bodyRef":"body-ref-1"}}"#.utf8))
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"message-1","version":1,"kind":"message","op":"append","role":"user","title":"user","status":"complete","turnId":"turn-1","callId":"call-1","truncationReason":"body_budget","ts":"2026-10-03T12:00:00Z","body":"journal body","truncated":true,"bodyRef":"body-ref-1","attachment":{"id":"image-1","mediaType":"image/png","width":320,"height":200,"bytes":4096}}}"#.utf8))
         model.applySessionStreamEvent(event)
         let item = try XCTUnwrap(model.selectedDetail?.timeline?.items.first)
         XCTAssertEqual(item.role, "user")
         XCTAssertEqual(item.title, "user")
         XCTAssertEqual(item.status, "complete")
+        XCTAssertEqual(item.callId, "call-1")
+        XCTAssertEqual(item.truncationReason, "body_budget")
         XCTAssertEqual(item.bodyRef, "body-ref-1")
+        XCTAssertEqual(item.attachment?.id, "image-1")
     }
 
     @MainActor
@@ -145,13 +148,33 @@ final class AgenthailIOSTests: XCTestCase {
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "demo"
-        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref")
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
 
         let result = await model.retainedSessionBody(for: item)
 
         XCTAssertEqual(result?.text.count, 40_000)
         XCTAssertNil(result?.error)
         XCTAssertGreaterThan(RetainedBodyURLProtocol.state.requestCount, 1)
+    }
+
+    func testSessionAttachmentFetchIsAuthenticatedAndBounded() async throws {
+        AttachmentURLProtocol.state.reset(oversized: false)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AttachmentURLProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "secret", session: URLSession(configuration: configuration))
+        let data = try await api.sessionAttachment(sessionID: "demo", id: "image-1")
+        XCTAssertEqual(data, Data([137, 80, 78, 71]))
+        XCTAssertEqual(AttachmentURLProtocol.state.authorization, "Bearer secret")
+        XCTAssertEqual(AttachmentURLProtocol.state.sessionID, "demo")
+        XCTAssertEqual(AttachmentURLProtocol.state.attachmentID, "image-1")
+
+        AttachmentURLProtocol.state.reset(oversized: true)
+        do {
+            _ = try await api.sessionAttachment(sessionID: "demo", id: "large")
+            XCTFail("Expected oversized attachment to be rejected")
+        } catch let error as AgenthailAPIError {
+            XCTAssertEqual(error.errorDescription, "This image is too large to display on the device.")
+        }
     }
 
     @MainActor
@@ -161,7 +184,7 @@ final class AgenthailIOSTests: XCTestCase {
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "demo"
-        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref")
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
 
         let result = await model.retainedSessionBody(for: item)
 
@@ -176,7 +199,7 @@ final class AgenthailIOSTests: XCTestCase {
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "demo"
-        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref")
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
 
         let result = await model.retainedSessionBody(for: item)
 
@@ -581,6 +604,50 @@ private final class RequestRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         requests.removeAll()
     }
+}
+
+private final class AttachmentState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var oversized = false
+    private var auth = ""
+    private var session = ""
+    private var attachment = ""
+    var authorization: String { lock.withLock { auth } }
+    var sessionID: String { lock.withLock { session } }
+    var attachmentID: String { lock.withLock { attachment } }
+    func reset(oversized: Bool) {
+        lock.withLock {
+            self.oversized = oversized
+            auth = ""
+            session = ""
+            attachment = ""
+        }
+    }
+    func record(_ request: URLRequest) {
+        lock.withLock {
+            auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            session = query.first(where: { $0.name == "sessionId" })?.value ?? ""
+            attachment = query.first(where: { $0.name == "id" })?.value ?? ""
+        }
+    }
+    func response() -> (Int, Data, [String: String]) {
+        lock.withLock { oversized ? (413, Data(), [:]) : (200, Data([137, 80, 78, 71]), ["Content-Length": "4"]) }
+    }
+}
+
+private final class AttachmentURLProtocol: URLProtocol, @unchecked Sendable {
+    static let state = AttachmentState()
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/session-attachment" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.state.record(request)
+        let (status, body, headers) = Self.state.response()
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 private final class ReplacementURLProtocol: URLProtocol, @unchecked Sendable {

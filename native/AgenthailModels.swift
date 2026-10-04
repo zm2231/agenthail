@@ -458,12 +458,21 @@ struct SessionTimeline: Decodable {
     let unavailableReason: String?
 }
 
+struct SessionAttachment: Decodable, Equatable, Hashable {
+    let id: String
+    let mediaType: String
+    let width: Int?
+    let height: Int?
+    let bytes: Int?
+}
+
 struct SessionStreamItem: Decodable {
     let itemId: String
     let version: UInt64
     let op: String
     let kind: String
     let turnId: String?
+    let callId: String?
     let ts: String
     let body: String?
     let context: ContextState?
@@ -472,8 +481,10 @@ struct SessionStreamItem: Decodable {
     let title: String?
     let status: String?
     let truncated: Bool
+    let truncationReason: String?
     let bodyRef: String?
     let reason: String?
+    let attachment: SessionAttachment?
 }
 
 struct SessionStreamBody: Decodable {
@@ -532,6 +543,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
+    let attachment: SessionAttachment?
 }
 
 struct SessionSearchResponse: Decodable {

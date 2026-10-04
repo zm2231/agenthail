@@ -32,7 +32,7 @@ struct NewSessionSheet: View {
                             }
                             Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
                         }
-                        let launchers = (options.launchers ?? []).filter { $0.agents.contains(selectedSurface) }
+                        let launchers = launchers(for: selectedSurface, options: options)
                         if !launchers.isEmpty {
                             Section("Where it runs") {
                                 Picker("Launcher", selection: $selectedLauncher) {
@@ -127,6 +127,7 @@ struct NewSessionSheet: View {
             }
             .task { await load() }
             .task(id: selectedSurface) {
+                selectedLauncher = nil
                 models = []; selectedModel = ""; modelError = nil; turnSettings = .init()
                 guard !selectedSurface.isEmpty else { return }
                 do { let values = try await model.creationModels(surface: selectedSurface); try Task.checkCancellation(); models = values }
@@ -136,6 +137,9 @@ struct NewSessionSheet: View {
     }
     private var selectedModelOption: ModelOption? {
         models.first { $0.id == selectedModel } ?? (selectedModel.isEmpty ? models.first { $0.default == true } : nil)
+    }
+    private func launchers(for surface: String, options: SessionCreationOptions) -> [LauncherOption] {
+        options.launchers?.filter { $0.agents.contains(surface) } ?? []
     }
     private func load() async {
         loading = true; error = nil
