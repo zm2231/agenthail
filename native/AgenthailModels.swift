@@ -268,6 +268,7 @@ struct SessionMetadata: Decodable {
 
 struct SessionDetail: Decodable {
     let session: RawSession
+    let journalSeq: UInt64?
     let alias: String?
     let exchanges: [ExchangeState]
     let capabilities: Capabilities
@@ -420,6 +421,8 @@ struct SessionStreamItem: Decodable {
     let turnId: String?
     let ts: String
     let body: String?
+    let context: ContextState?
+    let goal: GoalState?
     let role: String?
     let title: String?
     let status: String?
