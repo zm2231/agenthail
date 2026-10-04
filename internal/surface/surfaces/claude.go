@@ -554,6 +554,9 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 			if key == "" {
 				key = turn.UserID
 			}
+			if turn.Assistant != "" {
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "upsert", Final: true, TurnID: targetID, Kind: "text", Text: turn.Assistant})
+			}
 			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
 			return nil
 		}

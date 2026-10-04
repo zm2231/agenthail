@@ -10,12 +10,54 @@ import (
 )
 
 type codexTurn struct {
-	ID        string
-	Status    surface.SessionStatus
-	User      string
-	Assistant string
-	Done      bool
-	Error     string
+	ID             string
+	Status         surface.SessionStatus
+	User           string
+	Assistant      string
+	AssistantItems []codexAssistantItem
+	Done           bool
+	Error          string
+}
+
+type codexAssistantItem struct {
+	ID    string
+	Phase string
+	Text  string
+}
+
+func (t codexTurn) authoritativeAssistant() (codexAssistantItem, bool) {
+	if len(t.AssistantItems) == 0 {
+		if t.Assistant == "" {
+			return codexAssistantItem{}, false
+		}
+		return codexAssistantItem{Text: t.Assistant}, true
+	}
+	items := make([]codexAssistantItem, 0, len(t.AssistantItems))
+	indexes := make(map[string]int, len(t.AssistantItems))
+	for _, item := range t.AssistantItems {
+		if item.Text == "" {
+			continue
+		}
+		if item.ID == "" {
+			items = append(items, item)
+			continue
+		}
+		if index, ok := indexes[item.ID]; ok {
+			items[index] = item
+			continue
+		}
+		indexes[item.ID] = len(items)
+		items = append(items, item)
+	}
+	for index := len(items) - 1; index >= 0; index-- {
+		if items[index].Phase == "final_answer" {
+			return items[index], true
+		}
+	}
+	if len(items) == 0 {
+		return codexAssistantItem{}, false
+	}
+	return items[len(items)-1], true
 }
 
 type codexThread struct {
@@ -73,7 +115,11 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 			case "userMessage", "user":
 				turn.User = codexItemText(item)
 			case "agentMessage", "assistant":
-				turn.Assistant = codexItemText(item)
+				if text := codexItemText(item); text != "" {
+					assistant := codexAssistantItem{ID: str(item, "id"), Phase: str(item, "phase"), Text: text}
+					turn.AssistantItems = append(turn.AssistantItems, assistant)
+					turn.Assistant = text
+				}
 			}
 		}
 		thread.Turns = append(thread.Turns, turn)
@@ -110,7 +156,9 @@ func (c *Codex) readThreadWithOptions(ctx context.Context, conn codexClient, thr
 			case "userMessage", "user":
 				turn.User = codexItemText(item)
 			case "agentMessage", "assistant":
-				if text, _ := item["text"].(string); text != "" {
+				if text := codexItemText(item); text != "" {
+					assistant := codexAssistantItem{ID: str(item, "id"), Phase: str(item, "phase"), Text: text}
+					turn.AssistantItems = append(turn.AssistantItems, assistant)
 					turn.Assistant = text
 				}
 			}

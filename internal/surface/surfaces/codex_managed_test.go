@@ -297,9 +297,14 @@ func (c *sequenceCodexClient) Request(_ context.Context, _ string, _ map[string]
 func (*sequenceCodexClient) Close() error { return nil }
 
 func managedThreadResponse(turnID, status, assistant string) map[string]any {
-	items := []any{}
-	if assistant != "" {
-		items = append(items, map[string]any{"type": "agentMessage", "text": assistant})
+	return managedThreadResponseItems(turnID, status, []any{map[string]any{"type": "agentMessage", "text": assistant}})
+}
+
+func managedThreadResponseItems(turnID, status string, items []any) map[string]any {
+	if len(items) == 1 {
+		if item, ok := items[0].(map[string]any); ok && item["text"] == "" {
+			items = nil
+		}
 	}
 	return map[string]any{"result": map[string]any{"thread": map[string]any{
 		"id": "thread", "turns": []any{map[string]any{"id": turnID, "status": status, "items": items}},
@@ -353,7 +358,10 @@ func TestManagedStreamWaitsForNewTurnInsteadOfReplayingHistory(t *testing.T) {
 		managedThreadResponse("old", "completed", "old answer"),
 		managedThreadResponse("old", "completed", "old answer"),
 		managedThreadResponse("new", "inProgress", "hel"),
-		managedThreadResponse("new", "completed", "hello"),
+		managedThreadResponseItems("new", "completed", []any{
+			map[string]any{"id": "interim", "type": "agentMessage", "phase": "commentary", "text": "hel"},
+			map[string]any{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": "hello"},
+		}),
 	}}
 	var events []surface.StreamEvent
 	err := NewCodex("").streamManagedClient(context.Background(), client, &surface.Session{ID: "thread", Transport: codexTransportManaged}, "", func(event surface.StreamEvent) {
@@ -362,8 +370,54 @@ func TestManagedStreamWaitsForNewTurnInsteadOfReplayingHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 || events[0].Text != "hel" || events[0].ID != "managed:new:text" || events[1].Text != "lo" || events[1].ID != events[0].ID || events[1].Version != 5 || events[2].Kind != "done" || events[2].ID != "managed:new:done" {
+	if len(events) != 3 || events[0].Text != "hel" || events[0].ID != "managed:new:text" || events[1].Text != "hello" || !events[1].Final || events[1].Operation != "upsert" || events[1].ID != "managed:new:text" || events[2].Kind != "done" || events[2].ID != "managed:new:done" {
 		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestManagedStreamCompletesAlreadyCompletedFinalWithoutPrefix(t *testing.T) {
+	client := &sequenceCodexClient{responses: []map[string]any{
+		managedThreadResponseItems("done", "completed", []any{
+			map[string]any{"id": "interim", "type": "agentMessage", "phase": "commentary", "text": "checking"},
+			map[string]any{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": "finished"},
+		}),
+	}}
+	var events []surface.StreamEvent
+	err := NewCodex("").streamManagedClient(context.Background(), client, &surface.Session{ID: "thread", Transport: codexTransportManaged}, "done", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, time.Second)
+	if err != nil || len(events) != 2 || events[0].Text != "finished" || !events[0].Final || events[1].Kind != "done" {
+		t.Fatalf("err=%v events=%+v", err, events)
+	}
+}
+
+func TestManagedStreamTreatsGrowingFinalPhaseAsPartialUntilTerminal(t *testing.T) {
+	client := &sequenceCodexClient{responses: []map[string]any{
+		managedThreadResponse("old", "completed", "old answer"),
+		managedThreadResponse("old", "completed", "old answer"),
+		managedThreadResponseItems("new", "inProgress", []any{map[string]any{"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "hel"}}),
+		managedThreadResponseItems("new", "inProgress", []any{map[string]any{"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "hello"}}),
+		managedThreadResponseItems("new", "completed", []any{map[string]any{"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "hello"}}),
+	}}
+	var events []surface.StreamEvent
+	err := NewCodex("").streamManagedClient(context.Background(), client, &surface.Session{ID: "thread", Transport: codexTransportManaged}, "", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, 2*time.Second)
+	if err != nil || len(events) != 4 || events[0].Text != "hel" || events[1].Text != "lo" || events[2].Text != "hello" || !events[2].Final || events[3].Kind != "done" {
+		t.Fatalf("err=%v events=%+v", err, events)
+	}
+}
+
+func TestManagedStreamDoesNotEmitFinalForFailedTurn(t *testing.T) {
+	client := &sequenceCodexClient{responses: []map[string]any{
+		managedThreadResponseItems("failed", "failed", []any{map[string]any{"id": "answer", "type": "agentMessage", "phase": "final_answer", "text": "not success"}}),
+	}}
+	var events []surface.StreamEvent
+	err := NewCodex("").streamManagedClient(context.Background(), client, &surface.Session{ID: "thread", Transport: codexTransportManaged}, "failed", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, time.Second)
+	if err == nil || len(events) != 0 {
+		t.Fatalf("err=%v events=%+v", err, events)
 	}
 }
 
