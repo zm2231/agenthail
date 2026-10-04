@@ -437,6 +437,50 @@ func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
 	}
 }
 
+func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}}
+	streamed := make(chan struct{})
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "codex:target-turn:done", Operation: "phase", TurnID: "target-turn", Kind: "done"})
+		close(streamed)
+	}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the tool only"})
+	select {
+	case <-streamed:
+	case <-time.After(time.Second):
+		t.Fatal("tool-only target stream did not complete")
+	}
+	time.Sleep(100 * time.Millisecond)
+	v := s.View("phone")
+	for _, event := range v.Events {
+		if event.Method == "voice/delegation/failed" {
+			t.Fatalf("completed tool-only turn surfaced a delegation failure: %+v", event)
+		}
+	}
+	if strings.Contains(v.Message, "ended without an authoritative final") {
+		t.Fatalf("completed tool-only turn recorded a failure message: %q", v.Message)
+	}
+	for _, params := range p.params {
+		if role, _ := params["role"].(string); role == "developer" {
+			t.Fatalf("empty turn handed text to realtime audio: %+v", params)
+		}
+	}
+}
+
 func TestDelegationBlocksUncorrelatedClaudePeer(t *testing.T) {
 	p := &fixtureProvider{}
 	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, Name: "Peer", Transport: "uds"}}
