@@ -26,7 +26,7 @@ func TestCodexCatalogListIsNotComplete(t *testing.T) {
 
 func startManagedCodexFixture(t *testing.T) string {
 	t.Helper()
-	home, err := os.MkdirTemp("/tmp", "ah-")
+	home, err := os.MkdirTemp("", "ah-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,6 +350,46 @@ func TestCodexStartSessionCreatesManagedThreadAndFirstTurn(t *testing.T) {
 	}
 	if client.params[1]["threadId"] != "thread-new" {
 		t.Fatalf("turn params=%v", client.params[1])
+	}
+}
+
+func TestPrepareManagedTerminalSessionUsesProviderThreadIdentity(t *testing.T) {
+	client := &scriptedCodexClient{}
+	session, err := prepareManagedTerminalSession(context.Background(), client, "/tmp/project", "gpt-5.6-sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.ID != "thread-new" || session.Surface != surface.KindCodex || session.Transport != codexTransportManaged || session.Cwd != "/tmp/project" {
+		t.Fatalf("session=%+v", session)
+	}
+	if strings.Join(client.methods, ",") != "thread/start" {
+		t.Fatalf("methods=%v", client.methods)
+	}
+	if client.params[0]["threadSource"] != "agenthail-terminal" || client.params[0]["serviceName"] != "agenthail" || client.params[0]["cwd"] != "/tmp/project" || client.params[0]["model"] != "gpt-5.6-sol" {
+		t.Fatalf("thread params=%v", client.params[0])
+	}
+}
+
+func TestManagedCodexProviderIdentityFlowsIntoLaunchReceipt(t *testing.T) {
+	client := &scriptedCodexClient{}
+	session, err := prepareManagedTerminalSession(context.Background(), client, "/work/project", "gpt-5.6-sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "launch.json")
+	receipt := surface.ManagedCodexLaunchReceipt{
+		LaunchID:    "agenthail-launch",
+		ThreadID:    session.ID,
+		Cwd:         session.Cwd,
+		TmuxSession: "agenthail-launch",
+		TmuxPane:    "%7",
+	}
+	if err := surface.WriteManagedCodexLaunchReceipt(path, receipt); err != nil {
+		t.Fatal(err)
+	}
+	got, err := surface.ReadManagedCodexLaunchReceipt(path)
+	if err != nil || got.ThreadID != "thread-new" || got.ThreadID != session.ID {
+		t.Fatalf("receipt=%+v err=%v session=%+v", got, err, session)
 	}
 }
 

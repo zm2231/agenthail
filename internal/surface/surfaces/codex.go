@@ -707,6 +707,52 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 	return c.startSessionOnTransport(ctx, client, options, codexTransportManaged)
 }
 
+// PrepareManagedTerminalSession creates the provider-owned thread that the
+// interactive terminal will resume. It does not start a model turn.
+func (c *Codex) PrepareManagedTerminalSession(ctx context.Context, cwd, model string) (*surface.Session, error) {
+	if !c.managed {
+		return nil, errors.New("managed Codex terminal preparation requires the managed runtime")
+	}
+	client, err := c.openExistingManaged(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	return prepareManagedTerminalSession(ctx, client, cwd, model)
+}
+
+func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd, model string) (*surface.Session, error) {
+	params := map[string]any{"threadSource": "agenthail-terminal", "serviceName": "agenthail"}
+	if cwd != "" {
+		params["cwd"] = cwd
+	}
+	if model != "" {
+		params["model"] = model
+	}
+	response, err := client.Request(ctx, "thread/start", params, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("thread/start managed terminal: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	thread, _ := result["thread"].(map[string]any)
+	threadID := str(thread, "id")
+	if threadID == "" {
+		return nil, errors.New("thread/start managed terminal returned no thread id")
+	}
+	session := codexSession(thread, true, false)
+	session.ID = threadID
+	session.Surface = surface.KindCodex
+	session.Transport = codexTransportManaged
+	session.Source = "agenthail"
+	if session.Cwd == "" {
+		session.Cwd = str(result, "cwd")
+	}
+	if session.Cwd == "" {
+		session.Cwd = cwd
+	}
+	return &session, nil
+}
+
 func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient, options surface.SessionStartOptions, transport string) (*surface.Session, *surface.SendResult, error) {
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, nil, err
