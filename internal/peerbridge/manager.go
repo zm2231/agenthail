@@ -630,11 +630,15 @@ func (c *child) healthy() bool {
 		return false
 	default:
 	}
-	owned := c.paths[c.controlPath]
+	path := c.controlPath
+	if path == "" {
+		path = c.socketPath
+	}
+	owned := c.paths[path]
 	if owned == nil {
 		return false
 	}
-	current, err := os.Lstat(c.controlPath)
+	current, err := os.Lstat(path)
 	if err != nil || current.Mode()&os.ModeSocket == 0 || !os.SameFile(owned, current) {
 		return false
 	}
