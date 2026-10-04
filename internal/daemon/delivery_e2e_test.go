@@ -36,16 +36,17 @@ type deliveredMessage struct {
 }
 
 type scriptedAgent struct {
-	mu        sync.Mutex
-	sessions  map[string]*scriptedSession
-	sendErr   map[string]error
-	attempts  map[string]int
-	delivered []deliveredMessage
-	turn      int
+	mu         sync.Mutex
+	sessions   map[string]*scriptedSession
+	sendErr    map[string]error
+	observeErr map[string]error
+	attempts   map[string]int
+	delivered  []deliveredMessage
+	turn       int
 }
 
 func newScriptedAgent(ids ...string) *scriptedAgent {
-	agent := &scriptedAgent{sessions: map[string]*scriptedSession{}, sendErr: map[string]error{}, attempts: map[string]int{}}
+	agent := &scriptedAgent{sessions: map[string]*scriptedSession{}, sendErr: map[string]error{}, observeErr: map[string]error{}, attempts: map[string]int{}}
 	for _, id := range ids {
 		agent.sessions[id] = &scriptedSession{status: surface.StatusIdle}
 	}
@@ -78,6 +79,16 @@ func (a *scriptedAgent) failSends(id string, err error) {
 		return
 	}
 	a.sendErr[id] = err
+}
+
+func (a *scriptedAgent) failObservation(id string, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == nil {
+		delete(a.observeErr, id)
+		return
+	}
+	a.observeErr[id] = err
 }
 
 func (a *scriptedAgent) attemptsFor(id string) int {
@@ -123,6 +134,9 @@ func (a *scriptedAgent) Resolve(_ context.Context, id string) (*surface.Session,
 func (a *scriptedAgent) Observe(_ context.Context, session *surface.Session) (*surface.TurnObservation, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.observeErr[session.ID]; err != nil {
+		return nil, err
+	}
 	state, ok := a.sessions[session.ID]
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", session.ID)
@@ -500,6 +514,28 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 		t.Fatalf("delivered=%+v", got)
 	}
 	if item := h.queueItem(id); !item.Historical || item.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("queue item=%+v", item)
+	}
+}
+
+func TestQueuedMessageWaitsThroughObservationOutageAndDeliversOnce(t *testing.T) {
+	agent := newScriptedAgent("target")
+	agent.setStatus("target", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "message": "deliver after bridge recovery"}))
+	agent.failObservation("target", errors.New("Codex Desktop bridge was replaced; rebinding"))
+	agent.setStatus("target", surface.StatusIdle)
+	settle()
+	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts != 0 || len(agent.deliveredTo("target")) != 0 {
+		t.Fatalf("observation outage touched the queued message: item=%+v", item)
+	}
+	agent.failObservation("target", nil)
+	eventually(t, "delivery after recovery", func() bool { return h.queueItem(id).Historical })
+	settle()
+	if got := agent.deliveredTo("target"); len(got) != 1 {
+		t.Fatalf("delivered=%+v", got)
+	}
+	if item := h.queueItem(id); item.Attempts != 1 || item.Evidence != surface.EvidenceDelivered {
 		t.Fatalf("queue item=%+v", item)
 	}
 }
