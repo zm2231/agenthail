@@ -1238,3 +1238,85 @@ func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
 		t.Fatalf("events=%+v err=%v", events, err)
 	}
 }
+
+func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var server *httptest.Server
+	eventReads := 0
+	handler := http.NewServeMux()
+	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+	})
+	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			var request map[string]any
+			if conn.ReadJSON(&request) != nil {
+				return
+			}
+			params, _ := request["params"].(map[string]any)
+			expression, _ := params["expression"].(string)
+			var value any = ""
+			switch {
+			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
+				value = "hooked"
+			case expression == codexEventCursorJS:
+				value = float64(0)
+			case strings.Contains(expression, "events:b.events.filter"):
+				eventReads++
+				var batch codexEventBatch
+				if eventReads == 1 {
+					batch = codexEventBatch{Cursor: 4, Events: []codexEvent{
+						{Sequence: 1, Method: "turn/started", Params: map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1"}}},
+						{Sequence: 2, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-1", "type": "agentMessage"}, "delta": "hel"}},
+						{Sequence: 3, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-1", "type": "agentMessage"}, "delta": "lo"}},
+						{Sequence: 4, Method: "item/tool/started", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "tool-1", "type": "toolCall", "name": "lookup"}}},
+					}}
+				} else {
+					batch = codexEventBatch{Cursor: 5, Events: []codexEvent{{Sequence: 5, Method: "turn/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1"}}}}
+				}
+				encoded, _ := json.Marshal(batch)
+				value = string(encoded)
+			case strings.Contains(expression, `"thread/turns/list"`):
+				value = `{"result":{"data":[{"id":"turn-1","status":{"type":"completed"},"items":[{"type":"agentMessage","id":"assistant-1","phase":"commentary","text":"interim"},{"type":"agentMessage","id":"assistant-2","phase":"final_answer","text":"authoritative answer"}]}]}}`
+			}
+			if conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}}) != nil {
+				return
+			}
+		}
+	})
+	server = httptest.NewServer(handler)
+	defer server.Close()
+
+	var events []surface.StreamEvent
+	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1"}, "", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eventReads < 2 || len(events) != 5 {
+		t.Fatalf("event_reads=%d events=%+v", eventReads, events)
+	}
+	if events[0].ID != "codex:turn-1:assistant:assistant-1" || events[1].ID != events[0].ID || events[1].Text != "lo" || events[1].Version != 5 {
+		t.Fatalf("delta identity/accumulation=%+v", events[:2])
+	}
+	if events[2].ID != "codex:turn-1:tool:tool-1" || events[2].Kind != "tool_use" {
+		t.Fatalf("tool boundary=%+v", events[2])
+	}
+	if events[3].ID != events[0].ID || !events[3].Final || events[3].Text != "authoritative answer" || events[3].Operation != "upsert" {
+		t.Fatalf("authoritative final=%+v", events[3])
+	}
+	if events[4].ID != "codex:turn-1:done" || events[4].Kind != "done" || events[4].TurnID != "turn-1" {
+		t.Fatalf("completion boundary=%+v", events[4])
+	}
+	for _, event := range events {
+		if strings.HasPrefix(event.ID, "renderer:") {
+			t.Fatalf("desktop stream emitted fragment identity: %+v", event)
+		}
+	}
+}

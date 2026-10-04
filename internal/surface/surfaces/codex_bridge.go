@@ -229,6 +229,61 @@ func codexEventText(value any) string {
 	return ""
 }
 
+func codexEventTurnID(value any) string {
+	if current, ok := value.(map[string]any); ok {
+		if turn, ok := current["turn"].(map[string]any); ok {
+			if id := str(turn, "id"); id != "" {
+				return id
+			}
+		}
+	}
+	return codexEventNamedString(value, "turnId", "turnID")
+}
+
+func codexEventItemID(value any) string {
+	if current, ok := value.(map[string]any); ok {
+		for _, key := range []string{"itemId", "itemID", "messageId", "agentMessageId"} {
+			if id, ok := current[key].(string); ok && id != "" {
+				return id
+			}
+		}
+		if kind := strings.ToLower(str(current, "type")); strings.Contains(kind, "agentmessage") || strings.Contains(kind, "tool") {
+			if id := str(current, "id"); id != "" {
+				return id
+			}
+		}
+		if item, ok := current["item"]; ok {
+			if id := codexEventItemID(item); id != "" {
+				return id
+			}
+		}
+	}
+	return codexEventNamedString(value, "itemId", "itemID", "messageId", "agentMessageId")
+}
+
+func codexEventNamedString(value any, keys ...string) string {
+	switch current := value.(type) {
+	case map[string]any:
+		for _, key := range keys {
+			if text, ok := current[key].(string); ok && text != "" {
+				return text
+			}
+		}
+		for _, child := range current {
+			if text := codexEventNamedString(child, keys...); text != "" {
+				return text
+			}
+		}
+	case []any:
+		for _, child := range current {
+			if text := codexEventNamedString(child, keys...); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
 func codexEventTool(value any) string {
 	if current, ok := value.(map[string]any); ok {
 		for _, key := range []string{"toolName", "name"} {

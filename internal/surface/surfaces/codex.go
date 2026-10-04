@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -895,6 +896,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		cursor = 0
 	}
 	emittedText := ""
+	desktopState := codexDesktopStreamState{turnID: uuid}
 	var lastContext surface.ContextUsage
 	var nextContextPoll time.Time
 	deadline := time.Now().Add(timeout)
@@ -922,6 +924,9 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				onEvent(goalEvent)
 				continue
 			}
+			if uuid == "" {
+				desktopState.observe(event)
+			}
 			if usage, ok := c.applyContextEvent(sess, event, lastContext); ok {
 				lastContext = *usage
 				onEvent(codexStreamEvent(event.Sequence, "context", "", usage, uuid))
@@ -934,28 +939,50 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			switch {
 			case strings.Contains(strings.ToLower(method), "agentmessage"):
 				if txt := codexEventText(event.Params); txt != "" {
-					emittedText += txt
-					onEvent(codexStreamEvent(event.Sequence, "text", txt, nil, uuid))
+					if uuid == "" {
+						onEvent(desktopState.textEvent(txt, codexEventItemID(event.Params)))
+					} else {
+						emittedText += txt
+						onEvent(codexStreamEvent(event.Sequence, "text", txt, nil, uuid))
+					}
 				}
 			case strings.Contains(strings.ToLower(method), "tool"):
 				if name := codexEventTool(event.Params); name != "" {
-					onEvent(codexStreamEvent(event.Sequence, "tool_use", name, nil, uuid))
+					if uuid == "" {
+						onEvent(desktopState.toolEvent(event.Sequence, name, codexEventItemID(event.Params)))
+					} else {
+						onEvent(codexStreamEvent(event.Sequence, "tool_use", name, nil, uuid))
+					}
 				}
 			case codexCompletionMethod(method):
 				thread, readErr := c.readObservationThread(ctx, client, sess.ID)
 				if readErr != nil {
 					return readErr
 				}
-				turn := codexTurnByID(thread, uuid)
+				turnID := uuid
+				if turnID == "" {
+					turnID = desktopState.turnID
+				}
+				turn := codexTurnByID(thread, turnID)
 				if turn != nil && turn.Error != "" {
-					return fmt.Errorf("Codex turn %s did not complete successfully: %s", uuid, turn.Error)
+					return fmt.Errorf("Codex turn %s did not complete successfully: %s", turnID, turn.Error)
 				}
 				if turn != nil {
-					for _, streamEvent := range codexCompletionStreamEvents(event.Sequence, uuid, turn, emittedText) {
-						onEvent(streamEvent)
+					if uuid == "" {
+						if finalEvent, ok := desktopState.finalEvent(turnID, turn); ok {
+							onEvent(finalEvent)
+						}
+					} else {
+						for _, streamEvent := range codexCompletionStreamEvents(event.Sequence, uuid, turn, emittedText) {
+							onEvent(streamEvent)
+						}
 					}
 				}
-				onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
+				if uuid == "" {
+					onEvent(desktopState.doneEvent(event.Sequence, turnID))
+				} else {
+					onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
+				}
 				return nil
 			}
 		}
@@ -969,6 +996,72 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		time.Sleep(300 * time.Millisecond)
 	}
 	return fmt.Errorf("stream timed out after %s", timeout)
+}
+
+type codexDesktopStreamState struct {
+	turnID        string
+	assistantKey  string
+	assistantItem string
+	text          string
+}
+
+func (s *codexDesktopStreamState) observe(event codexEvent) {
+	turnID := codexEventTurnID(event.Params)
+	if turnID == "" || turnID == s.turnID {
+		return
+	}
+	s.turnID = turnID
+	s.assistantKey = ""
+	s.assistantItem = ""
+	s.text = ""
+}
+
+func (s *codexDesktopStreamState) textEvent(text, itemID string) surface.StreamEvent {
+	if itemID != "" && itemID != s.assistantItem {
+		s.assistantItem = itemID
+		s.assistantKey = codexDesktopStreamKey(s.turnID, "assistant", itemID)
+		s.text = ""
+	} else if s.assistantKey == "" {
+		s.assistantKey = codexDesktopStreamKey(s.turnID, "assistant", "")
+	}
+	s.text += text
+	return surface.StreamEvent{ID: s.assistantKey, ProviderKey: s.assistantKey, Version: uint64(len(s.text)), Operation: "append", TurnID: s.turnID, Kind: "text", Text: text}
+}
+
+func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID string) surface.StreamEvent {
+	if itemID == "" {
+		itemID = strconv.FormatInt(sequence, 10)
+	}
+	key := codexDesktopStreamKey(s.turnID, "tool", itemID)
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, Kind: "tool_use", Text: name}
+}
+
+func (s *codexDesktopStreamState) finalEvent(turnID string, turn *codexTurn) (surface.StreamEvent, bool) {
+	assistant, ok := turn.authoritativeAssistant()
+	if !ok || assistant.Text == "" {
+		return surface.StreamEvent{}, false
+	}
+	key := s.assistantKey
+	if key == "" {
+		key = codexDesktopStreamKey(turnID, "assistant", assistant.ID)
+	}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(assistant.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: assistant.Text}, true
+}
+
+func (s *codexDesktopStreamState) doneEvent(sequence int64, turnID string) surface.StreamEvent {
+	key := codexDesktopStreamKey(turnID, "done", "")
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(sequence), Operation: "phase", TurnID: turnID, Kind: "done"}
+}
+
+func codexDesktopStreamKey(turnID, kind, itemID string) string {
+	if turnID == "" {
+		return "renderer:" + kind + ":" + itemID
+	}
+	key := "codex:" + turnID + ":" + kind
+	if itemID != "" {
+		key += ":" + itemID
+	}
+	return key
 }
 
 func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
