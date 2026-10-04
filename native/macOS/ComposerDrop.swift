@@ -15,6 +15,7 @@ enum ComposerDrop {
 
     private static func word(for path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path == home { return "~" }
         if path.hasPrefix(home + "/") {
             return "~/" + quoted(String(path.dropFirst(home.count + 1)))
         }

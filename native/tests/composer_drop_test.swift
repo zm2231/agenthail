@@ -7,6 +7,7 @@ struct ComposerDropTest {
         let plain = URL(fileURLWithPath: "\(home)/work/notes.md")
         let spaced = URL(fileURLWithPath: "/tmp/My Files/it's.png")
         check(ComposerDrop.text(for: [plain]) == "~/work/notes.md", "a home path is shortened")
+        check(ComposerDrop.text(for: [URL(fileURLWithPath: home)]) == "~", "the home folder itself is ~")
         check(ComposerDrop.text(for: [plain, spaced]) == #"~/work/notes.md '/tmp/My Files/it'\''s.png'"#, "paths with spaces or quotes are quoted")
         check(ComposerDrop.text(for: [URL(string: "https://example.com")!]) == nil, "web links are ignored")
         check(ComposerDrop.text(for: [plain, URL(string: "https://example.com")!]) == nil, "a drop with any web link is refused")
