@@ -115,6 +115,7 @@ struct NewSessionSheet: View {
                 }
             }
             .interactiveDismissDisabled(model.creatingSession)
+            .onAppear { model.prepareNewSessionForm() }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: models, currentSelectedID: selectedModel.isEmpty ? nil : selectedModel, allowsDefault: true, onSelect: { value in
                     selectedModel = value ?? ""

@@ -408,8 +408,10 @@ private struct InstructionRequest: Encodable {
         try container.encode(action, forKey: .action)
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(message, forKey: .message)
-        try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
-        try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+        if action != "steer" {
+            try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
+            try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+        }
     }
 }
 

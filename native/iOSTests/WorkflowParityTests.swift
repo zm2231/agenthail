@@ -49,6 +49,20 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testOpeningNewSessionFormClearsPriorAcceptedWarningWithoutRetrying() async {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        model.creationWarning = "The launcher accepted the request; the conversation is not available yet."
+        model.prepareNewSessionForm()
+        XCTAssertNil(model.creationWarning)
+        XCTAssertNil(model.creationError)
+        XCTAssertTrue(ParityProtocol.state.actions.isEmpty)
+        let created = await model.createSession(surface: "codex", message: "New launch", cwd: "/project", model: "chosen")
+        XCTAssertTrue(created)
+        XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+    }
+
+    @MainActor
     func testAcceptedTerminalCreationShowsWarningWithoutConversationClaimOrRetry() async throws {
         ParityProtocol.state.reset(accepted: true)
         let model = makeModel()
