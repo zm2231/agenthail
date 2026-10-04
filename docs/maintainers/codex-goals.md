@@ -19,9 +19,9 @@ Codex emits `thread/goal/updated` with the complete goal and
 `thread/goal/cleared` with the thread ID. The adapter preserves those typed
 events for the daemon catalog/API integration.
 
-## Parent integration contract
+## API and clients
 
-The generic daemon action handler should route these actions for a writable
+The generic daemon action handler routes these actions for a writable
 Codex session:
 
 | Agenthail action | Typed adapter request |
@@ -33,10 +33,9 @@ Codex session:
 | `goal-budget` | parse non-negative integer message, then `TokenBudget`; `clear` sends JSON null |
 | `goal-clear` | existing `thread/goal/clear` |
 
-The session metadata endpoint should return the adapter's `GoalState` unchanged.
-The catalog/event consumer should map `thread/goal/updated` and
-`thread/goal/cleared` to a target-specific session goal refresh event carrying
-the exact `threadId` and, for updates, the complete `GoalState`. The native
-consumer should refresh the session-metadata endpoint on that event, including
-when the event represents a clear. The integration belongs in the generic
-daemon/API handlers and is intentionally not included in this slice.
+The session metadata endpoint returns the adapter's `GoalState`. The session
+journal carries goal updates and explicit clears; a clear has a null goal.
+Clients apply these changes to the selected session without reloading its
+transcript. Human CLI output includes elapsed seconds, tokens, a configured
+budget and available timestamps; `--json` preserves the complete typed goal.
+Blocked, usage-limited and budget-limited goals require user attention.
