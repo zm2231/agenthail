@@ -23,6 +23,7 @@ struct SessionTreeTest {
         expect(recent.projects[0].checkouts[1].sessions.map(\.id) == ["idle"], "sessions older than a day leave Recent")
         expect(recent.projects[1].checkouts[0].label == "detached at de2fda1", "detached checkout label")
         expect(recent.needsYou.map(\.id) == ["other"], "attention sessions appear under Needs you")
+        expect(SessionTree.needsYou(sessions, attentionSessionIDs: ["other", "gone"]).map(\.id) == ["other"], "attention for a session missing from the catalog is not counted")
 
         let running = SessionTree.build(sessions, filter: .running, attentionSessionIDs: [], now: now)
         expect(running.projects.flatMap { $0.checkouts.flatMap(\.sessions) }.map(\.id) == ["busy"], "Running shows only working sessions")

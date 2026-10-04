@@ -401,7 +401,7 @@ private struct MenuBarLabel: View {
         .onChange(of: route.latest) { handleRoute() }
         .onChange(of: model.snapshot?.sessions, initial: true) { syncSpotlight() }
         .onChange(of: spotlightSessions) { syncSpotlight() }
-        .onChange(of: model.attentionSessionIDs.count, initial: true) { _, count in
+        .onChange(of: SessionTree.needsYou(model.knownSessions, attentionSessionIDs: model.attentionSessionIDs).count, initial: true) { _, count in
             NSApplication.shared.dockTile.badgeLabel = count > 0 ? String(count) : nil
         }
         .onChange(of: globalShortcut, initial: true) {

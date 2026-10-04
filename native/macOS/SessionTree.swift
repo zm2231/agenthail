@@ -69,10 +69,13 @@ struct SessionTree: Equatable {
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
             projects[projectIndex].checkouts[checkoutIndex].sessions.append(session)
         }
-        let needsYou = sessions
+        return SessionTree(projects: projects, needsYou: needsYou(sessions, attentionSessionIDs: attentionSessionIDs), counts: counts)
+    }
+
+    static func needsYou(_ sessions: [SessionState], attentionSessionIDs: Set<String>) -> [SessionState] {
+        sessions
             .filter { attentionSessionIDs.contains($0.id) }
             .sorted { activity($0) > activity($1) }
-        return SessionTree(projects: projects, needsYou: needsYou, counts: counts)
     }
 
     static func includes(_ session: SessionState, in filter: SessionFilter, now: Date) -> Bool {
