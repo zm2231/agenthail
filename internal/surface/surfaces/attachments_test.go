@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -52,3 +54,34 @@ func TestAttachmentResolvesOldReferencedRecordByStableOffset(t *testing.T) {
 }
 
 func quote(value string) string { b, _ := json.Marshal(value); return string(b) }
+
+func TestAttachmentOversizedRecordPreservesTypedTooLarge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + strings.Repeat("A", 15<<20) + `"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, "attachment:0:0:"+strings.Repeat("0", 64))
+	if !errors.Is(err, ErrAttachmentTooLarge) {
+		t.Fatalf("err=%v, want ErrAttachmentTooLarge", err)
+	}
+}
+
+func TestAttachmentRejectsMidRecordOffsetAndHonorsCancellation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data, _ := base64.StdEncoding.DecodeString(testPNG)
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, "attachment:1:0:"+hashBytes(data))
+	if !errors.Is(err, ErrAttachmentNotFound) {
+		t.Fatalf("mid-record err=%v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err = NewClaude("", t.TempDir()).ReadAttachment(ctx, &surface.Session{Transcript: path}, "attachment:0:0:"+hashBytes(data))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled err=%v", err)
+	}
+}
