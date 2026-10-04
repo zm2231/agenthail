@@ -69,7 +69,7 @@ final class WorkflowParityTests: XCTestCase {
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "tmux")
         XCTAssertFalse(created)
         XCTAssertNil(model.requestedSessionID)
-        XCTAssertEqual(model.creationWarning, "The launcher accepted the request; the conversation is not available yet.")
+        XCTAssertEqual(model.creationWarning, "Submitted to tmux.")
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
     }
 
@@ -148,12 +148,29 @@ final class WorkflowParityTests: XCTestCase {
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
         XCTAssertTrue(created)
         XCTAssertEqual(model.requestedSessionID, "created")
-        XCTAssertTrue(model.deliveryStatus["created"]!.contains("unconfirmed"))
+        XCTAssertEqual(model.deliveryStatus["created"], "Submitted to codex.")
         XCTAssertEqual(ParityProtocol.state.actions.first?["cwd"] as? String, "/project")
         XCTAssertEqual(ParityProtocol.state.actions.first?["model"] as? String, "chosen")
         model.creatingSession = true
         let duplicate = await model.createSession(surface: "codex", message: "Build", cwd: "", model: "")
         XCTAssertFalse(duplicate); XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+    }
+
+    @MainActor
+    func testCreationRetryReplaysSameLogicalRequestButEditedFormGetsNewKey() async throws {
+        ParityProtocol.state.reset(fail: true)
+        let model = makeModel()
+        let firstAttempt = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+        XCTAssertFalse(firstAttempt)
+        XCTAssertEqual(model.creationError, "Couldn’t complete request. Your session form is still ready.")
+        let sameAttempt = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+        XCTAssertFalse(sameAttempt)
+        let editedAttempt = await model.createSession(surface: "codex", message: "Build the edited plan", cwd: "/project", model: "chosen")
+        XCTAssertFalse(editedAttempt)
+        let keys = ParityProtocol.state.actionIdempotencyKeys
+        XCTAssertEqual(keys.count, 3)
+        XCTAssertEqual(keys[0], keys[1])
+        XCTAssertNotEqual(keys[1], keys[2])
     }
 
     @MainActor
@@ -200,10 +217,13 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
         private var unknown = false
         private var fail = false
         private var accepted = false
+        private var actionKeys: [String?] = []
         var actions: [[String:Any]] { lock.withLock { records } }
-        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false) { lock.withLock { records = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted } }
-        func respond(_ body: [String:Any]) -> (Int,String) { lock.withLock {
+        var actionIdempotencyKeys: [String?] { lock.withLock { actionKeys } }
+        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false) { lock.withLock { records = []; actionKeys = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted } }
+        func respond(_ body: [String:Any], idempotencyKey: String?) -> (Int,String) { lock.withLock {
             records.append(body)
+            actionKeys.append(idempotencyKey)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
             if (body["action"] as? String)?.contains("create") == true {
                 if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"The launcher accepted the request; the conversation is not available yet."}"#) }
@@ -225,7 +245,7 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
             var data = request.httpBody ?? Data()
             if let stream = request.httpBodyStream { stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating:0,count:4096); while stream.hasBytesAvailable { let n = stream.read(&buffer,maxLength:buffer.count); if n <= 0 { break }; data.append(contentsOf:buffer.prefix(n)) } }
             let body = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
-            (status,text) = Self.state.respond(body)
+            (status,text) = Self.state.respond(body, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
         } else if request.url?.path != "/api/v1/session-options" { status = 503; text = #"{"error":{"message":"fixture refresh unavailable"}}"# }
         client?.urlProtocol(self,didReceive:HTTPURLResponse(url:request.url!,statusCode:status,httpVersion:nil,headerFields:["Content-Type":"application/json"])!,cacheStoragePolicy:.notAllowed)
         client?.urlProtocol(self,didLoad:Data(text.utf8)); client?.urlProtocolDidFinishLoading(self)

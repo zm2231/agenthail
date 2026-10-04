@@ -86,6 +86,21 @@ final class TurnSettingsFlowTests: XCTestCase {
 
         XCTAssertEqual(model.turnSettings(for: fixture.session.id), settings)
         XCTAssertTrue(model.composer.contains("Retry this normally"))
+
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1])
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Couldn’t complete request. Draft kept.")
+
+        model.composer = "Edited retry"
+        let edited = TurnSettings(effort: "high", mode: .plan)
+        model.setTurnSettings(edited, for: fixture.session.id)
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 3 }
+        XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[2])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["message"] as? String, "Edited retry")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["effort"] as? String, "high")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["mode"] as? String, "plan")
     }
 
     @MainActor
