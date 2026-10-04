@@ -1129,6 +1129,25 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 	}
 }
 
+func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
+	daemon, r, _, from, to := daemonFixture(t)
+	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
+	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
+	if count := r.QueueCount(from.ID); count != 1 {
+		t.Fatalf("sender notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+}
+
 func TestOutboxOnlyAcknowledgesAcceptedDelivery(t *testing.T) {
 	daemon, r, fake, _, to := daemonFixture(t)
 	if err := r.QueueMessage("to", "wait"); err != nil {

@@ -201,6 +201,38 @@ func (r *Registry) QueueDeliveryFailureNotice(id int64) (int64, bool, error) {
 	return queueID, queued, tx.Commit()
 }
 
+func (r *Registry) RecordReplyForwardFailure(senderSessionID, targetSessionID, providerKey, message, failure string) (bool, error) {
+	if strings.TrimSpace(senderSessionID) == "" || strings.TrimSpace(targetSessionID) == "" || strings.TrimSpace(providerKey) == "" {
+		return false, fmt.Errorf("reply-forward failure requires sender, target, and provider key")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, found, err := deliveryIntentByProviderKey(tx, targetSessionID, providerKey); err != nil {
+		return false, err
+	} else if found {
+		return false, tx.Commit()
+	}
+	result, err := tx.Exec(`INSERT INTO delivery_intents(sender_session_id,target_session_id,provider_key,message,status,evidence) VALUES(?,?,?,?,?,?)`, senderSessionID, targetSessionID, providerKey, boundedIntentMessage(message), DeliveryIntentSubmitted, surface.EvidenceSubmitted)
+	if err != nil {
+		return false, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return false, err
+	}
+	if changed, err := failDeliveryIntent(tx, id, DeliveryIntentFailed, failure); err != nil || !changed {
+		return false, err
+	}
+	_, queued, err := queueDeliveryFailureNotice(tx, id)
+	if err != nil {
+		return false, err
+	}
+	return queued, tx.Commit()
+}
+
 func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	intent, err := deliveryIntentByID(tx, id)
 	if err != nil {

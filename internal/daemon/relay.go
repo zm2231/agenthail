@@ -83,6 +83,12 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 }
 
 func (d *Daemon) dropRelay(sourceID string, route registry.RouteRow, completionID, text, reason string) {
+	providerKey := fmt.Sprintf("relay:%d:%s", route.ID, completionID)
+	if queued, err := d.Registry.RecordReplyForwardFailure(sourceID, route.ToSession, providerKey, text, reason); err != nil {
+		d.log.Printf("record relay failure %d: %s", route.ID, err)
+	} else if queued {
+		d.publishEvent("state.changed", sourceID, map[string]string{"source": "delivery-problem"})
+	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SessionID: route.ToSession, SourceSessionID: sourceID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})
 	d.log.Printf("drop relay %d to %s: %s", route.ID, d.resolveDisplay(route.ToSession), reason)
 }
