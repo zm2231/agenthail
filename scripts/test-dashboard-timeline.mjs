@@ -12,13 +12,45 @@ const messageStart = source.indexOf("function handoffMessage");
 const messageEnd = source.indexOf("function stopLiveStream", messageStart);
 const rendererStart = source.indexOf("function renderImageAttachment");
 const rendererEnd = source.indexOf("function renderChat", rendererStart);
+const chatStart = rendererEnd;
+const chatEnd = source.indexOf("function compactTokenCount", chatStart);
+const goalStart = chatEnd;
+const goalEnd = source.indexOf("function renderContextUsage", goalStart);
 assert(markdownStart >= 0 && markdownEnd > markdownStart, "markdown renderer boundary missing");
 assert(messageStart >= 0 && messageEnd > messageStart, "message renderer boundary missing");
 assert(rendererStart >= 0 && rendererEnd > rendererStart, "timeline renderer boundary missing");
+assert(chatEnd > chatStart, "chat renderer boundary missing");
+assert(goalEnd > goalStart, "goal renderer boundary missing");
 
+const elements = {
+  "#chat-actions": { innerHTML: "" },
+  "#message": { disabled: false, placeholder: "" },
+  "#send": { disabled: false },
+  "#composer-note": { textContent: "" },
+  "#chat-subtitle": { textContent: "" },
+  "#thread-count": { textContent: "" },
+  "#chat-body": {
+    innerHTML: "",
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+    querySelectorAll: () => [],
+    getBoundingClientRect: () => ({ top: 0 }),
+  },
+};
 const context = {
-  app: { expandedTurns: new Set() },
+  app: { expandedTurns: new Set(), slashCommands: [], pendingEntryScroll: false, transcriptSignature: null },
   labels: { claude: "Claude Code", codex: "Codex" },
+  $: (selector) => elements[selector],
+  mobileConversationView: () => false,
+  syncComposerAction: () => {},
+  renderSlashMenu: () => {},
+  conversationMeta: () => "Claude Code",
+  renderContextUsage: () => {},
+  startLiveStream: () => {},
+  renderGoalAttention: () => "",
+  renderLiveTurn: () => {},
+  alignTranscriptTop: () => {},
   escape: (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -30,7 +62,11 @@ const context = {
 vm.runInNewContext(`${source.slice(markdownStart, markdownEnd)}${source.slice(messageStart, messageEnd)}${source.slice(rendererStart, rendererEnd)}
 globalThis.renderTimeline = renderTimeline;
 globalThis.timelineSignature = timelineSignature;
-globalThis.renderClaudeMetadata = renderClaudeMetadata;`, context);
+globalThis.renderClaudeMetadata = renderClaudeMetadata;
+${source.slice(chatStart, chatEnd)}
+${source.slice(goalStart, goalEnd)}
+globalThis.renderChat = renderChat;
+globalThis.goalStatusLabel = goalStatusLabel;`, context);
 
 const session = { id: "session-1", surface: "claude" };
 const items = [
@@ -57,6 +93,38 @@ for (const expected of ["job-1", "background", "working", "agent-1", "/transcrip
   assert(claudeMetadata.includes(expected), `Claude metadata omitted ${expected}`);
 }
 assert(!claudeMetadata.includes("wake") && !claudeMetadata.includes("cancel"), "Claude metadata must not invent controls");
+
+context.app.selected = { id: "session-1", surface: "claude", runtime: {}, status: "idle" };
+context.app.history = {
+  exchanges: [],
+  capabilities: { goal: true },
+  readOnly: false,
+  timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
+  claudeRuns: [{ jobId: "job-writable", providerState: "idle" }],
+  claudeSubagents: [{ parentSessionId: "session-1", agentId: "agent-writable", transcriptPath: "/transcripts/agent-writable.jsonl" }],
+};
+context.renderChat();
+assert(elements["#chat-body"].innerHTML.includes("job-writable"), "writable Claude sessions should render supplied run observations");
+assert(elements["#chat-body"].innerHTML.includes("agent-writable"), "writable Claude sessions should render supplied subagent observations");
+
+const renderGoal = (goal) => {
+  context.app.transcriptSignature = null;
+  context.app.history.goal = goal;
+  elements["#chat-body"].innerHTML = "";
+  context.renderChat();
+  return elements["#chat-body"].innerHTML;
+};
+const active = renderGoal({ status: "active", objective: "Investigate", timeUsedSeconds: 125, tokensUsed: 2400, tokenBudget: 5000, createdAt: "2026-10-04T12:01:00Z", updatedAt: "2026-10-04T12:02:00Z" });
+assert(active.includes("Pause") && active.includes("Clear") && active.includes("Clear budget"), "active goal should expose pause, clear, and budget actions");
+for (const expected of ["Elapsed: 2m 5s", "Tokens: 2k", "Budget: 5k", "Created: 2026-10-04T12:01:00Z", "Updated: 2026-10-04T12:02:00Z"]) assert(active.includes(expected), `active goal omitted ${expected}`);
+assert(renderGoal({ status: "paused", objective: "Investigate" }).includes("Resume"), "paused goal should expose resume");
+for (const status of ["blocked", "usageLimited", "budgetLimited"]) {
+  const html = renderGoal({ status, objective: "Investigate" });
+  assert(html.includes(`Needs you: ${context.goalStatusLabel(status)}`), `${status} goal should render attention outside settings`);
+  assert(html.indexOf("Needs you:") < html.indexOf("Conversation settings"), `${status} attention should precede collapsed settings`);
+}
+const complete = renderGoal({ status: "complete", objective: "Investigate" });
+assert(!complete.includes("Needs you:"), "complete goal should not render active attention");
 
 const first = [{ id: "call-2", kind: "toolCall", title: "Search", text: "first", callId: "call-8", status: "running" }];
 const refreshed = [{ id: "call-2", kind: "toolCall", title: "Search", text: "second", callId: "call-8", status: "complete" }];
