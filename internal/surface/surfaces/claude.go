@@ -491,6 +491,12 @@ func (c *Claude) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 }
 
 func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	if sess.Transport == "uds" && uuid != "" {
+		return surface.ErrUnsupported
+	}
+	if sess.Transport == "uds" {
+		return c.streamUDSTimeline(ctx, sess, onEvent, timeout)
+	}
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -563,7 +569,7 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "upsert", Final: true, TurnID: targetID, Kind: "text", Text: turn.Assistant})
 			}
 			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
-			if sess.Transport == "uds" {
+			if sess.Transport == "uds" && uuid == "" {
 				baselineUserID = turn.UserID
 				targetID = ""
 				lastText = ""
@@ -577,6 +583,82 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 		time.Sleep(300 * time.Millisecond)
 	}
 	return fmt.Errorf("stream timed out after %s", timeout)
+}
+
+func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	path := sess.Transcript
+	if path == "" {
+		path = c.transcriptPath(sess)
+	}
+	if path == "" || !fileExists(path) {
+		return fmt.Errorf("no local transcript for streaming")
+	}
+	state, err := c.observeTranscript(ctx, path)
+	if err != nil {
+		return err
+	}
+	// The overlap covers records written between page seeding and tail startup;
+	// stable record keys make replay idempotent in the journal.
+	offset := max(int64(0), state.offset-initialClaudeObservationBytes)
+	deadline := time.Now().Add(timeout)
+	currentTurnID := ""
+	for time.Now().Before(deadline) {
+		lineOffset := offset
+		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			var record map[string]any
+			if json.Unmarshal(line, &record) != nil {
+				return nil
+			}
+			turnID := currentTurnID
+			if str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) {
+				currentTurnID = str(record, "uuid")
+				turnID = currentTurnID
+			}
+			items := claudeTimelineItems(record)
+			for index, item := range items {
+				key := stableTimelineItemID(lineOffset, line, index)
+				version := uint64(len(item.Text))
+				if version == 0 {
+					version = 1
+				}
+				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Timestamp: at, Kind: item.Kind, Text: item.Text})
+			}
+			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
+				key := stableTimelineItemID(lineOffset, line, len(items))
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
+			}
+			lineOffset += int64(len(line))
+			return nil
+		})
+		if scanErr != nil {
+			return scanErr
+		}
+		offset = next
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("stream timed out after %s", timeout)
+}
+
+func claudeRecordHasToolResult(record map[string]any) bool {
+	message, _ := record["message"].(map[string]any)
+	blocks, _ := message["content"].([]any)
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if str(block, "type") == "tool_result" {
+			return true
+		}
+	}
+	return str(message, "tool_use_id") != ""
+}
+
+func strNested(record map[string]any, object, field string) string {
+	value, _ := record[object].(map[string]any)
+	return str(value, field)
 }
 
 func (c *Claude) GoalSet(ctx context.Context, sess *surface.Session, text string) error {

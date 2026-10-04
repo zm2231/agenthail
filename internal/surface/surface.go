@@ -324,6 +324,7 @@ type StreamEvent struct {
 	Role        string        `json:"role,omitempty"`
 	Title       string        `json:"title,omitempty"`
 	Status      string        `json:"status,omitempty"`
+	CallID      string        `json:"callId,omitempty"`
 	Truncated   bool          `json:"truncated,omitempty"`
 	ID          string        `json:"id,omitempty"`
 	ProviderKey string        `json:"providerKey,omitempty"`
