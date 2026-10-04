@@ -243,6 +243,102 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	if got := r.QueueCount("s"); got != 0 {
 		t.Fatalf("expected no queued rows, got %d", got)
 	}
+	assertSynchronousRefusalLeavesNoProblem(t, r, "s", "busy")
+}
+
+func assertSynchronousRefusalLeavesNoProblem(t *testing.T, r *registry.Registry, sessionID, historyKind string) {
+	t.Helper()
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+		t.Fatalf("synchronous refusal became a durable problem: problems=%+v err=%v", problems, err)
+	}
+	if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+		t.Fatalf("synchronous refusal injected %d failure notices", got)
+	}
+	if intent, err := r.DeliveryIntent(1); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("refused intent was retained: intent=%+v err=%v", intent, err)
+	}
+	history, err := r.ListHistory(20, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.Kind == historyKind {
+			return
+		}
+	}
+	t.Fatalf("refusal left no %q audit entry: %+v", historyKind, history)
+}
+
+type unwritableSurface struct {
+	*fakeSurface
+}
+
+func (unwritableSurface) EnsureWritable(context.Context, *surface.Session) error {
+	return errors.New("session is read-only")
+}
+
+func TestDispatcherSteerRefusesUnwritableSessionWithoutDurableIntent(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "read-only", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := unwritableSurface{&fakeSurface{capabilities: surface.Capabilities{Steer: true}}}
+	if _, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "focus"); err == nil {
+		t.Fatal("expected read-only refusal")
+	}
+	if len(adapter.steered) != 0 {
+		t.Fatalf("read-only session was steered: %v", adapter.steered)
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+		t.Fatalf("problems=%+v err=%v", problems, err)
+	}
+	if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+		t.Fatalf("read-only refusal injected %d failure notices", got)
+	}
+	if intent, err := r.DeliveryIntent(1); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDispatcherConfirmedSendKeepsSentBookkeepingWhenIntentTransitionFails(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "thread", Name: "thread", Surface: surface.KindNotion}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{kind: surface.KindNotion, observe: &surface.TurnObservation{Status: surface.StatusUnknown}, result: &surface.SendResult{UUID: "shared-key", Accepted: true}}
+	for _, message := range []string{"one", "two"} {
+		receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, message, "")
+		if err != nil || receipt.DeliveryID == 0 {
+			t.Fatalf("%s: receipt=%+v err=%v", message, receipt, err)
+		}
+		intent, err := r.DeliveryIntent(receipt.DeliveryID)
+		if err != nil || receipt.Status != string(intent.Status) {
+			t.Fatalf("%s: receipt=%+v disagrees with durable intent=%+v err=%v", message, receipt, intent, err)
+		}
+	}
+	history, err := r.ListHistory(20, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := 0
+	for _, entry := range history {
+		if entry.Kind == "sent" {
+			sent++
+		}
+	}
+	if sent != 2 {
+		t.Fatalf("confirmed sends skipped sent bookkeeping: %+v", history)
+	}
 }
 
 func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
@@ -415,7 +511,7 @@ func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
 	}
 }
 
-func TestDispatcherQueueStorageFailureTerminalizesSubmittedIntent(t *testing.T) {
+func TestDispatcherQueueStorageFailureDiscardsSubmittedIntent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := registry.Open(path)
 	if err != nil {
@@ -438,16 +534,10 @@ func TestDispatcherQueueStorageFailureTerminalizesSubmittedIntent(t *testing.T) 
 	if _, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "reject queue", "", surface.SendOptions{BusyDelivery: "queue"}); err == nil {
 		t.Fatal("expected queue storage failure")
 	}
-	problems, err := r.ListDeliveryProblems()
-	if err != nil || len(problems) != 1 || problems[0].SessionID != session.ID || problems[0].Status != registry.DeliveryIntentFailed {
-		t.Fatalf("problems=%+v err=%v", problems, err)
-	}
 	if got := r.QueueCount(session.ID); got != 0 {
 		t.Fatalf("failed queue insert left target work queued: %d", got)
 	}
-	if got := r.QueueCount(registry.OperatorSessionID); got != 1 {
-		t.Fatalf("expected one durable failure notice, got %d", got)
-	}
+	assertSynchronousRefusalLeavesNoProblem(t, r, session.ID, "failed")
 }
 
 func TestDispatcherDoesNotCallProviderWhenIntentPersistenceFails(t *testing.T) {

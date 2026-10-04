@@ -56,7 +56,7 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 	body, _ := json.Marshal(map[string]any{
 		"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": sess.ID}, "version": -1}},
 	})
-	status, responseBody, err := sidecarRequestWithCookies(ctx,
+	status, responseBody, err := notionRecordRequest(ctx,
 		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
 		return "", nil, fmt.Errorf("notion reply: %w", err)
@@ -88,7 +88,7 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 		requests[i] = map[string]any{"pointer": map[string]any{"table": "thread_message", "id": id}, "version": -1}
 	}
 	body, _ = json.Marshal(map[string]any{"requests": requests})
-	status, responseBody, err = sidecarRequestWithCookies(ctx,
+	status, responseBody, err = notionRecordRequest(ctx,
 		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
 		return "", nil, fmt.Errorf("notion reply messages: %w", err)
