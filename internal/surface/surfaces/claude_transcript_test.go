@@ -400,21 +400,27 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 		file.WriteString("{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"id\":\"m1\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}]}}\n")
 	}()
 	var events []surface.StreamEvent
-	err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) { events = append(events, event) }, time.Second)
+	err := claude.Stream(context.Background(), session, "u1", func(event surface.StreamEvent) { events = append(events, event) }, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 || events[0].Kind != "text" || events[0].Text != "answer" || events[1].Kind != "text" || !events[1].Final || events[1].Text != "answer" || events[2].Kind != "done" {
+	var user, assistant, done *surface.StreamEvent
+	for index := range events {
+		event := &events[index]
+		switch {
+		case event.Role == "user":
+			user = event
+		case event.Role == "assistant" && event.Kind == "message":
+			assistant = event
+		case event.Kind == "done":
+			done = event
+		}
+	}
+	if user == nil || assistant == nil || done == nil || assistant.Text != "answer" || assistant.TurnID != "u1" || done.TurnID != "u1" {
 		t.Fatalf("events=%+v", events)
 	}
-	if events[0].ProviderKey != "m1" || events[0].ID != "m1" || events[0].Operation != "append" || events[0].Version != 6 || events[0].TurnID != "u1" {
-		t.Fatalf("text event=%+v", events[0])
-	}
-	if events[1].ProviderKey != "m1" || events[1].ID != "m1" || events[1].Operation != "upsert" {
-		t.Fatalf("final event=%+v", events[1])
-	}
-	if events[2].ProviderKey != "m1" || events[2].Operation != "phase" || events[2].TurnID != "u1" {
-		t.Fatalf("done event=%+v", events[2])
+	if assistant.ProviderKey == "" || !strings.HasPrefix(assistant.ProviderKey, "timeline:") || assistant.CallID != "" {
+		t.Fatalf("assistant identity=%+v", assistant)
 	}
 }
 
@@ -503,13 +509,61 @@ func TestClaudeStreamWaitsForNewTurnAfterCompletedBaseline(t *testing.T) {
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
 	claude := NewClaude("Default", t.TempDir())
 	var events []surface.StreamEvent
-	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "", func(event surface.StreamEvent) {
+	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "u2", func(event surface.StreamEvent) {
 		events = append(events, event)
 	}, 350*time.Millisecond)
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("stream err=%v", err)
 	}
 	if len(events) != 0 {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestClaudeStreamKeepsTargetTurnAcrossLongTranscriptOverlap(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"target","message":{"content":"inspect"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	if _, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	padding := `{"type":"system","subtype":"background"}` + "\n"
+	for written := 0; written < initialClaudeObservationBytes+(1<<20); written += len(padding) {
+		if _, err := file.WriteString(padding); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := file.WriteString(`{"type":"assistant","uuid":"assistant-target","message":{"id":"target-answer","stop_reason":"end_turn","content":[{"type":"text","text":"target answer"}]}}` + "\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var events []surface.StreamEvent
+	err = claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "target", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawAnswer, sawDone bool
+	for _, event := range events {
+		if event.TurnID != "target" {
+			t.Fatalf("event escaped target turn: %+v", event)
+		}
+		if event.Kind == "message" && event.Text == "target answer" {
+			sawAnswer = true
+		}
+		if event.Kind == "done" {
+			sawDone = true
+		}
+	}
+	if !sawAnswer || !sawDone {
 		t.Fatalf("events=%+v", events)
 	}
 }
