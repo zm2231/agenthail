@@ -17,7 +17,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          published="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ "$EVENT" = "push" ] && [ "$published" = "false" ]; then
+            echo "$TAG is already published; run this workflow manually to rebuild it."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   push-relay-check:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -44,6 +66,8 @@ jobs:
         run: npm test
 
   macos-package:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: macos-15
     timeout-minutes: 75
     steps:
@@ -126,6 +150,8 @@ jobs:
           retention-days: 7
 
   ios-archive:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: macos-26
     timeout-minutes: 45
     env:
