@@ -19,8 +19,8 @@ The command is read-only and is the authoritative producer for the session
 catalog, but it does not expose child relationships or wake times.
 
 Claude Code also writes local background-job records at
-`~/.claude/jobs/<job-id>/state.json`. The Claude session-detail API reads these
-records through `surface.ClaudeRunObserver` and filters them to matching
+`~/.claude/jobs/<job-id>/state.json`. The progressive `/api/session-metadata`
+endpoint reads these records through `surface.ClaudeRunObserver` and filters them to matching
 session or resume-session IDs. It exposes only fields observed in that
 producer:
 
@@ -35,13 +35,14 @@ observation. Its observed member was an artifact descriptor (`kind: frame`),
 not a Claude agent identity.
 
 Subagent relationships use a separate local producer. The Claude
-session-detail API exposes only links whose validated parent ID matches the
+progressive metadata API exposes only links whose validated parent ID matches the
 requested session:
 `~/.claude/projects/<encoded-cwd>/<parent-session-id>/subagents/agent-<agent-id>.jsonl`.
 `ObserveClaudeSubagentLinks` derives the parent session and agent ID from that
 path, then requires a JSONL record with matching exact `sessionId` and
 `agentId`. This yields a validated parent-session -> local-agent link without
-deriving state from transcript content.
+deriving state from transcript content. The CLI `agenthail claude runs` exposes
+the same observer contract read-only.
 
 ## Deliberately unavailable
 
@@ -91,7 +92,7 @@ registry; metadata reads remain best-effort and non-blocking.
 `sessions.configured_model`, preserving an existing value when a later
 registration omits the model. Claude context projection resolves only that
 captured value and emits `ContextUsage.ContextWindowSource`; the existing
-session-detail API carries the field without a separate provider endpoint.
+session API carries the field without a separate provider endpoint.
 
 Native and dashboard consumers treat a zero window, an estimated window, or
 usage above the denominator as token-only state. They do not show a percentage
@@ -103,14 +104,17 @@ producer, and it is displayed as configured rather than estimated.
 The native client consumes `/api/v1/session-stream`. The source completes its
 bounded `ReadSession` seed before replay, then shares one provider tail per
 session. Claude UDS sessions with a reliable local transcript use the same
-transcript reader for live polling across completed turns; the source stays
-open and does not reseed between turns. A reader without reliable live-stream
-capability remains seed-only and stays open until its client cancels, avoiding
-unsupported-stream retry and reconnect noise.
+transcript reader for live polling across completed turns. The tail reads a
+bounded overlap at handoff, uses stable timeline IDs shared with the seed, and
+normalizes user, assistant, reasoning, tool-call, tool-result, and done events
+through one source loop. A session without reliable live-stream capability is
+still readable through its seeded page, while `/session-stream` returns typed
+`stream_unsupported` (HTTP 409) instead of opening a fake stream.
 
 The coverage is a first-replay seed assertion, a real Claude transcript
-seed-and-two-turn tail assertion, a UDS transcript stream assertion, a bounded
-seed-only API replay assertion, and a no-provider-call seed-only assertion.
+seed-and-two-turn tail assertion, a UDS transcript stream assertion including
+future roles and tool activity, a UUID-specific UDS rejection, and a typed
+seed-only API rejection without a provider call.
 
 The API does not expose `waiting`, `wakeAt`, cron, schedule, or cancellation
 fields. Those values have no reliable local producer in the installed records;

@@ -29,6 +29,7 @@ type sessionJournalPayload struct {
 	Op          string `json:"op"`
 	Kind        string `json:"kind"`
 	TurnID      string `json:"turnId,omitempty"`
+	Role        string `json:"role,omitempty"`
 	TS          string `json:"ts"`
 	Body        string `json:"body,omitempty"`
 	Truncated   bool   `json:"truncated"`
@@ -190,7 +191,11 @@ func (s *sessionSource) run() {
 		return
 	}
 	for {
-		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		current := *s.session
+		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
+			current = *refreshed
+		}
+		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
 			break
@@ -369,6 +374,10 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if op == "" {
 		op = "append"
 	}
+	if op == "phase" && providerKey != "" {
+		providerKey += ":phase:" + event.Kind
+		itemID += ":phase:" + event.Kind
+	}
 	body := event.Text
 	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
 		s.appendBodies[providerKey] += body
@@ -379,5 +388,5 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, Role: event.Role, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
 }

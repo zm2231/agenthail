@@ -331,6 +331,7 @@ type StreamEvent struct {
 	Operation   string        `json:"operation,omitempty"`
 	Final       bool          `json:"final,omitempty"`
 	TurnID      string        `json:"turnId,omitempty"`
+	Role        string        `json:"role,omitempty"`
 	Timestamp   time.Time     `json:"timestamp,omitempty"`
 	Kind        string        `json:"kind"`
 	Text        string        `json:"text"`

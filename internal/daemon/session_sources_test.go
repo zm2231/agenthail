@@ -251,7 +251,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 			select {
 			case entry := <-subscription.Entries:
 				var payload sessionJournalPayload
-				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.ItemID == turn.message && payload.Kind == "done" {
+				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.Kind == "done" && payload.TurnID == "u"+turn.message[1:] {
 					seen[turn.message] = true
 				}
 			case <-deadline:

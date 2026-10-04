@@ -230,6 +230,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/favicon.ico", dashboard.asset("image/png", dashboardFavicon))
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
+	mux.HandleFunc("/api/session-metadata", dashboard.guard(d.dashboardSessionMetadataHandler))
 	mux.HandleFunc("/api/stream", dashboard.guard(d.dashboardStreamHandler))
 	mux.HandleFunc("/api/models", dashboard.guard(d.dashboardModelsHandler))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
@@ -263,6 +264,102 @@ func (d *Daemon) dashboardModelsHandler(w http.ResponseWriter, r *http.Request) 
 		models = []surface.ModelOption{}
 	}
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
+func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session, err := d.Registry.Session(r.URL.Query().Get("id"))
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil {
+		http.Error(w, "surface is not configured", http.StatusConflict)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	requests := map[string]func() (any, error){}
+	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
+		requests["context"] = func() (any, error) { return provider.ContextUsage(ctx, session) }
+	}
+	if effective.Goal {
+		requests["goal"] = func() (any, error) { return adapter.GoalGet(ctx, session) }
+	}
+	if effective.Model {
+		requests["model"] = func() (any, error) { return adapter.Model(ctx, session, "") }
+		if lister, ok := adapter.(surface.ModelLister); ok {
+			requests["models"] = func() (any, error) { return lister.Models(ctx) }
+		}
+	}
+	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
+		requests["claudeRuns"] = func() (any, error) {
+			runs, err := observer.ObserveClaudeRuns(ctx)
+			if err != nil {
+				return nil, err
+			}
+			links, err := observer.ObserveClaudeSubagentLinks(ctx)
+			if err != nil {
+				return nil, err
+			}
+			filteredRuns := make([]surface.ClaudeRunObservation, 0)
+			for _, run := range runs {
+				if run.SessionID == session.ID || run.ResumeSessionID == session.ID {
+					filteredRuns = append(filteredRuns, run)
+				}
+			}
+			filteredLinks := make([]surface.ClaudeSubagentLink, 0)
+			for _, link := range links {
+				if link.ParentSessionID == session.ID {
+					filteredLinks = append(filteredLinks, link)
+				}
+			}
+			return map[string]any{"runs": filteredRuns, "subagents": filteredLinks}, nil
+		}
+	}
+	type metadataResult struct {
+		field string
+		value any
+		err   error
+	}
+	results := make(chan metadataResult, len(requests))
+	for field, read := range requests {
+		go func() {
+			value, err := read()
+			results <- metadataResult{field: field, value: value, err: err}
+		}()
+	}
+	response := map[string]any{"sessionId": session.ID}
+	errorsByField := map[string]string{}
+	for len(requests) > 0 {
+		select {
+		case result := <-results:
+			delete(requests, result.field)
+			if result.err != nil {
+				errorsByField[result.field] = "Metadata unavailable."
+			} else if result.field == "claudeRuns" {
+				value := result.value.(map[string]any)
+				response[result.field] = value["runs"]
+				response["claudeSubagents"] = value["subagents"]
+			} else {
+				response[result.field] = result.value
+			}
+		case <-ctx.Done():
+			for field := range requests {
+				errorsByField[field] = "Metadata unavailable."
+			}
+			requests = nil
+		}
+	}
+	if len(errorsByField) > 0 {
+		response["errors"] = errorsByField
+	}
+	writeDashboardJSON(w, http.StatusOK, response)
 }
 
 func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1386,9 +1483,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	var goal *surface.GoalState
 	var model string
 	var models []surface.ModelOption
-	var claudeRuns []surface.ClaudeRunObservation
-	var claudeSubagents []surface.ClaudeSubagentLink
-	var contextUsageErr, goalErr, modelErr, modelsErr, claudeRunErr error
+	var contextUsageErr, goalErr, modelErr, modelsErr error
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		metadata.Add(1)
 		go func() {
@@ -1416,32 +1511,6 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 				models, modelsErr = lister.Models(ctx)
 			}()
 		}
-	}
-	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
-		metadata.Add(1)
-		go func() {
-			defer metadata.Done()
-			var runs []surface.ClaudeRunObservation
-			runs, claudeRunErr = observer.ObserveClaudeRuns(ctx)
-			if claudeRunErr != nil {
-				return
-			}
-			for _, run := range runs {
-				if run.SessionID == session.ID || run.ResumeSessionID == session.ID {
-					claudeRuns = append(claudeRuns, run)
-				}
-			}
-			links, linkErr := observer.ObserveClaudeSubagentLinks(ctx)
-			if linkErr != nil {
-				claudeRunErr = linkErr
-				return
-			}
-			for _, link := range links {
-				if link.ParentSessionID == session.ID {
-					claudeSubagents = append(claudeSubagents, link)
-				}
-			}
-		}()
 	}
 	metadata.Wait()
 	if sessionRead == nil {
@@ -1476,12 +1545,6 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	if modelsErr == nil && models != nil {
 		response["models"] = models
-	}
-	if claudeRunErr == nil {
-		response["claudeRuns"] = claudeRuns
-		response["claudeSubagents"] = claudeSubagents
-	} else {
-		response["claudeRunObservationUnavailable"] = "Claude job or subagent records could not be read."
 	}
 	writeDashboardJSON(w, http.StatusOK, response)
 }

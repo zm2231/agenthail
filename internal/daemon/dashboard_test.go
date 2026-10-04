@@ -64,7 +64,7 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	}
 }
 
-func TestDashboardSessionExposesValidatedClaudeRunObservations(t *testing.T) {
+func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testing.T) {
 	_, registry, _, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
 	from.ID = "claude-session"
@@ -78,7 +78,7 @@ func TestDashboardSessionExposesValidatedClaudeRunObservations(t *testing.T) {
 	}
 	d := New(registry, []surface.Surface{fake})
 	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID, nil))
+	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}

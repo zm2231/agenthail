@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -439,8 +440,60 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	if err != context.Canceled {
 		t.Fatalf("stream err=%v", err)
 	}
-	if len(events) != 3 || events[0].ProviderKey != "m1" || events[2].Kind != "done" {
+	if len(events) != 3 || events[0].Role != "user" || events[1].Role != "assistant" || events[2].Kind != "done" {
 		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestClaudeStreamUDSTimelineIncludesFutureToolsAndRoles(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"seed"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transport: "uds", Transcript: path, HasLocal: true}
+	streamContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var events []surface.StreamEvent
+	done := make(chan struct{})
+	go func() {
+		_ = claude.Stream(streamContext, session, "", func(event surface.StreamEvent) {
+			events = append(events, event)
+			if event.Kind == "done" {
+				select {
+				case <-done:
+				default:
+					close(done)
+				}
+			}
+		}, time.Second)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	appendTestTranscript(t, path, `{"type":"user","uuid":"u2","message":{"content":"second"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"inspect"},{"type":"tool_use","id":"call-2","name":"Bash","input":{"command":"pwd"}}]}}
+{"type":"user","uuid":"tool-result","message":{"content":[{"type":"tool_result","tool_use_id":"call-2","content":"/tmp"}]}}
+{"type":"assistant","uuid":"a3","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"finished"}]}}`)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("future turn did not complete")
+	}
+	cancel()
+	seen := map[string]bool{}
+	for _, event := range events {
+		seen[event.Kind] = true
+	}
+	if !seen["message"] || !seen["reasoning"] || !seen["toolCall"] || !seen["toolResult"] || !seen["done"] {
+		t.Fatalf("events=%+v", events)
+	}
+	if events[0].Role != "user" {
+		t.Fatalf("first event=%+v", events[0])
+	}
+}
+
+func TestClaudeStreamRejectsUUIDSpecificUDSStream(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"one"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transport: "uds", Transcript: path, HasLocal: true}, "u1", func(surface.StreamEvent) {}, time.Second)
+	if !errors.Is(err, surface.ErrUnsupported) {
+		t.Fatalf("err=%v", err)
 	}
 }
 
