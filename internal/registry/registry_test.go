@@ -711,7 +711,10 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,?,?)`, "s", id, "Delivery outcome could not be confirmed", "Retry or cancel this message"); err != nil {
+	if _, err := r.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(false)
@@ -1106,12 +1109,89 @@ func TestAttentionItemsRefreshLegacyUnknownHTTPRecovery(t *testing.T) {
 	if err := r.DeadLetterUnknown(item.ID, errors.New("send failed (HTTP 404): session not found")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,?,?)`, "s", item.ID, "Delivery outcome could not be confirmed", "Retry or cancel this message"); err != nil {
-		t.Fatal(err)
-	}
 	items, err := r.ListAttentionItems(false)
 	if err != nil || len(items) != 1 || items[0].Reason != "Delivery target is unavailable" || items[0].RequestedAction != "Cancel and send this message to an available session" {
 		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
+
+func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s", "sender")
+	id, deliveryID, err := r.QueueDeliveryWithIntent("s", "expired snapshot", "expired-snapshot", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
+		t.Fatal(err)
+	}
+	beforeHistory, err := r.ListHistory(20, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRow, err := r.QueueItem(id)
+	if err != nil || beforeRow.Status != "pending" {
+		t.Fatalf("before row=%+v err=%v", beforeRow, err)
+	}
+	beforeDelivery, err := r.DeliveryIntent(deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := r.ListQueue(false); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
+		t.Fatalf("expired current snapshot=%+v err=%v", rows, err)
+	}
+	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
+		t.Fatalf("attention snapshot=%+v err=%v", items, err)
+	}
+	afterRow, err := r.QueueItem(id)
+	if err != nil || afterRow.Status != "pending" {
+		t.Fatalf("after row=%+v err=%v", afterRow, err)
+	}
+	afterDelivery, err := r.DeliveryIntent(deliveryID)
+	if err != nil || afterDelivery.Status != beforeDelivery.Status || afterDelivery.Failure != beforeDelivery.Failure || afterDelivery.NotificationQueueID != beforeDelivery.NotificationQueueID {
+		t.Fatalf("delivery intent changed before=%+v after=%+v err=%v", beforeDelivery, afterDelivery, err)
+	}
+	afterHistory, err := r.ListHistory(20, "")
+	if err != nil || len(afterHistory) != len(beforeHistory) {
+		t.Fatalf("history changed before=%+v after=%+v err=%v", beforeHistory, afterHistory, err)
+	}
+	if _, err := r.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := r.QueueItem(id)
+	if err != nil || expired.Status != "expired" {
+		t.Fatalf("background expiry row=%+v err=%v", expired, err)
+	}
+	history, err := r.ListHistory(20, "")
+	if err != nil || len(history) != len(beforeHistory)+1 || history[0].Kind != "expired" {
+		t.Fatalf("background expiry history=%+v err=%v", history, err)
+	}
+}
+
+func TestListAttentionSnapshotDoesNotReconcileDeadQueue(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	id, err := r.QueueMessageWithKey("s", "dead snapshot", "dead-snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET status='dead',last_error=? WHERE id=?`, "delivery failed", id); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.ListAttentionItems(false)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("GET reconciled attention=%+v err=%v", items, err)
+	}
+	var count int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM attention_items WHERE queue_id=?`, id).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("attention rows=%d err=%v", count, err)
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items, err = r.ListAttentionItems(false)
+	if err != nil || len(items) != 1 || items[0].QueueID != id {
+		t.Fatalf("writer reconciliation=%+v err=%v", items, err)
 	}
 }
 
