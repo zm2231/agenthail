@@ -938,17 +938,27 @@ async function selectSession(id, focus = false) {
     if (!response.ok) throw Error(await response.text());
     const detail = await response.json();
     if (app.selected?.id !== id) return;
+    detail.transcriptWarning = detail.readError || "";
     app.history = detail;
     renderChat();
+    const metadataSeq = detail.journalSeq;
     fetch(`/api/session-metadata?id=${encodeURIComponent(id)}`)
       .then((result) => { if (!result.ok) throw Error("Metadata unavailable"); return result.json(); })
-      .then((metadata) => { if (app.selected?.id === id && app.history === detail) { Object.assign(detail, metadata); renderChat(); } })
+      .then((metadata) => { if (app.selected?.id === id && app.history === detail) { applySessionMetadata(detail, metadata, metadataSeq); renderChat(); } })
       .catch(() => {});
     if (focus && mobileConversationView())
       requestAnimationFrame(() => window.scrollTo(0, 0));
   } catch (error) {
     $("#chat-body").innerHTML =
       `<div class="empty-state"><h2>Could not load this conversation</h2><p>${escape(error.message)}</p></div>`;
+  }
+}
+function applySessionMetadata(detail, metadata, initialSeq) {
+  const {goal, context, ...other} = metadata;
+  Object.assign(detail, other);
+  if (detail.journalSeq === initialSeq) {
+    if (Object.hasOwn(metadata, "goal")) detail.goal = goal;
+    if (Object.hasOwn(metadata, "context")) detail.context = context;
   }
 }
 function renderChat() {
