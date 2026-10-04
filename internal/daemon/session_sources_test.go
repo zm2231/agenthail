@@ -3,19 +3,23 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type sourceCountingSurface struct {
 	*daemonSurface
-	calls   atomic.Int32
-	started chan struct{}
-	events  chan surface.StreamEvent
-	items   []surface.TimelineItem
+	calls     atomic.Int32
+	started   chan struct{}
+	events    chan surface.StreamEvent
+	items     []surface.TimelineItem
+	streamErr error
 }
 
 type restartingSource struct {
@@ -41,6 +45,9 @@ func (s *sourceCountingSurface) Stream(ctx context.Context, _ *surface.Session, 
 	case s.started <- struct{}{}:
 	default:
 	}
+	if s.streamErr != nil {
+		return s.streamErr
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -48,6 +55,39 @@ func (s *sourceCountingSurface) Stream(ctx context.Context, _ *surface.Session, 
 		case event := <-s.events:
 			onEvent(event)
 		}
+	}
+}
+
+func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		streamErr:     errors.New(strings.Repeat("upstream unavailable ", 32)),
+	}
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	var entry registry.SessionJournalEntry
+	select {
+	case entry = <-subscription.Entries:
+	case <-time.After(time.Second):
+		t.Fatal("subscriber did not receive source failure")
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Seq == 0 || payload.Op != "reset" || payload.Kind != "source-error" || payload.ItemID == "" || payload.Reason == "" || len([]rune(payload.Reason)) > 240 {
+		t.Fatalf("entry=%+v payload=%+v", entry, payload)
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 || window.Entries[0].Seq != entry.Seq {
+		t.Fatalf("window=%+v err=%v", window, err)
 	}
 }
 

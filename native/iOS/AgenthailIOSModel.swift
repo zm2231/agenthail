@@ -714,6 +714,10 @@ final class AgenthailIOSModel: ObservableObject {
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
+        if event.data.op == "reset", event.data.kind == "source-error" {
+            sessionError = event.data.reason ?? "The session source restarted."
+            return
+        }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
         let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated, bodyRef: event.data.bodyRef)
@@ -726,6 +730,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         detail.timeline = timeline
         selectedDetail = detail
+        sessionError = nil
     }
 
     func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> String? {

@@ -394,6 +394,7 @@ struct SessionStreamItem: Decodable {
     let body: String?
     let truncated: Bool
     let bodyRef: String?
+    let reason: String?
 }
 
 struct SessionStreamBody: Decodable {
