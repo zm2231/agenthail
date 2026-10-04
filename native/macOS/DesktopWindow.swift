@@ -645,7 +645,7 @@ struct TranscriptView: View {
         let sends = model.localSends[session.id] ?? []
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                if let cursor = pane.olderCursor, cursor > 0 {
+                if (pane.olderCursor ?? 0) > 0 || pane.olderError != nil {
                     olderControl
                 }
                 if let error = pane.detail?.readError {
@@ -748,7 +748,7 @@ struct TranscriptView: View {
         HStack(spacing: 8) {
             if pane.loadingOlder {
                 ProgressView().controlSize(.mini)
-            } else {
+            } else if (pane.olderCursor ?? 0) > 0 {
                 Button("Load earlier") {
                     prepending = true
                     Task {

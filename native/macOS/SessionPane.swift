@@ -29,6 +29,8 @@ final class SessionPane: ObservableObject, Identifiable {
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
     private var olderTask: Task<Void, Never>?
+    private var metadataTask: Task<Void, Never>?
+    private var streamedMetadata: Set<String> = []
     private var closed = false
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
@@ -67,8 +69,10 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadPending = false
         detailReloadTask?.cancel()
         detailReloadTask = nil
+        streamedMetadata = []
         startSessionStream(id)
         startDetailLoad(id)
+        startMetadataLoad(id)
     }
 
     func close() {
@@ -77,6 +81,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadTask?.cancel()
         detailLoadTask?.cancel()
         olderTask?.cancel()
+        metadataTask?.cancel()
         sessionStreamTask = nil
         detailReloadTask = nil
         detailLoadTask = nil
@@ -101,7 +106,14 @@ final class SessionPane: ObservableObject, Identifiable {
                 let retained = Set(olderItems.map(\.id) + (loaded.timeline?.items.map(\.id) ?? []))
                 olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
-            detail = loaded
+            var merged = loaded
+            if let current = detail, current.session.id == id {
+                merged.context = loaded.context ?? current.context
+                merged.goal = loaded.goal ?? current.goal
+                merged.model = loaded.model ?? current.model
+                merged.models = loaded.models ?? current.models
+            }
+            detail = merged
             detailStale = false
             detailRefreshFailed = false
             model.detailLoaded(loaded, for: id)
@@ -144,7 +156,9 @@ final class SessionPane: ObservableObject, Identifiable {
             }
             olderError = nil
         } catch {
-            if selectionGeneration == selection, !error.isCancellation { olderError = error.localizedDescription }
+            guard selectionGeneration == selection, !error.isCancellation else { return }
+            if case AgenthailAPIError.historyGap = error { olderCursor = nil }
+            olderError = error.localizedDescription
         }
     }
 
@@ -160,6 +174,7 @@ final class SessionPane: ObservableObject, Identifiable {
                     frozenOlderCursor = nil
                     startSessionStream(selected)
                     startDetailLoad(selected)
+                    startMetadataLoad(selected)
                 }
             } else if removedSession?.id != selected, selectedSnapshot?.id == selected {
                 removedSession = selectedSnapshot
@@ -213,6 +228,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func freezeRemovedSession() {
         sessionStreamTask?.cancel()
+        metadataTask?.cancel()
         detailReloadTask?.cancel()
         detailReloadTask = nil
         detailReloadPending = false
@@ -222,6 +238,23 @@ final class SessionPane: ObservableObject, Identifiable {
         olderCursor = nil
         detailStale = false
         detailRefreshFailed = false
+    }
+
+    private func startMetadataLoad(_ id: String) {
+        metadataTask?.cancel()
+        guard !closed, let api = model.api else { return }
+        let selection = selectionGeneration
+        metadataTask = Task {
+            guard let metadata = try? await api.sessionMetadata(id: id) else { return }
+            guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil,
+                  var current = detail, current.session.id == id else { return }
+            if !streamedMetadata.contains("context"), let context = metadata.context { current.context = context }
+            if !streamedMetadata.contains("goal"), let goal = metadata.goal { current.goal = goal }
+            if let modelName = metadata.model { current.model = modelName }
+            if let models = metadata.models { current.models = models }
+            detail = current
+            model.refreshCachedDetail(current, for: id)
+        }
     }
 
     private func startDetailLoad(_ id: String) {
@@ -277,6 +310,14 @@ final class SessionPane: ObservableObject, Identifiable {
     private func receiveSessionEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID else { return }
         sessionCursor = max(sessionCursor, event.seq)
+        if event.data.kind == "context" || event.data.kind == "goal" {
+            guard removedSession == nil, var current = detail, current.session.id == event.sessionId else { return }
+            if event.data.kind == "context" { current.context = event.data.context } else { current.goal = event.data.goal }
+            streamedMetadata.insert(event.data.kind)
+            detail = current
+            model.refreshCachedDetail(current, for: event.sessionId)
+            return
+        }
         if let loadedAt = detailLoadedAt, let changedAt = SessionTree.parseTimestamp(event.data.ts), changedAt < loadedAt {
             return
         }

@@ -190,6 +190,11 @@ final class AgenthailModel: ObservableObject {
         operationError = nil
     }
 
+    func refreshCachedDetail(_ detail: SessionDetail, for id: String) {
+        guard detailCache[id] != nil else { return }
+        detailCache[id] = detail
+    }
+
     func draft(for sessionID: String) -> ComposerDraft {
         if let draft = drafts[sessionID] { return draft }
         let draft = ComposerDraft()
