@@ -140,18 +140,18 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil) async throws -> SessionCreationReceipt {
         if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         if surface == "codex" {
             let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher)
-            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65)
+            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
         }
         var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
         if surface == "claude" { body.merge(claude.fields) { _, value in value } }
         if let launcher { body["launcher"] = launcher }
-        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
+        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
     }
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {

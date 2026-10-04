@@ -36,6 +36,23 @@ final class AgenthailIOSModel: ObservableObject {
     private var searchQuery = ""
     private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:]
+    private struct PendingSendRequest {
+        let message: String
+        let turnSettings: TurnSettings
+        let idempotencyKey: String
+    }
+    private struct CreationRequestIdentity: Equatable {
+        let surface: String
+        let message: String
+        let cwd: String
+        let model: String
+        let turnSettings: TurnSettings
+        let claudeFields: [String: String]
+        let launcher: String?
+    }
+    private var pendingSendRequests: [String: PendingSendRequest] = [:]
+    private var creationRequestIdentity: CreationRequestIdentity?
+    private var creationRequestKey: String?
     @Published var notificationStatus = "Not enabled"
     @Published var requestedSessionID: String?
     @Published var showForgetMacConfirmation = false
@@ -130,26 +147,41 @@ final class AgenthailIOSModel: ObservableObject {
     func prepareNewSessionForm() {
         creationError = nil
         creationWarning = nil
+        creationRequestIdentity = nil
+        creationRequestKey = nil
     }
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
+        let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
+                                               turnSettings: surface == "codex" ? turnSettings : .init(),
+                                               claudeFields: claude.fields, launcher: launcher)
+        if creationRequestIdentity != identity || creationRequestKey == nil {
+            creationRequestIdentity = identity
+            creationRequestKey = UUID().uuidString
+        }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher)
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, idempotencyKey: creationRequestKey)
             guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
-            if receipt.accepted == true && receipt.id == nil {
-                creationWarning = receipt.warning ?? "The launcher accepted the request; the conversation is not available yet."
+            if receipt.status == "submitted" && receipt.id == nil {
+                creationWarning = "Submitted to \(receipt.launcher ?? launcher ?? surface)."
                 return false
             }
             creationWarning = receipt.warning
             if let id = receipt.id, !id.isEmpty {
-                deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                let target = receipt.launcher ?? launcher ?? surface
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
                 requestedSessionID = id
             }
+            if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
             return true
         } catch {
-            creationError = "Creation unconfirmed. Check All sessions before retrying to avoid starting twice. \(error.localizedDescription)"
+            if case AgenthailAPIError.unavailable(let detail) = error, detail == "Terminal sessions do not support advanced launch settings." {
+                creationError = detail
+            } else {
+                creationError = "Couldn’t complete request. Your session form is still ready."
+            }
             return false
         }
     }
@@ -537,6 +569,13 @@ final class AgenthailIOSModel: ObservableObject {
         let action = "send"
         guard detail.capabilities.send else { return }
         let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
+        let idempotencyKey: String
+        if let pending = pendingSendRequests[session.id], pending.message == message, pending.turnSettings == turnSettings {
+            idempotencyKey = pending.idempotencyKey
+        } else {
+            idempotencyKey = UUID().uuidString
+            pendingSendRequests[session.id] = PendingSendRequest(message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+        }
         sendingSessionIDs.insert(session.id)
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
@@ -545,7 +584,7 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
@@ -555,10 +594,11 @@ final class AgenthailIOSModel: ObservableObject {
                 if action == "send", turnSettingsDrafts[session.id] == turnSettings {
                     clearTurnSettings(for: session.id)
                 }
+                pendingSendRequests.removeValue(forKey: session.id)
             } catch {
                 deliveryIDs.removeValue(forKey: session.id)
-                deliveryStatus[session.id] = "Delivery unconfirmed. Draft kept; check activity before retrying."
-                operationError = error.localizedDescription
+                deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
+                operationError = "Couldn’t complete request."
                 if selectedSessionID == session.id {
                     composer = composer.isEmpty ? message : message + "\n\n" + composer
                 } else {
@@ -629,6 +669,9 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = nil
         composer = ""
         drafts = [:]
+        pendingSendRequests = [:]
+        creationRequestIdentity = nil
+        creationRequestKey = nil
         olderActivity = []
         activityCursor = nil
         searchResults = []
