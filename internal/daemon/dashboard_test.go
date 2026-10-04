@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,36 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	}
 	if body.Context.UsedTokens != 150000 || body.Context.ContextWindow != 200000 || body.Context.CompactionCount != 2 {
 		t.Fatalf("context=%+v", body.Context)
+	}
+}
+
+func TestDashboardSessionResolvesExactAlias(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	if err := registry.SetAlias("reviewer", "from"); err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{"reviewer", "@reviewer"} {
+		response := httptest.NewRecorder()
+		d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+url.QueryEscape(reference), nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: status=%d body=%s", reference, response.Code, response.Body.String())
+		}
+		var body struct {
+			Session struct {
+				ID string `json:"id"`
+			} `json:"session"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Session.ID != "from" {
+			t.Fatalf("%s: resolved %q", reference, body.Session.ID)
+		}
+	}
+	response := httptest.NewRecorder()
+	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=revi", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("alias prefix status=%d", response.Code)
 	}
 }
 

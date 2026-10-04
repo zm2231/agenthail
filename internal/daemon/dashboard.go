@@ -1342,6 +1342,11 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
+		if aliased, aliasErr := d.Registry.LookupAlias(strings.TrimPrefix(sessionID, "@")); aliasErr == nil {
+			session, err = d.Registry.Session(aliased)
+		}
+	}
+	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}

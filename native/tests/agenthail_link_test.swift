@@ -13,6 +13,9 @@ struct AgenthailLinkTest {
         check(link("agenthail://session/a/b") == nil, "extra path segments are rejected")
         check(link("agenthail://pair?endpoint=x&secret=y") == nil, "pairing links belong to the phone")
         check(link("https://session/a") == nil, "other schemes are rejected")
+        for extra in ["agenthail://?x=1", "agenthail://open?x=1", "agenthail://new#x", "agenthail://session/a?x=1", "agenthail://session/a#x", "agenthail://user@session/a", "agenthail://session:1/a"] {
+            check(link(extra) == nil, "\(extra) is rejected")
+        }
 
         let session = SessionState(id: "019a-thread", surface: "codex", name: "", alias: "optimizer", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil, cwd: nil)
         check(AgenthailLink.matches(session, reference: "019a-thread"), "matches by id")

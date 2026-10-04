@@ -6,7 +6,7 @@ enum AgenthailLink: Equatable {
     case session(String)
 
     init?(url: URL) {
-        guard url.scheme?.lowercased() == "agenthail" else { return nil }
+        guard url.scheme?.lowercased() == "agenthail", url.query == nil, url.fragment == nil, url.user == nil, url.port == nil else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
         switch url.host?.lowercased() ?? "" {
         case "", "open":
