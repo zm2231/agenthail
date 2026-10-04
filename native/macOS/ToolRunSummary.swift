@@ -1,5 +1,12 @@
 import Foundation
 
+struct ToolInvocation: Identifiable {
+    let call: TimelineItem?
+    var results: [TimelineItem]
+
+    var id: String { call?.id ?? results.first?.id ?? "" }
+}
+
 enum ToolRunSummary {
     private struct Category {
         let names: Set<String>
@@ -22,6 +29,34 @@ enum ToolRunSummary {
 
     static func isFailure(_ item: TimelineItem) -> Bool {
         item.status == "failed" || item.status == "error"
+    }
+
+    static func invocations(_ items: [TimelineItem]) -> [ToolInvocation] {
+        var invocations: [ToolInvocation] = []
+        var callIndex: [String: Int] = [:]
+        for item in items {
+            if isCall(item) {
+                if let callID = item.callId { callIndex[callID] = invocations.count }
+                invocations.append(ToolInvocation(call: item, results: []))
+            } else if item.kind == "toolResult" {
+                if let callID = item.callId, let index = callIndex[callID] {
+                    invocations[index].results.append(item)
+                } else {
+                    invocations.append(ToolInvocation(call: nil, results: [item]))
+                }
+            }
+        }
+        return invocations
+    }
+
+    static func outputText(_ text: String) -> String {
+        guard text.hasPrefix("["), let blocks = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]], !blocks.isEmpty else { return text }
+        let texts = blocks.compactMap { $0["text"] as? String }
+        return texts.count == blocks.count ? texts.joined() : text
+    }
+
+    static func outputPreview(_ text: String) -> String {
+        String(text.split(separator: "\n", omittingEmptySubsequences: false).prefix(24).joined(separator: "\n").prefix(3000))
     }
 
     static func mcpParts(_ title: String) -> (server: String, tool: String)? {

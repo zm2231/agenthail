@@ -2,8 +2,8 @@ import Foundation
 
 @main
 struct ToolRunSummaryTest {
-    static func item(_ kind: String, _ title: String, status: String? = nil, text: String = "") -> TimelineItem {
-        TimelineItem(id: UUID().uuidString, kind: kind, role: nil, title: title, text: text, timestamp: nil, callId: nil, status: status, truncated: false, truncationReason: nil, bodyRef: nil)
+    static func item(_ kind: String, _ title: String, status: String? = nil, text: String = "", callId: String? = nil) -> TimelineItem {
+        TimelineItem(id: UUID().uuidString, kind: kind, role: nil, title: title, text: text, timestamp: nil, callId: callId, status: status, truncated: false, truncationReason: nil, bodyRef: nil)
     }
 
     static func main() {
@@ -15,6 +15,18 @@ struct ToolRunSummaryTest {
         expect(ToolRunSummary.isFailure(item("toolResult", "Tool result", status: "error")), "error result is a failure")
         let mcp = [item("toolCall", "mcp__agent-hands__press_key"), item("toolCall", "mcp__agent-hands__list_apps"), item("toolCall", "Bash")]
         expect(ToolRunSummary.label(mcp) == "Used 2 agent-hands tools and ran 1 command", ToolRunSummary.label(mcp))
+        let run = [item("toolCall", "Bash", callId: "a"), item("toolCall", "Read", callId: "b"), item("reasoning", "Thinking"), item("toolResult", "Tool result", text: "read", callId: "b"), item("toolResult", "Tool result", status: "error", text: "boom", callId: "a"), item("toolResult", "Tool result", text: "earlier page", callId: "z"), item("toolCall", "Edit", callId: "c")]
+        let invocations = ToolRunSummary.invocations(run)
+        expect(invocations.map { $0.call?.title ?? "-" } == ["Bash", "Read", "-", "Edit"], "calls keep order and an unmatched result stands alone")
+        expect(invocations[0].results.map(\.text) == ["boom"] && invocations[1].results.map(\.text) == ["read"], "results pair with their call by call ID")
+        expect(invocations[2].results.map(\.text) == ["earlier page"] && invocations[3].results.isEmpty, "a call without a result has none")
+        let long = (1...40).map { "line \($0)" }.joined(separator: "\n")
+        expect(ToolRunSummary.outputPreview(long).split(separator: "\n").count == 24, "preview keeps the first 24 lines")
+        expect(ToolRunSummary.outputPreview(String(repeating: "x", count: 5000)).count == 3000, "preview caps characters")
+        expect(ToolRunSummary.outputPreview("short") == "short", "short output is its own preview")
+        expect(ToolRunSummary.outputText(#"[{"text":"Script completed\n","type":"input_text"},{"text":"body","type":"input_text"}]"#) == "Script completed\nbody", "content blocks unwrap to their text")
+        expect(ToolRunSummary.outputText(#"[{"text":"a"},{"image":"x"}]"#) == #"[{"text":"a"},{"image":"x"}]"#, "mixed blocks stay raw")
+        expect(ToolRunSummary.outputText("[1, 2]") == "[1, 2]" && ToolRunSummary.outputText("plain") == "plain", "other output is unchanged")
         print("tool run summary tests passed")
     }
 

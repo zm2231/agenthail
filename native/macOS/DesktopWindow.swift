@@ -998,8 +998,7 @@ struct ToolRunView: View {
     @Binding var expanded: Bool
 
     var body: some View {
-        let calls = items.filter(ToolRunSummary.isCall)
-        let failedCallIDs = Set(items.filter(ToolRunSummary.isFailure).compactMap(\.callId))
+        let invocations = ToolRunSummary.invocations(items)
         let failed = items.filter(ToolRunSummary.isFailure).count
         VStack(alignment: .leading, spacing: 6) {
             Button {
@@ -1019,8 +1018,15 @@ struct ToolRunView: View {
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                ForEach(calls) { call in
-                    ToolCallRow(call: call, failed: call.callId.map(failedCallIDs.contains) ?? false)
+                ForEach(invocations) { invocation in
+                    if let call = invocation.call {
+                        ToolCallRow(call: call, results: invocation.results)
+                    } else {
+                        ForEach(invocation.results) { result in
+                            ToolOutputBlock(result: result)
+                                .padding(.leading, 21)
+                        }
+                    }
                 }
             }
         }
@@ -1032,8 +1038,10 @@ struct ToolRunView: View {
 
 struct ToolCallRow: View {
     let call: TimelineItem
-    let failed: Bool
+    let results: [TimelineItem]
     @State private var expanded = false
+
+    private var failed: Bool { results.contains(where: ToolRunSummary.isFailure) || ToolRunSummary.isFailure(call) }
 
     static func fullInput(_ text: String) -> String {
         guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], !object.isEmpty else { return text }
@@ -1081,24 +1089,76 @@ struct ToolCallRow: View {
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                Text(Self.fullInput(call.text))
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(DesktopPalette.text)
-                    .textSelection(.enabled)
-                    .lineLimit(40)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
-                    .padding(.leading, 21)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(Self.fullInput(call.text))
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(DesktopPalette.text)
+                        .textSelection(.enabled)
+                        .lineLimit(40)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
+                    if results.isEmpty {
+                        Text("No result yet")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(DesktopPalette.muted)
+                    }
+                    ForEach(results) { result in
+                        ToolOutputBlock(result: result)
+                    }
+                }
+                .padding(.leading, 21)
             }
         }
         .contextMenu {
-            Button("Copy input") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(call.text, forType: .string)
+            Button("Copy input") { copyToPasteboard(call.text) }
+            if !results.isEmpty {
+                Button("Copy output") { copyToPasteboard(results.map { ToolRunSummary.outputText($0.text) }.joined(separator: "\n\n")) }
             }
         }
     }
+}
+
+struct ToolOutputBlock: View {
+    let result: TimelineItem
+    @State private var showAll = false
+
+    var body: some View {
+        let failed = ToolRunSummary.isFailure(result)
+        let text = ToolRunSummary.outputText(result.text)
+        let preview = ToolRunSummary.outputPreview(text)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text(failed ? "Error output" : "Output")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.muted)
+                Spacer()
+                if preview.count < text.count {
+                    Button(showAll ? "Show less output" : "Show full output") { showAll.toggle() }
+                }
+                Button("Copy output") { copyToPasteboard(text) }
+            }
+            .font(.system(size: 11))
+            .buttonStyle(.link)
+            Text(text.isEmpty ? "The tool returned an empty result." : showAll ? text : preview)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.text)
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
+            if result.truncated {
+                Label("Output shortened by the host", systemImage: "text.badge.ellipsis")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DesktopPalette.muted)
+            }
+        }
+    }
+}
+
+private func copyToPasteboard(_ text: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
 }
 
 struct ComposerView: View {
