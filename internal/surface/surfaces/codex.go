@@ -951,7 +951,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			case strings.Contains(strings.ToLower(method), "tool"):
 				if name := codexEventTool(event.Params); name != "" {
 					if uuid == "" {
-						if toolEvent, ok := desktopState.toolEvent(event.Sequence, name, codexEventItemID(event.Params), codexEventItemBody(codexEventItem(event.Params))); ok {
+						if toolEvent, ok := desktopState.toolEvent(event.Sequence, name, codexEventItemID(event.Params), codexEventCallID(event.Params), codexEventItemBody(codexEventItem(event.Params))); ok {
 							onEvent(toolEvent)
 						}
 					} else {
@@ -1043,7 +1043,7 @@ func (s *codexDesktopStreamState) textEvent(text, itemID string) (surface.Stream
 	return surface.StreamEvent{ID: s.assistantKey, ProviderKey: s.assistantKey, Version: uint64(len(s.textByItem[s.assistantKey])), Operation: "append", TurnID: s.turnID, Kind: "text", Text: text}, true
 }
 
-func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, body string) (surface.StreamEvent, bool) {
+func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, callID, body string) (surface.StreamEvent, bool) {
 	if s.turnID == "" {
 		return surface.StreamEvent{}, false
 	}
@@ -1054,7 +1054,10 @@ func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, body s
 	if body == "" {
 		body = name
 	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, CallID: itemID, Kind: "toolCall", Title: name, Text: body}, true
+	if callID == "" {
+		callID = itemID
+	}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, CallID: callID, Kind: "toolCall", Title: name, Text: body}, true
 }
 
 func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEvent, bool) {
@@ -1096,7 +1099,10 @@ func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEve
 	key := codexDesktopStreamKey(turnID, kind, itemID)
 	callID := ""
 	if kind == "toolCall" || kind == "toolResult" {
-		callID = itemID
+		callID = codexEventCallID(event.Params)
+		if callID == "" {
+			callID = itemID
+		}
 	}
 	result := surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(body)), Operation: "upsert", TurnID: turnID, CallID: callID, Kind: kind, Role: role, Title: str(item, "name"), Text: body, Status: str(item, "status")}
 	if kind == "text" && str(item, "phase") == "final_answer" {

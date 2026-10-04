@@ -188,6 +188,65 @@ func TestSessionSourceSeedsJournalBeforeSubscribeReturns(t *testing.T) {
 	}
 }
 
+func TestSessionSourceUnifiesCodexSeedAndLiveProviderIdentity(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "codex:turn-1:assistant:item-1", Kind: "text", Text: "seeded"}},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	var seed sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &seed); err != nil {
+		t.Fatal(err)
+	}
+	if seed.ProviderKey != "codex:turn-1:assistant:item-1" {
+		t.Fatalf("seed identity=%+v", seed)
+	}
+	adapter.events <- surface.StreamEvent{ID: seed.ItemID, ProviderKey: seed.ProviderKey, Version: 2, Operation: "upsert", TurnID: "turn-1", Kind: "text", Text: "live"}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case entry := <-subscription.Entries:
+			var payload sessionJournalPayload
+			if json.Unmarshal(entry.Payload, &payload) == nil && payload.Body == "live" {
+				goto liveObserved
+			}
+		case <-deadline:
+			t.Fatal("live event was not journaled")
+		}
+	}
+
+liveObserved:
+	window, err = reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("live window=%+v err=%v", window, err)
+	}
+	var live sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &live); err != nil {
+		t.Fatal(err)
+	}
+	if live.ProviderKey != seed.ProviderKey || live.Body != "live" {
+		t.Fatalf("live identity/body=%+v seed=%+v", live, seed)
+	}
+}
+
 func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude

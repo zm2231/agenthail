@@ -330,13 +330,17 @@ func (s *sessionSource) seedJournal() {
 			continue
 		}
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		providerKey := "timeline:" + item.ID
+		if s.session.Surface == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
+			providerKey = item.ID
+		}
 		s.append(surface.StreamEvent{
 			Role:        item.Role,
 			Title:       item.Title,
 			Status:      item.Status,
 			Truncated:   item.Truncated,
 			ID:          item.ID,
-			ProviderKey: "timeline:" + item.ID,
+			ProviderKey: providerKey,
 			Version:     uint64(len(item.Text)),
 			Operation:   "upsert",
 			TurnID:      item.CallID,
