@@ -28,6 +28,11 @@ final class AgenthailModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
+    private struct PendingSendRequest {
+        let message: String
+        let idempotencyKey: String
+    }
+    private var pendingSendRequests: [String: PendingSendRequest] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -139,14 +144,24 @@ final class AgenthailModel: ObservableObject {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let sessionID = selectedSessionID else { return }
         composer = ""
-        perform(action: selectedSession?.isWorking == true ? "steer" : "send", sessionID: sessionID, message: message)
+        let idempotencyKey: String
+        if let pending = pendingSendRequests[sessionID], pending.message == message {
+            idempotencyKey = pending.idempotencyKey
+        } else {
+            idempotencyKey = UUID().uuidString
+            pendingSendRequests[sessionID] = PendingSendRequest(message: message, idempotencyKey: idempotencyKey)
+        }
+        perform(action: "send", sessionID: sessionID, message: message, idempotencyKey: idempotencyKey)
     }
 
-    func perform(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil) {
+    func perform(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, idempotencyKey: String? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, sessionID: sessionID, message: message, model: model, queueID: queueID)
+                try await api.action(action, sessionID: sessionID, message: message, model: model, queueID: queueID, idempotencyKey: idempotencyKey)
+                if action == "send", let sessionID, let pending = pendingSendRequests[sessionID], pending.idempotencyKey == idempotencyKey {
+                    pendingSendRequests.removeValue(forKey: sessionID)
+                }
                 operationError = nil
                 await refresh(fresh: true)
             } catch {
