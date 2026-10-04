@@ -201,7 +201,7 @@ final class AgenthailModel: ObservableObject {
             let startedAt = Date()
             if selectedSessionID == id { detailLoadedAt = startedAt }
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return }
             detailAppliedGeneration = generation
             if olderItems.isEmpty {
                 olderCursor = loaded.timeline?.nextBefore
@@ -331,6 +331,14 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    private func freezeRemovedSession() {
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        detailReloadPending = false
+        detailAppliedGeneration = detailRequestGeneration
+    }
+
     func closeRemovedSession() {
         guard removedSession != nil else { return }
         removedSession = nil
@@ -397,9 +405,14 @@ final class AgenthailModel: ObservableObject {
         if let selected = selectedSessionID {
             if let live = sessions.first(where: { $0.id == selected }) {
                 selectedSnapshot = live
-                if removedSession != nil { removedSession = nil }
-            } else if removedSession?.id != selected {
-                removedSession = selectedSnapshot?.id == selected ? selectedSnapshot : nil
+                if removedSession != nil {
+                    removedSession = nil
+                    startSessionStream(selected)
+                    Task { await loadSession(selected) }
+                }
+            } else if removedSession?.id != selected, selectedSnapshot?.id == selected {
+                removedSession = selectedSnapshot
+                freezeRemovedSession()
             }
             if removedSession != nil || sessions.contains(where: { $0.id == selected }) { return }
         }
@@ -418,7 +431,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func scheduleDetailReload(_ id: String) {
-        guard selectedSessionID == id else { return }
+        guard selectedSessionID == id, removedSession == nil else { return }
         detailReloadPending = true
         guard detailReloadTask == nil else { return }
         let owner = UUID()

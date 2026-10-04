@@ -1359,7 +1359,7 @@ struct SessionInspector: View {
             .padding(.horizontal, 16)
             .frame(height: 52)
             .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
-            if let session = model.selectedSession {
+            if let session = model.displayedSession {
                 ScrollView {
                     Group {
                         switch tab {
