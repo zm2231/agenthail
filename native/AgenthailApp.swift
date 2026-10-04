@@ -17,7 +17,7 @@ private struct NotificationState: Codable {
     let error: String?
 }
 
-private enum NativeCommand {
+enum NativeCommand {
     static func run(_ arguments: [String]) -> Int32 {
         guard let command = arguments.first else { return 64 }
         switch command {

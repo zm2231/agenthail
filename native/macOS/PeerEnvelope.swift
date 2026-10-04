@@ -4,6 +4,11 @@ struct PeerEnvelope: Equatable {
     let sender: String?
     let body: String
 
+    var summary: String {
+        guard let sender else { return body }
+        return "From \(sender): \(body)"
+    }
+
     private static let openTag = "<cross-session-message "
     private static let closeTag = "</cross-session-message>"
     private static let preambles = ["Another Claude session sent a message:"]

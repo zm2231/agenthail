@@ -20,7 +20,6 @@ let package = Package(
             sources: [
                 "AgenthailApp.swift",
                 "DuplicateApplicationPolicy.swift",
-                "ResponsivePairLayout.swift",
                 "StatusRefreshPolicy.swift",
                 "AgenthailModels.swift",
                 "TurnSettings.swift",
@@ -30,7 +29,6 @@ let package = Package(
                 "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",
                 "AgenthailModel.swift",
-                "AgenthailViews.swift",
                 "macOS"
             ],
         )

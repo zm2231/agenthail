@@ -4,6 +4,7 @@ import Foundation
 struct SessionTreeTest {
     static func main() {
         let now = SessionTree.parseTimestamp("2026-10-04T12:00:00Z")!
+        expect(SessionTree.parseTimestamp("2026-10-04 12:00:00") == now, "SQLite UTC timestamps parse as UTC")
         let caps = Capabilities(send: true, stream: true, reply: true, goal: false, compact: false, model: true, interrupt: true, steer: true)
         func session(_ id: String, status: String, lastActive: String, project: String, checkout: String, branch: String?, detached: String? = nil) -> SessionState {
             SessionState(id: id, surface: "codex", name: id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", hostProject: HostProjectIdentity(id: project, displayName: project, commonDir: "/repo/.git", path: nil), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))

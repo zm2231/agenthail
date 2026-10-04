@@ -95,8 +95,17 @@ struct SessionTree: Equatable {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: raw) { return date }
-        return ISO8601DateFormatter().date(from: raw)
+        if let date = ISO8601DateFormatter().date(from: raw) { return date }
+        return sqliteTimestamp.date(from: raw)
     }
+
+    private static let sqliteTimestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
 
     private static func projectName(_ session: SessionState) -> String {
         if let name = session.hostProject?.displayName, !name.isEmpty { return name }
