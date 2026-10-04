@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -112,6 +113,9 @@ func (s *legacyIdentitySurface) ReadSession(context.Context, *surface.Session, s
 
 func TestLegacySuccessfulSeedWithoutIdentityFailsBeforeProviderRead(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
+	if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "timeline:old", Payload: []byte(`{"itemId":"old","kind":"text","role":"assistant","body":"old generation"}`)}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}); err != nil {
+		t.Fatal(err)
+	}
 	if err := reg.MarkSessionJournalSeed(from.ID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +128,15 @@ func TestLegacySuccessfulSeedWithoutIdentityFailsBeforeProviderRead(t *testing.T
 	if got := adapter.reads.Load(); got != 0 {
 		t.Fatalf("provider reads=%d, want no read without trusted identity", got)
 	}
-	status, _, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
-	if err != nil || status != "failed" || identity != "" {
-		t.Fatalf("checkpoint status=%q identity=%q err=%v", status, identity, err)
+	status, seq, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
+	if err != nil || status != "failed" || seq != 1 || identity != "" {
+		t.Fatalf("checkpoint status=%q seq=%d identity=%q err=%v", status, seq, identity, err)
+	}
+	if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
+		t.Fatalf("retry err=%v, want durable missing-identity failure", err)
+	}
+	if got := adapter.reads.Load(); got != 0 {
+		t.Fatalf("retry provider reads=%d, want no fresh seed", got)
 	}
 }
 
