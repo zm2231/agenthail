@@ -22,26 +22,24 @@ const (
 )
 
 type Daemon struct {
-	Registry           *registry.Registry
-	Surfaces           []surface.Surface
-	log                *log.Logger
-	errorMu            sync.Mutex
-	observeErrors      map[string]observedError
-	pendingAliasWarns  map[int64]bool
-	retryMu            sync.Mutex
-	observeRetry       map[string]observeRetry
-	notificationMu     sync.Mutex
-	notificationArmed  map[string]bool
-	queueWorkers       sync.WaitGroup
-	events             *eventHub
-	catalog            *catalogHub
-	catalogQueueMu     sync.Mutex
-	catalogQueueCounts map[string]int
-	sources            *sessionSourceManager
-	sourceHoldMu       sync.Mutex
-	sourceHolds        map[string]map[string]func()
-	dashboard          *dashboardServer
-	transportResolver  *SessionTransportResolver
+	Registry          *registry.Registry
+	Surfaces          []surface.Surface
+	log               *log.Logger
+	errorMu           sync.Mutex
+	observeErrors     map[string]observedError
+	pendingAliasWarns map[int64]bool
+	retryMu           sync.Mutex
+	observeRetry      map[string]observeRetry
+	notificationMu    sync.Mutex
+	notificationArmed map[string]bool
+	queueWorkers      sync.WaitGroup
+	events            *eventHub
+	catalog           *catalogHub
+	sources           *sessionSourceManager
+	sourceHoldMu      sync.Mutex
+	sourceHolds       map[string]map[string]func()
+	dashboard         *dashboardServer
+	transportResolver *SessionTransportResolver
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {

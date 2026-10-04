@@ -1022,13 +1022,10 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 					finalEmitted = true
 				}
 				emitted = assistant.Text
-			} else if hasAssistant && strings.HasPrefix(assistant.Text, emitted) {
-				delta := strings.TrimPrefix(assistant.Text, emitted)
-				if delta != "" {
-					emitted = assistant.Text
-					key := "managed:" + turn.ID
-					onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(assistant.Text)), Operation: "append", TurnID: turn.ID, Kind: "text", Text: delta})
-				}
+			} else if hasAssistant && assistant.Text != emitted {
+				emitted = assistant.Text
+				key := "managed:" + turn.ID
+				onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(assistant.Text)), Operation: "upsert", TurnID: turn.ID, Kind: "text", Text: assistant.Text})
 			}
 			if turn.Done {
 				key := "managed:" + turn.ID

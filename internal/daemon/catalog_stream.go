@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -377,11 +376,6 @@ func (d *Daemon) publishCatalogQueueCounts() {
 		d.log.Printf("catalog queue counts: %s", err)
 		return
 	}
-	d.catalogQueueMu.Lock()
-	defer d.catalogQueueMu.Unlock()
-	if d.catalogQueueCounts != nil && maps.Equal(d.catalogQueueCounts, counts) {
-		return
-	}
 	snapshot, err := d.Registry.CatalogSnapshot()
 	if err != nil {
 		d.log.Printf("catalog queue snapshot: %s", err)
@@ -413,7 +407,6 @@ func (d *Daemon) publishCatalogQueueCounts() {
 			return
 		}
 	}
-	d.catalogQueueCounts = counts
 }
 
 func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surface.Session) {

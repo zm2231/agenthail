@@ -427,6 +427,35 @@ CREATE TABLE IF NOT EXISTS catalog_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS catalog_events_created ON catalog_events(created_at DESC, seq DESC);
+CREATE TRIGGER IF NOT EXISTS message_queue_catalog_insert AFTER INSERT ON message_queue
+WHEN NEW.status IN ('pending','inflight')
+BEGIN
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
+		json_object('sessionId',NEW.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=NEW.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+CREATE TRIGGER IF NOT EXISTS message_queue_catalog_update AFTER UPDATE OF status,session_id ON message_queue
+WHEN (OLD.status IN ('pending','inflight')) != (NEW.status IN ('pending','inflight')) OR (OLD.session_id != NEW.session_id AND NEW.status IN ('pending','inflight'))
+BEGIN
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
+		json_object('sessionId',NEW.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=NEW.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	SELECT 'session.queue:'||OLD.session_id||':'||lower(hex(randomblob(12))),'session.queue',OLD.session_id,
+		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
+END;
+CREATE TRIGGER IF NOT EXISTS message_queue_catalog_delete AFTER DELETE ON message_queue
+WHEN OLD.status IN ('pending','inflight')
+BEGIN
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	VALUES('session.queue:'||OLD.session_id||':'||lower(hex(randomblob(12))),'session.queue',OLD.session_id,
+		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL

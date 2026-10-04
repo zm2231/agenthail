@@ -247,7 +247,8 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 	window, err := first.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	problems := catalogEventsOfType(window, "delivery.problem")
+	if err != nil || len(problems) != 1 {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 	var payload struct {
@@ -255,7 +256,7 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 		SessionID       string `json:"sessionId"`
 		SourceSessionID string `json:"sourceSessionId"`
 	}
-	if err := json.Unmarshal(window.Events[0].Payload, &payload); err != nil || payload.DeliveryID != deliveryID || payload.SessionID != "target" || payload.SourceSessionID != "sender" {
+	if err := json.Unmarshal(problems[0].Payload, &payload); err != nil || payload.DeliveryID != deliveryID || payload.SessionID != "target" || payload.SourceSessionID != "sender" {
 		t.Fatalf("payload=%+v err=%v", payload, err)
 	}
 	if err := first.Close(); err != nil {
@@ -276,7 +277,7 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err = second.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	if err != nil || len(catalogEventsOfType(window, "delivery.problem")) != 1 {
 		t.Fatalf("reopened events=%+v err=%v", window, err)
 	}
 }
@@ -358,4 +359,14 @@ func TestQueuedDeliveryUnknownOutcomeRetainsUncertaintyWithoutNotice(t *testing.
 	if count := r.QueueCount("sender"); count != 0 {
 		t.Fatalf("unknown outcome queued %d notices", count)
 	}
+}
+
+func catalogEventsOfType(window CatalogEventWindow, kind string) []CatalogEvent {
+	var events []CatalogEvent
+	for _, event := range window.Events {
+		if event.Type == kind {
+			events = append(events, event)
+		}
+	}
+	return events
 }
