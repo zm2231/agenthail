@@ -156,6 +156,8 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		}
 		lineOffset := offset
 		next, err := scanAppendedJSONL(ctx, path, offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+			recordOffset := lineOffset
+			lineOffset += int64(len(line))
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				return nil
@@ -172,7 +174,6 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			}
 			projection := codexUserProjection{pending: session.CodexPendingEventUser, turnID: session.CodexPendingEventTurn}
 			if projection.consume(record, items, effectiveTurnID) {
-				lineOffset += int64(len(line))
 				session.CodexPendingEventUser = projection.pending
 				session.CodexPendingEventTurn = projection.turnID
 				session.CodexCurrentTurnID = currentTurnID
@@ -183,18 +184,16 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			session.CodexCurrentTurnID = currentTurnID
 			if len(items) == 0 {
 				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
-					emitCodexTranscriptItem(session, uuid, record, line, lineOffset, 0, *opaque, currentTurnID, onEvent)
+					emitCodexTranscriptItem(session, uuid, record, line, recordOffset, 0, *opaque, currentTurnID, onEvent)
 				}
-				lineOffset += int64(len(line))
 				return nil
 			}
-			if err := decorateTimelineAttachments(ctx, items, record, "codex", lineOffset); err != nil {
+			if err := decorateTimelineAttachments(ctx, items, record, "codex", recordOffset); err != nil {
 				return err
 			}
 			for index, item := range items {
-				emitCodexTranscriptItem(session, uuid, record, line, lineOffset, index, item, currentTurnID, onEvent)
+				emitCodexTranscriptItem(session, uuid, record, line, recordOffset, index, item, currentTurnID, onEvent)
 			}
-			lineOffset += int64(len(line))
 			return nil
 		})
 		if err != nil {
