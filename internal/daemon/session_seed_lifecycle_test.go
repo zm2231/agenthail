@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type emptySeedSurface struct {
@@ -89,6 +92,102 @@ func TestSessionSourceDoesNotPersistFailedSeedAsSuccess(t *testing.T) {
 	}
 	if got := adapter.reads.Load(); got != 2 {
 		t.Fatalf("failed seed reads=%d, want retry", got)
+	}
+}
+
+func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.T) {
+	_, reg, _, from, _ := daemonFixture(t)
+	transcript := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-seed"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"seed request"}}
+{"type":"response_item","payload":{"id":"seed-user","type":"message","role":"user","content":[{"type":"input_text","text":"seed request"}]}}
+{"type":"response_item","payload":{"id":"seed-answer","type":"message","role":"assistant","content":[{"type":"output_text","text":"seed answer"}]}}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Source = "vscode"
+	from.Transport = "desktop"
+	from.Transcript = transcript
+	from.HasLocal = true
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := surfaces.NewCodex("http://127.0.0.1:1")
+	manager := newSessionSourceManager(reg)
+	first, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedPage, err := reg.ReadSessionJournalPage(from.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Cancel()
+	waitForSessionSourceGone(t, manager)
+	if err := appendFile(t, transcript, `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-restart"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"after restart"}}
+{"type":"response_item","payload":{"id":"restart-user","type":"message","role":"user","content":[{"type":"input_text","text":"after restart"}]}}
+{"type":"response_item","payload":{"id":"restart-answer","type":"message","role":"assistant","content":[{"type":"output_text","text":"restart answer"}]}}
+`); err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Cancel()
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		seen[payload.Body]++
+	}
+	for _, body := range []string{"after restart", "restart answer"} {
+		if seen[body] != 1 {
+			t.Fatalf("body %q count=%d page=%+v", body, seen[body], page)
+		}
+	}
+	for _, body := range []string{"seed request", "seed answer"} {
+		if seen[body] != 1 {
+			t.Fatalf("reseed duplicated body %q count=%d seed=%+v page=%+v", body, seen[body], seedPage, page)
+		}
+	}
+}
+
+func appendFile(t *testing.T, path, content string) error {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func waitForSessionSourceGone(t *testing.T, manager *sessionSourceManager) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		manager.mu.Lock()
+		count := len(manager.sources)
+		manager.mu.Unlock()
+		if count == 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("source did not become cold")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
