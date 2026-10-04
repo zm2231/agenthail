@@ -16,8 +16,13 @@ const (
 func (d *Daemon) scanAndRelay(ctx context.Context) {
 	if expired, err := d.Registry.ExpireMessages(time.Now()); err != nil {
 		d.log.Printf("expire queued messages: %s", err)
-	} else if expired > 0 {
-		d.publishEvent("state.changed", "", map[string]any{"source": "queue-expired", "count": expired})
+	} else {
+		if err := d.catalog.flushCommitted(); err != nil {
+			d.log.Printf("publish committed catalog events: %s", err)
+		}
+		if expired > 0 {
+			d.publishEvent("state.changed", "", map[string]any{"source": "queue-expired", "count": expired})
+		}
 	}
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {

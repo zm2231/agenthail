@@ -121,6 +121,9 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, QueueID: item.ID, Message: message, Error: sendErr.Error()})
 		if notified {
+			if err := d.catalog.flushCommitted(); err != nil {
+				d.log.Printf("publish terminal delivery problem: %s", err)
+			}
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "delivery-problem"})
 		}
 		return
