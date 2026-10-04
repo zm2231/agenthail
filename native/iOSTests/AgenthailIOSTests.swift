@@ -7,6 +7,16 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(formatGoalDuration(125), "2m 5s")
         XCTAssertEqual(formatGoalDuration(3720), "1h 2m")
     }
+    func testContextStateUsesTokensWhenWindowIsUnknownOrExceeded() throws {
+        let unknown = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":0,"compacting":false,"compactionCount":0,"contextWindowSource":"unknown"}"#.utf8))
+        XCTAssertNil(unknown.fraction)
+
+        let exceeded = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":200000,"compacting":false,"compactionCount":0,"windowEstimated":true}"#.utf8))
+        XCTAssertNil(exceeded.fraction)
+
+        let configured = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":1000000,"compacting":false,"compactionCount":0,"contextWindowSource":"configured"}"#.utf8))
+        XCTAssertEqual(configured.fraction ?? -1, 0.25, accuracy: 0.0001)
+    }
 
     func testEmptyEventStreamMarksConnectionHealthy() async throws {
         let configuration = URLSessionConfiguration.ephemeral

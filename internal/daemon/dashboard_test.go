@@ -457,6 +457,7 @@ func TestDashboardShowsCompactContextUsage(t *testing.T) {
 		`id="context-usage"`,
 		`item.kind === "context"`,
 		`Context ${compactTokenCount(context.usedTokens)}`,
+		`context window unavailable`,
 		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
 		`.context-usage.critical`,
 	} {

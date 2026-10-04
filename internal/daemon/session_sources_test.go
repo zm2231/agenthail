@@ -116,6 +116,63 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 	}
 }
 
+func TestSessionSourceSeedsJournalBeforeSubscribeReturns(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-1", Kind: "text", Text: "seeded"}},
+	}
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ItemID != "seed-1" || payload.Body != "seeded" {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-uds", Kind: "text", Text: "peer seed"}},
+	}
+	adapter.caps.Stream = false
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ItemID != "seed-uds" || payload.Kind == "source-error" || adapter.calls.Load() != 0 {
+		t.Fatalf("payload=%+v streamCalls=%d", payload, adapter.calls.Load())
+	}
+}
+
 func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}

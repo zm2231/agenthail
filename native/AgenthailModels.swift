@@ -253,19 +253,19 @@ struct ContextState: Decodable {
     let inputTokens: Int64?
     let cachedInputTokens: Int64?
     let outputTokens: Int64?
-    let reasoningOutputTokens: Int64?
-    let windowEstimated: Bool?
-    let updatedAt: String?
+	let reasoningOutputTokens: Int64?
+	let windowEstimated: Bool?
+	let contextWindowSource: String?
+	let updatedAt: String?
     let lastCompactedAt: String?
-
-    var fraction: Double {
-        guard contextWindow > 0 else { return 0 }
-        return min(1, Double(usedTokens) / Double(contextWindow))
-    }
 
     var exceedsEstimatedWindow: Bool {
         windowEstimated == true && contextWindow > 0 && usedTokens > contextWindow
     }
+	var fraction: Double? {
+		guard contextWindow > 0, usedTokens <= contextWindow else { return nil }
+		return Double(usedTokens) / Double(contextWindow)
+	}
 }
 
 struct ModelOption: Decodable, Identifiable {

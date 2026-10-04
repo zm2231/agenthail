@@ -110,6 +110,7 @@ func (r *Registry) migrate() error {
 	}{
 		{"source", `TEXT NOT NULL DEFAULT ''`},
 		{"transport", `TEXT NOT NULL DEFAULT ''`},
+		{"configured_model", `TEXT NOT NULL DEFAULT ''`},
 		{"last_active_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
@@ -203,6 +204,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
 	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
+	configured_model TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -407,8 +409,8 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		lastActiveMS = s.LastActive.UnixMilli()
 	}
 	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
@@ -423,10 +425,11 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.transport
 		     WHEN excluded.transport<>'' THEN excluded.transport
 		     ELSE sessions.transport
-		   END,
-		   last_active_ms=excluded.last_active_ms,
+			   END,
+			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
+			   last_active_ms=excluded.last_active_ms,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, lastActiveMS)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, lastActiveMS)
 	if err != nil {
 		return err
 	}
@@ -1853,8 +1856,8 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var kind, status string
 	var hasLocal int
 	var lastActiveMS int64
-	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions WHERE id = ?`, id).Scan(
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS,
+	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms FROM sessions WHERE id = ?`, id).Scan(
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS,
 	)
 	if err != nil {
 		return nil, err
@@ -1877,7 +1880,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.last_active_ms
+	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
@@ -1891,7 +1894,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)
@@ -1906,7 +1909,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
+	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -1923,7 +1926,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)

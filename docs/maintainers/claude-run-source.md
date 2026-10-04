@@ -74,13 +74,19 @@ the window is zero or an estimated denominator would exceed 100 percent.
 They must not reconstruct a window from transcript model names or observed
 usage.
 
-## Shared-surface follow-up
+## Shared-surface integration
 
-The observation is intentionally not wired into `internal/surface/surface.go`
-or the daemon session projection in this change. The parent-owned integration
-must capture the launch value at `Claude.StartSession`, persist it by session
-ID, expose the typed source through the existing context response, and update
-native rendering before claiming end-to-end context-window support.
+`Claude.StartSession` captures the launch model in
+`surface.Session.ConfiguredModel`. The registry persists it in
+`sessions.configured_model`, preserving an existing value when a later
+registration omits the model. Claude context projection resolves only that
+captured value and emits `ContextUsage.ContextWindowSource`; the existing
+session-detail API carries the field without a separate provider endpoint.
+
+Native and dashboard consumers treat a zero window, an estimated window, or
+usage above the denominator as token-only state. They do not show a percentage
+for those cases. A configured `[1m]` value is the only current Claude window
+producer, and it is displayed as configured rather than estimated.
 
 ## Journal production wiring
 
@@ -92,11 +98,11 @@ That ordering permits an initially empty replay. The current source also
 records an unsupported provider stream as `source-error` and retries it,
 although a bounded `ReadSession` seed may still be available.
 
-The daemon integration must make seed completion observable before the first
-journal replay, allow seed-only sessions when `ReadSession` is available, and
-terminate unsupported live tails without appending retry noise. The required
-tests are a first-replay seed assertion, an unsupported-stream seed-only
-assertion, and a no-retry/no-source-error assertion.
+The daemon integration makes seed completion observable before the first
+journal replay, allows Claude UDS seed-only sessions when `ReadSession` is
+available, and terminates unsupported live tails without appending retry noise.
+The coverage is a first-replay seed assertion, an unsupported-stream seed-only
+assertion, an API replay assertion, and a no-retry/no-source-error assertion.
 
 The contention investigation reproduced `SQLITE_BUSY` in an isolated fresh
 WAL database when an external writer held an uncommitted transaction while
