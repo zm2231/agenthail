@@ -1270,6 +1270,28 @@ func TestSteerClaimSkipsOlderExplicitQueueWithoutReorderingIt(t *testing.T) {
 	}
 }
 
+func TestSteerQueueNormalizesOptionsAndExcludesThemFromSteerClaims(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusBusy}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueRelayMessageWithOptions("target", "optioned steer", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.QueueItem(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.BusyDelivery != "queue" || item.Model != "model-a" || item.Effort != "high" {
+		t.Fatalf("normalized queue item=%+v", item)
+	}
+	steer, err := r.ClaimNextSteerMessage("target", time.Now())
+	if err != nil || steer != nil {
+		t.Fatalf("option-bearing item was steer-claimable: item=%+v err=%v", steer, err)
+	}
+}
+
 func TestDeliveryHistoryIsBoundedAndFilterable(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "writer", "reviewer")

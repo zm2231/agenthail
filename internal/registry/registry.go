@@ -801,6 +801,9 @@ func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey strin
 }
 
 func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
+	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
+		options.BusyDelivery = "queue"
+	}
 	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -895,7 +898,7 @@ func (r *Registry) QueueCount(sessionID string) int {
 
 func (r *Registry) PendingSteer(sessionID string) (bool, error) {
 	var found int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=?`, sessionID, "steer").Scan(&found)
+	err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
 	return found > 0, err
 }
 
@@ -1395,6 +1398,9 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	if busyDelivery != "" {
 		query += ` AND busy_delivery=?`
 		args = append(args, busyDelivery)
+		if busyDelivery == "steer" {
+			query += ` AND model='' AND (turn_options='' OR turn_options='{}')`
+		}
 	}
 	query += ` ORDER BY id LIMIT 1`
 	err = tx.QueryRow(query, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
