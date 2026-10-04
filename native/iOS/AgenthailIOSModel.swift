@@ -123,25 +123,32 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         return try await api.creationModels(surface: surface)
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async -> Bool {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         creatingSession = true; creationError = nil
         defer { creatingSession = false }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude)
-            if receipt.unknown == true && receipt.id == nil {
-                creationError = "\(surface.capitalized) may have started without a confirmed session ID. Check the agent catalog on your Mac before retrying. \(receipt.error ?? "")"
-                return false
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher)
+            guard receipt.ok || receipt.unknown == true else { throw AgenthailAPIError.invalidResponse }
+            if let id = receipt.id, !id.isEmpty {
+                deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                requestedSessionID = id
             }
-            guard let id = receipt.id, !id.isEmpty, receipt.ok || receipt.unknown == true else { throw AgenthailAPIError.invalidResponse }
-            deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
-            requestedSessionID = id
             return true
         } catch {
             creationError = "Creation unconfirmed. Check All sessions before retrying to avoid starting twice. \(error.localizedDescription)"
             return false
         }
     }
+
+    func focusSession(_ session: SessionState) {
+        guard let api, session.runtime?.focusable == true else { return }
+        Task {
+            do { try await api.action("session-focus", sessionID: session.id) }
+            catch { operationError = error.localizedDescription }
+        }
+    }
+
     private var endpoint: URL?
     private var token: String?
     private var eventTask: Task<Void, Never>?

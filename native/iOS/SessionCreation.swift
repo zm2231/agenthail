@@ -13,6 +13,7 @@ struct NewSessionSheet: View {
     @State private var modelError: String?
     @State private var loading = false
     @State private var claude = ClaudeCreationSettings()
+    @State private var selectedLauncher: String?
     @State private var showingModels = false
     @State private var turnSettings = TurnSettings()
 
@@ -30,6 +31,24 @@ struct NewSessionSheet: View {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
                             Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        let launchers = (options.launchers ?? []).filter { $0.agents.contains(selectedSurface) }
+                        if !launchers.isEmpty {
+                            Section("Where it runs") {
+                                Picker("Launcher", selection: $selectedLauncher) {
+                                    Text("Use Mac default").tag(String?.none)
+                                    ForEach(launchers) { launcher in
+                                        Text(launcher.available ? launcher.label : "\(launcher.label) (unavailable)")
+                                            .tag(Optional(launcher.id))
+                                            .disabled(!launcher.available)
+                                    }
+                                }
+                                ForEach(launchers.filter { !$0.available }) { launcher in
+                                    if let detail = launcher.detail, !detail.isEmpty {
+                                        Text("\(launcher.label): \(detail)").font(.footnote).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
                         if options.surfaces.first(where: { $0.id == selectedSurface })?.workspace == true {
                             Section("Workspace on your Mac") {
@@ -88,7 +107,7 @@ struct NewSessionSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.creatingSession) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task {
-                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude) { dismiss() }
+                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher) { dismiss() }
                     } } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
                     }.disabled(model.creatingSession || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
