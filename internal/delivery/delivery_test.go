@@ -247,6 +247,23 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 	}
 }
 
+func TestDispatcherPreflightsBusyClaudePeerBeforeTransportAcceptance(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "session_peer", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{kind: surface.KindClaude, observe: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}, result: &surface.SendResult{Accepted: true}}
+	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "hold for peer", "", surface.SendOptions{BusyDelivery: "queue"})
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || len(adapter.sent) != 0 || r.QueueCount(session.ID) != 1 {
+		t.Fatalf("receipt=%+v err=%v sent=%v queued=%d", receipt, err, adapter.sent, r.QueueCount(session.ID))
+	}
+}
+
 func TestDispatcherCompactUsesTypedSurfaceOperation(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {

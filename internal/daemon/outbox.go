@@ -14,8 +14,20 @@ const maxDeliveryAttempts = 5
 const compactOperationTimeout = 5 * time.Minute
 
 func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.drainClaimedMessage(ctx, adapter, session, func(now time.Time) (*registry.QueuedMessage, error) {
+		return d.Registry.ClaimNextMessage(session.ID, now)
+	})
+}
+
+func (d *Daemon) drainSteerMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.drainClaimedMessage(ctx, adapter, session, func(now time.Time) (*registry.QueuedMessage, error) {
+		return d.Registry.ClaimNextSteerMessage(session.ID, now)
+	})
+}
+
+func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surface, session *surface.Session, claim func(time.Time) (*registry.QueuedMessage, error)) {
 	now := time.Now()
-	item, err := d.Registry.ClaimNextMessage(session.ID, now)
+	item, err := claim(now)
 	if err != nil {
 		d.log.Printf("claim queue for %s: %s", d.resolveDisplay(session.ID), err)
 		return

@@ -1348,6 +1348,14 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 }
 
 func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	return r.claimNextMessage(sessionID, now, "")
+}
+
+func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	return r.claimNextMessage(sessionID, now, "steer")
+}
+
+func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
@@ -1360,7 +1368,14 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`
+	args := []any{sessionID}
+	if busyDelivery != "" {
+		query += ` AND busy_delivery=?`
+		args = append(args, busyDelivery)
+	}
+	query += ` ORDER BY id LIMIT 1`
+	err = tx.QueryRow(query, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
