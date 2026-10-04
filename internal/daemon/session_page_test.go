@@ -165,6 +165,36 @@ func TestReadJournalPagePreservesPagingIdentityRolesAndBodyReferences(t *testing
 	}
 }
 
+func TestReadJournalPageKeepsToolAndReasoningRolesOutOfChatExchanges(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	items := []sessionJournalPayload{
+		{ItemID: "prompt", Kind: "message", Role: "user", Body: "Question"},
+		{ItemID: "thinking", Kind: "reasoning", Role: "assistant", Body: "Private reasoning"},
+		{ItemID: "call", Kind: "toolCall", Role: "assistant", Body: "Tool input"},
+		{ItemID: "result", Kind: "toolResult", Role: "user", Body: "Tool output"},
+		{ItemID: "image", Kind: "attachment", Role: "user", Body: "Image attachment"},
+		{ItemID: "answer", Kind: "message", Role: "assistant", Body: "Answer"},
+	}
+	for _, item := range items {
+		item.Op = "upsert"
+		item.Version = 1
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: item.Kind, ProviderKey: item.ItemID, Payload: encoded, ObservedAt: time.Now()}, registry.SessionJournalRetention{Count: 32, Bytes: 16 << 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := d.readJournalPage(from.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != len(items) || len(page.Exchanges) != 1 || page.Exchanges[0].User != "Question" || page.Exchanges[0].Assistant != "Answer" {
+		t.Fatalf("page lost timeline or mixed tool/reasoning into chat: %+v", page)
+	}
+}
+
 func TestDashboardSessionReturnsTypedHistoryGapAfterJournalPrune(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	retention := registry.SessionJournalRetention{Count: 2, Bytes: 1024}

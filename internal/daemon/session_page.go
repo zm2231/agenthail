@@ -38,6 +38,9 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		}
 		result.Items = append(result.Items, surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind, Role: role, Title: title, Text: payload.Body, Timestamp: payload.TS, CallID: payload.TurnID, Status: payload.Status, Truncated: payload.Truncated, TruncationReason: payload.TruncationReason, BodyRef: payload.BodyRef})
 		result.Truncated = result.Truncated || payload.Truncated
+		if payload.Kind != "message" && payload.Kind != "text" && payload.Kind != "assistant" {
+			continue
+		}
 		if role == "user" {
 			result.Exchanges = append(result.Exchanges, surface.Exchange{User: payload.Body, Source: "journal"})
 		} else if role == "assistant" {

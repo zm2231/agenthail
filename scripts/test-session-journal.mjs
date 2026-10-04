@@ -120,6 +120,10 @@ instances[0].emit('item', {itemId: 'image-1', op: 'upsert', kind: 'attachment', 
 assert.equal(app.history.timeline.items[2].attachment.id, 'image-1');
 assert.equal(app.history.timeline.items[2].callId, 'tool-1');
 assert.equal(app.history.exchanges.length, 1, 'attachments remain timeline items, not duplicate text exchanges');
+instances[0].emit('item', {itemId: 'tool-2', op: 'upsert', kind: 'toolResult', role: 'user', body: 'Tool result'});
+instances[0].emit('item', {itemId: 'thinking', op: 'upsert', kind: 'reasoning', role: 'assistant', body: 'Reasoning'});
+assert.equal(app.history.exchanges.length, 1, 'tool and reasoning roles do not create chat exchanges');
+assert.equal(app.history.exchanges[0].assistant, 'updated answer');
 
 instances[0].emit('item', {itemId: 'context-1', op: 'upsert', kind: 'context', context: {usedTokens: 90}});
 assert.equal(app.history.context.usedTokens, 90);
