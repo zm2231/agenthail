@@ -19,6 +19,7 @@ type threadCreateOutput struct {
 	Status     string              `json:"status,omitempty"`
 	Accepted   bool                `json:"accepted,omitempty"`
 	Retryable  bool                `json:"retryable"`
+	Detail     string              `json:"detail,omitempty"`
 	Warning    string              `json:"warning,omitempty"`
 	DeliveryID int64               `json:"deliveryId,omitempty"`
 	Session    *surface.Session    `json:"session,omitempty"`
@@ -103,7 +104,7 @@ func (a *App) cmdThread(args []string) error {
 			output.DeliveryID = intent.ID
 			if surface.IsDeliveryOutcomeUnknown(startErr) {
 				recordThreadCreateHistory(a.Registry, "submitted", session, request.message, "", startErr.Error())
-				return emitSubmittedThreadOutput(request, output, "Initial turn outcome is unresolved; no automatic retry will occur.")
+				return emitSubmittedThreadOutput(request, output)
 			}
 			_, _ = a.Registry.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, startErr.Error())
 			recordThreadCreateHistory(a.Registry, "failed", session, request.message, "", startErr.Error())
@@ -155,25 +156,27 @@ func (a *App) cmdThread(args []string) error {
 	return nil
 }
 
-func emitSubmittedThreadCreate(request threadCreateRequest, session *surface.Session, warning string) error {
-	return emitSubmittedThreadOutput(request, threadCreateOutput{OK: true, Session: session, Alias: request.alias}, warning)
-}
-
-func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateOutput, warning string) error {
+func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateOutput) error {
 	output.OK = true
 	output.Status = "submitted"
 	output.Accepted = true
 	output.Retryable = false
-	output.Warning = warning
+	output.Detail = submittedThreadDetail(output.Session, request.alias)
 	if request.jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(output)
 	}
-	target := string(output.Session.Surface) + "/" + output.Session.ID
-	if request.alias != "" {
-		target = "@" + request.alias
-	}
-	fmt.Printf("created %s; %s\n", target, warning)
+	fmt.Println(output.Detail)
 	return nil
+}
+
+func submittedThreadDetail(session *surface.Session, alias string) string {
+	target := alias
+	if target != "" {
+		target = "@" + target
+	} else {
+		target = string(session.Surface) + ":" + session.ID
+	}
+	return "Submitted to " + target + "."
 }
 
 func emitCreateStorageFailure(request threadCreateRequest, session *surface.Session, message string) error {

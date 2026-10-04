@@ -155,7 +155,7 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 		t.Fatalf("err=%v", runErr)
 	}
 	var result threadCreateOutput
-	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil || result.Session.ID != "created" || result.Warning != "Initial turn outcome is unresolved; no automatic retry will occur." {
+	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil || result.Session.ID != "created" || result.Detail != "Submitted to @builder." || result.Warning != "" || strings.Contains(strings.ToLower(output), "unresolved") || strings.Contains(strings.ToLower(output), "confirm") || strings.Contains(strings.ToLower(output), "inspect") || strings.Contains(strings.ToLower(output), "retrying") {
 		t.Fatalf("result=%+v decodeErr=%v output=%q", result, err, output)
 	}
 	if _, err := app.Registry.Session("created"); err != nil {
@@ -196,6 +196,22 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	intent, err := app.Registry.DeliveryIntent(result.DeliveryID)
 	if err != nil || intent.Status != "failed" || intent.TargetSessionID != "created" {
 		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestThreadCreateCodexHumanSubmittedDetailIsNeutral(t *testing.T) {
+	cwd := t.TempDir()
+	starter := &starterCLISurface{
+		cliSurface: &cliSurface{kind: surface.KindCodex},
+		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, Cwd: cwd, Transport: "managed"},
+		err:        surface.DeliveryOutcomeUnknown(errors.New("provider response lost")),
+	}
+	app := threadFixture(t, starter)
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder"})
+	})
+	if err != nil || output != "Submitted to @builder.\n" {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
