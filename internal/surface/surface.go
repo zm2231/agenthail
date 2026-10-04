@@ -361,6 +361,53 @@ type StreamEvent struct {
 	Goal        *GoalState    `json:"goal,omitempty"`
 }
 
+type StreamEventClass string
+
+const (
+	StreamEventMessage    StreamEventClass = "message"
+	StreamEventToolCall   StreamEventClass = "tool_call"
+	StreamEventToolResult StreamEventClass = "tool_result"
+	StreamEventTerminal   StreamEventClass = "terminal"
+	StreamEventOther      StreamEventClass = "other"
+)
+
+func (e StreamEvent) Class() StreamEventClass {
+	switch e.Kind {
+	case "text", "message", "assistant":
+		return StreamEventMessage
+	case "tool_use", "toolCall", "tool_call":
+		return StreamEventToolCall
+	case "tool_result", "toolResult":
+		return StreamEventToolResult
+	case "done", "source-error":
+		return StreamEventTerminal
+	default:
+		return StreamEventOther
+	}
+}
+
+func (e StreamEvent) Failed() bool {
+	if e.Class() != StreamEventTerminal {
+		return false
+	}
+	switch e.Status {
+	case "failed", "error", "cancelled", "canceled":
+		return true
+	default:
+		return e.Kind == "source-error"
+	}
+}
+
+func StreamEventDelta(event StreamEvent, previous string) string {
+	if event.Operation == "append" {
+		return event.Text
+	}
+	if strings.HasPrefix(event.Text, previous) {
+		return strings.TrimPrefix(event.Text, previous)
+	}
+	return event.Text
+}
+
 type ContextUsage struct {
 	UsedTokens            int64     `json:"usedTokens"`
 	ContextWindow         int64     `json:"contextWindow"`

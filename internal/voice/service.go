@@ -613,34 +613,71 @@ func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string,
 	}
 	finalSpoken := false
 	terminalDone := false
-	interimText := ""
-	err = target.Adapter.Stream(ctx, target.Session, turnID, func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			terminalDone = true
-			return
-		}
-		if event.Kind == "text" && strings.TrimSpace(event.Text) != "" {
-			if event.Final {
-				if finalSpoken {
-					return
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	lastBody := map[string]string{}
+	seenVersion := map[string]uint64{}
+	finalItems := map[string]bool{}
+	var streamFailure error
+	err = target.Adapter.Stream(streamCtx, target.Session, turnID, func(event surface.StreamEvent) {
+		switch event.Class() {
+		case surface.StreamEventTerminal:
+			if event.Failed() {
+				reason := event.Status
+				if reason == "" {
+					reason = "terminal failure"
 				}
-				finalSpoken = true
-				if event.Text == interimText {
-					return
-				}
-				text := event.Text
-				if strings.HasPrefix(text, interimText) {
-					text = strings.TrimPrefix(text, interimText)
-				}
-				if strings.TrimSpace(text) != "" {
-					s.speakDelegation(attemptID, messageID, target.Session, turnID, text, "final")
-				}
+				streamFailure = errors.New(reason)
+				cancelStream()
 				return
 			}
-			interimText += event.Text
-			s.speakDelegation(attemptID, messageID, target.Session, turnID, event.Text, "interim")
+			terminalDone = true
+		case surface.StreamEventMessage:
+			if event.Role != "" && event.Role != "assistant" {
+				return
+			}
+			if event.Final {
+				finalSpoken = true
+			}
+			key := event.ID
+			if key == "" {
+				key = event.ProviderKey
+			}
+			if key != "" {
+				if prior, found := seenVersion[key]; found && event.Version > 0 && prior > 0 && event.Version <= prior {
+					return
+				}
+				seenVersion[key] = event.Version
+			}
+			if event.Final && key != "" {
+				if finalItems[key] {
+					return
+				}
+				finalItems[key] = true
+			}
+			text := event.Text
+			if key != "" {
+				previous := lastBody[key]
+				text = surface.StreamEventDelta(event, previous)
+				if event.Operation == "append" {
+					lastBody[key] = previous + event.Text
+				} else {
+					lastBody[key] = event.Text
+				}
+			}
+			if strings.TrimSpace(text) != "" {
+				stage := "interim"
+				if event.Final {
+					stage = "final"
+				}
+				s.speakDelegation(attemptID, messageID, target.Session, turnID, text, stage)
+			}
 		}
 	}, 5*time.Minute)
+	if streamFailure != nil {
+		s.recordDelegationFailure(attemptID, messageID, targetID, streamFailure)
+		return
+	}
 	if err != nil {
 		s.recordDelegationFailure(attemptID, messageID, targetID, err)
 		return
