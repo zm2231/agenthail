@@ -141,7 +141,7 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async throws -> SessionCreationReceipt {
-        if launcher.map(Self.terminalLaunchers.contains) == true && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+        if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         if surface == "codex" {
@@ -153,8 +153,6 @@ final class AgenthailAPI: @unchecked Sendable {
         if let launcher { body["launcher"] = launcher }
         return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
     }
-
-    private static let terminalLaunchers: Set<String> = ["cmux", "tmux"]
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {
         var components = URLComponents()

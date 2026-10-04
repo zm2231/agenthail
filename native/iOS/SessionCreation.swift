@@ -69,7 +69,7 @@ struct NewSessionSheet: View {
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on your Mac.").font(.footnote).foregroundStyle(.secondary)
                         }
                         if selectedSurface == "codex" {
-                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: true)
+                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher == nil)
                         }
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
@@ -94,7 +94,7 @@ struct NewSessionSheet: View {
                                     }
                                     Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
                                 }
-                            }
+                            }.disabled(selectedLauncher != nil)
                         }
                     }
                 }
@@ -111,7 +111,7 @@ struct NewSessionSheet: View {
                         if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher) { dismiss() }
                     } } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
-                    }.disabled(model.creatingSession || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }.disabled(model.creatingSession || model.creationWarning != nil || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .interactiveDismissDisabled(model.creatingSession)
@@ -129,10 +129,15 @@ struct NewSessionSheet: View {
             .task { await load() }
             .task(id: selectedSurface) {
                 selectedLauncher = nil
-                models = []; selectedModel = ""; modelError = nil; turnSettings = .init()
+                models = []; selectedModel = ""; modelError = nil; turnSettings = .init(); claude = .init()
                 guard !selectedSurface.isEmpty else { return }
                 do { let values = try await model.creationModels(surface: selectedSurface); try Task.checkCancellation(); models = values }
                 catch is CancellationError {} catch { modelError = "Models unavailable. You can still use the runtime default." }
+            }
+            .onChange(of: selectedLauncher) { _, launcher in
+                guard launcher != nil else { return }
+                turnSettings = .init()
+                claude = .init()
             }
         }
     }

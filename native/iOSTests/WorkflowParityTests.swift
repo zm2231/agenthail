@@ -53,7 +53,7 @@ final class WorkflowParityTests: XCTestCase {
         ParityProtocol.state.reset(accepted: true)
         let model = makeModel()
         let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "tmux")
-        XCTAssertTrue(created)
+        XCTAssertFalse(created)
         XCTAssertNil(model.requestedSessionID)
         XCTAssertEqual(model.creationWarning, "The launcher accepted the request; the conversation is not available yet.")
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
