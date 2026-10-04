@@ -636,14 +636,14 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"unknown":true`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := registry.Session("started"); err != nil {
 		t.Fatalf("created session was not registered: %v", err)
 	}
 	history, err := registry.ListHistory(5, "started")
-	if err != nil || len(history) != 1 || history[0].Kind != "unknown" {
+	if err != nil || len(history) != 1 || history[0].Kind != "submitted" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }

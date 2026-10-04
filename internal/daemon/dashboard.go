@@ -1071,6 +1071,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, cwdErr.Error(), http.StatusBadRequest)
 			return
 		}
+		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
+		if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
+			var taken registry.AliasTakenError
+			if errors.As(err, &taken) {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			} else {
+				http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
+			}
+			return
+		}
 		approval := strings.TrimSpace(request.Approval)
 		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
 			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
@@ -1086,29 +1096,36 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if session != nil {
 			session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
-				http.Error(w, fmt.Sprintf("register conversation: %s", registerErr), http.StatusInternalServerError)
+				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: request.Message, Error: registerErr.Error()})
+				writeSubmittedSession(w, session, fmt.Sprintf("session was created, but local registration failed: %s; inspect it before retrying", registerErr))
 				return
 			}
-			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
+			if alias != "" {
 				if aliasErr := d.Registry.SetAlias(alias, session.ID); aliasErr != nil {
-					http.Error(w, fmt.Sprintf("name conversation: %s", aliasErr), http.StatusBadRequest)
+					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: request.Message, Error: aliasErr.Error()})
+					writeSubmittedSession(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; inspect it before retrying", aliasErr))
 					return
 				}
 			}
 		}
 		if startErr != nil {
-			kind := "failed"
-			unknown := surface.IsDeliveryOutcomeUnknown(startErr)
-			if unknown {
-				kind = "unknown"
-			}
 			sessionID := ""
 			if session != nil {
 				sessionID = session.ID
 			}
+			if session != nil {
+				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
+				writeSubmittedSession(w, session, fmt.Sprintf("session was created, but its initial turn could not be confirmed: %s; inspect it before retrying", startErr))
+				return
+			}
+			unknown := surface.IsDeliveryOutcomeUnknown(startErr)
+			kind := "failed"
+			if unknown {
+				kind = "unknown"
+			}
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
 			if unknown {
-				writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "unknown": true, "session": session, "error": startErr.Error()})
+				writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "unknown": true, "error": startErr.Error()})
 				return
 			}
 			http.Error(w, startErr.Error(), http.StatusBadGateway)
@@ -1914,6 +1931,17 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeSubmittedSession(w http.ResponseWriter, session *surface.Session, warning string) {
+	writeDashboardJSON(w, http.StatusAccepted, map[string]any{
+		"ok":        true,
+		"status":    "submitted",
+		"accepted":  true,
+		"retryable": false,
+		"session":   session,
+		"warning":   warning,
+	})
 }
 
 func writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, warning string) {
