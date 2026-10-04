@@ -98,6 +98,38 @@ func TestSessionSourceDoesNotPersistFailedSeedAsSuccess(t *testing.T) {
 	}
 }
 
+type legacyIdentitySurface struct {
+	*emptySeedSurface
+	reads atomic.Int32
+}
+
+func (s *legacyIdentitySurface) RequiresLocalTranscript(*surface.Session) bool { return true }
+
+func (s *legacyIdentitySurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	s.reads.Add(1)
+	return &surface.SessionReadResult{TranscriptOffsetSet: true, TranscriptIdentity: "replacement", Items: []surface.TimelineItem{{ID: "replacement", Kind: "text", Role: "assistant", Text: "replacement"}}}, nil
+}
+
+func TestLegacySuccessfulSeedWithoutIdentityFailsBeforeProviderRead(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	if err := reg.MarkSessionJournalSeed(from.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &legacyIdentitySurface{emptySeedSurface: &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 1)}}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
+		t.Fatalf("err=%v, want explicit legacy checkpoint failure", err)
+	}
+	if got := adapter.reads.Load(); got != 0 {
+		t.Fatalf("provider reads=%d, want no read without trusted identity", got)
+	}
+	status, _, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
+	if err != nil || status != "failed" || identity != "" {
+		t.Fatalf("checkpoint status=%q identity=%q err=%v", status, identity, err)
+	}
+}
+
 func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.T) {
 	_, reg, _, from, _ := daemonFixture(t)
 	transcript := filepath.Join(t.TempDir(), "session.jsonl")

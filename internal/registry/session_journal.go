@@ -72,6 +72,10 @@ func (r *Registry) SessionJournalSeedStatus(sessionID string) (string, error) {
 }
 
 func (r *Registry) MarkSessionJournalSeed(sessionID string, succeeded bool) error {
+	return r.MarkSessionJournalSeedWithIdentity(sessionID, succeeded, "")
+}
+
+func (r *Registry) MarkSessionJournalSeedWithIdentity(sessionID string, succeeded bool, transcriptIdentity string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("session id is required")
 	}
@@ -93,7 +97,7 @@ func (r *Registry) MarkSessionJournalSeed(sessionID string, succeeded bool) erro
 		if latest.Valid && latest.Int64 > 0 {
 			seedSeq = uint64(latest.Int64)
 		}
-		_, err = tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,seed_status,seed_seq) VALUES(?,0,0,?,?) ON CONFLICT(session_id) DO UPDATE SET seed_status=excluded.seed_status,seed_seq=excluded.seed_seq`, sessionID, status, seedSeq)
+		_, err = tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,seed_status,seed_seq,seed_identity) VALUES(?,0,0,?,?,?) ON CONFLICT(session_id) DO UPDATE SET seed_status=excluded.seed_status,seed_seq=excluded.seed_seq,seed_identity=CASE WHEN excluded.seed_identity!='' THEN excluded.seed_identity ELSE session_journal_state.seed_identity END`, sessionID, status, seedSeq, transcriptIdentity)
 	} else {
 		_, err = tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,seed_status) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET seed_status=excluded.seed_status`, sessionID, status)
 	}
@@ -103,23 +107,24 @@ func (r *Registry) MarkSessionJournalSeed(sessionID string, succeeded bool) erro
 	return tx.Commit()
 }
 
-func (r *Registry) SessionJournalSeedCheckpoint(sessionID string) (string, uint64, error) {
+func (r *Registry) SessionJournalSeedCheckpoint(sessionID string) (string, uint64, string, error) {
 	if strings.TrimSpace(sessionID) == "" {
-		return "", 0, fmt.Errorf("session id is required")
+		return "", 0, "", fmt.Errorf("session id is required")
 	}
 	var status string
 	var seq int64
-	err := r.db.QueryRow(`SELECT seed_status,seed_seq FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status, &seq)
+	var identity string
+	err := r.db.QueryRow(`SELECT seed_status,seed_seq,seed_identity FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status, &seq, &identity)
 	if err == sql.ErrNoRows {
-		return SessionJournalSeedUnknown, 0, nil
+		return SessionJournalSeedUnknown, 0, "", nil
 	}
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	if seq < 0 {
-		return "", 0, fmt.Errorf("invalid session journal seed sequence")
+		return "", 0, "", fmt.Errorf("invalid session journal seed sequence")
 	}
-	return status, uint64(seq), nil
+	return status, uint64(seq), identity, nil
 }
 
 func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit int) (SessionJournalPage, error) {
