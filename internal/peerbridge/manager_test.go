@@ -94,6 +94,69 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("post-repair receipt=%+v err=%v", receipt, err)
 	}
+	if manager.relays["recent"] == nil {
+		t.Fatal("non-Claude sender did not get a durable reply relay")
+	}
+	nativeSocket := filepath.Join(manager.socketDir, strconv.Itoa(os.Getpid())+".sock")
+	nativeListener, err := net.Listen("unix", nativeSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nativeListener.Close()
+	receipts := make(chan []byte, 2)
+	go func() {
+		for {
+			conn, err := nativeListener.Accept()
+			if err != nil {
+				return
+			}
+			data, _ := io.ReadAll(conn)
+			receipts <- data
+			_ = conn.Close()
+		}
+	}()
+	startCmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
+	startCmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	startBytes, err := startCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	nativeRecord := map[string]any{"pid": os.Getpid(), "sessionId": "native-test", "procStart": strings.TrimSpace(string(startBytes)), "messagingSocketPath": nativeSocket}
+	data, _ := json.Marshal(nativeRecord)
+	if err := os.WriteFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	replyID := uuid.NewString()
+	replyFrame := map[string]any{"msgV": 1, "msg_id": replyID, "type": "user", "from": "uds:" + nativeSocket, "message": map[string]string{"role": "user", "content": "reply after helper replacement"}}
+	for range 2 {
+		conn, err := net.Dial("unix", manager.relays["recent"].socketPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if err := json.NewEncoder(conn).Encode(replyFrame); err != nil {
+			t.Fatal(err)
+		}
+		conn.(*net.UnixConn).CloseWrite()
+		if _, err := io.ReadAll(conn); err != nil {
+			t.Fatal(err)
+		}
+		conn.Close()
+	}
+	if count := reg.QueueCount("recent"); count != 1 {
+		t.Fatalf("relay reply queue count=%d", count)
+	}
+	select {
+	case receiptData := <-receipts:
+		if !strings.Contains(string(receiptData), `"status":"received"`) || !strings.Contains(string(receiptData), replyID) {
+			t.Fatalf("native receipt=%s", receiptData)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("native receipt not delivered")
+	}
 	socket := filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock")
 	messageID := uuid.NewString()
 	for range 2 {
@@ -119,7 +182,7 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(2200 * time.Millisecond)
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(second.process.Pid)+".json"))
+	data, err = os.ReadFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(second.process.Pid)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +212,9 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	}
 	children := manager.children
 	manager.Close()
+	nativeListener.Close()
+	_ = os.Remove(nativeSocket)
+	_ = os.Remove(filepath.Join(home, ".claude", "sessions", strconv.Itoa(os.Getpid())+".json"))
 	for _, entry := range children {
 		select {
 		case <-entry.done:

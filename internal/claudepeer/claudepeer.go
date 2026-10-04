@@ -46,6 +46,7 @@ type Config struct {
 	ManifestPath string
 	Generation   string
 	ProcessToken string
+	ReplyRelay   bool
 }
 
 type Ready struct {
@@ -109,6 +110,7 @@ type controlRequest struct {
 	TargetSocket string `json:"targetSocket"`
 	SenderID     string `json:"senderId"`
 	Message      string `json:"message"`
+	ReplySocket  string `json:"replySocket,omitempty"`
 }
 
 type controlResponse struct {
@@ -142,6 +144,9 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	}
 	if c.ProcessToken != "" && os.Getenv("AGENTHAIL_PEER_TOKEN") != c.ProcessToken {
 		return errors.New("Claude peer worker process token does not match its launch environment")
+	}
+	if c.ReplyRelay {
+		return runReplyRelay(ctx, c, parent, ready)
 	}
 	pid := os.Getpid()
 	procStart, err := processStart(pid)
@@ -288,6 +293,10 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 }
 
 func Send(ctx context.Context, controlPath, senderID, targetSocket, message string) (*surface.SendResult, error) {
+	return SendWithReplySocket(ctx, controlPath, senderID, targetSocket, "", message)
+}
+
+func SendWithReplySocket(ctx context.Context, controlPath, senderID, targetSocket, replySocket, message string) (*surface.SendResult, error) {
 	if err := ValidateSend(senderID, targetSocket, message); err != nil {
 		return nil, err
 	}
@@ -301,7 +310,7 @@ func Send(ctx context.Context, controlPath, senderID, targetSocket, message stri
 	if err := conn.SetDeadline(time.Now().Add(readDeadline)); err != nil {
 		return nil, err
 	}
-	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message})
+	req, _ := json.Marshal(controlRequest{TargetSocket: targetSocket, SenderID: senderID, Message: message, ReplySocket: replySocket})
 	if _, err := conn.Write(append(req, '\n')); err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
@@ -354,6 +363,83 @@ func ValidateSend(senderID, targetSocket, message string) error {
 	}
 	if len(req) >= maxLineBytes {
 		return surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
+	}
+	return nil
+}
+
+func runReplyRelay(ctx context.Context, c Config, parent io.Reader, ready io.Writer) error {
+	pid := os.Getpid()
+	procStart, err := processStart(pid)
+	if err != nil {
+		return fmt.Errorf("read relay process start: %w", err)
+	}
+	socketPath := filepath.Join(c.SocketDir, strconv.Itoa(pid)+".sock")
+	manifestPath := c.ManifestPath
+	if manifestPath == "" {
+		manifestPath = WorkerManifestPath(c.Home, c.Generation, pid)
+	}
+	if err := os.MkdirAll(c.SocketDir, 0700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+		return err
+	}
+	if err := requireAbsent(socketPath, manifestPath); err != nil {
+		return err
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-relay", State: "starting", Generation: c.Generation, SourceID: c.Session.ID, ProcessToken: c.ProcessToken, PID: pid, ProcStart: procStart, SocketPath: socketPath}
+	if err := writeExclusiveJSONAtomic(manifestPath, manifest); err != nil {
+		return err
+	}
+	ln, err := listenOwned(socketPath)
+	if err != nil {
+		cleanupManifest(manifestPath, manifest)
+		return err
+	}
+	socketDevice, socketInode, err := socketIdentity(socketPath)
+	if err != nil {
+		ln.Close()
+		cleanupManifest(manifestPath, manifest)
+		return err
+	}
+	manifest.SocketDevice, manifest.SocketInode, manifest.State = socketDevice, socketInode, "ready"
+	if err := replaceManifest(manifestPath, OwnershipManifest{Agenthail: "peer-relay", State: "starting", Generation: c.Generation, SourceID: c.Session.ID, ProcessToken: c.ProcessToken, PID: pid, ProcStart: procStart, SocketPath: socketPath}, manifest); err != nil {
+		ln.Close()
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		cleanupManifest(manifestPath, manifest)
+		return err
+	}
+	reg, err := registry.Open(c.RegistryPath)
+	if err != nil {
+		ln.Close()
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+		cleanupManifest(manifestPath, manifest)
+		return err
+	}
+	defer reg.Close()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var handlers sync.WaitGroup
+	go acceptRelays(&handlers, ln, reg, c, socketPath)
+	if ready != nil {
+		if err := json.NewEncoder(ready).Encode(Ready{PID: pid, SocketPath: socketPath}); err != nil {
+			return err
+		}
+	}
+	parentDone := make(chan struct{})
+	if parent != nil {
+		go watchParent(parent, parentDone)
+	}
+	defer func() {
+		cancel()
+		ln.Close()
+		handlers.Wait()
+		cleanupManifest(manifestPath, manifest)
+		removeOwnedSocket(socketPath, socketDevice, socketInode)
+	}()
+	select {
+	case <-ctx.Done():
+	case <-parentDone:
 	}
 	return nil
 }
@@ -597,7 +683,7 @@ func Reconcile(home, socketDir string) error {
 }
 
 func validManifest(root, socketDir, path string, manifest OwnershipManifest) bool {
-	if manifest.Agenthail != "peer-worker" || manifest.PID <= 0 || manifest.Generation == "" || manifest.ProcStart == "" || (manifest.State != "starting" && manifest.State != "ready") {
+	if (manifest.Agenthail != "peer-worker" && manifest.Agenthail != "peer-relay") || manifest.PID <= 0 || manifest.Generation == "" || manifest.ProcStart == "" || (manifest.State != "starting" && manifest.State != "ready") {
 		return false
 	}
 	if (manifest.ControlDevice == 0) != (manifest.ControlInode == 0) || (manifest.SocketDevice == 0) != (manifest.SocketInode == 0) {
@@ -609,6 +695,9 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 	wantDir := filepath.Join(root, manifest.Generation)
 	if filepath.Dir(path) != wantDir || manifest.ControlPath != filepath.Join(wantDir, strconv.Itoa(manifest.PID)+".sock") || manifest.SocketPath != filepath.Join(socketDir, strconv.Itoa(manifest.PID)+".sock") {
 		return false
+	}
+	if manifest.Agenthail == "peer-relay" {
+		return manifest.RecordPath == ""
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(root)))
 	return manifest.RecordPath == filepath.Join(home, ".claude", "sessions", strconv.Itoa(manifest.PID)+".json")
@@ -636,7 +725,7 @@ func processOwnsManifest(manifest OwnershipManifest) bool {
 	foundWorker := false
 	foundToken := false
 	for _, field := range strings.Fields(string(out)) {
-		foundWorker = foundWorker || field == "claude-peer-worker"
+		foundWorker = foundWorker || field == "claude-peer-worker" || field == "claude-peer-relay"
 		foundToken = foundToken || field == wantToken
 	}
 	return foundWorker && foundToken
@@ -644,7 +733,7 @@ func processOwnsManifest(manifest OwnershipManifest) bool {
 
 func processIsPeerWorker(pid int) bool {
 	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
-	return err == nil && strings.Contains(string(out), "agenthail claude-peer-worker")
+	return err == nil && (strings.Contains(string(out), "agenthail claude-peer-worker") || strings.Contains(string(out), "agenthail claude-peer-relay"))
 }
 
 func ownedByCurrentUser(info os.FileInfo) bool {
@@ -711,6 +800,77 @@ func ownedRecordMatches(path string, manifest OwnershipManifest) bool {
 	return json.Unmarshal(data, &record) == nil && record.Agenthail == "peer-worker" && record.PID == manifest.PID && record.ProcStart == manifest.ProcStart && record.ProcessToken == manifest.ProcessToken
 }
 
+func acceptRelays(wg *sync.WaitGroup, ln net.Listener, reg *registry.Registry, c Config, ownSocket string) {
+	sem := make(chan struct{}, 8)
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		select {
+		case sem <- struct{}{}:
+		default:
+			conn.Close()
+			continue
+		}
+		wg.Add(1)
+		go func() { defer wg.Done(); defer func() { <-sem }(); handleRelay(conn, reg, c, ownSocket) }()
+	}
+}
+
+func handleRelay(conn net.Conn, reg *registry.Registry, c Config, ownSocket string) {
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(firstLineDeadline))
+	s := bufio.NewScanner(io.LimitReader(conn, maxLineBytes*maxFrames))
+	s.Buffer(make([]byte, 1024), maxLineBytes)
+	for n := 0; n < maxFrames && s.Scan(); n++ {
+		var f frame
+		if json.Unmarshal(s.Bytes(), &f) != nil || f.Type == "auth" {
+			continue
+		}
+		if f.Type != "user" {
+			continue
+		}
+		if err := validateNativeSender(c.Home, c.SocketDir, f.From); err != nil {
+			_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "denied", err.Error())
+			continue
+		}
+		if err := queueFrame(reg, c, f, ownSocket); err != nil {
+			_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_rejected", SessionID: c.Session.ID, Message: string(s.Bytes()), Error: err.Error()})
+			_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "denied", err.Error())
+			continue
+		}
+		_ = sendReceipt(c.SocketDir, f.From, ownSocket, f.MsgID, "received", "transport accepted; logical source queue updated")
+	}
+}
+
+func validateNativeSender(home, socketDir, from string) error {
+	if !strings.HasPrefix(from, "uds:") {
+		return errors.New("sender is not a uds address")
+	}
+	socket := strings.TrimPrefix(from, "uds:")
+	if err := validateTargetSocket(socketDir, socket); err != nil {
+		return err
+	}
+	pidText := strings.TrimSuffix(filepath.Base(socket), ".sock")
+	pid, err := strconv.Atoi(pidText)
+	if err != nil {
+		return errors.New("sender socket has no valid owner pid")
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "sessions", pidText+".json"))
+	if err != nil {
+		return errors.New("sender has no current native Claude record")
+	}
+	var record sessionRecord
+	if json.Unmarshal(data, &record) != nil || record.MessagingSocketPath != socket || record.Agenthail != "" {
+		return errors.New("sender is not a current native Claude endpoint")
+	}
+	if record.PID != pid || record.ProcStart == "" || !processMatches(pid, record.ProcStart) {
+		return errors.New("sender native process identity is stale")
+	}
+	return nil
+}
+
 func acceptPeers(wg *sync.WaitGroup, ln net.Listener, reg *registry.Registry, c Config, ownSocket string) {
 	sem := make(chan struct{}, 8)
 	for {
@@ -739,8 +899,12 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 		detail string
 	}
 	var rejected []rejection
+	var accepted []frame
 	defer func() {
 		conn.Close()
+		for _, item := range accepted {
+			_ = sendReceipt(c.SocketDir, item.From, ownSocket, item.MsgID, "received", "transport accepted; logical source queue updated")
+		}
 		for _, item := range rejected {
 			_ = sendReceipt(c.SocketDir, item.frame.From, ownSocket, item.frame.MsgID, "denied", item.detail)
 		}
@@ -767,6 +931,8 @@ func handlePeer(conn net.Conn, reg *registry.Registry, c Config, ownSocket strin
 		if err := queueFrame(reg, c, f, ownSocket); err != nil {
 			rejected = append(rejected, rejection{frame: f, detail: err.Error()})
 			_ = reg.RecordHistory(registry.HistoryEntry{Kind: "peer_rejected", SessionID: c.Session.ID, Message: string(s.Bytes()), Error: err.Error()})
+		} else {
+			accepted = append(accepted, f)
 		}
 	}
 }
@@ -850,8 +1016,17 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 			session.Name = alias
 		}
 		id := uuid.New().String()
-		content := peerContent(*session, ownSocket, req.Message)
-		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + ownSocket})
+		senderSocket := ownSocket
+		if req.ReplySocket != "" {
+			if err := validateRelaySocket(c.SocketDir, req.ReplySocket); err != nil {
+				resp.Error = classifyControlError(err)
+				_ = json.NewEncoder(conn).Encode(resp)
+				return
+			}
+			senderSocket = req.ReplySocket
+		}
+		content := peerContent(*session, senderSocket, req.Message)
+		f, _ := json.Marshal(frame{MsgV: 1, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
 		var sendErr error
 		if len(f) >= maxLineBytes {
 			sendErr = surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
@@ -867,6 +1042,10 @@ func handleControl(conn net.Conn, reg *registry.Registry, c Config, ownSocket st
 		}
 	}
 	_ = json.NewEncoder(conn).Encode(resp)
+}
+
+func validateRelaySocket(socketDir, path string) error {
+	return validateTargetSocket(socketDir, path)
 }
 
 func classifyControlError(err error) *controlError {
