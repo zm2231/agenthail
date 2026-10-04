@@ -30,7 +30,7 @@ func TestReadManagedCodexLaunchReceiptRejectsMalformedAndOversizedFiles(t *testi
 		data string
 	}{
 		{name: "malformed", data: "{"},
-		{name: "oversized", data: fmt.Sprintf("%q", string(make([]byte, managedCodexLaunchReceiptMaxBytes)))},
+		{name: "oversized", data: fmt.Sprintf("%q", string(make([]byte, 1<<20)))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "launch.json")

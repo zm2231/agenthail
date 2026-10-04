@@ -2,12 +2,10 @@ package surfaces
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -56,58 +54,5 @@ func TestClaudeMalformedBackgroundOutputIsUnknown(t *testing.T) {
 	session, _, err := NewClaude("", home).StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home})
 	if session != nil || !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("session=%+v err=%v", session, err)
-	}
-}
-
-type turnOptionsClient struct {
-	methods []string
-	params  []map[string]any
-}
-
-func (c *turnOptionsClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
-	c.methods = append(c.methods, method)
-	c.params = append(c.params, params)
-	if method == "thread/read" {
-		return map[string]any{"result": map[string]any{"thread": map[string]any{"model": "active-model"}}}, nil
-	}
-	if method == "thread/start" {
-		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "new"}, "cwd": "/tmp"}}, nil
-	}
-	return map[string]any{"result": map[string]any{"turn": map[string]any{"id": "turn"}}}, nil
-}
-func (*turnOptionsClient) Close() error { return nil }
-func TestCodexTurnOptionsReachCreationAndPreserveActiveModel(t *testing.T) {
-	client := &turnOptionsClient{}
-	options := surface.TurnOptions{Effort: "high", Mode: "plan", ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}
-	_, _, err := NewCodex("").startSession(context.Background(), client, surface.SessionStartOptions{Message: "hello", TurnOptions: options})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(client.methods, ",") != "thread/start,thread/read,turn/start" {
-		t.Fatal(client.methods)
-	}
-	params := client.params[2]
-	mode := params["collaborationMode"].(map[string]any)
-	settings := mode["settings"].(map[string]any)
-	if settings["model"] != "active-model" || settings["reasoning_effort"] != "high" || mode["mode"] != "plan" || params["serviceTierForTurn"] != "fast" {
-		t.Fatal(params)
-	}
-	encoded, _ := json.Marshal(params)
-	if !strings.Contains(string(encoded), `"outputSchema":{"type":"object"}`) {
-		t.Fatalf("schema was encoded as text: %s", encoded)
-	}
-}
-func TestNativeQueueContract(t *testing.T) {
-	session := &surface.Session{ID: "thread"}
-	for _, action := range []string{"list", "add", "update", "delete", "reorder", "start"} {
-		method, params, err := nativeQueueParams(session, surface.NativeQueueRequest{Action: action, Message: "hello", ID: "q1", IDs: []string{"q1"}, ClientID: "retry-key", Cursor: "page-2"})
-		if err != nil || method != "thread/queue/"+action || params["threadId"] != "thread" {
-			t.Fatalf("%s %v %v", method, params, err)
-		}
-	}
-	for _, request := range []surface.NativeQueueRequest{{Action: "add", Message: "hello"}, {Action: "update", Message: "hello"}, {Action: "delete"}, {Action: "reorder"}, {Action: "bogus"}} {
-		if _, _, err := nativeQueueParams(session, request); err == nil {
-			t.Fatalf("invalid request accepted: %+v", request)
-		}
 	}
 }

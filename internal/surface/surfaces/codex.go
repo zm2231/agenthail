@@ -1086,7 +1086,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(transcriptPollInterval):
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)

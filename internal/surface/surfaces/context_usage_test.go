@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,38 +118,33 @@ func TestClaudeContextUsageInvalidatesStaleConfiguredWindowAfterObservedModelSwi
 	}
 }
 
-func TestClaudeContextUsageIgnoresOlderCommandAfterBoundary(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "claude.jsonl")
-	writeTestTranscript(t, path,
-		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"cache_creation_input_tokens":20000,"cache_read_input_tokens":129000,"output_tokens":500}}}`,
-		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-16T01:01:02Z","compactMetadata":{"preTokens":150000,"postTokens":42000}}`,
-		`{"type":"user","timestamp":"2026-07-16T01:01:00Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`,
-	)
-	adapter := NewClaude("", t.TempDir())
-	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if usage.Compacting {
-		t.Fatalf("usage=%+v", usage)
-	}
-}
-
-func TestClaudeContextUsageCompletesCommandMarkerAtBoundary(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "claude.jsonl")
-	writeTestTranscript(t, path,
-		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"cache_creation_input_tokens":20000,"cache_read_input_tokens":129000,"output_tokens":500}}}`,
-		`{"type":"user","timestamp":"2026-07-16T01:01:00Z","message":{"content":"/compact"}}`,
-		`{"type":"user","timestamp":"2026-07-16T01:01:00.001Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`,
-		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-16T01:01:02Z","compactMetadata":{"preTokens":150000,"postTokens":42000}}`,
-	)
-	adapter := NewClaude("", t.TempDir())
-	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if usage.Compacting {
-		t.Fatalf("usage=%+v", usage)
+func TestClaudeContextUsageCompactCommandEndsAtBoundary(t *testing.T) {
+	usageRecord := `{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"cache_creation_input_tokens":20000,"cache_read_input_tokens":129000,"output_tokens":500}}}`
+	boundary := `{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-16T01:01:02Z","compactMetadata":{"preTokens":150000,"postTokens":42000}}`
+	for name, records := range map[string][]string{
+		"older command marker written after the boundary": {
+			usageRecord,
+			boundary,
+			`{"type":"user","timestamp":"2026-07-16T01:01:00Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`,
+		},
+		"command and marker completed by the boundary": {
+			usageRecord,
+			`{"type":"user","timestamp":"2026-07-16T01:01:00Z","message":{"content":"/compact"}}`,
+			`{"type":"user","timestamp":"2026-07-16T01:01:00.001Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`,
+			boundary,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "claude.jsonl")
+			writeTestTranscript(t, path, records...)
+			usage, err := NewClaude("", t.TempDir()).ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if usage.Compacting {
+				t.Fatalf("usage=%+v", usage)
+			}
+		})
 	}
 }
 
@@ -268,110 +264,113 @@ func TestCodexContextUsageIgnoresPartialRecordUntilComplete(t *testing.T) {
 	}
 }
 
-func TestCodexContextEventsExposeLiveUsageAndCompaction(t *testing.T) {
-	event := codexEvent{Method: "thread/tokenUsage/updated", Params: map[string]any{
-		"threadId": "thread",
+// liveContext drives managed Streams for a session with a local transcript.
+// Each Stream first sees its turn in progress, so the transcript poll sets the
+// baseline, and then receives the queued notifications with the completed turn.
+type liveContext struct {
+	codex   *Codex
+	session *surface.Session
+	mu      sync.Mutex
+	reads   int
+	batch   []liveNotification
+}
+
+type liveNotification struct {
+	method string
+	params map[string]any
+}
+
+func newLiveContext(t *testing.T, records ...string) *liveContext {
+	t.Helper()
+	live := &liveContext{}
+	var fake *managedCodex
+	fake = startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+		if method != "thread/read" {
+			return nil
+		}
+		live.mu.Lock()
+		defer live.mu.Unlock()
+		live.reads++
+		if live.reads%2 == 1 {
+			return managedTurn("turn", "inProgress")
+		}
+		for _, notification := range live.batch {
+			fake.Notify(notification.method, notification.params)
+		}
+		live.batch = nil
+		return managedTurn("turn", "completed", agentMessage("final", "final_answer", "done"))
+	})
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	writeTestTranscript(t, path, records...)
+	live.codex = isolatedManagedRuntime(t)
+	live.session = &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, Transport: codexTransportManaged, Transcript: path}
+	return live
+}
+
+func (l *liveContext) compaction(phase string) liveNotification {
+	return liveNotification{"item/" + phase, map[string]any{"threadId": l.session.ID, "item": map[string]any{"type": "contextCompaction"}}}
+}
+
+func (l *liveContext) tokenUsage(current, cumulative float64) liveNotification {
+	return liveNotification{"thread/tokenUsage/updated", map[string]any{
+		"threadId": l.session.ID,
 		"tokenUsage": map[string]any{
-			"last":               map[string]any{"inputTokens": float64(90000), "cachedInputTokens": float64(80000), "outputTokens": float64(1000), "reasoningOutputTokens": float64(200), "totalTokens": float64(91000)},
-			"total":              map[string]any{"totalTokens": float64(1000000)},
+			"last":               map[string]any{"inputTokens": current - 20, "totalTokens": current},
+			"total":              map[string]any{"totalTokens": cumulative},
 			"modelContextWindow": float64(258400),
 		},
 	}}
-	usage, ok := codexContextEvent(event, surface.ContextUsage{CompactionCount: 4})
-	if !ok || usage.UsedTokens != 91000 || usage.ContextWindow != 258400 || usage.CumulativeTokens != 1000000 || usage.CompactionCount != 4 {
-		t.Fatalf("usage=%+v ok=%v", usage, ok)
+}
+
+// stream delivers notifications in one Stream window and returns the last
+// context usage it emitted.
+func (l *liveContext) stream(t *testing.T, notifications ...liveNotification) *surface.ContextUsage {
+	t.Helper()
+	l.mu.Lock()
+	l.batch = notifications
+	l.mu.Unlock()
+	var last *surface.ContextUsage
+	if err := l.codex.Stream(context.Background(), l.session, "turn", func(event surface.StreamEvent) {
+		if event.Kind == "context" {
+			last = event.Context
+		}
+	}, 3*time.Second); err != nil {
+		t.Fatal(err)
 	}
-	started, ok := codexContextEvent(codexEvent{Method: "item/started", Params: map[string]any{"threadId": "thread", "item": map[string]any{"type": "contextCompaction"}}}, *usage)
-	if !ok || !started.Compacting {
-		t.Fatalf("started=%+v ok=%v", started, ok)
+	if last == nil {
+		t.Fatal("stream emitted no context usage")
 	}
-	completed, ok := codexContextEvent(codexEvent{Method: "item/completed", Params: map[string]any{"threadId": "thread", "item": map[string]any{"type": "contextCompaction"}}}, *started)
-	if !ok || completed.Compacting {
-		t.Fatalf("completed=%+v ok=%v", completed, ok)
-	}
+	return last
 }
 
 func TestCodexLiveContextEventsSurviveStaleTranscriptPolls(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "codex.jsonl")
-	writeTestTranscript(t, path, codexTokenRecord("2026-07-16T04:29:00Z", 90000, 90000))
-	adapter := NewCodex("")
-	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Transcript: path}
-	usage, err := adapter.ContextUsage(context.Background(), session)
-	if err != nil {
-		t.Fatal(err)
+	live := newLiveContext(t, codexTokenRecord("2026-07-16T04:29:00Z", 90000, 90000))
+	if usage := live.stream(t, live.compaction("started"), live.tokenUsage(100000, 190000)); usage.UsedTokens != 100000 || !usage.Compacting {
+		t.Fatalf("live=%+v", usage)
 	}
-	started, ok := adapter.applyContextEvent(session, codexEvent{Method: "item/started", Params: map[string]any{"threadId": session.ID, "item": map[string]any{"type": "contextCompaction"}}}, *usage)
-	if !ok || !started.Compacting {
-		t.Fatalf("started=%+v ok=%v", started, ok)
+	if usage, err := live.codex.ContextUsage(context.Background(), live.session); err != nil || usage.UsedTokens != 100000 || !usage.Compacting {
+		t.Fatalf("poll after live events usage=%+v err=%v", usage, err)
 	}
-	usage, err = adapter.ContextUsage(context.Background(), session)
-	if err != nil || !usage.Compacting {
-		t.Fatalf("poll usage=%+v err=%v", usage, err)
-	}
-	live := codexEvent{Method: "thread/tokenUsage/updated", Params: map[string]any{
-		"threadId": session.ID,
-		"tokenUsage": map[string]any{
-			"last":               map[string]any{"inputTokens": float64(99000), "totalTokens": float64(100000)},
-			"total":              map[string]any{"totalTokens": float64(190000)},
-			"modelContextWindow": float64(258400),
-		},
-	}}
-	updated, ok := adapter.applyContextEvent(session, live, *usage)
-	if !ok || updated.UsedTokens != 100000 || !updated.Compacting {
-		t.Fatalf("updated=%+v ok=%v", updated, ok)
-	}
-	usage, err = adapter.ContextUsage(context.Background(), session)
-	if err != nil || usage.UsedTokens != 100000 || !usage.Compacting {
-		t.Fatalf("poll usage=%+v err=%v", usage, err)
-	}
-	completed, ok := adapter.applyContextEvent(session, codexEvent{Method: "item/completed", Params: map[string]any{"threadId": session.ID, "item": map[string]any{"type": "contextCompaction"}}}, *usage)
-	if !ok || completed.Compacting {
-		t.Fatalf("completed=%+v ok=%v", completed, ok)
+	if usage := live.stream(t, live.compaction("completed")); usage.Compacting {
+		t.Fatalf("completed=%+v", usage)
 	}
 }
 
 func TestCodexStaleLiveCompactionPreservesRecoveredSavings(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "codex.jsonl")
-	writeTestTranscript(t, path,
+	live := newLiveContext(t,
 		codexTokenRecord("2026-07-16T04:29:00Z", 180000, 900000),
 		`{"timestamp":"2026-07-16T04:30:11Z","type":"compacted","payload":{"window_number":3,"window_id":"019f6930-7747-7c63-9442-3c742e0589f0"}}`,
 		codexTokenRecord("2026-07-16T04:30:13Z", 80000, 980000),
 	)
-	adapter := NewCodex("")
-	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, Transcript: path}
-	usage, err := adapter.ContextUsage(context.Background(), session)
-	if err != nil {
-		t.Fatal(err)
+	if usage := live.stream(t, live.compaction("started"), live.tokenUsage(80000, 980000)); usage.PreCompactTokens != 180000 || usage.PostCompactTokens != 80000 || usage.ReclaimedTokens != 100000 {
+		t.Fatalf("stale live usage=%+v", usage)
 	}
-	started, ok := adapter.applyContextEvent(session, codexEvent{Method: "item/started", Params: map[string]any{"threadId": session.ID, "item": map[string]any{"type": "contextCompaction"}}}, *usage)
-	if !ok || !started.Compacting {
-		t.Fatalf("started=%+v ok=%v", started, ok)
-	}
-	stale := codexEvent{Method: "thread/tokenUsage/updated", Params: map[string]any{
-		"threadId": session.ID,
-		"tokenUsage": map[string]any{
-			"last":               map[string]any{"inputTokens": float64(79980), "totalTokens": float64(80000)},
-			"total":              map[string]any{"totalTokens": float64(980000)},
-			"modelContextWindow": float64(258400),
-		},
-	}}
-	updated, ok := adapter.applyContextEvent(session, stale, *started)
-	if !ok || updated.PreCompactTokens != 180000 || updated.PostCompactTokens != 80000 || updated.ReclaimedTokens != 100000 {
-		t.Fatalf("updated=%+v ok=%v", updated, ok)
-	}
-	completed, ok := adapter.applyContextEvent(session, codexEvent{Method: "item/completed", Params: map[string]any{"threadId": session.ID, "item": map[string]any{"type": "contextCompaction"}}}, *updated)
-	if !ok || completed.Compacting || completed.PreCompactTokens != 180000 || completed.PostCompactTokens != 80000 || completed.ReclaimedTokens != 100000 {
-		t.Fatalf("completed=%+v ok=%v", completed, ok)
+	if usage := live.stream(t, live.compaction("completed")); usage.Compacting || usage.PreCompactTokens != 180000 || usage.PostCompactTokens != 80000 || usage.ReclaimedTokens != 100000 {
+		t.Fatalf("completed=%+v", usage)
 	}
 }
 
-func TestUUIDV7TimeRejectsOtherUUIDVersions(t *testing.T) {
-	if !uuidV7Time("1845b4c6-eb75-4e59-b439-b95c3698ac31").IsZero() {
-		t.Fatal("UUIDv4 was treated as a transcript timestamp")
-	}
-}
-
-func TestCodexTranscriptPathUsesLocalSessionDate(t *testing.T) {
+func TestCodexReadSessionFindsTranscriptByLocalSessionDate(t *testing.T) {
 	originalLocal := time.Local
 	time.Local = time.FixedZone("EDT", -4*60*60)
 	t.Cleanup(func() { time.Local = originalLocal })
@@ -382,11 +381,15 @@ func TestCodexTranscriptPathUsesLocalSessionDate(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, nil, 0600); err != nil {
-		t.Fatal(err)
+	writeTestTranscript(t, path, `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"found"}]}}`)
+	read, err := (&Codex{}).ReadSession(context.Background(), &surface.Session{ID: id}, surface.SessionReadRequest{Limit: 5})
+	if err != nil || len(read.Items) != 1 || read.Items[0].Text != "found" {
+		t.Fatalf("read=%+v err=%v", read, err)
 	}
-	if got := codexTranscriptPath(&surface.Session{ID: id}); got != path {
-		t.Fatalf("path=%q want=%q", got, path)
+	notV7 := "1845b4c6-eb75-4e59-b439-b95c3698ac31"
+	read, err = (&Codex{}).ReadSession(context.Background(), &surface.Session{ID: notV7}, surface.SessionReadRequest{Limit: 5})
+	if err != nil || len(read.Items) != 0 || read.UnavailableReason == "" {
+		t.Fatalf("UUIDv4 was treated as a transcript timestamp: read=%+v err=%v", read, err)
 	}
 }
 

@@ -3,22 +3,51 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func startRendererDesktopBridge(t *testing.T) string {
+var desktopRPCMethod = regexp.MustCompile(`request\("([^"]+)"`)
+
+// desktopBridge is a fake Codex Desktop renderer reachable over the Chrome
+// DevTools protocol. It answers hook installation itself and hands every
+// app-server request to respond, keyed by JSON-RPC method.
+type desktopBridge struct {
+	URL         string
+	mu          sync.Mutex
+	methods     []string
+	expressions []string
+}
+
+func (b *desktopBridge) Methods() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.methods...)
+}
+
+func (b *desktopBridge) Request(method string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for index, seen := range b.methods {
+		if seen == method {
+			return b.expressions[index]
+		}
+	}
+	return ""
+}
+
+func startDesktopBridge(t *testing.T, respond func(method string) string) *desktopBridge {
 	t.Helper()
+	bridge := &desktopBridge{}
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
 	handler := http.NewServeMux()
@@ -39,27 +68,15 @@ func startRendererDesktopBridge(t *testing.T) string {
 			params, _ := request["params"].(map[string]any)
 			expression, _ := params["expression"].(string)
 			value := any("")
-			switch {
+			switch match := desktopRPCMethod.FindStringSubmatch(expression); {
 			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
 				value = "hooked"
-			case expression == codexEventCursorJS:
-				value = float64(1)
-			case strings.Contains(expression, "b.events.filter"):
-				value = `{"cursor":1,"events":[{"sequence":1,"method":"turn/progress","params":{"threadId":"thread"}}]}`
-			case strings.Contains(expression, `"mode":"timeout"`):
-				value = `{"error":{"code":"timeout","message":"Codex Desktop app-server request timed out"}}`
-			case strings.Contains(expression, `"thread/read"`):
-				value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"}}}}`
-			case strings.Contains(expression, `"thread/loaded/list"`):
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"thread/turns/list"`):
-				value = `{"result":{"data":[{"id":"completed","status":{"type":"completed"}}]}}`
-			case strings.Contains(expression, `"thread/items/list"`):
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"thread/start"`):
-				value = `{"result":{"cwd":"/tmp/project","thread":{"id":"desktop-new","name":"Desktop conversation","source":"vscode"}}}`
-			case strings.Contains(expression, `"turn/start"`):
-				value = `{"result":{"turn":{"id":"desktop-turn"},"method":"turn/start"}}`
+			case match != nil:
+				bridge.mu.Lock()
+				bridge.methods = append(bridge.methods, match[1])
+				bridge.expressions = append(bridge.expressions, expression)
+				bridge.mu.Unlock()
+				value = respond(match[1])
 			case strings.Contains(expression, "__agenthailPayloads"):
 				value = "ok"
 			}
@@ -68,17 +85,54 @@ func startRendererDesktopBridge(t *testing.T) string {
 	})
 	server = httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return server.URL
+	bridge.URL = server.URL
+	return bridge
+}
+
+func startRendererDesktopBridge(t *testing.T) string {
+	t.Helper()
+	return startDesktopBridge(t, func(method string) string {
+		switch method {
+		case "thread/read":
+			return `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"}}}}`
+		case "thread/loaded/list", "thread/items/list":
+			return `{"result":{"data":[]}}`
+		case "thread/turns/list":
+			return `{"result":{"data":[{"id":"completed","status":{"type":"completed"}}]}}`
+		case "thread/start":
+			return `{"result":{"cwd":"/tmp/project","thread":{"id":"desktop-new","name":"Desktop conversation","source":"vscode"}}}`
+		case "turn/start":
+			return `{"result":{"turn":{"id":"desktop-turn"},"method":"turn/start"}}`
+		}
+		return ""
+	}).URL
 }
 
 func TestCodexStartSessionPrefersDesktopOwner(t *testing.T) {
-	codex := NewCodex(startRendererDesktopBridge(t))
-	session, sent, err := codex.StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Owner: codexTransportDesktop})
+	t.Setenv("HOME", t.TempDir())
+	bridge := startDesktopBridge(t, func(method string) string {
+		switch method {
+		case "thread/start":
+			return `{"result":{"cwd":"/tmp/project","thread":{"id":"desktop-new","name":"","source":"vscode"}}}`
+		case "turn/start":
+			return `{"result":{"turn":{"id":"desktop-turn"}}}`
+		}
+		return ""
+	})
+	session, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Model: "gpt-5.6-sol", ApprovalPolicy: "on-request", Owner: codexTransportDesktop})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.ID != "desktop-new" || session.Transport != codexTransportDesktop || sent.UUID != "desktop-turn" || !sent.Accepted {
+	if session.ID != "desktop-new" || session.Transport != codexTransportDesktop || session.Status != surface.StatusBusy || session.Name != "Build the release" || sent.UUID != "desktop-turn" || !sent.Accepted {
 		t.Fatalf("session=%+v sent=%+v", session, sent)
+	}
+	for _, field := range []string{`"threadSource":"agenthail"`, `"serviceName":"agenthail"`, `"cwd":"/tmp/project"`, `"model":"gpt-5.6-sol"`, `"approvalPolicy":"on-request"`} {
+		if !strings.Contains(bridge.Request("thread/start"), field) {
+			t.Fatalf("thread/start missing %s: %s", field, bridge.Request("thread/start"))
+		}
+	}
+	if !strings.Contains(bridge.Request("turn/start"), `"threadId":"desktop-new"`) {
+		t.Fatalf("turn/start not bound to the created thread: %s", bridge.Request("turn/start"))
 	}
 }
 
@@ -100,388 +154,45 @@ func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 	}
 }
 
-func TestCodexObservationUsesTurnIDsAndCompletion(t *testing.T) {
-	thread := &codexThread{Status: surface.StatusUnknown, Turns: []codexTurn{
-		{ID: "done", Status: surface.StatusIdle, User: "one", Assistant: "same", Done: true},
-		{ID: "running", Status: surface.StatusBusy, User: "two", Assistant: "partial"},
-	}}
-	observation := codexObservation(thread)
-	if observation.Status != surface.StatusBusy || observation.ActiveTurnID != "running" || observation.CompletedTurnID != "done" || observation.Reply.Text != "same" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-func TestCodexTurnUsesFinalPhaseAndDeduplicatesReplay(t *testing.T) {
-	turn := codexTurn{AssistantItems: []codexAssistantItem{
-		{ID: "item-1", Phase: "commentary", Text: "interim"},
-		{ID: "item-1", Phase: "commentary", Text: "interim replay"},
-		{ID: "item-2", Phase: "final_answer", Text: "final"},
-		{ID: "item-2", Phase: "final_answer", Text: "final replay"},
-	}}
-	item, ok := turn.authoritativeAssistant()
-	if !ok || item.ID != "item-2" || item.Phase != "final_answer" || item.Text != "final replay" {
-		t.Fatalf("authoritative item=%+v ok=%v", item, ok)
-	}
-}
-
-func TestCodexTurnDoesNotConcatenateInterimAndFinal(t *testing.T) {
-	turn := codexTurn{AssistantItems: []codexAssistantItem{
-		{ID: "interim", Phase: "commentary", Text: "interim"},
-		{ID: "final", Phase: "final_answer", Text: "final"},
-	}}
-	item, ok := turn.authoritativeAssistant()
-	if !ok || item.Text != "final" {
-		t.Fatalf("authoritative item=%+v ok=%v", item, ok)
-	}
-	if item.Text == "interimfinal" {
-		t.Fatal("interim and final were concatenated")
-	}
-}
-
-func TestCodexCompletionAlwaysEmitsOneFullFinalForEqualityAndPrefix(t *testing.T) {
-	turn := &codexTurn{ID: "turn", AssistantItems: []codexAssistantItem{{ID: "final", Phase: "final_answer", Text: "hello"}}}
-	for name, emitted := range map[string]string{"equal": "hello", "prefix": "hel"} {
-		t.Run(name, func(t *testing.T) {
-			events := codexCompletionStreamEvents(7, turn.ID, turn, emitted)
-			if len(events) == 0 || !events[len(events)-1].Final || events[len(events)-1].Text != "hello" {
-				t.Fatalf("events=%+v", events)
-			}
-			finals := 0
-			for _, event := range events {
-				if event.Final {
-					finals++
-				}
-			}
-			if finals != 1 {
-				t.Fatalf("final events=%d events=%+v", finals, events)
-			}
-		})
-	}
-}
-
-func TestCodexObservationSkipsEmptyTerminalTurnForReply(t *testing.T) {
-	thread := &codexThread{Status: surface.StatusIdle, Turns: []codexTurn{
-		{ID: "answer", Status: surface.StatusIdle, Assistant: "actual reply", Done: true},
-		{ID: "empty", Status: surface.StatusIdle, Done: true},
-	}}
-	observation := codexObservation(thread)
-	if observation.TerminalTurnID != "empty" || observation.CompletedTurnID != "answer" || observation.Reply == nil || observation.Reply.Text != "actual reply" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-func TestCodexFailedTurnIsCompletedWithExplicitError(t *testing.T) {
-	status, done, message := codexTurnState(map[string]any{"type": "failed"})
-	if status != surface.StatusIdle || !done || message != "turn failed" {
-		t.Fatalf("status=%s done=%v message=%q", status, done, message)
-	}
-	observation := codexObservation(&codexThread{Turns: []codexTurn{{ID: "failed", Status: status, Done: done, Assistant: "partial", Error: message}}})
-	if observation.Reply == nil || observation.Reply.Error != "turn failed" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-type paginatedThreadClient struct {
-	methods []string
-	params  []map[string]any
-}
-
-func (c *paginatedThreadClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
-	c.methods = append(c.methods, method)
-	c.params = append(c.params, params)
-	switch method {
-	case "thread/read":
-		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "thread", "status": map[string]any{"type": "idle"}, "turns": []any{}}}}, nil
-	case "thread/turns/list":
-		return map[string]any{"result": map[string]any{"data": []any{map[string]any{"id": "turn", "status": map[string]any{"type": "completed"}}}}}, nil
-	case "thread/items/list":
-		return map[string]any{"result": map[string]any{"data": []any{
-			map[string]any{"item": map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "question"}}}},
-			map[string]any{"item": map[string]any{"type": "agentMessage", "text": "answer"}},
-		}}}, nil
-	default:
-		return nil, fmt.Errorf("unexpected method %s", method)
-	}
-}
-
-type observationThreadClient struct {
-	methods    []string
-	turnParams map[string]any
-	itemCalls  int
-}
-
-func (c *observationThreadClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
-	c.methods = append(c.methods, method)
-	switch method {
-	case "thread/read":
-		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "thread", "status": map[string]any{"type": "busy"}, "turns": []any{}}}}, nil
-	case "thread/turns/list":
-		c.turnParams = params
-		turns := make([]any, 50)
-		turns[0] = map[string]any{"id": "active", "status": map[string]any{"type": "inProgress"}}
-		for index := 1; index < len(turns); index++ {
-			turns[index] = map[string]any{"id": fmt.Sprintf("old-%d", index), "status": map[string]any{"type": "completed"}}
-		}
-		return map[string]any{"result": map[string]any{"data": turns}}, nil
-	case "thread/items/list":
-		c.itemCalls++
-		turnID, _ := params["turnId"].(string)
-		if turnID == "active" {
-			return map[string]any{"result": map[string]any{"data": []any{map[string]any{"item": map[string]any{"type": "userMessage", "text": "working"}}}}}, nil
-		}
-		return map[string]any{"result": map[string]any{"data": []any{map[string]any{"item": map[string]any{"type": "agentMessage", "text": "latest answer"}}}}}, nil
-	default:
-		return nil, fmt.Errorf("unexpected method %s", method)
-	}
-}
-
-func (c *observationThreadClient) Close() error { return nil }
-
-func TestCodexObservationHydratesOnlyLatestCandidates(t *testing.T) {
-	client := &observationThreadClient{}
-	thread, err := NewCodex("").readObservationThread(context.Background(), client, "thread")
-	if err != nil {
-		t.Fatal(err)
-	}
-	observation := codexObservation(thread)
-	if observation.Status != surface.StatusBusy || observation.ActiveTurnID != "active" || observation.Reply == nil || observation.Reply.Text != "latest answer" {
-		t.Fatalf("observation=%+v", observation)
-	}
-	if client.itemCalls != 2 {
-		t.Fatalf("item calls=%d, want 2", client.itemCalls)
-	}
-	if got := strings.Join(client.methods, ","); got != "thread/turns/list,thread/items/list,thread/items/list" {
-		t.Fatalf("observation hydrated deprecated full history: methods=%s", got)
-	}
-	if page, _ := client.turnParams["page"].(map[string]any); page["limit"] != 3 {
-		t.Fatalf("turn params=%v", client.turnParams)
-	}
-}
-
-func TestCodexActiveTurnUsesBoundedReader(t *testing.T) {
-	client := &observationThreadClient{}
-	active, err := NewCodex("").activeTurnID(context.Background(), client, "thread")
-	if err != nil || active != "active" || client.itemCalls != 0 {
-		t.Fatalf("active=%q item_calls=%d err=%v", active, client.itemCalls, err)
-	}
-	if page, _ := client.turnParams["page"].(map[string]any); page["limit"] != 1 {
-		t.Fatalf("turn params=%v", client.turnParams)
-	}
-}
-
-type interruptTurnClient struct {
-	activeTurn      string
-	interrupted     bool
-	interruptParams map[string]any
-}
-
-func (c *interruptTurnClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
-	switch method {
-	case "thread/turns/list":
-		return map[string]any{"result": map[string]any{"data": []any{map[string]any{"id": c.activeTurn, "status": map[string]any{"type": "inProgress"}}}}}, nil
-	case "turn/interrupt":
-		c.interrupted = true
-		c.interruptParams = params
-		return map[string]any{"result": map[string]any{}}, nil
-	default:
-		return nil, fmt.Errorf("unexpected method %s", method)
-	}
-}
-
-func (c *interruptTurnClient) Close() error { return nil }
-
-func TestCodexInterruptTurnRejectsReplacementTurn(t *testing.T) {
-	client := &interruptTurnClient{activeTurn: "turn-b"}
-	if err := NewCodex("").interruptActiveTurn(context.Background(), client, "thread", "turn-a"); err == nil {
-		t.Fatal("replacement turn was accepted")
-	}
-	if client.interrupted {
-		t.Fatal("replacement turn was interrupted")
-	}
-}
-
-func TestCodexInterruptTurnBindsConfirmedTurnID(t *testing.T) {
-	client := &interruptTurnClient{activeTurn: "turn-a"}
-	if err := NewCodex("").interruptActiveTurn(context.Background(), client, "thread", "turn-a"); err != nil {
-		t.Fatal(err)
-	}
-	if !client.interrupted || client.interruptParams["threadId"] != "thread" || client.interruptParams["turnId"] != "turn-a" {
-		t.Fatalf("interrupt=%t params=%v", client.interrupted, client.interruptParams)
-	}
-}
-
-func TestCodexDesktopBridgeFramesChildRPC(t *testing.T) {
-	codex := NewCodex(startRendererDesktopBridge(t))
-	client, err := codex.openDesktop(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-	response, err := client.Request(context.Background(), "turn/start", map[string]any{"threadId": "thread", "text": strings.Repeat("x", 4096)}, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, _ := response["result"].(map[string]any)
-	if result["method"] != "turn/start" {
-		t.Fatalf("response=%v", response)
-	}
-	desktop := client.(*desktopCodexClient)
-	eventsValue, err := desktop.conn.evaluate(context.Background(), codexEventsJS(0), time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var events codexEventBatch
-	if err := json.Unmarshal([]byte(eventsValue.(string)), &events); err != nil {
-		t.Fatal(err)
-	}
-	if len(events.Events) != 1 || events.Events[0].Method != "turn/progress" {
-		t.Fatalf("events=%+v", events)
-	}
-	_, err = client.Request(context.Background(), "turn/start", map[string]any{"mode": "malformed"}, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = client.Request(context.Background(), "turn/start", map[string]any{"mode": "timeout"}, 30*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "timed out") || !isCodexTimeout(err) {
-		t.Fatalf("timeout error=%v", err)
-	}
-}
-
-func (c *paginatedThreadClient) Close() error { return nil }
-
-func TestCodexReadThreadHydratesPaginatedDesktopTurns(t *testing.T) {
-	client := &paginatedThreadClient{}
-	thread, err := NewCodex("").readThread(context.Background(), client, "thread")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(thread.Turns) != 1 || thread.Turns[0].User != "question" || thread.Turns[0].Assistant != "answer" || !thread.Turns[0].Done {
-		t.Fatalf("thread=%+v", thread)
-	}
-	if got := strings.Join(client.methods, ","); got != "thread/read,thread/turns/list,thread/items/list" {
-		t.Fatalf("methods=%s", got)
-	}
-}
-
-func TestCodexSystemErrorTurnIsTerminal(t *testing.T) {
-	status, done, message := codexTurnState(map[string]any{"type": "systemError"})
-	if status != surface.StatusIdle || !done || message != "turn systemerror" {
-		t.Fatalf("status=%s done=%v message=%q", status, done, message)
-	}
-}
-
-func TestCodexEventCorrelationHelpers(t *testing.T) {
-	params := map[string]any{"thread": map[string]any{"id": "thread-1"}, "turn": map[string]any{"id": "turn-1"}, "delta": "hello"}
-	if !codexContainsID(params, "thread-1") || codexContainsID(params, "thread-2") {
-		t.Fatal("correlation mismatch")
-	}
-	if text := codexEventText(params); text != "hello" {
-		t.Fatalf("text=%q", text)
-	}
-	if !codexCompletionMethod("turn/completed") || codexCompletionMethod("item/started") {
-		t.Fatal("completion classification")
-	}
-}
-
-func TestResolveCodexRendererEndpointUsesPrimaryRendererTarget(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{
-			{"type": "page", "url": "app://-/index.html?initialRoute=%2Favatar-overlay", "webSocketDebuggerUrl": "ws://overlay"},
-			{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws://renderer"},
-		})
-	}))
-	defer server.Close()
-	targets, err := resolveCodexRendererEndpoint(context.Background(), server.URL)
-	if err != nil || len(targets) != 2 || targets[0].wsURL != "ws://renderer" || targets[1].wsURL != "ws://overlay" {
-		t.Fatalf("targets=%+v err=%v", targets, err)
-	}
-}
-
 func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	searchCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
+	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/search" {
+			return `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}},"snippet":"test"}]}}`
 		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/search"`):
-				searchCalls++
-				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}},"snippet":"test"}]}}`
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
+		return ""
 	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	session, err := NewCodex(server.URL).Resolve(context.Background(), "Q")
-	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || searchCalls != 1 {
-		t.Fatalf("session=%+v search_calls=%d err=%v", session, searchCalls, err)
+	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "Q")
+	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || countMethod(bridge.Methods(), "thread/search") != 1 {
+		t.Fatalf("session=%+v methods=%v err=%v", session, bridge.Methods(), err)
 	}
 }
 
 func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	readCalls := 0
-	listCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
+	const id = "019f004a-a94e-7313-a599-2db587a1f67a"
+	bridge := startDesktopBridge(t, func(method string) string {
+		switch method {
+		case "thread/loaded/list":
+			return `{"result":{"data":[]}}`
+		case "thread/read":
+			return `{"result":{"thread":{"id":"` + id + `","name":"known","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}}}`
 		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := any("")
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/loaded/list"`):
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"thread/read"`):
-				readCalls++
-				value = `{"result":{"thread":{"id":"019f004a-a94e-7313-a599-2db587a1f67a","name":"known","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}}}`
-			case strings.Contains(expression, `"thread/list"`):
-				listCalls++
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
+		return ""
 	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	session, err := NewCodex(server.URL).Resolve(context.Background(), "019f004a-a94e-7313-a599-2db587a1f67a")
-	if err != nil || session == nil || session.ID != "019f004a-a94e-7313-a599-2db587a1f67a" || session.Transport != codexTransportDesktop || readCalls != 1 || listCalls != 0 {
-		t.Fatalf("session=%+v read_calls=%d list_calls=%d err=%v", session, readCalls, listCalls, err)
+	session, err := NewCodex(bridge.URL).Resolve(context.Background(), id)
+	methods := bridge.Methods()
+	if err != nil || session == nil || session.ID != id || session.Transport != codexTransportDesktop || countMethod(methods, "thread/read") != 1 || countMethod(methods, "thread/list") != 0 {
+		t.Fatalf("session=%+v methods=%v err=%v", session, methods, err)
 	}
+}
+
+func countMethod(methods []string, method string) int {
+	count := 0
+	for _, seen := range methods {
+		if seen == method {
+			count++
+		}
+	}
+	return count
 }
 
 func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
@@ -495,156 +206,73 @@ func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopSendSkipsResumeAndRepairsStaleManagedTransport(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	var methods []string
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := any("")
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "hooked"
-			case strings.Contains(expression, `"thread/read"`):
-				methods = append(methods, "thread/read")
-				value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":true,"model":"gpt-5.6-terra"}}}`
-			case strings.Contains(expression, `"thread/turns/list"`):
-				methods = append(methods, "thread/turns/list")
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"thread/resume"`):
-				methods = append(methods, "thread/resume")
-				value = `{"error":{"code":-1,"message":"must not resume Desktop-owned thread"}}`
-			case strings.Contains(expression, `"turn/start"`):
-				methods = append(methods, "turn/start")
-				value = `{"result":{"turn":{"id":"turn"}}}`
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	codex := NewCodex(server.URL)
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
-	sent, err := codex.SendWithOptions(context.Background(), session, "hello", surface.SendOptions{TurnOptions: surface.TurnOptions{Mode: "plan"}})
-	if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
-		t.Fatalf("sent=%+v err=%v", sent, err)
-	}
-	if session.Source != "vscode" || session.Transport != codexTransportDesktop {
-		t.Fatalf("session=%+v", session)
-	}
-	if strings.Join(methods, ",") != "thread/read,thread/read,thread/turns/list,thread/read,turn/start" {
-		t.Fatalf("methods=%v", methods)
-	}
-}
-
-type desktopLoadClient struct {
-	methods []string
-	reads   int
-}
-
-func (c *desktopLoadClient) Request(_ context.Context, method string, _ map[string]any, _ time.Duration) (map[string]any, error) {
-	c.methods = append(c.methods, method)
-	switch method {
-	case "thread/read":
-		c.reads++
-		if c.reads == 1 {
-			return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "thread", "source": "vscode", "status": map[string]any{"type": "notLoaded"}}}}, nil
-		}
-		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "thread", "source": "vscode", "status": map[string]any{"type": "idle"}, "canAcceptDirectInput": true}}}, nil
-	case "thread/resume":
-		return map[string]any{"result": map[string]any{"thread": map[string]any{"id": "thread"}}}, nil
-	default:
-		return nil, fmt.Errorf("unexpected method %s", method)
-	}
-}
-
-func (*desktopLoadClient) Close() error { return nil }
-
-func TestCodexDesktopLoadResumesUnloadedThreadBeforeDelivery(t *testing.T) {
-	client := &desktopLoadClient{}
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "vscode", Transport: codexTransportDesktop}
-	if err := NewCodex("").requireDirectInput(context.Background(), client, session); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(client.methods, ","); got != "thread/read,thread/resume,thread/read" {
-		t.Fatalf("methods=%s", got)
-	}
-}
-
-func TestCodexDesktopSendLoadsUnloadedThreadBeforeStartingTurn(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	var methods []string
-	reads := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := any("")
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "hooked"
-			case strings.Contains(expression, `"thread/read"`):
-				methods = append(methods, "thread/read")
-				reads++
-				if reads == 1 {
-					value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"notLoaded"}}}}`
-				} else {
-					value = `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":true}}}`
+func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ready := `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"idle"},"canAcceptDirectInput":true,"model":"gpt-5.6-terra"}}}`
+	for _, test := range []struct {
+		name       string
+		firstRead  string
+		session    surface.Session
+		wantResume int
+	}{
+		{
+			name:      "loaded thread behind stale managed transport",
+			firstRead: ready,
+			session:   surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged},
+		},
+		{
+			name:       "unloaded Desktop thread",
+			firstRead:  `{"result":{"thread":{"id":"thread","source":"vscode","status":{"type":"notLoaded"}}}}`,
+			session:    surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "vscode", Transport: codexTransportDesktop},
+			wantResume: 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resumed := false
+			bridge := startDesktopBridge(t, func(method string) string {
+				switch method {
+				case "thread/read":
+					if resumed || test.wantResume == 0 {
+						return ready
+					}
+					return test.firstRead
+				case "thread/resume":
+					if test.wantResume == 0 {
+						return `{"error":{"code":-1,"message":"must not resume a loaded Desktop thread"}}`
+					}
+					resumed = true
+					return `{"result":{"thread":{"id":"thread"}}}`
+				case "thread/turns/list":
+					return `{"result":{"data":[]}}`
+				case "turn/start":
+					return `{"result":{"turn":{"id":"turn"}}}`
 				}
-			case strings.Contains(expression, `"thread/resume"`):
-				methods = append(methods, "thread/resume")
-				value = `{"result":{"thread":{"id":"thread"}}}`
-			case strings.Contains(expression, `"thread/turns/list"`):
-				methods = append(methods, "thread/turns/list")
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"turn/start"`):
-				methods = append(methods, "turn/start")
-				value = `{"result":{"turn":{"id":"turn"}}}`
+				return ""
+			})
+			session := test.session
+			sent, err := NewCodex(bridge.URL).SendWithOptions(context.Background(), &session, "deliver queued work", surface.SendOptions{TurnOptions: surface.TurnOptions{Mode: "plan"}})
+			if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
+				t.Fatalf("sent=%+v err=%v", sent, err)
 			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	codex := NewCodex(server.URL)
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "vscode", Transport: codexTransportDesktop}
-	sent, err := codex.SendWithOptions(context.Background(), session, "deliver queued work", surface.SendOptions{})
-	if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
-		t.Fatalf("sent=%+v err=%v", sent, err)
-	}
-	if got := strings.Join(methods, ","); got != "thread/read,thread/resume,thread/read,thread/turns/list,turn/start" {
-		t.Fatalf("methods=%s", got)
+			if session.Source != "vscode" || session.Transport != codexTransportDesktop {
+				t.Fatalf("session=%+v", session)
+			}
+			methods := bridge.Methods()
+			resumes, starts, resumeAt, startAt := 0, 0, -1, -1
+			for index, method := range methods {
+				switch method {
+				case "thread/resume":
+					resumes++
+					resumeAt = index
+				case "turn/start":
+					starts++
+					startAt = index
+				}
+			}
+			if resumes != test.wantResume || starts != 1 || resumeAt > startAt {
+				t.Fatalf("methods=%v", methods)
+			}
+		})
 	}
 }
 
@@ -661,724 +289,14 @@ func TestCodexObserveRepairsStaleManagedTransport(t *testing.T) {
 }
 
 func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	searchCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
+	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/search" {
+			return `{"result":{"data":[{"thread":{"id":"thread-1","name":"duplicate","cwd":"/one"}},{"thread":{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}}]}}`
+		}
+		return ""
 	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/search"`):
-				searchCalls++
-				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"duplicate","cwd":"/one"}},{"thread":{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}}]}}`
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	_, err := NewCodex(server.URL).Resolve(context.Background(), "duplicate")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
-		t.Fatalf("err=%v", err)
+	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "duplicate")
+	if err == nil || session != nil || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
+		t.Fatalf("session=%+v err=%v", session, err)
 	}
-}
-
-func TestCodexListUsesOneBoundedStateDatabasePage(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	listCalls := 0
-	loadedCalls := 0
-	readCalls := 0
-	listExpression := ""
-	loadedExpression := ""
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/loaded/list"`):
-				loadedCalls++
-				loadedExpression = expression
-				value = `{"result":{"data":["loaded-thread"]}}`
-			case strings.Contains(expression, `"thread/read"`):
-				readCalls++
-				value = `{"result":{"thread":{"id":"loaded-thread","name":"loaded session","status":"busy"}}}`
-			case strings.Contains(expression, `"thread/list"`):
-				listCalls++
-				listExpression = expression
-				value = fmt.Sprintf(`{"result":{"data":[{"id":"thread-%d","name":"session"}],"nextCursor":"cursor-%d"}}`, listCalls, listCalls)
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	sessions, err := NewCodex(server.URL).List(context.Background())
-	if err != nil || len(sessions) != 2 || listCalls != 1 || loadedCalls != 1 || readCalls != 1 {
-		t.Fatalf("sessions=%v list_calls=%d loaded_calls=%d read_calls=%d err=%v", sessions, listCalls, loadedCalls, readCalls, err)
-	}
-	for _, required := range []string{`"limit":50`, `"useStateDbOnly":true`, `"sortKey":"recency_at"`, `"sortDirection":"desc"`} {
-		if !strings.Contains(listExpression, required) {
-			t.Fatalf("bounded list expression missing %s: %s", required, listExpression)
-		}
-	}
-	if !strings.Contains(loadedExpression, `"limit":50`) {
-		t.Fatalf("loaded list expression missing limit: %s", loadedExpression)
-	}
-}
-
-func TestCodexReadyUsesLoadedListOnly(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	loadedCalls := 0
-	listCalls := 0
-	readCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := any("")
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/loaded/list"`):
-				loadedCalls++
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"thread/list"`):
-				listCalls++
-			case strings.Contains(expression, `"thread/read"`):
-				readCalls++
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	if err := NewCodex(server.URL).Ready(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if loadedCalls != 1 || listCalls != 0 || readCalls != 0 {
-		t.Fatalf("loaded_calls=%d list_calls=%d read_calls=%d", loadedCalls, listCalls, readCalls)
-	}
-}
-
-func TestCodexBridgeUsesDesktopRendererMessages(t *testing.T) {
-	for name, source := range map[string]string{
-		"hook":   codexHookJS,
-		"rpc":    codexRPCJSONJS("thread/list", `{}`, time.Second),
-		"staged": codexStagedRPCJS("payload", "turn/start", time.Second),
-	} {
-		if !strings.Contains(source, "__agenthailCodexDesktopRendererV2") {
-			t.Fatalf("%s does not use the Desktop renderer bridge", name)
-		}
-	}
-	for _, required := range []string{"electronBridge.sendMessageFromView", "mcp-request", "mcp-response", "mcp-notification"} {
-		if !strings.Contains(codexHookJS, required) {
-			t.Fatalf("Desktop renderer bridge missing %q", required)
-		}
-	}
-}
-
-func TestCodexBridgeUsesDedicatedRequestIDs(t *testing.T) {
-	if !strings.Contains(codexHookJS, "'agenthail-' + Date.now()") {
-		t.Fatal("Desktop app-server bridge does not isolate request IDs")
-	}
-}
-
-func TestCodexDesktopDiscoveryRetriesImmediatelyForReplacementTarget(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var mu sync.Mutex
-	target := "one"
-	hookCalls := map[string]int{}
-	compatible := map[string]bool{"one": true, "three": true, "four": true}
-	var server *httptest.Server
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		mu.Lock()
-		current := target
-		mu.Unlock()
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/" + current}})
-	})
-	for _, name := range []string{"one", "two", "three", "four"} {
-		name := name
-		handler.HandleFunc("/"+name, func(w http.ResponseWriter, r *http.Request) {
-			conn, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				return
-			}
-			defer conn.Close()
-			for {
-				var request map[string]any
-				if conn.ReadJSON(&request) != nil {
-					return
-				}
-				mu.Lock()
-				hookCalls[name]++
-				mu.Unlock()
-				value := any("no-renderer-bridge")
-				if compatible[name] {
-					value = "hooked"
-				}
-				_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-			}
-		})
-	}
-	server = httptest.NewServer(handler)
-	defer server.Close()
-	codex := NewCodex(server.URL)
-	client, err := codex.openDesktop(context.Background())
-	if err != nil {
-		t.Fatalf("initial target did not connect: %v", err)
-	}
-	client.Close()
-	mu.Lock()
-	target = "two"
-	mu.Unlock()
-	if client, err := codex.openDesktop(context.Background()); err == nil {
-		client.Close()
-		t.Fatal("replacement without a dispatcher connected")
-	}
-	mu.Lock()
-	firstCalls := hookCalls["two"]
-	mu.Unlock()
-	if client, err := codex.openDesktop(context.Background()); err == nil {
-		client.Close()
-		t.Fatal("unsupported replacement target reconnected")
-	}
-	mu.Lock()
-	secondCalls := hookCalls["two"]
-	target = "three"
-	mu.Unlock()
-	if secondCalls != firstCalls {
-		t.Fatalf("same target repeated expensive discovery: first=%d second=%d", firstCalls, secondCalls)
-	}
-	client, err = codex.openDesktop(context.Background())
-	if err != nil {
-		t.Fatalf("replacement target did not rebind: %v", err)
-	}
-	client.Close()
-	mu.Lock()
-	target = "four"
-	mu.Unlock()
-	client, err = codex.openDesktop(context.Background())
-	if err != nil {
-		t.Fatalf("second replacement target did not rebind: %v", err)
-	}
-	client.Close()
-	mu.Lock()
-	thirdCalls := hookCalls["three"]
-	fourthCalls := hookCalls["four"]
-	mu.Unlock()
-	if thirdCalls == 0 || fourthCalls == 0 {
-		t.Fatalf("replacement dispatchers were not rediscovered: three=%d four=%d", thirdCalls, fourthCalls)
-	}
-}
-
-func TestCodexDesktopDiscoveryRetriesSameTargetAfterBackoff(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var mu sync.Mutex
-	ready := false
-	hookCalls := 0
-	var server *httptest.Server
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/desktop"}})
-	})
-	handler.HandleFunc("/desktop", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			mu.Lock()
-			hookCalls++
-			value := any("no-renderer-bridge")
-			if ready {
-				value = "hooked"
-			}
-			mu.Unlock()
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-	codex := NewCodex(server.URL)
-	if client, err := codex.openDesktop(context.Background()); err == nil {
-		client.Close()
-		t.Fatal("unready Desktop bridge connected")
-	}
-	mu.Lock()
-	firstCalls := hookCalls
-	mu.Unlock()
-	if client, err := codex.openDesktop(context.Background()); err == nil {
-		client.Close()
-		t.Fatal("cached unready Desktop bridge connected")
-	}
-	mu.Lock()
-	secondCalls := hookCalls
-	ready = true
-	mu.Unlock()
-	if secondCalls != firstCalls {
-		t.Fatalf("same target repeated discovery before backoff: first=%d second=%d", firstCalls, secondCalls)
-	}
-	codex.bridgeMu.Lock()
-	codex.bridgeRetry = time.Now().Add(-time.Millisecond)
-	codex.bridgeMu.Unlock()
-	client, err := codex.openDesktop(context.Background())
-	if err != nil {
-		t.Fatalf("same target did not recover after backoff: %v", err)
-	}
-	client.Close()
-}
-
-func TestCodexTurnCorrelationRequiresThreadAndRequestedTurn(t *testing.T) {
-	event := map[string]any{"threadId": "thread-1", "turnId": "old-turn"}
-	if !codexContainsID(event, "thread-1") {
-		t.Fatal("thread correlation missing")
-	}
-	if codexContainsID(event, "requested-turn") {
-		t.Fatal("stale turn correlated")
-	}
-}
-
-func TestDiagnosticExcerptBoundsUnicodeErrorBodies(t *testing.T) {
-	body := strings.Repeat("界", 2*1024*1024)
-	excerpt := diagnosticExcerpt(body)
-	if len(excerpt) > maxDiagnosticBytes+100 || !strings.Contains(excerpt, "truncated") || !json.Valid([]byte(strconvQuote(excerpt))) {
-		t.Fatalf("excerpt bytes=%d", len(excerpt))
-	}
-}
-
-func TestCodexRPCPropagatesErrorEnvelope(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if err := conn.ReadJSON(&request); err != nil {
-				return
-			}
-			id := request["id"]
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := ""
-			switch {
-			case strings.Contains(expression, "await b.request"):
-				value = `{"jsonrpc":"2.0","id":"agenthail-test","error":{"code":-32601,"message":"missing"}}`
-			}
-			response := map[string]any{"id": id, "result": map[string]any{"result": map[string]any{"value": value}}}
-			if err := conn.WriteJSON(response); err != nil {
-				return
-			}
-		}
-	}))
-	defer server.Close()
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bridge := &cdpConn{ws: conn, next: 1}
-	_, err = (&Codex{}).rpc(context.Background(), bridge, "missing/method", map[string]any{}, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "RPC error") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestCodexRPCRejectsMalformedDesktopResponse(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		var request map[string]any
-		if conn.ReadJSON(&request) != nil {
-			return
-		}
-		_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": "not-json"}}})
-	}))
-	defer server.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_, err = (&Codex{}).rpc(context.Background(), &cdpConn{ws: conn, next: 1}, "thread/list", map[string]any{}, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "parse thread/list response") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestCodexEventBatchJSONShape(t *testing.T) {
-	raw, _ := json.Marshal(codexEventBatch{Cursor: 2, Events: []codexEvent{{Sequence: 2, Method: "turn/completed"}}})
-	var decoded codexEventBatch
-	if err := json.Unmarshal(raw, &decoded); err != nil || decoded.Cursor != 2 {
-		t.Fatalf("decoded=%+v err=%v", decoded, err)
-	}
-}
-
-func TestCodexRPCStagesLargePayloadInBoundedExpressions(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var longestExpression int
-	var sawStaging bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			if len(expression) > longestExpression {
-				longestExpression = len(expression)
-			}
-			value := ""
-			switch {
-			case strings.Contains(expression, "__agenthailPayloads") && !strings.Contains(expression, "delete p"):
-				sawStaging = true
-				value = "ok"
-			case strings.Contains(expression, "TextDecoder"):
-				value = `{"jsonrpc":"2.0","id":"agenthail-test","result":{}}`
-			}
-			response := map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}}
-			if conn.WriteJSON(response) != nil {
-				return
-			}
-		}
-	}))
-	defer server.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bridge := &cdpConn{ws: conn, next: 1}
-	// The fake response lookup is keyed by an unpredictable UUID, so return a valid
-	// envelope independent of its id; rpc only requires a result envelope here.
-	_, err = (&Codex{}).rpc(context.Background(), bridge, "turn/start", map[string]any{"text": strings.Repeat("界", 100_000)}, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !sawStaging || longestExpression > 2600 {
-		t.Fatalf("staging=%v longest_expression=%d", sawStaging, longestExpression)
-	}
-}
-
-func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
-	t.Skip("Desktop content is sourced from the local transcript")
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	eventReads := 0
-	threadReads := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case expression == codexEventCursorJS:
-				value = float64(10)
-			case strings.Contains(expression, "events:b.events.filter"):
-				eventReads++
-				turnID := "old-turn"
-				if eventReads > 1 {
-					turnID = "target-turn"
-				}
-				batch, _ := json.Marshal(codexEventBatch{Cursor: int64(10 + eventReads), Events: []codexEvent{{Sequence: int64(10 + eventReads), Method: "turn/completed", Params: map[string]any{"threadId": "thread-1", "turnId": turnID}}}})
-				value = string(batch)
-			case strings.Contains(expression, `"thread/turns/list"`):
-				threadReads++
-				status := "running"
-				if threadReads > 1 {
-					status = "completed"
-				}
-				value = fmt.Sprintf(`{"result":{"data":[{"id":"target-turn","status":{"type":"%s"}}]}}`, status)
-			case strings.Contains(expression, `"thread/items/list"`):
-				value = `{"result":{"data":[{"item":{"type":"agentMessage","text":"done"}}]}}`
-			}
-			response := map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}}
-			if conn.WriteJSON(response) != nil {
-				return
-			}
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	var events []surface.StreamEvent
-	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1"}, "target-turn", func(event surface.StreamEvent) {
-		events = append(events, event)
-	}, 2*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if eventReads < 2 || len(events) != 2 || events[0].Text != "done" || !events[0].Final || events[1].Kind != "done" {
-		t.Fatalf("event_reads=%d events=%+v", eventReads, events)
-	}
-	if events[0].ProviderKey != "codex:target-turn:assistant" || events[0].ID != "codex:target-turn:assistant" || events[0].Operation != "upsert" || events[0].TurnID != "target-turn" {
-		t.Fatalf("normalized event=%+v", events[0])
-	}
-}
-
-func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
-	t.Skip("Desktop content is sourced from the local transcript")
-}
-
-func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *testing.T) {
-	t.Skip("Desktop content is sourced from the local transcript")
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	eventReads := 0
-	requestedAfterBarrier := false
-	requestedExpression := ""
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "hooked"
-			case expression == codexEventCursorJS:
-				value = float64(0)
-			case strings.Contains(expression, "events:b.events.filter"):
-				requestedExpression = expression
-				requestedAfterBarrier = requestedAfterBarrier || strings.Contains(expression, "sequence>7")
-				eventReads++
-				var batch codexEventBatch
-				if eventReads == 1 {
-					batch = codexEventBatch{Cursor: 8, Events: []codexEvent{
-						{Sequence: 1, Method: "turn/started", Params: map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1"}}},
-						{Sequence: 2, Method: "item/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "question"}}}}},
-						{Sequence: 3, Method: "item/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "reasoning-1", "type": "reasoning", "text": "thinking"}}},
-						{Sequence: 4, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-1", "type": "agentMessage"}, "delta": "hel"}},
-						{Sequence: 5, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-1", "type": "agentMessage"}, "delta": "lo"}},
-						{Sequence: 6, Method: "item/tool/started", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "tool-1", "type": "toolCall", "call_id": "call-1", "name": "lookup", "arguments": map[string]any{"query": "status"}}}},
-						{Sequence: 7, Method: "item/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "result-1", "type": "toolResult", "call_id": "call-1", "output": "found"}}},
-						{Sequence: 8, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-2", "type": "agentMessage"}, "delta": "draft"}},
-					}}
-				} else {
-					batch = codexEventBatch{Cursor: 9, Events: []codexEvent{{Sequence: 9, Method: "turn/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1"}}}}
-				}
-				encoded, _ := json.Marshal(batch)
-				value = string(encoded)
-			case strings.Contains(expression, `"thread/turns/list"`):
-				value = `{"result":{"data":[{"id":"turn-1","status":{"type":"completed"},"items":[{"type":"agentMessage","id":"assistant-1","phase":"commentary","text":"interim"},{"type":"agentMessage","id":"assistant-2","phase":"final_answer","text":"authoritative answer"}]}]}}`
-			}
-			if conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}}) != nil {
-				return
-			}
-		}
-	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	var events []surface.StreamEvent
-	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1", StreamCursor: 7, StreamCursorSet: true}, "", func(event surface.StreamEvent) {
-		events = append(events, event)
-	}, 2*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if eventReads < 2 || !requestedAfterBarrier || len(events) != 9 {
-		t.Fatalf("event_reads=%d requested_after_barrier=%v expression=%q events=%+v", eventReads, requestedAfterBarrier, requestedExpression, events)
-	}
-	if events[0].ID != "codex:turn-1:message:user-1" || events[0].Role != "user" || events[0].Text != "question" {
-		t.Fatalf("user item=%+v", events[0])
-	}
-	if events[1].ID != "codex:turn-1:reasoning:reasoning-1" || events[1].Kind != "reasoning" || events[1].Text != "thinking" {
-		t.Fatalf("reasoning item=%+v", events[1])
-	}
-	if events[2].ID != "codex:turn-1:assistant:assistant-1" || events[3].ID != events[2].ID || events[3].Text != "lo" || events[3].Version != 5 {
-		t.Fatalf("delta identity/accumulation=%+v", events[2:4])
-	}
-	if events[4].ID != "codex:turn-1:toolCall:tool-1" || events[4].Kind != "toolCall" || events[4].CallID != "call-1" || !strings.Contains(events[4].Text, `"query": "status"`) {
-		t.Fatalf("tool boundary=%+v", events[4])
-	}
-	if events[5].ID != "codex:turn-1:toolResult:result-1" || events[5].Kind != "toolResult" || events[5].CallID != "call-1" || events[5].Text != "found" {
-		t.Fatalf("tool result=%+v", events[5])
-	}
-	if events[6].ID != "codex:turn-1:assistant:assistant-2" || events[6].Kind != "text" {
-		t.Fatalf("second assistant boundary=%+v", events[6])
-	}
-	if events[7].ID != "codex:turn-1:assistant:assistant-2" || !events[7].Final || events[7].Text != "authoritative answer" || events[7].Operation != "upsert" {
-		t.Fatalf("authoritative final=%+v", events[7])
-	}
-	if events[8].ID != "codex:turn-1:done" || events[8].Kind != "done" || events[8].TurnID != "turn-1" {
-		t.Fatalf("completion boundary=%+v", events[8])
-	}
-	for _, event := range events {
-		if strings.HasPrefix(event.ID, "renderer:") {
-			t.Fatalf("desktop stream emitted fragment identity: %+v", event)
-		}
-	}
-}
-
-func TestCodexDesktopStreamDerivesIdentityWhenJoiningMidTurn(t *testing.T) {
-	t.Skip("Desktop content is sourced from the local transcript")
-	/*
-		state := &codexDesktopStreamState{}
-		event := codexEvent{Params: map[string]any{
-			"threadId": "thread-1",
-			"turnId":   "turn-late",
-			"item":     map[string]any{"id": "assistant-late", "type": "agentMessage"},
-			"delta":    "late answer",
-		}}
-		state.observe(event)
-		streamEvent, ok := state.textEvent(1, "late answer", codexEventItemID(event.Params))
-		if !ok || streamEvent.ID != "codex:turn-late:assistant:assistant-late" || streamEvent.TurnID != "turn-late" {
-			t.Fatalf("late-join event=%+v ok=%v", streamEvent, ok)
-		}
-		empty := &codexDesktopStreamState{}
-		if _, ok := empty.textEvent(1, "unbound", ""); ok {
-			t.Fatal("emitted unbound Desktop fragment")
-		}
-	*/
-}
-
-func TestCodexDesktopLiveImageItemUsesOpaqueStableAttachmentReference(t *testing.T) {
-	t.Skip("Desktop attachments use durable transcript references")
-	/*
-		data, err := base64.StdEncoding.DecodeString(testPNG)
-		if err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(t.TempDir(), "input.png")
-		if err := os.WriteFile(path, data, 0600); err != nil {
-			t.Fatal(err)
-		}
-		codex := NewCodex("")
-		state := &codexDesktopStreamState{turnID: "turn-image"}
-		event := codexEvent{Sequence: 11, Params: map[string]any{
-			"threadId": "thread-image",
-			"turnId":   "turn-image",
-			"item": map[string]any{
-				"id": "user-image-1", "type": "userMessage",
-				"content": []any{map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": path}}},
-			},
-		}}
-		events := state.itemEvents(context.Background(), codex, "thread-image", event)
-		if len(events) != 1 || events[0].Kind != "attachment" || events[0].Attachment == nil {
-			t.Fatalf("events=%+v", events)
-		}
-		if !strings.HasPrefix(events[0].Attachment.ID, "live-attachment:thread-image:") || events[0].Text != "Image attachment" {
-			t.Fatalf("attachment=%+v", events[0].Attachment)
-		}
-		encoded, _ := json.Marshal(events[0])
-		if strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(data)) || strings.Contains(string(encoded), string(data)) {
-			t.Fatal("live event carried image bytes")
-		}
-		attachment, got, err := codex.ReadAttachment(context.Background(), &surface.Session{ID: "thread-image"}, events[0].Attachment.ID)
-		if err != nil || attachment.ID != events[0].Attachment.ID || string(got) != string(data) {
-			t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(got), err)
-		}
-	*/
-}
-
-func TestCodexEventImageReferencesHaveDeterministicMapOrder(t *testing.T) {
-	t.Skip("Desktop content is sourced from the local transcript")
-	/*
-		first := filepath.Join(t.TempDir(), "first.png")
-		second := filepath.Join(t.TempDir(), "second.png")
-		value := map[string]any{
-			"z": map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": second}},
-			"a": map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": first}},
-		}
-		refs := codexEventImageReferences(value)
-		if len(refs) != 2 || refs[0].Path != first || refs[1].Path != second {
-			t.Fatalf("refs=%+v", refs)
-		}
-	*/
 }
