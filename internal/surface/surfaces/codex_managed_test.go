@@ -125,22 +125,38 @@ func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 	}
 }
 
-func TestCodexManagedRuntimeStatusReportsPIDBackend(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"pid\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "")
-	t.Setenv("XPC_SERVICE_NAME", "")
-	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
-	if !status.Reachable || status.Durable || status.Backend != "pid" {
-		t.Fatalf("status=%+v", status)
-	}
-	if !strings.Contains(status.Remediation, "agenthail launch codex") {
-		t.Fatalf("remediation=%q", status.Remediation)
+func TestCodexManagedRuntimeStatusReportsDurability(t *testing.T) {
+	for _, test := range []struct {
+		name, backend, supervisor, xpc string
+		durable, remediation           bool
+	}{
+		{name: "unsupervised pid backend", backend: "pid", remediation: true},
+		{name: "homebrew-supervised pid backend", backend: "pid", supervisor: "homebrew", durable: true},
+		{name: "launchd-supervised pid backend", backend: "pid", xpc: "com.agenthail.daemon", durable: true},
+		{name: "unknown supervisor", backend: "pid", supervisor: "unknown"},
+		{name: "launchd backend", backend: "launchd", durable: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			script := filepath.Join(t.TempDir(), "codex")
+			body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"" + test.backend + "\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
+			if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AGENTHAIL_CODEX_BIN", script)
+			t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", test.supervisor)
+			t.Setenv("XPC_SERVICE_NAME", test.xpc)
+			status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
+			if !status.Reachable || status.Durable != test.durable || status.Backend != test.backend {
+				t.Fatalf("status=%+v", status)
+			}
+			if test.remediation {
+				if !strings.Contains(status.Remediation, "agenthail launch codex") {
+					t.Fatalf("remediation=%q", status.Remediation)
+				}
+			} else if test.durable && (status.Detail != "" || status.Remediation != "") {
+				t.Fatalf("supervised status carries degraded detail: %+v", status)
+			}
+		})
 	}
 }
 
@@ -151,78 +167,6 @@ func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
 	}
 	if !strings.Contains(status.Detail, "read path") || !strings.Contains(status.Detail, "per target") {
 		t.Fatalf("status=%+v", status)
-	}
-}
-
-func TestCodexManagedRuntimeStatusReportsSupervisedPIDBackend(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"pid\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "homebrew")
-	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
-	if !status.Reachable || !status.Durable || status.Backend != "pid" {
-		t.Fatalf("status=%+v", status)
-	}
-	if status.Detail != "" || status.Remediation != "" {
-		t.Fatalf("supervised status=%+v", status)
-	}
-}
-
-func TestCodexManagedRuntimeStatusReportsLaunchdSupervisedPIDBackend(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"pid\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	t.Setenv("XPC_SERVICE_NAME", "com.agenthail.daemon")
-	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
-	if !status.Reachable || !status.Durable || status.Backend != "pid" {
-		t.Fatalf("status=%+v", status)
-	}
-	if status.Detail != "" || status.Remediation != "" {
-		t.Fatalf("supervised status=%+v", status)
-	}
-}
-
-func TestCodexManagedRuntimeStatusRejectsUnknownSupervisor(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"pid\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", "unknown")
-	t.Setenv("XPC_SERVICE_NAME", "")
-	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
-	if !status.Reachable || status.Durable {
-		t.Fatalf("status=%+v", status)
-	}
-}
-
-func TestCodexManagedRuntimeStatusReportsDurableSupervisedBackend(t *testing.T) {
-	root := t.TempDir()
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"launchd\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
-	if !status.Reachable || !status.Durable || status.Backend != "launchd" {
-		t.Fatalf("status=%+v", status)
-	}
-	if status.Detail != "" {
-		t.Fatalf("supervised backend should carry no degraded detail, got %q", status.Detail)
-	}
-	if status.Remediation != "" {
-		t.Fatalf("supervised backend needs no remediation, got %q", status.Remediation)
 	}
 }
 

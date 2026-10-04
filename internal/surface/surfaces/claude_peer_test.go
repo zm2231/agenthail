@@ -236,42 +236,25 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 	}
 }
 
-func TestClaudeProcessStartAcceptsUTCAndLegacyLocalRecords(t *testing.T) {
+func TestClaudeProcessStartMatchesOnlyTheSameInstant(t *testing.T) {
 	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
 	localLocation := time.FixedZone("EDT", -4*60*60)
-	local := instant.In(localLocation)
-	if !sameClaudeProcessStartInLocation(
-		"2.1.270", instant.Format(claudeProcessStartLayout),
-		instant.Format(claudeProcessStartLayout), localLocation,
-	) {
-		t.Fatal("UTC record was rejected")
-	}
-	if !sameClaudeProcessStartInLocation(
-		"2.1.251", local.Format(claudeProcessStartLayout),
-		instant.Format(claudeProcessStartLayout), localLocation,
-	) {
-		t.Fatal("legacy local record was rejected")
-	}
-	if sameClaudeProcessStartInLocation(
-		"2.1.270", instant.Format(claudeProcessStartLayout),
-		instant.Add(time.Second).Format(claudeProcessStartLayout), localLocation,
-	) {
-		t.Fatal("different process start instant was accepted")
-	}
-}
-
-func TestClaudeProcessStartRejectsMatchingTextFromDifferentInstants(t *testing.T) {
-	instant := time.Date(2026, time.September, 13, 3, 2, 13, 0, time.UTC)
-	localLocation := time.FixedZone("EDT", -4*60*60)
-	text := instant.Format(claudeProcessStartLayout)
-	if sameClaudeProcessStartInLocation("2.1.251", text, text, localLocation) {
-		t.Fatal("matching wall-clock text admitted a recycled PID with a different start instant")
-	}
-	if !sameClaudeProcessStartInLocation("2.1.270", text, text, localLocation) {
-		t.Fatal("UTC process start was rejected")
-	}
-	if sameClaudeProcessStartInLocation("unrecognized", text, text, localLocation) {
-		t.Fatal("record with unknown timestamp format was admitted")
+	utc := instant.Format(claudeProcessStartLayout)
+	local := instant.In(localLocation).Format(claudeProcessStartLayout)
+	later := instant.Add(time.Second).Format(claudeProcessStartLayout)
+	for _, test := range []struct {
+		name, version, recorded, observed string
+		same                              bool
+	}{
+		{name: "UTC record", version: "2.1.270", recorded: utc, observed: utc, same: true},
+		{name: "legacy local record", version: "2.1.251", recorded: local, observed: utc, same: true},
+		{name: "different instant", version: "2.1.270", recorded: utc, observed: later},
+		{name: "legacy record with matching UTC text from a different instant", version: "2.1.251", recorded: utc, observed: utc},
+		{name: "unknown record format", version: "unrecognized", recorded: utc, observed: utc},
+	} {
+		if got := sameClaudeProcessStartInLocation(test.version, test.recorded, test.observed, localLocation); got != test.same {
+			t.Fatalf("%s: same=%v want %v", test.name, got, test.same)
+		}
 	}
 }
 

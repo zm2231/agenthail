@@ -162,43 +162,6 @@ func TestCodexAttachmentStaysFetchableAfterTranscriptGrows(t *testing.T) {
 	}
 }
 
-func TestCodexLiveAttachmentKeepsOffsetAfterMalformedPrefix(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
-	line := `{"type":"event_msg","payload":{"type":"user_message","message":"look","images":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
-	content := "not-json\n" + line
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
-	page, err := readTimeline(context.Background(), path, "codex", 0, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var seedID string
-	for _, item := range page.Items {
-		if item.Kind == "attachment" {
-			seedID = item.Attachment.ID
-			break
-		}
-	}
-	if seedID == "" {
-		t.Fatalf("seed=%+v", page.Items)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	var liveID string
-	err = (&Codex{}).Stream(ctx, &surface.Session{ID: "malformed-prefix", Transcript: path, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
-		if event.Kind == "attachment" {
-			liveID = event.Attachment.ID
-			cancel()
-		}
-	}, time.Second)
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal(err)
-	}
-	if liveID != seedID {
-		t.Fatalf("seed attachment=%q live attachment=%q", seedID, liveID)
-	}
-}
 
 func mustAttachmentData(t *testing.T) []byte {
 	t.Helper()
@@ -209,11 +172,11 @@ func mustAttachmentData(t *testing.T) []byte {
 	return data
 }
 
-func TestCodexInputImageURLSiblingsKeepDistinctFetchableIdentities(t *testing.T) {
+func TestCodexImageSiblingsKeepDistinctFetchableIdentitiesAcrossSeedAndStream(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	image := "data:image/png;base64," + testPNG
 	line := `{"timestamp":"2026-09-01T12:00:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_siblings","role":"user","content":[{"type":"input_text","text":"compare these"},{"type":"input_image","image_url":"` + image + `"},{"type":"input_image","image_url":"` + image + `"}]}}` + "\n"
-	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("not-json\n"+line), 0600); err != nil {
 		t.Fatal(err)
 	}
 	page, err := readTimeline(context.Background(), path, "codex", 0, 20)

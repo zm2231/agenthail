@@ -224,56 +224,75 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	}
 }
 
-func TestTMUXMalformedPostLaunchOutputIsAcceptedWithoutLocation(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	launcher := newTMUX().(*processLauncher)
-	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("created-but-unparseable"), nil
-	}
-	_, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindCodex, Cwd: "/work", Message: "hello"})
-	var acceptedErr LaunchAcceptedError
-	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherTMUX {
-		t.Fatalf("err=%v, want accepted tmux launch error", err)
-	}
-}
-
-func TestTMUXRunnerErrorAfterDispatchIsAcceptedWithLaunchIdentity(t *testing.T) {
+func TestTMUXLaunchClassifiesPostDispatchFailureAsAccepted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	claude := filepath.Join(t.TempDir(), "claude")
 	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
-	launcher := newTMUX().(*processLauncher)
-	launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		sessionIndex := slices.Index(args, "-s")
-		if sessionIndex < 0 || sessionIndex+1 >= len(args) {
-			t.Fatalf("tmux session argument missing: %#v", args)
+	launchSession := func(args []string) string {
+		if index := slices.Index(args, "-s"); index >= 0 && index+1 < len(args) {
+			return args[index+1]
 		}
-		return []byte(args[sessionIndex+1] + " %1"), errors.New("tmux exited after creating the session")
+		t.Fatalf("tmux session argument missing: %#v", args)
+		return ""
 	}
-	result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Message: "hello"})
-	var acceptedErr LaunchAcceptedError
-	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherTMUX {
-		t.Fatalf("err=%v, want accepted post-dispatch error", err)
-	}
-	if result.Location == nil || result.Location.Session == "" {
-		t.Fatalf("result=%#v, want launch-owned session identity", result)
-	}
-}
-
-func TestTMUXRunnerStartErrorRemainsDefinitiveFailure(t *testing.T) {
-	for _, startErr := range []error{
-		&exec.Error{Name: "tmux", Err: os.ErrNotExist},
-		&os.PathError{Op: "fork/exec", Path: "/missing/tmux", Err: os.ErrNotExist},
+	for _, test := range []struct {
+		name     string
+		agent    SurfaceKind
+		run      func(args []string) ([]byte, error)
+		accepted bool
+		identity bool
+	}{
+		{
+			name:  "unparseable output after launch",
+			agent: KindCodex,
+			run: func([]string) ([]byte, error) {
+				return []byte("created-but-unparseable"), nil
+			},
+			accepted: true,
+		},
+		{
+			name:  "runner error after dispatch",
+			agent: KindClaude,
+			run: func(args []string) ([]byte, error) {
+				return []byte(launchSession(args) + " %1"), errors.New("tmux exited after creating the session")
+			},
+			accepted: true,
+			identity: true,
+		},
+		{
+			name:  "tmux executable missing",
+			agent: KindClaude,
+			run: func([]string) ([]byte, error) {
+				return nil, &exec.Error{Name: "tmux", Err: os.ErrNotExist}
+			},
+		},
+		{
+			name:  "tmux fork failure",
+			agent: KindClaude,
+			run: func([]string) ([]byte, error) {
+				return nil, &os.PathError{Op: "fork/exec", Path: "/missing/tmux", Err: os.ErrNotExist}
+			},
+		},
 	} {
-		t.Run(startErr.Error(), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			launcher := newTMUX().(*processLauncher)
-			launcher.run = func(context.Context, string, ...string) ([]byte, error) {
-				return nil, startErr
+			launcher.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				return test.run(args)
 			}
-			result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Message: "hello"})
+			result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: test.agent, Cwd: "/work", Message: "hello"})
 			var acceptedErr LaunchAcceptedError
-			if errors.As(err, &acceptedErr) || err == nil || result.Location != nil {
-				t.Fatalf("result=%#v err=%v, want definitive pre-start failure", result, err)
+			if !test.accepted {
+				if err == nil || errors.As(err, &acceptedErr) || result.Location != nil {
+					t.Fatalf("result=%#v err=%v, want definitive pre-start failure", result, err)
+				}
+				return
+			}
+			if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherTMUX {
+				t.Fatalf("err=%v, want accepted tmux launch error", err)
+			}
+			if test.identity && (result.Location == nil || result.Location.Session == "") {
+				t.Fatalf("result=%#v, want launch-owned session identity", result)
 			}
 		})
 	}

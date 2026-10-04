@@ -263,85 +263,220 @@ func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testi
 	}
 }
 
-func TestClaudeCompletedTurnClearsPreviouslyBusyStatus(t *testing.T) {
-	path := writeTranscript(t, `
+func TestClaudeObserveDerivesTurnStateFromTranscript(t *testing.T) {
+	const completed = `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusBusy, Transcript: path})
-	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" || observation.CompletedTurnID != "m1" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
+{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`
+	live := os.Getpid()
+	notBusy := func(t *testing.T, observation *surface.TurnObservation) {
+		t.Helper()
+		if observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" {
+			t.Fatalf("observation=%+v", observation)
+		}
 	}
-}
-
-func TestClaudeTranscriptCompletionOverridesUnknownRemoteStatus(t *testing.T) {
-	path := writeTranscript(t, `
+	for _, test := range []struct {
+		name       string
+		transcript string
+		session    surface.Session
+		check      func(*testing.T, *surface.TurnObservation)
+	}{
+		{
+			name: "completed turn clears previously busy status", transcript: completed,
+			session: surface.Session{Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.ActiveTurnID != "" || o.CompletedTurnID != "m1" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "completion overrides unknown remote status", transcript: completed,
+			session: surface.Session{Status: surface.StatusUnknown},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.ActiveTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "completion overrides stale offline status for live process", transcript: completed,
+			session: surface.Session{PID: live, Status: surface.StatusOffline},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.ActiveTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "completed turn does not revive offline session", transcript: completed,
+			session: surface.Session{Status: surface.StatusOffline},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusOffline || o.ActiveTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "empty transcript keeps busy", transcript: "",
+			session: surface.Session{PID: live, Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusBusy || o.ActiveTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "empty transcript does not prove idle", transcript: "",
+			session: surface.Session{PID: live, Status: surface.StatusIdle},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusUnknown || o.ActiveTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "max_tokens releases turn without completion",
+			transcript: `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusUnknown, Transcript: path})
-	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeEmptyTranscriptDoesNotProveReadiness(t *testing.T) {
-	path := writeTranscript(t, "")
-	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", PID: os.Getpid(), Status: surface.StatusBusy, Transcript: path})
-	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-	observation, err = NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", PID: os.Getpid(), Status: surface.StatusIdle, Transcript: path})
-	if err != nil || observation.Status != surface.StatusUnknown || observation.ActiveTurnID != "" {
-		t.Fatalf("idle observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeTranscriptCompletionOverridesStaleOfflineStatusForLiveProcess(t *testing.T) {
-	path := writeTranscript(t, `
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]}}`,
+			session: surface.Session{Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.ActiveTurnID != "" || o.CompletedTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "context window exhaustion releases turn without completion",
+			transcript: `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", PID: os.Getpid(), Status: surface.StatusOffline, Transcript: path})
-	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeTerminalLimitsReleaseTurnWithoutReportingCompletion(t *testing.T) {
-	for _, reason := range []string{"max_tokens", "model_context_window_exceeded"} {
-		t.Run(reason, func(t *testing.T) {
-			path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"`+reason+`","content":[{"type":"text","text":"partial"}]}}`)
-			observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusBusy, Transcript: path})
-			if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" || observation.CompletedTurnID != "" {
-				t.Fatalf("observation=%+v err=%v", observation, err)
-			}
-		})
-	}
-}
-
-func TestClaudeTurnDurationClosesToolEndingTurn(t *testing.T) {
-	path := writeTranscript(t, `
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"model_context_window_exceeded","content":[{"type":"text","text":"partial"}]}}`,
+			session: surface.Session{Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.ActiveTurnID != "" || o.CompletedTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "turn duration closes tool-ending turn",
+			transcript: `
 {"type":"user","uuid":"u1","message":{"content":"work"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"tool_use","content":[{"type":"text","text":"done"}]}}
 {"type":"user","uuid":"tool-result","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}
-{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T01:29:40.594Z"}`)
-	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusBusy, Transcript: path})
-	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "m1" || observation.Reply == nil || observation.Reply.Text != "done" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeRecentTerminalMarkerDoesNotRaceNewBusyTurn(t *testing.T) {
-	path := writeTranscript(t, `
+{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T01:29:40.594Z"}`,
+			session: surface.Session{Status: surface.StatusBusy},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusIdle || o.CompletedTurnID != "m1" || o.Reply == nil || o.Reply.Text != "done" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "completion older than bridge activity does not clear a new busy turn",
+			transcript: `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
-	lastActive := time.Date(2026, 7, 19, 1, 5, 0, 0, time.UTC)
-	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusBusy, Transcript: path, LastActive: lastActive})
-	if err != nil || observation.Status != surface.StatusBusy {
-		t.Fatalf("observation=%+v err=%v", observation, err)
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`,
+			session: surface.Session{Status: surface.StatusBusy, LastActive: time.Date(2026, 7, 19, 1, 5, 0, 0, time.UTC)},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusBusy {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "user interrupt marker terminates partial turn",
+			transcript: `
+{"type":"user","uuid":"u1","message":{"content":"long answer"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":null,"content":[{"type":"text","text":"partial"}]}}
+{"type":"user","uuid":"interrupt","message":{"content":"[Request interrupted by user]"}}`,
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				notBusy(t, o)
+				if o.CompletedTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "slash commands are not active turns",
+			transcript: completed + `
+{"type":"user","uuid":"command","message":{"content":"/compact"}}
+{"type":"user","uuid":"metadata","message":{"content":"<command-name>/compact</command-name>\n<command-args></command-args>"}}
+{"type":"system","subtype":"local_command","content":"<local-command-stdout>Compacted</local-command-stdout>"}`,
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				notBusy(t, o)
+				if o.CompletedTurnID != "m1" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "compaction summary is not an active turn",
+			transcript: completed + `
+{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}
+{"type":"user","uuid":"summary","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}`,
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				notBusy(t, o)
+				if o.CompletedTurnID != "m1" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name:       "pending compact does not revive offline session",
+			transcript: `{"type":"user","uuid":"compact","message":{"content":"/compact"}}`,
+			session:    surface.Session{Status: surface.StatusOffline},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusOffline || o.ActiveTurnID != "" {
+					t.Fatalf("observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "compact boundary does not consume a following compact",
+			transcript: `
+{"type":"user","uuid":"c1","message":{"content":"/compact"}}
+{"type":"user","uuid":"c2","message":{"content":"/compact"}}
+{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}
+{"type":"user","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}
+{"type":"user","message":{"content":"<local-command-stdout>Compacted</local-command-stdout>"}}`,
+			session: surface.Session{Status: surface.StatusIdle},
+			check: func(t *testing.T, o *surface.TurnObservation) {
+				if o.Status != surface.StatusBusy {
+					t.Fatalf("second compact was not pending: observation=%+v", o)
+				}
+			},
+		},
+		{
+			name: "compact completion uses timestamps across reordered records",
+			transcript: `
+{"type":"user","timestamp":"2026-07-18T08:09:58.695Z","message":{"content":"/compact"}}
+{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-18T08:12:08.605Z","content":"Conversation compacted"}
+{"type":"user","timestamp":"2026-07-18T08:12:08.359Z","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
+{"type":"user","timestamp":"2026-07-18T08:09:58.696Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`,
+			session: surface.Session{Status: surface.StatusIdle},
+			check:   notBusy,
+		},
+		{
+			name: "compact followed by a completed turn is not pending",
+			transcript: `
+{"type":"user","timestamp":"2026-07-19T07:30:52.908Z","message":{"content":"/compact"}}
+{"type":"assistant","timestamp":"2026-07-19T07:43:04.867Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T07:43:04.906Z"}`,
+			session: surface.Session{Status: surface.StatusIdle},
+			check:   notBusy,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session := test.session
+			session.ID = "bridge"
+			session.Transcript = writeTranscript(t, test.transcript)
+			observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.check(t, observation)
+		})
 	}
 }
 
@@ -373,51 +508,6 @@ func TestClaudeCompactRemainsBusyUntilCommandCompletes(t *testing.T) {
 	observation, err = claude.Observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
 		t.Fatalf("completed observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeCompactBoundaryDoesNotConsumeFollowingCompact(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"c1","message":{"content":"/compact"}}
-{"type":"user","uuid":"c2","message":{"content":"/compact"}}
-{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}
-{"type":"user","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}
-{"type":"user","message":{"content":"<local-command-stdout>Compacted</local-command-stdout>"}}`)
-	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path})
-	if err != nil || observation.Status != surface.StatusBusy {
-		t.Fatalf("second compact was not pending: observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudePendingCompactDoesNotReviveOfflineSession(t *testing.T) {
-	path := writeTranscript(t, `{"type":"user","uuid":"compact","message":{"content":"/compact"}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusOffline, Transcript: path})
-	if err != nil || observation.Status != surface.StatusOffline || observation.ActiveTurnID != "" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeCompletedTurnDoesNotReviveOfflineSession(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusOffline, Transcript: path})
-	if err != nil || observation.Status != surface.StatusOffline || observation.ActiveTurnID != "" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeUserInterruptMarkerTerminatesPartialTurn(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"long answer"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":null,"content":[{"type":"text","text":"partial"}]}}
-{"type":"user","uuid":"interrupt","message":{"content":"[Request interrupted by user]"}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
-	if err != nil || observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" || observation.CompletedTurnID != "" {
-		t.Fatalf("observation=%+v err=%v", observation, err)
 	}
 }
 
@@ -651,61 +741,5 @@ func TestClaudeTranscriptPreservesMultiMegabyteUnicodeReply(t *testing.T) {
 	}
 	if observation.Reply.Text != reply {
 		t.Fatalf("reply_bytes=%d want=%d", len(observation.Reply.Text), len(reply))
-	}
-}
-
-func TestClaudeSlashCommandsAreNotActiveTurns(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
-{"type":"user","uuid":"command","message":{"content":"/compact"}}
-{"type":"user","uuid":"metadata","message":{"content":"<command-name>/compact</command-name>\n<command-args></command-args>"}}
-{"type":"system","subtype":"local_command","content":"<local-command-stdout>Compacted</local-command-stdout>"}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" || observation.CompletedTurnID != "m1" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-func TestClaudeCompactionSummaryIsNotAnActiveTurn(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
-{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}
-{"type":"user","uuid":"summary","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}`)
-	claude := NewClaude("Default", t.TempDir())
-	observation, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" || observation.CompletedTurnID != "m1" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-func TestClaudeCompactPendingUsesTimestampsAcrossReorderedRecords(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","timestamp":"2026-07-18T08:09:58.695Z","message":{"content":"/compact"}}
-{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-18T08:12:08.605Z","content":"Conversation compacted"}
-{"type":"user","timestamp":"2026-07-18T08:12:08.359Z","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
-{"type":"user","timestamp":"2026-07-18T08:09:58.696Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
-	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path})
-	if err != nil || observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" {
-		t.Fatalf("completed compact still pending: observation=%+v err=%v", observation, err)
-	}
-}
-
-func TestClaudeCompactFollowedByCompletedTurnIsNotPending(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","timestamp":"2026-07-19T07:30:52.908Z","message":{"content":"/compact"}}
-{"type":"assistant","timestamp":"2026-07-19T07:43:04.867Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}
-{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T07:43:04.906Z"}`)
-	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path})
-	if err != nil || observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" {
-		t.Fatalf("completed compact still pending: observation=%+v err=%v", observation, err)
 	}
 }
