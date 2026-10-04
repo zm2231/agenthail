@@ -301,23 +301,27 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(ref) == "" || start < 0 || end < start {
 		return nil, 0, fmt.Errorf("invalid session journal body range")
 	}
+	if start == int(^uint(0)>>1) || end-start == int(^uint(0)>>1) {
+		return nil, 0, fmt.Errorf("invalid session journal body range")
+	}
 	var body []byte
-	if err := r.db.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, ref).Scan(&body); err != nil {
+	var total int
+	if err := r.db.QueryRow(`SELECT length(body),substr(body,?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`, start+1, end-start+1, sessionID, ref).Scan(&total, &body); err != nil {
 		return nil, 0, err
 	}
-	if start > len(body) {
+	if start > total {
 		return nil, 0, fmt.Errorf("session journal body range is outside the retained body")
 	}
-	if start < len(body) && !utf8.RuneStart(body[start]) {
+	if start < total && len(body) > 0 && !utf8.RuneStart(body[0]) {
 		return nil, 0, fmt.Errorf("session journal body range starts inside a UTF-8 code point")
 	}
-	if end > len(body) {
-		end = len(body)
+	if end > total {
+		end = total
 	}
-	for end > start && end < len(body) && !utf8.RuneStart(body[end]) {
+	for end > start && end < total && !utf8.RuneStart(body[end-start]) {
 		end--
 	}
-	return append([]byte(nil), body[start:end]...), len(body), nil
+	return append([]byte(nil), body[:end-start]...), total, nil
 }
 
 func refreshSessionJournalState(tx *sql.Tx, sessionID string) error {
