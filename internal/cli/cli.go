@@ -141,7 +141,8 @@ Session commands:
   stream <target>               Tail live activity
   reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
   last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
-  goal <target> [text|clear]    Set or clear a goal
+  goal <target> [set|edit|pause|resume|budget|clear] [value] [--json]
+                                 Read goal usage or control its objective, status and budget
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn

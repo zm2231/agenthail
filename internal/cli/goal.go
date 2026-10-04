@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -36,7 +37,7 @@ func (a *App) cmdGoal(args []string) error {
 			fmt.Println("(no active goal)")
 			return nil
 		}
-		fmt.Printf("%s [%s]\n", goal.Objective, goal.Status)
+		fmt.Print(formatGoalState(goal))
 		return nil
 	}
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
@@ -88,4 +89,24 @@ func (a *App) cmdGoal(args []string) error {
 	default:
 		return fmt.Errorf("unknown goal action %q", action)
 	}
+}
+
+func formatGoalState(goal *surface.GoalState) string {
+	var output strings.Builder
+	fmt.Fprintf(&output, "%s [%s]\n", goal.Objective, goal.Status)
+	if goal.Status == surface.GoalStatusBlocked || goal.Status == surface.GoalStatusUsageLimited || goal.Status == surface.GoalStatusBudgetLimited {
+		output.WriteString("Needs you\n")
+	}
+	fmt.Fprintf(&output, "Elapsed: %ds · Tokens: %d", goal.TimeUsedSeconds, goal.TokensUsed)
+	if goal.TokenBudget != nil {
+		fmt.Fprintf(&output, " / %d", *goal.TokenBudget)
+	}
+	output.WriteByte('\n')
+	if !goal.CreatedAt.IsZero() {
+		fmt.Fprintf(&output, "Created: %s\n", goal.CreatedAt.UTC().Format(time.RFC3339))
+	}
+	if !goal.UpdatedAt.IsZero() {
+		fmt.Fprintf(&output, "Updated: %s\n", goal.UpdatedAt.UTC().Format(time.RFC3339))
+	}
+	return output.String()
 }
