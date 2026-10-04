@@ -95,6 +95,28 @@ func TestSourceIdentityResolvesNestedClaudeCallerWithoutEnvironment(t *testing.T
 	}
 }
 
+func TestSourceIdentityUsesNativeClaudeCallerBeforeAmbientCodex(t *testing.T) {
+	t.Setenv("AGENTHAIL_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "ambient-codex")
+	t.Setenv("CLAUDE_SESSION_ID", "")
+	self := os.Getpid()
+	claudePID := self + 1000
+	withProcessSnapshot(t, []processIdentity{
+		{pid: self, ppid: claudePID, uid: uint32(os.Getuid())},
+		{pid: claudePID, ppid: 1, uid: uint32(os.Getuid())},
+	})
+	fake := &callerCLISurface{
+		cliSurface:  &cliSurface{kind: surface.KindClaude},
+		caller:      &surface.Session{ID: "session-native", Surface: surface.KindClaude, PID: claudePID, Transport: "uds"},
+		callerFound: true,
+	}
+	app := App{Surfaces: []SurfaceEntry{{Name: "claude", Surface: fake}}}
+	got, err := app.sourceSessionID(context.Background(), "")
+	if err != nil || got != "session-native" {
+		t.Fatalf("source=%q err=%v", got, err)
+	}
+}
+
 func TestSourceIdentityRejectsRecognizedClaudeCallerWithoutValidatedEndpoint(t *testing.T) {
 	t.Setenv("AGENTHAIL_SESSION_ID", "")
 	t.Setenv("CODEX_THREAD_ID", "")
