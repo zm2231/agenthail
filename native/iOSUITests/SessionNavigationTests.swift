@@ -66,6 +66,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Sessions"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Sessions"].isSelected)
         app.buttons["session-demo"].tap()
+        XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
         app.buttons["Session details"].tap()
