@@ -830,6 +830,88 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 	}
 }
 
+func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing.T) {
+	for _, transport := range []string{"", "uds"} {
+		t.Run(map[string]string{"": "native", "uds": "uds"}[transport], func(t *testing.T) {
+			_, reg, _, from, _ := daemonFixture(t)
+			from.ID = "claude-interrupted-" + map[string]string{"": "native", "uds": "uds"}[transport]
+			from.Surface = surface.KindClaude
+			from.Transport = transport
+			from.HasLocal = true
+			transcript := filepath.Join(t.TempDir(), "session.jsonl")
+			seed := `{"type":"user","uuid":"u0","message":{"content":"seed"}}
+{"type":"assistant","uuid":"a0","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"seed answer"}]}}
+`
+			if err := os.WriteFile(transcript, []byte(seed), 0600); err != nil {
+				t.Fatal(err)
+			}
+			from.Transcript = transcript
+			if err := reg.RegisterSession(from); err != nil {
+				t.Fatal(err)
+			}
+			adapter := providers.NewClaude("Default", t.TempDir())
+			subscription, err := newSessionSourceManager(reg).subscribe(&from, adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer subscription.Cancel()
+
+			file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = file.WriteString(`{"type":"user","uuid":"u1","message":{"content":"cancel me"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":null,"content":[{"type":"text","text":"partial"}]}}
+{"type":"user","uuid":"interrupt","message":{"content":"[Request interrupted by user]"}}
+{"type":"system","subtype":"turn_duration","content":"done"}
+{"type":"user","uuid":"u2","message":{"content":"continue"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"continued"}]}}
+`)
+			if closeErr := file.Close(); err != nil {
+				t.Fatal(err)
+			} else if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				window, readErr := reg.SessionJournalAfter(from.ID, 0, 100)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				cancelled := 0
+				continued := false
+				continuedDone := false
+				for _, entry := range window.Entries {
+					var payload sessionJournalPayload
+					if json.Unmarshal(entry.Payload, &payload) != nil {
+						continue
+					}
+					if payload.TurnID == "u1" && payload.Kind == "done" {
+						if payload.Status != "cancelled" {
+							t.Fatalf("interrupted terminal overwritten: %+v", payload)
+						}
+						cancelled++
+					}
+					if payload.TurnID == "u2" && payload.Kind == "message" && payload.Body == "continued" {
+						continued = true
+					}
+					if payload.TurnID == "u2" && payload.Kind == "done" {
+						continuedDone = true
+					}
+				}
+				if cancelled == 1 && continued && continuedDone {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("transport=%q cancelled=%d continued=%v done=%v window=%+v", transport, cancelled, continued, continuedDone, window)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		})
+	}
+}
+
 func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}

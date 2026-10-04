@@ -556,6 +556,11 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				if uuid != "" && turnID == uuid {
 					return fmt.Errorf("Claude turn %s was interrupted", uuid)
 				}
+				if turnID != "" && !terminalTurns[turnID] {
+					terminalTurns[turnID] = true
+					key := stableTimelineItemID(recordOffset, line, 0)
+					onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done", Status: "cancelled"})
+				}
 				return nil
 			}
 			items := claudeTimelineItems(record)
