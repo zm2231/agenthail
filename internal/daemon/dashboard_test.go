@@ -697,6 +697,11 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.startErr = errors.New("initial message rejected")
+	_, liveEvents, cancel, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
 	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
@@ -727,6 +732,35 @@ func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
 	}
 	if !queueEvent {
 		t.Fatalf("catalog events missing operator notice: %+v", events.Events)
+	}
+	type problemPayload struct {
+		DeliveryID      int64  `json:"deliveryId"`
+		SessionID       string `json:"sessionId"`
+		SourceSessionID string `json:"sourceSessionId"`
+		Reason          string `json:"reason"`
+	}
+	var problem problemPayload
+	for _, event := range events.Events {
+		if event.Type == "delivery.problem" {
+			if err := json.Unmarshal(event.Payload, &problem); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if problem.DeliveryID <= 0 || problem.SessionID != "started" || problem.SourceSessionID != registrypkg.OperatorSessionID || problem.Reason != "initial message rejected" {
+		t.Fatalf("problem payload=%+v", problem)
+	}
+	live := receiveCatalogEvent(t, liveEvents)
+	if live.Type != "delivery.problem" {
+		t.Fatalf("live event=%+v", live)
+	}
+	var liveProblem problemPayload
+	if err := json.Unmarshal(live.Payload, &liveProblem); err != nil {
+		t.Fatal(err)
+	}
+	if liveProblem.DeliveryID != problem.DeliveryID || liveProblem.SessionID != problem.SessionID || liveProblem.SourceSessionID != problem.SourceSessionID || liveProblem.Reason != problem.Reason {
+		t.Fatalf("live problem=%+v persisted=%+v", liveProblem, problem)
 	}
 }
 
