@@ -495,98 +495,10 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 	if sess.Transport == "uds" && uuid != "" {
 		return surface.ErrUnsupported
 	}
-	if sess.Transport == "uds" {
-		return c.streamUDSTimeline(ctx, sess, onEvent, timeout)
-	}
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	if path == "" || !fileExists(path) {
-		return fmt.Errorf("no local transcript for streaming")
-	}
-	deadline := time.Now().Add(timeout)
-	state, err := c.observeTranscript(ctx, path)
-	if err != nil {
-		return err
-	}
-	targetID := uuid
-	baselineUserID := ""
-	if state.hasCurrent {
-		baselineUserID = state.current.UserID
-	}
-	if targetID == "" && state.hasCurrent && !state.current.Done && !state.current.Interrupted {
-		targetID = state.current.UserID
-	}
-	lastText := ""
-	var lastContext surface.ContextUsage
-	var nextContextPoll time.Time
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if !time.Now().Before(nextContextPoll) {
-			nextContextPoll = time.Now().Add(time.Second)
-			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
-				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
-			}
-		}
-		state, err := c.observeTranscript(ctx, path)
-		if err != nil {
-			time.Sleep(300 * time.Millisecond)
-			continue
-		}
-		if targetID == "" && state.hasCurrent && state.current.UserID != "" && state.current.UserID != baselineUserID {
-			targetID = state.current.UserID
-		}
-		if !state.hasCurrent || targetID == "" || state.current.UserID != targetID {
-			time.Sleep(300 * time.Millisecond)
-			continue
-		}
-		turn := state.current
-		if turn.Assistant != "" && turn.Assistant != lastText {
-			text := turn.Assistant
-			if strings.HasPrefix(text, lastText) {
-				text = strings.TrimPrefix(text, lastText)
-			}
-			lastText = turn.Assistant
-			if text != "" {
-				key := turn.MessageID
-				if key == "" {
-					key = turn.UserID
-				}
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: targetID, Kind: "text", Text: text})
-			}
-		}
-		if turn.Done {
-			key := turn.MessageID
-			if key == "" {
-				key = turn.UserID
-			}
-			if turn.Assistant != "" {
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "upsert", Final: true, TurnID: targetID, Kind: "text", Text: turn.Assistant})
-			}
-			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
-			if sess.Transport == "uds" && uuid == "" {
-				baselineUserID = turn.UserID
-				targetID = ""
-				lastText = ""
-				continue
-			}
-			return nil
-		}
-		if turn.Interrupted {
-			return fmt.Errorf("Claude turn %s was interrupted", targetID)
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return c.streamTimeline(ctx, sess, uuid, onEvent, timeout)
 }
 
-func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -620,9 +532,15 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 	}
 	deadline := time.Now().Add(timeout)
 	currentTurnID := ""
+	if state.hasCurrent {
+		currentTurnID = state.current.UserID
+	}
 	for time.Now().Before(deadline) {
 		lineOffset := offset
+		completed := false
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			recordOffset := lineOffset
+			lineOffset += int64(len(line))
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				return nil
@@ -633,11 +551,14 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 				turnID = currentTurnID
 			}
 			items := claudeTimelineItems(record)
-			if err := decorateTimelineAttachments(ctx, items, record, "claude", lineOffset); err != nil {
+			if err := decorateTimelineAttachments(ctx, items, record, "claude", recordOffset); err != nil {
 				return err
 			}
+			if uuid != "" && turnID != uuid {
+				return nil
+			}
 			for index, item := range items {
-				key := stableTimelineItemID(lineOffset, line, index)
+				key := stableTimelineItemID(recordOffset, line, index)
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
@@ -646,16 +567,24 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
-				key := stableTimelineItemID(lineOffset, line, len(items))
+				key := stableTimelineItemID(recordOffset, line, len(items))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
+				if uuid != "" {
+					completed = true
+				}
 			}
-			lineOffset += int64(len(line))
+			if uuid != "" && str(record, "type") == "assistant" && claudeTerminalInterruption(strNested(record, "message", "stop_reason")) && turnID == uuid {
+				return fmt.Errorf("Claude turn %s was interrupted", uuid)
+			}
 			return nil
 		})
 		if scanErr != nil {
 			return scanErr
 		}
 		offset = next
+		if completed {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
