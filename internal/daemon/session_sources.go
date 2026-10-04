@@ -1,0 +1,307 @@
+package daemon
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+const (
+	sessionJournalRetentionCount = 2048
+	sessionJournalRetentionBytes = 8 << 20
+	sessionStreamBodyBytes       = 16 << 10
+)
+
+type sessionJournalPayload struct {
+	ItemID      string `json:"itemId"`
+	ProviderKey string `json:"providerKey,omitempty"`
+	Version     uint64 `json:"version"`
+	Op          string `json:"op"`
+	Kind        string `json:"kind"`
+	TurnID      string `json:"turnId,omitempty"`
+	TS          string `json:"ts"`
+	Body        string `json:"body,omitempty"`
+	Truncated   bool   `json:"truncated"`
+	BodyRef     string `json:"bodyRef,omitempty"`
+}
+
+type sessionSourceManager struct {
+	registry *registry.Registry
+	mu       sync.Mutex
+	sources  map[string]*sessionSource
+}
+
+type sessionSource struct {
+	manager      *sessionSourceManager
+	session      *surface.Session
+	adapter      surface.Surface
+	epoch        string
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	subscribers  map[uint64]chan registry.SessionJournalEntry
+	nextID       uint64
+	holders      map[string]int
+	appendBodies map[string]string
+	anonymous    uint64
+}
+
+type sessionSourceSubscription struct {
+	Entries <-chan registry.SessionJournalEntry
+	Cancel  func()
+}
+
+func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
+	return &sessionSourceManager{registry: store, sources: map[string]*sessionSource{}}
+}
+
+func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {
+	if session == nil || adapter == nil {
+		return sessionSourceSubscription{}, fmt.Errorf("session source requires session and adapter")
+	}
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	start := false
+	if source == nil {
+		epoch, err := m.registry.BeginSessionJournalSource(session.ID)
+		if err != nil {
+			m.mu.Unlock()
+			return sessionSourceSubscription{}, err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		m.sources[session.ID] = source
+		start = true
+	}
+	subscription := source.subscribe("viewer")
+	m.mu.Unlock()
+	if start {
+		go source.run()
+	}
+	return subscription, nil
+}
+
+func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Surface, holder string) (func(), error) {
+	if strings.TrimSpace(holder) == "" {
+		return nil, fmt.Errorf("session source holder is required")
+	}
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	start := false
+	if source == nil {
+		epoch, err := m.registry.BeginSessionJournalSource(session.ID)
+		if err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		m.sources[session.ID] = source
+		start = true
+	}
+	source.mu.Lock()
+	source.holders[holder]++
+	source.mu.Unlock()
+	m.mu.Unlock()
+	if start {
+		go source.run()
+	}
+	return func() { source.releaseHolder(holder) }, nil
+}
+
+func (s *sessionSource) subscribe(holder string) sessionSourceSubscription {
+	s.mu.Lock()
+	s.nextID++
+	id := s.nextID
+	events := make(chan registry.SessionJournalEntry, 64)
+	s.subscribers[id] = events
+	s.holders[holder]++
+	s.mu.Unlock()
+	return sessionSourceSubscription{Entries: events, Cancel: func() {
+		s.mu.Lock()
+		if existing, found := s.subscribers[id]; found {
+			delete(s.subscribers, id)
+			close(existing)
+		}
+		s.holders[holder]--
+		if s.holders[holder] <= 0 {
+			delete(s.holders, holder)
+		}
+		stop := len(s.subscribers) == 0 && len(s.holders) == 0
+		s.mu.Unlock()
+		if stop {
+			s.stop()
+		}
+	}}
+}
+
+func (s *sessionSource) releaseHolder(holder string) {
+	s.mu.Lock()
+	s.holders[holder]--
+	if s.holders[holder] <= 0 {
+		delete(s.holders, holder)
+	}
+	stop := len(s.subscribers) == 0 && len(s.holders) == 0
+	s.mu.Unlock()
+	if stop {
+		s.stop()
+	}
+}
+
+func (s *sessionSource) stop() {
+	s.cancel()
+	s.manager.mu.Lock()
+	if s.manager.sources[s.session.ID] == s {
+		delete(s.manager.sources, s.session.ID)
+	}
+	s.manager.mu.Unlock()
+}
+
+func (s *sessionSource) run() {
+	s.seedJournal()
+	for {
+		_ = s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		s.mu.Lock()
+		for id, subscriber := range s.subscribers {
+			delete(s.subscribers, id)
+			close(subscriber)
+		}
+		hasHolders := len(s.holders) > 0
+		s.mu.Unlock()
+		if s.ctx.Err() != nil || !hasHolders {
+			break
+		}
+		select {
+		case <-s.ctx.Done():
+		case <-time.After(time.Second):
+		}
+	}
+	s.manager.mu.Lock()
+	if s.manager.sources[s.session.ID] == s {
+		delete(s.manager.sources, s.session.ID)
+	}
+	s.manager.mu.Unlock()
+}
+
+func (s *sessionSource) seedJournal() {
+	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
+	defer cancel()
+	read, err := surface.ReadSession(ctx, s.adapter, s.session, surface.SessionReadRequest{Limit: 40})
+	if err != nil || read == nil {
+		return
+	}
+	for _, item := range read.Items {
+		if item.ID == "" {
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		s.append(surface.StreamEvent{
+			ID:          item.ID,
+			ProviderKey: "timeline:" + item.ID,
+			Version:     uint64(len(item.Text)),
+			Operation:   "upsert",
+			TurnID:      item.CallID,
+			Timestamp:   at,
+			Kind:        item.Kind,
+			Text:        item.Text,
+		})
+	}
+}
+
+func (s *sessionSource) append(event surface.StreamEvent) {
+	s.mu.Lock()
+	payload := s.normalizeLocked(event)
+	s.mu.Unlock()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	fullBody := []byte(payload.Body)
+	if len(fullBody) > sessionStreamBodyBytes {
+		ref, err := newSessionBodyRef()
+		if err != nil {
+			return
+		}
+		payload.Body = string(fullBody[:sessionStreamBodyBytes])
+		payload.Truncated = true
+		payload.BodyRef = ref
+		encoded, err = json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: ref, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+		if err != nil {
+			return
+		}
+		s.publish(entry)
+		return
+	}
+	entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	if err != nil {
+		return
+	}
+	s.publish(entry)
+}
+
+func (s *sessionSource) publish(entry registry.SessionJournalEntry) {
+	s.mu.Lock()
+	for id, subscriber := range s.subscribers {
+		select {
+		case subscriber <- entry:
+		default:
+			delete(s.subscribers, id)
+			close(subscriber)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func newSessionBodyRef() (string, error) {
+	bytes := make([]byte, 24)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJournalPayload {
+	providerKey := event.ProviderKey
+	if strings.HasPrefix(providerKey, "renderer:") {
+		providerKey = s.epoch + ":" + providerKey
+	}
+	itemID := event.ID
+	if strings.HasPrefix(event.ProviderKey, "renderer:") {
+		itemID = s.epoch + ":" + itemID
+	}
+	if itemID == "" {
+		itemID = providerKey
+	}
+	if itemID == "" {
+		s.anonymous++
+		itemID = fmt.Sprintf("%s:anonymous:%d", s.epoch, s.anonymous)
+		providerKey = itemID
+	}
+	op := event.Operation
+	if op == "" {
+		op = "append"
+	}
+	body := event.Text
+	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
+		s.appendBodies[providerKey] += body
+		body = s.appendBodies[providerKey]
+		op = "upsert"
+	}
+	at := event.Timestamp
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
+}

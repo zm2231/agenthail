@@ -18,6 +18,12 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func TestCodexCatalogListIsNotComplete(t *testing.T) {
+	if NewCodex("").CatalogListComplete() {
+		t.Fatal("Codex List is bounded and must not reconcile omissions")
+	}
+}
+
 func startManagedCodexFixture(t *testing.T) string {
 	t.Helper()
 	home, err := os.MkdirTemp("/tmp", "ah-")
@@ -356,7 +362,7 @@ func TestManagedStreamWaitsForNewTurnInsteadOfReplayingHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 || events[0].Text != "hel" || events[1].Text != "lo" || events[2].Kind != "done" {
+	if len(events) != 3 || events[0].Text != "hel" || events[0].ID != "managed:new:text" || events[1].Text != "lo" || events[1].ID != events[0].ID || events[1].Version != 5 || events[2].Kind != "done" || events[2].ID != "managed:new:done" {
 		t.Fatalf("events=%+v", events)
 	}
 }

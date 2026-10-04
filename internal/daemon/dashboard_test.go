@@ -155,6 +155,26 @@ func TestDashboardRequiresTokenAndRejectsCrossOriginActions(t *testing.T) {
 	}
 }
 
+func TestDashboardExposesCookieAuthenticatedDesktopVoiceControls(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/voice", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized voice status=%d", unauthorized.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/voice-peer.js", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "agenthailVoiceNotify") {
+		t.Fatalf("desktop voice script status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "wss:") {
+		t.Fatalf("desktop voice CSP=%q", response.Header().Get("Content-Security-Policy"))
+	}
+}
+
 func TestDashboardActionSendsToRegisteredSession(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -852,6 +872,27 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	}
 }
 
+func TestDashboardChannelSendCountsSubmittedSeparately(t *testing.T) {
+	d, registry, fake, _, to := daemonFixture(t)
+	if _, err := registry.CreateChannel("reviewers"); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.AddToChannel("reviewers", to.ID); err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
+	d.dashboardActionHandler(response, request)
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("body=%s code=%d err=%v", response.Body.String(), response.Code, err)
+	}
+	if body["submitted"] != float64(1) || body["sent"] != float64(0) {
+		t.Fatalf("body=%v", body)
+	}
+}
+
 func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	d, registry, _, from, _ := daemonFixture(t)
 	if _, err := registry.CreateChannel("reviewers"); err != nil {
@@ -873,7 +914,7 @@ func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	}
 }
 
-func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
+func TestDashboardStateReadsCatalogWithoutProviderDiscovery(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	dashboard := &dashboardServer{token: "secret"}
 	handler := d.dashboardHandler(dashboard)
@@ -886,8 +927,8 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 			t.Fatalf("state request %d status=%d body=%s", i, res.Code, res.Body.String())
 		}
 	}
-	if got := fake.listCalls.Load(); got != 1 {
-		t.Fatalf("surface list called %d times, want one cached discovery", got)
+	if got := fake.listCalls.Load(); got != 0 {
+		t.Fatalf("surface list called %d times, want snapshot to read only the catalog", got)
 	}
 	d.publishEvent("session.updated", "from", nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/state", nil)
@@ -897,8 +938,8 @@ func TestDashboardStateCachesSurfaceDiscovery(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("state after event status=%d body=%s", response.Code, response.Body.String())
 	}
-	if got := fake.listCalls.Load(); got != 2 {
-		t.Fatalf("surface list called %d times, want event invalidation", got)
+	if got := fake.listCalls.Load(); got != 0 {
+		t.Fatalf("surface list called %d times after event, want snapshot to read only the catalog", got)
 	}
 }
 
@@ -985,15 +1026,17 @@ func TestDashboardHistoryIsAuthorizedAndPaginated(t *testing.T) {
 	}
 }
 
-func TestDashboardStatePrefersLiveSurfaceStatus(t *testing.T) {
+func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	d, registry, fake, from, _ := daemonFixture(t)
+	d, registry, _, from, _ := daemonFixture(t)
 	if err := registry.SaveRuntimeState(from.ID, surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	from.Status = surface.StatusBusy
 	from.LastActive = time.Now()
-	fake.sessions[from.ID] = from
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
 
 	state, err := d.dashboardState(context.Background())
 	if err != nil {

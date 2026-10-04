@@ -427,7 +427,7 @@ struct SessionScreen: View {
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                             if activityOnly {
-                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false).id($0.id) }
+                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }).id($0.id) }
                             } else {
                                 ForEach(TimelineGroup.make(items)) { group in
                                     CompactActivityGroup(group: group) { followingLatest = false }.id(group.id)
@@ -746,8 +746,10 @@ struct IOSMessage: View {
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
+	var bodyLoader: ((TimelineItem) async -> String?)? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
+	@State private var retainedBody: String?
 
     var body: some View {
         if compactContext, let title = TranscriptContext.title(for: item) {
@@ -794,6 +796,9 @@ struct IOSTimelineRow: View {
                     SessionTimestamp(value: item.timestamp)
                 }
                 if item.truncated { shortened }
+				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
+					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
+				} else if let retainedBody { SessionMarkdown(text: retainedBody, readingStyle: item.kind == "reasoning") }
             }
             .padding(.vertical, 4)
         }
@@ -865,6 +870,7 @@ struct SessionInspector: View {
     let detail: SessionDetail
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
+    @State private var showingVoice = false
     var body: some View {
         NavigationStack {
             List {
@@ -878,6 +884,12 @@ struct SessionInspector: View {
                     if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
                     if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
+                }
+                Section("Voice") {
+                    Button("Call this session", systemImage: "phone.fill") { showingVoice = true }
+                    Text("Starts a Codex Voice call routed to this exact session. During a call, you can transfer back to the Agenthail orchestrator or to another session.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Context") {
                     if let context = detail.context {
@@ -931,6 +943,9 @@ struct SessionInspector: View {
                         dismiss()
                     }
                 }, reload: { try await model.creationModels(surface: session.surface) })
+            }
+            .sheet(isPresented: $showingVoice) {
+                AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
             }
         }
     }

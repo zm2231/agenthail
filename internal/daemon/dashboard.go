@@ -77,27 +77,33 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	ID             string                `json:"id"`
-	Surface        surface.SurfaceKind   `json:"surface"`
-	Name           string                `json:"name"`
-	Cwd            string                `json:"cwd,omitempty"`
-	Alias          string                `json:"alias,omitempty"`
-	Status         surface.SessionStatus `json:"status"`
-	LastActive     time.Time             `json:"lastActive,omitempty"`
-	QueueCount     int                   `json:"queueCount"`
-	Open           bool                  `json:"open"`
-	Current        bool                  `json:"current"`
-	CurrentReason  string                `json:"currentReason,omitempty"`
-	Capabilities   surface.Capabilities  `json:"capabilities"`
-	ReadOnly       bool                  `json:"readOnly,omitempty"`
-	ReadOnlyReason string                `json:"readOnlyReason,omitempty"`
-	Source         string                `json:"source,omitempty"`
-	Transport      string                `json:"transport,omitempty"`
+	ID                string                `json:"id"`
+	Surface           surface.SurfaceKind   `json:"surface"`
+	Name              string                `json:"name"`
+	Cwd               string                `json:"cwd,omitempty"`
+	Alias             string                `json:"alias,omitempty"`
+	Status            surface.SessionStatus `json:"status"`
+	LastActive        time.Time             `json:"lastActive,omitempty"`
+	QueueCount        int                   `json:"queueCount"`
+	Open              bool                  `json:"open"`
+	Current           bool                  `json:"current"`
+	CurrentReason     string                `json:"currentReason,omitempty"`
+	Capabilities      surface.Capabilities  `json:"capabilities"`
+	ReadOnly          bool                  `json:"readOnly,omitempty"`
+	ReadOnlyReason    string                `json:"readOnlyReason,omitempty"`
+	Source            string                `json:"source,omitempty"`
+	Transport         string                `json:"transport,omitempty"`
+	HostProject       *catalogHostProject   `json:"hostProject,omitempty"`
+	Checkout          *catalogCheckout      `json:"checkout,omitempty"`
+	ObservedAt        time.Time             `json:"observedAt,omitempty"`
+	UnavailableReason string                `json:"unavailableReason,omitempty"`
 }
 
 type dashboardState struct {
 	UpdatedAt        time.Time            `json:"updatedAt"`
 	EventCursor      uint64               `json:"eventCursor"`
+	HostEpoch        string               `json:"hostEpoch"`
+	CatalogSeq       uint64               `json:"catalogSeq"`
 	Daemon           map[string]any       `json:"daemon"`
 	Surfaces         []dashboardSurface   `json:"surfaces"`
 	Sessions         []dashboardSession   `json:"sessions"`
@@ -499,7 +505,7 @@ func (d *Daemon) dashboardHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self' https: wss:; media-src blob:; base-uri 'none'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -521,6 +527,10 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	eventCursor := uint64(0)
 	if d.events != nil {
 		eventCursor = d.events.cursor()
+	}
+	catalogSnapshot, err := d.Registry.CatalogSnapshot()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read catalog state: %w", err)
 	}
 	config, err := LoadDashboardConfig()
 	if err != nil {
@@ -551,7 +561,7 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read attention items: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), CodexRecentHours: config.CodexRecentHours}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation})
 	}
@@ -574,40 +584,55 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	for _, item := range attention {
 		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
-	var mu sync.Mutex
-	var wait sync.WaitGroup
-	for _, adapter := range d.Surfaces {
-		adapter := adapter
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			listBudget := 12 * time.Second
-			if deadline, ok := ctx.Deadline(); ok {
-				remaining := time.Until(deadline)
-				if remaining < listBudget {
-					listBudget = remaining
-				}
-			}
-			operationCtx, cancel := context.WithTimeout(ctx, listBudget)
-			sessions, listErr := adapter.List(operationCtx)
-			cancel()
-			entry := d.dashboardSurfaceHealth(ctx, adapter, listErr)
-			mu.Lock()
-			state.Surfaces = append(state.Surfaces, entry)
-			for _, session := range sessions {
-				if registerErr := d.Registry.RegisterSession(session); registerErr != nil {
-					continue
-				}
-				alias, _ := d.Registry.ReverseAlias(session.ID)
-				open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
-				current, reason := dashboardSessionPresence(session, counts[session.ID], open, config.CodexRecentHours, now)
-				effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-				state.Sessions = append(state.Sessions, dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: counts[session.ID], Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport})
-			}
-			mu.Unlock()
-		}()
+	adapters := make(map[surface.SurfaceKind]surface.Surface, len(d.Surfaces))
+	catalogSurface := make(map[surface.SurfaceKind]registry.CatalogSurfaceState, len(catalogSnapshot.Surfaces))
+	for _, record := range catalogSnapshot.Surfaces {
+		catalogSurface[record.Surface] = record
 	}
-	wait.Wait()
+	for _, adapter := range d.Surfaces {
+		adapters[adapter.Name()] = adapter
+		entry := dashboardSurface{Name: string(adapter.Name()), Connected: false, Health: "unknown", Capabilities: adapter.Capabilities()}
+		if record, found := catalogSurface[adapter.Name()]; found {
+			entry.Health = record.Health
+			entry.HealthDetail = record.Detail
+			entry.Connected = record.Health == "healthy"
+		}
+		state.Surfaces = append(state.Surfaces, entry)
+	}
+	catalogSessions := map[string]registry.CatalogSessionState{}
+	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))
+	for _, record := range catalogSnapshot.Sessions {
+		catalogSessions[record.Session.ID] = record
+		sessions = append(sessions, record.Session)
+	}
+	if len(catalogSnapshot.Sessions) == 0 && len(catalogSnapshot.Surfaces) == 0 {
+		var err error
+		sessions, err = d.Registry.ListSessions(0)
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read session catalog: %w", err)
+		}
+	}
+	for _, session := range sessions {
+		adapter := adapters[session.Surface]
+		if adapter == nil {
+			continue
+		}
+		identity := catalogIdentity{}
+		observedAt := time.Time{}
+		if record, found := catalogSessions[session.ID]; found {
+			_ = json.Unmarshal(record.HostProject, &identity.HostProject)
+			_ = json.Unmarshal(record.Checkout, &identity.Checkout)
+			identity.UnavailableReason = record.UnavailableReason
+			observedAt = record.ObservedAt
+		}
+		if observedAt.IsZero() {
+			observedAt = now.UTC()
+		}
+		entry := d.catalogSessionRow(ctx, adapter, session, identity, observedAt)
+		entry.QueueCount = counts[session.ID]
+		entry.Current, entry.CurrentReason = dashboardSessionPresence(session, entry.QueueCount, entry.Open, config.CodexRecentHours, now)
+		state.Sessions = append(state.Sessions, entry)
+	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
 	sort.Slice(state.Sessions, func(i, j int) bool {
 		if state.Sessions[i].Status == surface.StatusBusy && state.Sessions[j].Status != surface.StatusBusy {
@@ -933,7 +958,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		sent, queued, failed := 0, 0, 0
+		sent, queued, submitted, failed := 0, 0, 0, 0
 		for _, member := range members {
 			session, sessionErr := d.Registry.Session(member)
 			if sessionErr != nil {
@@ -954,17 +979,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			if receipt.Evidence == surface.EvidenceQueued {
+			switch receipt.Evidence {
+			case surface.EvidenceQueued:
 				queued++
-			} else {
+			case surface.EvidenceSubmitted:
+				submitted++
+			default:
 				sent++
 			}
 		}
 		if failed > 0 {
-			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d failed", sent, queued, failed), http.StatusConflict)
+			http.Error(w, fmt.Sprintf("channel delivery: %d sent, %d queued, %d submitted, %d failed", sent, queued, submitted, failed), http.StatusConflict)
 			return
 		}
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued, "failed": failed})
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "queued": queued, "submitted": submitted, "failed": failed})
 		return
 	}
 	if request.Action == "channel-add" || request.Action == "channel-remove" {

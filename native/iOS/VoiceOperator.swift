@@ -16,6 +16,7 @@ final class VoiceOperatorModel: ObservableObject {
     @Published private(set) var hostHangupPending = false
     @Published private(set) var hostHangupUnconfirmed = false
     @Published var text = ""
+    @Published var targetID = ""
     let isPreview: Bool
     let audio: any VoiceAudioClient
     private var api: (any VoiceServiceClient)?
@@ -36,8 +37,9 @@ final class VoiceOperatorModel: ObservableObject {
             && state?.phase != "creating" && state?.phase != "blocked"
     }
 
-    init(preview: Bool = false, api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
+    init(preview: Bool = false, targetID: String = "", api: (any VoiceServiceClient)? = nil, audio: (any VoiceAudioClient)? = nil) {
         isPreview = preview
+        self.targetID = targetID
         self.audio = audio ?? VoiceAudioBridge()
 #if DEBUG
         if preview {
@@ -141,6 +143,9 @@ final class VoiceOperatorModel: ObservableObject {
         let current = generation
         defer { working = false }
         do {
+            let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
+            guard !closed, generation == current else { return }
+            state = selected
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
@@ -259,6 +264,19 @@ final class VoiceOperatorModel: ObservableObject {
         catch { if !closed, generation == current { self.error = "Text outcome is unknown. Check the conversation before resending. \(error.localizedDescription)" } }
     }
 
+    func transfer() async {
+        guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true else { return }
+        working = true
+        defer { working = false }
+        let current = generation
+        do {
+            let next = try await api.action(VoiceAction(action: "transfer", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
+            if !closed, generation == current { state = next }
+        } catch {
+            if !closed, generation == current { self.error = error.localizedDescription }
+        }
+    }
+
     func interrupt() async {
         guard let api, !closed else { return }
         let current = generation
@@ -267,6 +285,19 @@ final class VoiceOperatorModel: ObservableObject {
             if !closed, generation == current { state = next }
         }
         catch { if !closed, generation == current { self.error = error.localizedDescription } }
+    }
+
+    func interruptTarget() async {
+        guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true, state?.target != nil else { return }
+        working = true
+        defer { working = false }
+        let current = generation
+        do {
+            let next = try await api.action(VoiceAction(action: "target-interrupt", attemptId: state?.attemptId))
+            if !closed, generation == current { state = next }
+        } catch {
+            if !closed, generation == current { self.error = error.localizedDescription }
+        }
     }
 
     func startNewConversation() async {
@@ -290,6 +321,8 @@ final class VoiceOperatorModel: ObservableObject {
         guard !closed else { return }
         hangup()
         closed = true
+        state = nil
+        detail = nil
         polling?.cancel(); polling = nil
         audio.close()
     }
@@ -301,6 +334,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmInterrupt = false
+    @State private var confirmTargetInterrupt = false
     @State private var confirmNewConversation = false
     @State private var showKeyboard = false
     @State private var showDetails = false
@@ -309,8 +343,8 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var userScrolling = false
     let openSession: (String) -> Void
 
-    init(model: VoiceOperatorModel? = nil, openSession: @escaping (String) -> Void) {
-        _model = StateObject(wrappedValue: model ?? VoiceOperatorModel())
+    init(targetID: String = "", model: VoiceOperatorModel? = nil, openSession: @escaping (String) -> Void) {
+        _model = StateObject(wrappedValue: model ?? VoiceOperatorModel(targetID: targetID))
         self.openSession = openSession
     }
 
@@ -349,17 +383,17 @@ struct AgenthailVoiceOperatorSheet: View {
                     if let state = model.state, !state.transcripts.isEmpty {
                         ForEach(state.transcripts) { item in
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(item.role == "user" ? "You" : "Orchestrator").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                                Text(item.role == "user" ? "You" : (model.state?.target == nil ? "Orchestrator" : "Selected session")).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                                 Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
                             }
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 20) {
                             Text("What would you like to work on?").font(.title2.weight(.semibold))
-                            Text("Talk through a plan, check on your agents, or ask the orchestrator to send them work.").font(.body).foregroundStyle(.secondary)
+                            Text("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.").font(.body).foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 14) {
-                                Label("What are my agents working on?", systemImage: "bubble.left")
-                                Label("Ask the builder to review the failing tests.", systemImage: "bubble.left")
+                                Label("What are you working on?", systemImage: "bubble.left")
+                                Label("Review the failing tests.", systemImage: "bubble.left")
                             }.font(.subheadline).foregroundStyle(.secondary)
                         }.padding(.vertical, 16)
                     }
@@ -430,7 +464,7 @@ struct AgenthailVoiceOperatorSheet: View {
             .background(alignment: .bottom) {
                 if let bridge = model.audio as? VoiceAudioBridge { VoiceAudioSurface(bridge: bridge).frame(width: 1, height: 1).accessibilityHidden(true) }
             }
-            .navigationTitle("Orchestrator")
+            .navigationTitle(model.state?.target == nil ? "Talk to orchestrator" : "Session voice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
@@ -448,6 +482,11 @@ struct AgenthailVoiceOperatorSheet: View {
             .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { model.audioInterrupted($0) }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
+            }
+            .confirmationDialog("Stop the selected session's confirmed active turn? Audio stays connected.", isPresented: $confirmTargetInterrupt) {
+                Button("Stop selected session", role: .destructive) { Task { await model.interruptTarget() } }
+            } message: {
+                Text("This does not hang up the call or stop another agent.")
             }
             .confirmationDialog("Start a new orchestrator conversation?", isPresented: $confirmNewConversation, titleVisibility: .visible) {
                 Button("Start new conversation") {
@@ -471,7 +510,7 @@ struct AgenthailVoiceOperatorSheet: View {
         VStack(spacing: 16) {
             if showKeyboard && model.audioConnected {
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField("Message the orchestrator", text: $model.text, axis: .vertical)
+                    TextField("Message selected session", text: $model.text, axis: .vertical)
                         .lineLimit(1...5).padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
                     Button("Send", systemImage: "arrow.up") { Task { await model.sendText() } }
                         .labelStyle(.iconOnly).frame(width: 44, height: 44).background(.tint, in: Circle()).foregroundStyle(.white)
@@ -485,6 +524,26 @@ struct AgenthailVoiceOperatorSheet: View {
                 callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(.secondary) }
             } else if model.state?.hasCall == true || model.audioConnected || model.dialing {
+                if model.audioConnected && model.state?.occupied != true {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Session ID or alias (optional)", text: $model.targetID)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                        HStack {
+                            Button(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Return to orchestrator" : "Transfer to session") { Task { await model.transfer() } }
+                                .buttonStyle(.bordered)
+                                .disabled(model.working)
+                            if model.state?.target != nil {
+                                Button("Clear route") { model.targetID = "" }
+                                    .buttonStyle(.borderless)
+                                Button("Stop selected session", role: .destructive) { confirmTargetInterrupt = true }
+                                    .buttonStyle(.borderless)
+                                    .disabled(model.working)
+                            }
+                        }
+                    }
+                }
                 HStack(alignment: .top, spacing: 32) {
                     callControl("Type", icon: "keyboard", disabled: !model.audioConnected) { showKeyboard.toggle() }
                     callControl(model.muted ? "Unmute" : "Mute", icon: model.muted ? "mic.slash.fill" : "mic.fill", disabled: !model.audioConnected, action: model.toggleMute)
@@ -492,10 +551,18 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(.secondary) }
             } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Session ID or alias (optional)", text: $model.targetID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                    Text(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Voice starts with the normal Agenthail orchestrator workflow." : "Voice uses Codex realtime for audio and sends work only to this exact existing session.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button { Task { await model.call() } } label: {
-                    Label(dynamicTypeSize.isAccessibilitySize ? "Call" : "Call Codex Voice", systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                }.buttonStyle(.borderedProminent).accessibilityLabel("Call Codex Voice").disabled(!model.canCall)
-                if !dynamicTypeSize.isAccessibilitySize { Text("Your conversation and agent work stay in the same session.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                    Label(dynamicTypeSize.isAccessibilitySize ? "Call" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Talk to orchestrator" : "Call session"), systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                }.buttonStyle(.borderedProminent).accessibilityLabel("Start voice call").disabled(!model.canCall)
+                if !dynamicTypeSize.isAccessibilitySize { Text(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "The orchestrator can inspect, plan, and coordinate across Agenthail." : "Your conversation and agent work stay in the selected session.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
             }
         }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: .infinity).background(.bar)
     }
@@ -534,6 +601,11 @@ struct AgenthailVoiceOperatorSheet: View {
             List {
                 Section("Connection") {
                     LabeledContent("Provider", value: "Codex Voice")
+                    if let target = model.state?.target {
+                        LabeledContent("Coding target", value: target.name)
+                        LabeledContent("Coding provider", value: model.state?.codingProvider ?? target.surface)
+                    }
+                    if let provider = model.state?.audioProvider { LabeledContent("Audio provider", value: provider) }
                     LabeledContent("Audio", value: connectionTitle)
                     Text("The microphone sends audio to Codex. No on-device speech recognition is used.")
                     Text("Leaving the app ends audio. Return and call again to continue with the same orchestrator.")

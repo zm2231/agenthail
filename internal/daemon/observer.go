@@ -143,6 +143,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("observe %s: empty observation", d.resolveDisplay(session.ID))
 		return
 	}
+	if observation.Status == surface.StatusBusy && observation.ActiveTurnID != "" && surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+		d.holdSessionSource(session, adapter, "active-turn")
+	} else if observation.Status != surface.StatusBusy || observation.ActiveTurnID == "" {
+		d.releaseSessionSource(session.ID, "active-turn")
+	}
 	session.Status = observation.Status
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
@@ -160,6 +165,23 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	completionPredatesActiveDelivery := previous.ActiveTurnID != "" && observation.ActiveTurnID == previous.ActiveTurnID
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
 	if completionChanged {
+		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
+			providerKey := ""
+			switch session.Surface {
+			case surface.KindCodex:
+				providerKey = observation.CompletedTurnID
+			case surface.KindClaude:
+				providerKey = observation.InputTurnID
+			}
+			if providerKey != "" {
+				reconciled, reconcileErr := d.Registry.ReconcileDeliveryIntent(session.ID, providerKey)
+				if reconcileErr != nil {
+					d.log.Printf("reconcile delivery intent %s: %s", d.resolveDisplay(session.ID), reconcileErr)
+				} else if reconciled {
+					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, CompletionID: observation.CompletedTurnID, Result: "provider completion correlated to delivery intent"})
+				}
+			}
+		}
 		text := ""
 		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
 			text = observation.Reply.Text
@@ -214,6 +236,60 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}
 	}
+}
+
+func (d *Daemon) holdSessionSource(session *surface.Session, adapter surface.Surface, holder string) {
+	d.sourceHoldMu.Lock()
+	if holders := d.sourceHolds[session.ID]; holders != nil && holders[holder] != nil {
+		d.sourceHoldMu.Unlock()
+		return
+	}
+	d.sourceHoldMu.Unlock()
+	release, err := d.sources.hold(session, adapter, holder)
+	if err != nil {
+		d.log.Printf("hold session source %s: %s", d.resolveDisplay(session.ID), err)
+		return
+	}
+	d.sourceHoldMu.Lock()
+	if holders := d.sourceHolds[session.ID]; holders != nil && holders[holder] != nil {
+		d.sourceHoldMu.Unlock()
+		release()
+		return
+	}
+	if d.sourceHolds[session.ID] == nil {
+		d.sourceHolds[session.ID] = map[string]func(){}
+	}
+	d.sourceHolds[session.ID][holder] = release
+	d.sourceHoldMu.Unlock()
+}
+
+func (d *Daemon) releaseSessionSource(sessionID, holder string) {
+	d.sourceHoldMu.Lock()
+	holders := d.sourceHolds[sessionID]
+	release := holders[holder]
+	delete(holders, holder)
+	if len(holders) == 0 {
+		delete(d.sourceHolds, sessionID)
+	}
+	d.sourceHoldMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+func (d *Daemon) setSessionSourceHold(session *surface.Session, active bool, holder string) {
+	if session == nil {
+		return
+	}
+	if !active {
+		d.releaseSessionSource(session.ID, holder)
+		return
+	}
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil || !surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+		return
+	}
+	d.holdSessionSource(session, adapter, holder)
 }
 
 func completionNotificationEligible(state registry.RuntimeState, observedActive bool) bool {

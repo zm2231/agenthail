@@ -221,6 +221,47 @@ func TestCodexActiveTurnUsesBoundedReader(t *testing.T) {
 	}
 }
 
+type interruptTurnClient struct {
+	activeTurn      string
+	interrupted     bool
+	interruptParams map[string]any
+}
+
+func (c *interruptTurnClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
+	switch method {
+	case "thread/turns/list":
+		return map[string]any{"result": map[string]any{"data": []any{map[string]any{"id": c.activeTurn, "status": map[string]any{"type": "inProgress"}}}}}, nil
+	case "turn/interrupt":
+		c.interrupted = true
+		c.interruptParams = params
+		return map[string]any{"result": map[string]any{}}, nil
+	default:
+		return nil, fmt.Errorf("unexpected method %s", method)
+	}
+}
+
+func (c *interruptTurnClient) Close() error { return nil }
+
+func TestCodexInterruptTurnRejectsReplacementTurn(t *testing.T) {
+	client := &interruptTurnClient{activeTurn: "turn-b"}
+	if err := NewCodex("").interruptActiveTurn(context.Background(), client, "thread", "turn-a"); err == nil {
+		t.Fatal("replacement turn was accepted")
+	}
+	if client.interrupted {
+		t.Fatal("replacement turn was interrupted")
+	}
+}
+
+func TestCodexInterruptTurnBindsConfirmedTurnID(t *testing.T) {
+	client := &interruptTurnClient{activeTurn: "turn-a"}
+	if err := NewCodex("").interruptActiveTurn(context.Background(), client, "thread", "turn-a"); err != nil {
+		t.Fatal(err)
+	}
+	if !client.interrupted || client.interruptParams["threadId"] != "thread" || client.interruptParams["turnId"] != "turn-a" {
+		t.Fatalf("interrupt=%t params=%v", client.interrupted, client.interruptParams)
+	}
+}
+
 func TestCodexDesktopBridgeFramesChildRPC(t *testing.T) {
 	codex := NewCodex(startRendererDesktopBridge(t))
 	client, err := codex.openDesktop(context.Background())
@@ -1103,6 +1144,9 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 	}
 	if eventReads < 2 || len(events) != 2 || events[0].Text != "done" || events[1].Kind != "done" {
 		t.Fatalf("event_reads=%d events=%+v", eventReads, events)
+	}
+	if events[0].ProviderKey != "renderer:12" || events[0].ID != "renderer:12" || events[0].Operation != "append" || events[0].TurnID != "target-turn" {
+		t.Fatalf("normalized event=%+v", events[0])
 	}
 }
 

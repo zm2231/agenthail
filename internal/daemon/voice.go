@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/voice"
@@ -29,9 +31,39 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	if err != nil {
 		provider = nil
 	}
-	s := voice.New(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath)
+	s := voice.NewWithTargetsAndOperatorSource(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, delivery.Dispatcher{Registry: d.Registry}, func(session *surface.Session, active bool) {
+		d.setSessionSourceHold(session, active, "voice")
+	})
 	mux.HandleFunc("/api/v1/voice", d.voiceBearerGuard(dashboard, voiceHandler(s)))
 	mux.HandleFunc("/api/v1/voice/peer", d.voiceBearerGuard(dashboard, voicePeerHandler))
+	mux.HandleFunc("/api/voice", dashboard.guard(dashboardVoiceHandler(s, dashboard.token)))
+	mux.HandleFunc("/voice-peer.js", dashboard.guard(voicePeerScriptHandler))
+}
+
+func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voice.Target, error) {
+	if d.Registry == nil {
+		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
+	}
+	id, err := d.Registry.ResolveTarget(requested)
+	if err != nil {
+		return nil, fmt.Errorf("resolve voice target: %w", err)
+	}
+	session, err := d.Registry.Session(id)
+	if err != nil {
+		return nil, fmt.Errorf("load voice target: %w", err)
+	}
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil {
+		return nil, fmt.Errorf("%s target has no configured adapter", session.Surface)
+	}
+	resolved, err := adapter.Resolve(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("verify voice target: %w", err)
+	}
+	if resolved == nil || resolved.ID != session.ID {
+		return nil, fmt.Errorf("verified voice target did not retain its exact identity")
+	}
+	return &voice.Target{Session: resolved, Adapter: adapter}, nil
 }
 
 func (d *Daemon) voiceBearerGuard(dashboard *dashboardServer, next http.HandlerFunc) http.HandlerFunc {
@@ -59,28 +91,54 @@ func voiceHandler(s *voice.Service) http.HandlerFunc {
 			writeAPIError(w, 401, "device_required", "Voice requires the paired native client's Bearer token.")
 			return
 		}
-		owner := fmt.Sprintf("%x", sha256.Sum256([]byte(token)))
-		switch r.Method {
-		case http.MethodGet:
-			writeDashboardJSON(w, 200, s.View(owner))
-		case http.MethodPost:
-			var a voice.Action
-			if err := decodeAPIV1JSON(w, r, &a, true); err != nil {
-				writeAPIError(w, 400, "invalid_request", "Invalid voice request.")
-				return
-			}
-			ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
-			defer cancel()
-			state, err := s.Apply(ctx, owner, a)
-			if err != nil {
-				writeDashboardJSON(w, 409, map[string]any{"error": map[string]string{"code": "voice_blocked", "message": err.Error()}, "state": state})
-				return
-			}
-			writeDashboardJSON(w, 200, state)
-		default:
-			writeAPIError(w, 405, "method_not_allowed", "Use GET or POST.")
-		}
+		voiceActionHandler(s, fmt.Sprintf("%x", sha256.Sum256([]byte(token))), w, r, true)
 	}
+}
+
+func dashboardVoiceHandler(s *voice.Service, token string) http.HandlerFunc {
+	owner := fmt.Sprintf("dashboard:%x", sha256.Sum256([]byte(token)))
+	return func(w http.ResponseWriter, r *http.Request) {
+		voiceActionHandler(s, owner, w, r, false)
+	}
+}
+
+func voiceActionHandler(s *voice.Service, owner string, w http.ResponseWriter, r *http.Request, apiV1 bool) {
+	switch r.Method {
+	case http.MethodGet:
+		writeDashboardJSON(w, http.StatusOK, s.View(owner))
+	case http.MethodPost:
+		var a voice.Action
+		if apiV1 {
+			if err := decodeAPIV1JSON(w, r, &a, true); err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "Invalid voice request.")
+				return
+			}
+		} else if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&a); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "Invalid voice request.")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+		defer cancel()
+		state, err := s.Apply(ctx, owner, a)
+		if err != nil {
+			writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]string{"code": "voice_blocked", "message": err.Error()}, "state": state})
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, state)
+	default:
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET or POST.")
+	}
+}
+
+func voicePeerScriptHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Permissions-Policy", "microphone=(self), camera=()")
+	_, _ = fmt.Fprint(w, voicePeerScript)
 }
 
 func voicePeerHandler(w http.ResponseWriter, r *http.Request) {

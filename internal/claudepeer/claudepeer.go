@@ -325,6 +325,25 @@ func Send(ctx context.Context, controlPath, senderID, targetSocket, message stri
 	}
 }
 
+func SendNative(ctx context.Context, home string, sender surface.Session, senderSocket, targetSocket, message string) (*surface.SendResult, error) {
+	if err := ValidateSend(sender.ID, targetSocket, message); err != nil {
+		return nil, err
+	}
+	if err := validateTargetSocket(defaultSocketDir, targetSocket); err != nil {
+		return nil, err
+	}
+	id := uuid.New().String()
+	content := peerContent(sender, senderSocket, message)
+	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: id, Type: "user", Message: mustJSON(messageBody{Role: "user", Content: content}), Priority: "next", From: "uds:" + senderSocket})
+	if len(payload) >= maxLineBytes {
+		return nil, surface.DeliveryTerminal(errors.New("Claude peer message exceeds the 64 KiB frame limit"), surface.DeliveryInvalidRequest)
+	}
+	if err := sendAuthenticatedFrame(home, targetSocket, payload); err != nil {
+		return nil, err
+	}
+	return &surface.SendResult{UUID: id, Accepted: true}, nil
+}
+
 func ValidateSend(senderID, targetSocket, message string) error {
 	if strings.TrimSpace(senderID) == "" || strings.TrimSpace(targetSocket) == "" || strings.TrimSpace(message) == "" {
 		return surface.DeliveryTerminal(errors.New("sender, target socket, and message are required"), surface.DeliveryInvalidRequest)

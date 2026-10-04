@@ -80,6 +80,7 @@ type SendResult struct {
 type DeliveryEvidence string
 
 const (
+	EvidenceSubmitted         DeliveryEvidence = "submitted"
 	EvidenceQueued            DeliveryEvidence = "queued"
 	EvidenceTransportAccepted DeliveryEvidence = "transport_accepted"
 	EvidenceHeld              DeliveryEvidence = "held"
@@ -298,6 +299,7 @@ type TurnObservation struct {
 	ActiveTurnID    string        `json:"activeTurnId,omitempty"`
 	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
 	CompletedTurnID string        `json:"completedTurnId,omitempty"`
+	InputTurnID     string        `json:"inputTurnId,omitempty"`
 	Reply           *ReplyResult  `json:"reply,omitempty"`
 }
 
@@ -322,9 +324,15 @@ type GoalState struct {
 }
 
 type StreamEvent struct {
-	Kind    string        `json:"kind"`
-	Text    string        `json:"text"`
-	Context *ContextUsage `json:"context,omitempty"`
+	ID          string        `json:"id,omitempty"`
+	ProviderKey string        `json:"providerKey,omitempty"`
+	Version     uint64        `json:"version,omitempty"`
+	Operation   string        `json:"operation,omitempty"`
+	TurnID      string        `json:"turnId,omitempty"`
+	Timestamp   time.Time     `json:"timestamp,omitempty"`
+	Kind        string        `json:"kind"`
+	Text        string        `json:"text"`
+	Context     *ContextUsage `json:"context,omitempty"`
 }
 
 type ContextUsage struct {
@@ -399,6 +407,18 @@ type Surface interface {
 	Interrupt(ctx context.Context, sess *Session) error
 	Steer(ctx context.Context, sess *Session, message string) error
 	Capabilities() Capabilities
+}
+
+// TurnInterrupter accepts interruption only when the adapter can verify the
+// exact active turn selected by the caller.
+type TurnInterrupter interface {
+	InterruptTurn(context.Context, *Session, string) error
+}
+
+// CatalogListCompleteness declares whether a successful List result is a
+// complete enumeration suitable for omission reconciliation.
+type CatalogListCompleteness interface {
+	CatalogListComplete() bool
 }
 
 func DeriveName(explicit, preview string, maxLen int) string {

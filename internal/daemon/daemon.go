@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	pollInterval = 5 * time.Second
+	pollInterval             = 5 * time.Second
+	catalogDiscoveryInterval = 30 * time.Second
 )
 
 type Daemon struct {
@@ -32,6 +33,10 @@ type Daemon struct {
 	notificationArmed map[string]bool
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
+	catalog           *catalogHub
+	sources           *sessionSourceManager
+	sourceHoldMu      sync.Mutex
+	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
 }
 
@@ -60,7 +65,7 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 }
 
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		Registry:          reg,
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
@@ -68,7 +73,14 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		events:            newEventHub(reg),
+		catalog:           newCatalogHub(reg),
+		sources:           newSessionSourceManager(reg),
+		sourceHolds:       map[string]map[string]func(){},
 	}
+	if err := reg.EnsureCatalogState(); err != nil {
+		d.log.Printf("catalog state: %s", err)
+	}
+	return d
 }
 
 func (d *Daemon) observationAllowed(sessionID string) bool {
@@ -159,17 +171,22 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if recovered > 0 {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	observerTicker := time.NewTicker(pollInterval)
+	defer observerTicker.Stop()
+	catalogTicker := time.NewTicker(catalogDiscoveryInterval)
+	defer catalogTicker.Stop()
 	d.scanAndRelay(ctx)
+	d.discoverCatalog(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			d.queueWorkers.Wait()
 			d.log.Printf("stopping")
 			return nil
-		case <-ticker.C:
+		case <-observerTicker.C:
 			d.scanAndRelay(ctx)
+		case <-catalogTicker.C:
+			d.discoverCatalog(ctx)
 		}
 	}
 }
