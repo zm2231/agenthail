@@ -969,7 +969,9 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 				Health string `json:"health"`
 			} `json:"surfaces"`
 			Freshness map[string]struct {
+				Generation uint64    `json:"generation"`
 				ObservedAt time.Time `json:"observedAt"`
+				Stale      bool      `json:"stale"`
 			} `json:"freshness"`
 		} `json:"catalog"`
 	}
@@ -984,6 +986,9 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	}
 	if got := document.Catalog.Freshness["catalog-root"].ObservedAt; !got.Equal(observedAt) {
 		t.Fatalf("root freshness=%s want=%s", got, observedAt)
+	}
+	if got := document.Catalog.Freshness["catalog-root"]; got.Generation != 1 || got.Stale {
+		t.Fatalf("root freshness=%+v", got)
 	}
 }
 

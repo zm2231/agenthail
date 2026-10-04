@@ -433,6 +433,38 @@ func TestDiscoveryPersistsCatalogBeforeSnapshotReads(t *testing.T) {
 	}
 }
 
+func TestFailedDiscoveryKeepsCatalogRowsStaleThroughDashboardSnapshot(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	d.Surfaces = []surface.Surface{&failingClaudeListSurface{daemonSurface: fake}}
+	d.discoverCatalog(context.Background())
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 2 {
+		t.Fatalf("sessions=%d", len(state.Sessions))
+	}
+	for _, session := range state.Sessions {
+		if session.Freshness == nil || !session.Freshness.Stale || session.Freshness.Generation != 2 {
+			t.Fatalf("session=%+v", session)
+		}
+	}
+	window, err := registry.CatalogEventsAfter(0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleEvents := 0
+	for _, event := range window.Events {
+		if event.Type == "session.upserted" && event.EntityID != "" {
+			staleEvents++
+		}
+	}
+	if staleEvents < 4 {
+		t.Fatalf("catalog events=%d want initial and stale session events", staleEvents)
+	}
+}
+
 func TestDiscoveryRemovesOnlyAfterTwoSuccessfulOmissions(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())

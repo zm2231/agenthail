@@ -88,6 +88,15 @@ func (h *catalogHub) reconcileOmissions(kind surface.SurfaceKind, seen map[strin
 	return h.flushCommittedLocked()
 }
 
+func (h *catalogHub) markDiscoveryFailure(kind surface.SurfaceKind, reason string, observedAt time.Time) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, err := h.registry.MarkCatalogDiscoveryFailure(kind, reason, observedAt); err != nil {
+		return err
+	}
+	return h.flushCommittedLocked()
+}
+
 // flushCommitted publishes journal rows only after their owning transaction
 // committed. It preserves sequence order across catalog writers that do not
 // route through the hub themselves.
@@ -281,6 +290,9 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		cancel()
 		if err != nil {
 			observedAt := time.Now().UTC()
+			if markErr := d.catalog.markDiscoveryFailure(adapter.Name(), "catalog discovery failed", observedAt); markErr != nil {
+				d.log.Printf("catalog discovery failure state: %s", markErr)
+			}
 			payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "unavailable", "detail": "catalog discovery failed", "observedAt": observedAt.Format(time.RFC3339Nano)})
 			_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "unavailable", Detail: "catalog discovery failed", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":unavailable", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 			continue
