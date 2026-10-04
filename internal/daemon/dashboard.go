@@ -709,9 +709,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			return dashboardState{}, fmt.Errorf("read catalog page: %w", err)
 		}
 		catalogSnapshot = loaded.CatalogSnapshot
-		if loaded.TotalMatching > 0 || len(loaded.Surfaces) > 0 {
-			page = &loaded
-		}
+		page = &loaded
 	} else {
 		catalogSnapshot, err = d.Registry.CatalogSnapshot()
 		if err != nil {
@@ -807,7 +805,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		catalogSessions[record.Session.ID] = record
 		sessions = append(sessions, record.Session)
 	}
-	if len(catalogSnapshot.Sessions) == 0 && len(catalogSnapshot.Surfaces) == 0 {
+	if page == nil && len(catalogSnapshot.Sessions) == 0 && len(catalogSnapshot.Surfaces) == 0 {
 		var err error
 		sessions, err = d.Registry.ListSessions(0)
 		if err != nil {
