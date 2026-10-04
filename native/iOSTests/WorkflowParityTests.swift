@@ -49,6 +49,17 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testAcceptedTerminalCreationShowsWarningWithoutConversationClaimOrRetry() async throws {
+        ParityProtocol.state.reset(accepted: true)
+        let model = makeModel()
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "tmux")
+        XCTAssertTrue(created)
+        XCTAssertNil(model.requestedSessionID)
+        XCTAssertEqual(model.creationWarning, "The launcher accepted the request; the conversation is not available yet.")
+        XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+    }
+
+    @MainActor
     func testTerminalLauncherBodyOmitsAdvancedDefaultsAndRejectsUnsupportedSettings() async throws {
         ParityProtocol.state.reset()
         let model = makeModel()
@@ -174,12 +185,14 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
         private var records: [[String:Any]] = []
         private var unknown = false
         private var fail = false
+        private var accepted = false
         var actions: [[String:Any]] { lock.withLock { records } }
-        func reset(unknown: Bool = false, fail: Bool = false) { lock.withLock { records = []; self.unknown = unknown; self.fail = fail } }
+        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false) { lock.withLock { records = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted } }
         func respond(_ body: [String:Any]) -> (Int,String) { lock.withLock {
             records.append(body)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
             if (body["action"] as? String)?.contains("create") == true {
+                if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"The launcher accepted the request; the conversation is not available yet."}"#) }
                 if body["surface"] as? String == "claude" {
                     return unknown ? (202, #"{"ok":false,"unknown":true,"session":null,"error":"registration delayed"}"#) : (201, #"{"ok":true,"session":{"id":"native-claude","surface":"claude","name":"phone-task","status":"unknown","lastActive":"2026-09-08T08:00:00Z"},"result":null}"#)
                 }

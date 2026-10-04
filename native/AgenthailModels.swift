@@ -22,6 +22,10 @@ struct QueueResponse: Decodable { let items: [QueueState] }
 struct SessionCreationReceipt: Decodable {
     let ok: Bool
     let unknown: Bool?
+    let status: String?
+    let accepted: Bool?
+    let retryable: Bool?
+    let warning: String?
     let session: RawSession?
     let sessionId: String?
     let error: String?
