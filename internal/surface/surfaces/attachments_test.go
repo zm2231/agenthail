@@ -100,3 +100,30 @@ func TestAttachmentRecordAboveLegacyTimelineWindowIsProjected(t *testing.T) {
 		t.Fatalf("items=%+v err=%v", page.Items, err)
 	}
 }
+
+func TestToolResultImageIsMetadataOnlyAndKeepsCallID(t *testing.T) {
+	data, _ := base64.StdEncoding.DecodeString(testPNG)
+	path := filepath.Join(t.TempDir(), "tool-result.jsonl")
+	imagePath := filepath.Join(t.TempDir(), "tool.png")
+	if err := os.WriteFile(imagePath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"caption"},{"type":"image","source":{"type":"path","path":` + quote(imagePath) + `}}]}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	if err != nil || len(page.Items) != 2 {
+		t.Fatalf("items=%+v err=%v", page.Items, err)
+	}
+	encoded, _ := json.Marshal(page.Items)
+	if strings.Contains(string(encoded), testPNG) || !strings.Contains(string(encoded), "caption") {
+		t.Fatalf("timeline leaked image data: %s", encoded)
+	}
+	if page.Items[0].Kind != "toolResult" || page.Items[0].CallID != "call-1" || page.Items[0].Text != "caption" {
+		t.Fatalf("tool result=%+v", page.Items[0])
+	}
+	if page.Items[1].Kind != "attachment" || page.Items[1].CallID != "call-1" || page.Items[1].Attachment == nil {
+		t.Fatalf("attachment=%+v", page.Items[1])
+	}
+}
