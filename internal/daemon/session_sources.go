@@ -69,6 +69,7 @@ type sessionSource struct {
 	appendCursors   map[string]uint64
 	streamCursor    uint64
 	streamCursorSet bool
+	streamCursorErr error
 	anonymous       uint64
 	sourceVersion   uint64
 }
@@ -208,14 +209,28 @@ func (m *sessionSourceManager) shutdown() {
 }
 
 func (s *sessionSource) run() {
-	if reader, ok := s.adapter.(surface.StreamCursorReader); ok {
-		if cursor, err := reader.StreamCursor(s.ctx, &s.session); err == nil {
-			s.streamCursor = cursor
-			s.streamCursorSet = true
+	provider, localTranscript := s.adapter.(surface.LocalTranscriptProvider)
+	if !localTranscript || !provider.RequiresLocalTranscript(&s.session) {
+		if reader, ok := s.adapter.(surface.StreamCursorReader); ok {
+			if cursor, err := reader.StreamCursor(s.ctx, &s.session); err == nil {
+				s.streamCursor = cursor
+				s.streamCursorSet = true
+			} else if !errors.Is(err, surface.ErrUnsupported) && s.ctx.Err() == nil {
+				s.streamCursorErr = fmt.Errorf("session stream cursor unavailable: %w", err)
+			}
 		}
 	}
 	s.seedJournal()
 	close(s.seeded)
+	if s.streamCursorErr != nil || s.seedErr != nil {
+		if s.streamCursorErr != nil {
+			s.appendSourceError(s.streamCursorErr)
+		}
+		<-s.ctx.Done()
+		s.closeSubscribers()
+		s.remove()
+		return
+	}
 	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
 		<-s.ctx.Done()
 		s.closeSubscribers()
@@ -229,6 +244,10 @@ func (s *sessionSource) run() {
 		}
 		current.StreamCursor = s.streamCursor
 		current.StreamCursorSet = s.streamCursorSet
+		current.TranscriptOffset = s.session.TranscriptOffset
+		current.TranscriptOffsetSet = s.session.TranscriptOffsetSet
+		current.CodexUsesEventUsers = s.session.CodexUsesEventUsers
+		current.CodexUsesEventUsersSet = s.session.CodexUsesEventUsersSet
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
@@ -337,6 +356,17 @@ func (s *sessionSource) seedJournal() {
 		s.appendSourceError(err)
 		return
 	}
+	if read.TranscriptOffsetSet {
+		s.session.TranscriptOffset = read.TranscriptOffset
+		s.session.TranscriptOffsetSet = true
+		s.session.CodexUsesEventUsers = read.CodexUsesEventUsers
+		s.session.CodexUsesEventUsersSet = read.CodexUsesEventUsersSet
+	} else if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok && provider.RequiresLocalTranscript(&s.session) {
+		err := fmt.Errorf("Codex local transcript is unavailable")
+		s.seedErr = err
+		s.appendSourceError(err)
+		return
+	}
 	for _, item := range read.Items {
 		if item.ID == "" {
 			continue
@@ -350,13 +380,6 @@ func (s *sessionSource) seedJournal() {
 			s.mu.Lock()
 			s.appendBodies[providerKey] = item.Text
 			s.mu.Unlock()
-		}
-		if s.session.Surface == surface.KindCodex && item.Attachment != nil {
-			if digest, ok := transcriptAttachmentDigest(item.Attachment.ID); ok {
-				attachment := *item.Attachment
-				attachment.ID = "live-attachment:" + s.session.ID + ":" + digest
-				item.Attachment = &attachment
-			}
 		}
 		s.append(surface.StreamEvent{
 			Role:        item.Role,
@@ -375,17 +398,6 @@ func (s *sessionSource) seedJournal() {
 			Text:        item.Text,
 		})
 	}
-}
-
-func transcriptAttachmentDigest(id string) (string, bool) {
-	parts := strings.Split(id, ":")
-	if len(parts) != 4 || parts[0] != "attachment" || len(parts[3]) != 64 {
-		return "", false
-	}
-	if _, err := hex.DecodeString(parts[3]); err != nil {
-		return "", false
-	}
-	return parts[3], true
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {

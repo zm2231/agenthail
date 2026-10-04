@@ -92,9 +92,14 @@ separate. The following shapes are canonical:
 
 A `SessionSource` is the only component allowed to read provider session
 content for its session. It normalizes provider output, appends journal events
-in sequence order, and fans out journal entries to subscribers. Codex renderer
-records use their native sequence as raw-delta identity within a persisted
-source epoch; it is not presented as a stable final-message ID. Claude transcript
+in sequence order, and fans out journal entries to subscribers. Codex Desktop
+content is read from its local JSONL transcript as one incremental source: the
+seed ends at the last complete newline, and the live tail starts at that exact
+byte offset. Seed and tail use the same record parser and stable item keys,
+including durable offset-based attachment references; an incomplete final line
+is left for the tail. Codex managed app-server sessions use their separate
+native transport path. The Desktop content stream does not use renderer event
+records or a renderer cursor as a second content source. Claude transcript
 records use immutable record identity, not a mutable text hash. Provider keys remain absent where a
 source cannot prove identity or correlate an effect. The source is held while
 any viewer subscribes, a relay/route watches the session, a managed turn is
