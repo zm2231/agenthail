@@ -20,6 +20,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
     @Published var deliveryStatus: [String: String] = [:]
+    @Published var deliveryIDs: [String: Int64] = [:]
     private var deliveryQueueIDs: [String: Int64] = [:]
     private var refreshingDeliveries = false
     @Published var olderActivity: [TimelineItem] = []
@@ -454,7 +455,10 @@ final class AgenthailIOSModel: ObservableObject {
             activityCursor = timeline.nextBefore
             olderActivityError = nil
         } catch {
-            if selectedSessionID == id { olderActivityError = error.localizedDescription }
+            if selectedSessionID == id {
+                if case AgenthailAPIError.historyGap = error { activityCursor = nil }
+                olderActivityError = error.localizedDescription
+            }
         }
     }
 
@@ -499,6 +503,7 @@ final class AgenthailIOSModel: ObservableObject {
             defer { sendingSessionIDs.remove(session.id) }
             do {
                 let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
+                if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[session.id] = queueID
@@ -508,6 +513,7 @@ final class AgenthailIOSModel: ObservableObject {
                     clearTurnSettings(for: session.id)
                 }
             } catch {
+                deliveryIDs.removeValue(forKey: session.id)
                 deliveryStatus[session.id] = "Delivery unconfirmed. Draft kept; check activity before retrying."
                 operationError = error.localizedDescription
                 if selectedSessionID == session.id {
@@ -809,7 +815,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: event.data.status, truncated: event.data.truncated, bodyRef: event.data.bodyRef)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.reason, bodyRef: event.data.bodyRef)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {

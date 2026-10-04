@@ -505,6 +505,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let callId: String?
     let status: String?
     let truncated: Bool
+    let truncationReason: String?
     let bodyRef: String?
 }
 
