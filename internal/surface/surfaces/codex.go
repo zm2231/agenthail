@@ -918,6 +918,10 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			if !codexContainsID(event.Params, sess.ID) {
 				continue
 			}
+			if goalEvent, ok := codexGoalStreamEvent(event); ok {
+				onEvent(goalEvent)
+				continue
+			}
 			if usage, ok := c.applyContextEvent(sess, event, lastContext); ok {
 				lastContext = *usage
 				onEvent(codexStreamEvent(event.Sequence, "context", "", usage, uuid))
@@ -1046,6 +1050,10 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				if !codexContainsID(event.Params, sess.ID) {
 					continue
 				}
+				if goalEvent, ok := codexGoalStreamEvent(event); ok {
+					onEvent(goalEvent)
+					continue
+				}
 				if usage, matched := c.applyContextEvent(sess, event, lastContext); matched {
 					lastContext = *usage
 					onEvent(surface.StreamEvent{Kind: "context", Context: usage})
@@ -1117,38 +1125,11 @@ func codexTurnByID(thread *codexThread, turnID string) *codexTurn {
 	return nil
 }
 
-func (c *Codex) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
-	_, err := c.requestSession(ctx, sess, true, "thread/goal/set", map[string]any{
-		"threadId":  sess.ID,
-		"objective": text,
-		"status":    "active",
-	}, 5*time.Second)
-	return err
-}
-
 func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSession(ctx, sess, true, "thread/goal/clear", map[string]any{
 		"threadId": sess.ID,
 	}, 5*time.Second)
 	return err
-}
-
-func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	resp, err := c.requestSession(ctx, sess, false, "thread/goal/get", map[string]any{
-		"threadId": sess.ID,
-	}, 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	result, _ := resp["result"].(map[string]any)
-	goal, _ := result["goal"].(map[string]any)
-	if goal == nil {
-		return nil, nil
-	}
-	return &surface.GoalState{
-		Objective: str(goal, "objective"),
-		Status:    str(goal, "status"),
-	}, nil
 }
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {

@@ -15,6 +15,8 @@ struct SessionEditingControls: View {
             if !detail.readOnly && detail.capabilities.goal {
                 Button(detail.goal?.objective.isEmpty == false ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
                 if detail.goal?.objective.isEmpty == false {
+                    Button(detail.goal?.status == "paused" ? "Resume goal" : "Pause goal", systemImage: detail.goal?.status == "paused" ? "play.fill" : "pause.fill") { Task { await save(detail.goal?.status == "paused" ? "goal-resume" : "goal-pause") } }
+                    Button("Edit token budget", systemImage: "number") { text = detail.goal?.tokenBudget.map(String.init) ?? ""; editingBudget = true }
                     Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } }
                 }
                 if let goal = detail.goal {
