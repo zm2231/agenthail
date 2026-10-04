@@ -23,18 +23,26 @@ const (
 )
 
 type sessionJournalPayload struct {
-	ItemID      string `json:"itemId"`
-	ProviderKey string `json:"providerKey,omitempty"`
-	Version     uint64 `json:"version"`
-	Op          string `json:"op"`
-	Kind        string `json:"kind"`
-	TurnID      string `json:"turnId,omitempty"`
-	Role        string `json:"role,omitempty"`
-	TS          string `json:"ts"`
-	Body        string `json:"body,omitempty"`
-	Truncated   bool   `json:"truncated"`
-	BodyRef     string `json:"bodyRef,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	ItemID       string `json:"itemId"`
+	ProviderKey  string `json:"providerKey,omitempty"`
+	Version      uint64 `json:"version"`
+	Op           string `json:"op"`
+	Kind         string `json:"kind"`
+	TurnID       string `json:"turnId,omitempty"`
+	Role         string `json:"role,omitempty"`
+	AttachmentID string `json:"attachmentId,omitempty"`
+	MediaType    string `json:"mediaType,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	Bytes        int64  `json:"bytes,omitempty"`
+	Title        string `json:"title,omitempty"`
+	CallID       string `json:"callId,omitempty"`
+	Status       string `json:"status,omitempty"`
+	TS           string `json:"ts"`
+	Body         string `json:"body,omitempty"`
+	Truncated    bool   `json:"truncated"`
+	BodyRef      string `json:"bodyRef,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -285,14 +293,23 @@ func (s *sessionSource) seedJournal() {
 		}
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
 		s.append(surface.StreamEvent{
-			ID:          item.ID,
-			ProviderKey: "timeline:" + item.ID,
-			Version:     uint64(len(item.Text)),
-			Operation:   "upsert",
-			TurnID:      item.CallID,
-			Timestamp:   at,
-			Kind:        item.Kind,
-			Text:        item.Text,
+			ID:           item.ID,
+			ProviderKey:  "timeline:" + item.ID,
+			Version:      uint64(len(item.Text)),
+			Operation:    "upsert",
+			TurnID:       item.CallID,
+			Role:         item.Role,
+			AttachmentID: item.AttachmentID,
+			MediaType:    item.MediaType,
+			Width:        item.Width,
+			Height:       item.Height,
+			Bytes:        item.Bytes,
+			Title:        item.Title,
+			CallID:       item.CallID,
+			Status:       item.Status,
+			Timestamp:    at,
+			Kind:         item.Kind,
+			Text:         item.Text,
 		})
 	}
 }
@@ -388,5 +405,5 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, Role: event.Role, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, Role: event.Role, AttachmentID: event.AttachmentID, MediaType: event.MediaType, Width: event.Width, Height: event.Height, Bytes: event.Bytes, Title: event.Title, CallID: event.CallID, Status: event.Status, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
 }

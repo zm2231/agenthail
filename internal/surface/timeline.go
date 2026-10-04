@@ -4,15 +4,20 @@ import "context"
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	Role      string `json:"role,omitempty"`
-	Title     string `json:"title"`
-	Text      string `json:"text"`
-	Timestamp string `json:"timestamp,omitempty"`
-	CallID    string `json:"callId,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Truncated bool   `json:"truncated"`
+	ID           string `json:"id"`
+	Kind         string `json:"kind"`
+	Role         string `json:"role,omitempty"`
+	Title        string `json:"title"`
+	Text         string `json:"text"`
+	Timestamp    string `json:"timestamp,omitempty"`
+	CallID       string `json:"callId,omitempty"`
+	AttachmentID string `json:"attachmentId,omitempty"`
+	MediaType    string `json:"mediaType,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	Bytes        int64  `json:"bytes,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Truncated    bool   `json:"truncated"`
 }
 
 type SessionTimeline struct {
@@ -37,6 +42,18 @@ type SessionReadResult struct {
 	Truncated         bool           `json:"truncated"`
 	UnavailableReason string         `json:"unavailableReason,omitempty"`
 	Warning           string         `json:"warning,omitempty"`
+}
+
+type Attachment struct {
+	ID        string
+	MediaType string
+	Width     int
+	Height    int
+	Bytes     int64
+}
+
+type AttachmentReader interface {
+	ReadAttachment(context.Context, *Session, string) (*Attachment, []byte, error)
 }
 
 type SessionReader interface {

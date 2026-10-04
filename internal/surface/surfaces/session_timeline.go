@@ -3,11 +3,11 @@ package surfaces
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const timelineReadBudget = 4 << 20
+const timelineReadBudget = 16 << 20
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
@@ -170,10 +170,19 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		if len(items) == 0 {
 			continue
 		}
-		digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
 		for i := range items {
-			items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+			items[i].ID = stableTimelineItemID(offset, line, i)
 			items[i].Timestamp = str(record, "timestamp")
+		}
+		refs := attachmentReferencesForSource(record, source)
+		refIndex := 0
+		for i := range items {
+			if items[i].Kind == "attachment" {
+				if refIndex < len(refs) {
+					items[i].AttachmentID = attachmentID(items[i].ID, refs[refIndex], filepath.Dir(path))
+				}
+				refIndex++
+			}
 		}
 		full := slices.Clone(items)
 		for i := range items {
@@ -313,6 +322,24 @@ func timelineValue(value any) string {
 	return string(data)
 }
 
+func timelineAttachmentItem(value any, role, callID string) (surface.TimelineItem, bool) {
+	ref, ok := attachmentReferenceFromValue(value)
+	if !ok {
+		return surface.TimelineItem{}, false
+	}
+	item := surface.TimelineItem{Kind: "attachment", Role: role, Title: "Image", Text: "Image attachment", CallID: callID, MediaType: ref.MediaType}
+	if strings.HasPrefix(ref.Data, "data:") {
+		parts := strings.SplitN(ref.Data, ",", 2)
+		if len(parts) == 2 {
+			if semicolon := strings.IndexByte(parts[0], ';'); semicolon > len("data:") {
+				item.MediaType = strings.TrimPrefix(parts[0][:semicolon], "data:")
+			}
+			item.Bytes = int64(len(parts[1]) * 3 / 4)
+		}
+	}
+	return item, true
+}
+
 func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 	kind := str(record, "type")
 	if kind == "system" {
@@ -368,10 +395,19 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
 			}
+			items = append(items, item)
+			content, _ := block["content"].([]any)
+			for _, entry := range content {
+				if attachment, ok := timelineAttachmentItem(entry, kind, item.CallID); ok {
+					items = append(items, attachment)
+				}
+			}
+			continue
 		case "image":
-			item.Kind = "attachment"
-			item.Title = "Image attachment"
-			item.Text = "Open the original agent app to view this image."
+			if attachment, ok := timelineAttachmentItem(block["source"], kind, ""); ok {
+				items = append(items, attachment)
+			}
+			continue
 		default:
 			continue
 		}
@@ -390,10 +426,16 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	}
 	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
 		text := str(payload, "message")
+		var attachments []surface.TimelineItem
 		if images, ok := payload["images"].([]any); ok && len(images) > 0 {
-			text += "\n[Image attachment: open the original agent app to view]"
+			for _, image := range images {
+				if attachment, ok := timelineAttachmentItem(image, "user", ""); ok {
+					attachments = append(attachments, attachment)
+				}
+			}
 		}
-		return []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
+		items := []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
+		return append(items, attachments...)
 	}
 	if str(record, "type") != "response_item" {
 		return nil
@@ -413,8 +455,6 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			block, _ := raw.(map[string]any)
 			if text := str(block, "text"); text != "" {
 				parts = append(parts, text)
-			} else if strings.Contains(str(block, "type"), "image") {
-				parts = append(parts, "[Image attachment: open the original agent app to view]")
 			}
 		}
 		item.Text = strings.Join(parts, "\n\n")
@@ -454,5 +494,16 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	default:
 		return nil
 	}
-	return []surface.TimelineItem{item}
+	items := []surface.TimelineItem{item}
+	if blocks, ok := payload["content"].([]any); ok {
+		for _, raw := range blocks {
+			block, _ := raw.(map[string]any)
+			if strings.Contains(str(block, "type"), "image") {
+				if attachment, ok := timelineAttachmentItem(block, item.Role, item.CallID); ok {
+					items = append(items, attachment)
+				}
+			}
+		}
+	}
+	return items
 }

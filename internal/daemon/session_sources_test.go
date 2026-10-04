@@ -353,6 +353,20 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	}
 }
 
+func TestSessionSourcePersistsAttachmentMetadataWithoutBytes(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(registry)
+	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	payload := source.normalizeLocked(surface.StreamEvent{ID: "item", ProviderKey: "timeline:item", Version: 2, Operation: "upsert", Kind: "attachment", Role: "user", Title: "Image", AttachmentID: "attachment:item:hash", MediaType: "image/png", Width: 1, Height: 1, Bytes: 68, Text: "Image attachment"})
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "iVBOR") || payload.AttachmentID != "attachment:item:hash" || payload.MediaType != "image/png" || payload.Title != "Image" || payload.Bytes != 68 {
+		t.Fatalf("payload=%s", encoded)
+	}
+}
+
 func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{

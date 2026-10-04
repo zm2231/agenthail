@@ -486,6 +486,11 @@ func TestClaudeStreamUDSTimelineIncludesFutureToolsAndRoles(t *testing.T) {
 	if events[0].Role != "user" {
 		t.Fatalf("first event=%+v", events[0])
 	}
+	for _, event := range events {
+		if event.Kind == "toolCall" && (event.Title != "Bash" || event.CallID != "call-2" || event.Role != "assistant") {
+			t.Fatalf("tool event=%+v", event)
+		}
+	}
 }
 
 func TestClaudeStreamRejectsUUIDSpecificUDSStream(t *testing.T) {

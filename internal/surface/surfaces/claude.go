@@ -617,14 +617,22 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 				}
 			}
 			items := claudeTimelineItems(record)
+			refs := attachmentReferencesForSource(record, "claude")
+			refIndex := 0
 			var index uint64
 			for _, item := range items {
 				key := claudeLiveTimelineKey(lineOffset, line, item, index)
+				if item.Kind == "attachment" {
+					if refIndex < len(refs) {
+						item.AttachmentID = attachmentID(key, refs[refIndex], filepath.Dir(path))
+					}
+					refIndex++
+				}
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
 				}
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, AttachmentID: item.AttachmentID, MediaType: item.MediaType, Width: item.Width, Height: item.Height, Bytes: item.Bytes, Title: item.Title, CallID: item.CallID, Status: item.Status, Kind: item.Kind, Text: item.Text})
 				index++
 			}
 			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
