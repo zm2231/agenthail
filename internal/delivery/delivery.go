@@ -24,7 +24,8 @@ type Receipt struct {
 }
 
 type Dispatcher struct {
-	Registry *registry.Registry
+	Registry         *registry.Registry
+	ProblemCommitted func()
 }
 
 func (d Dispatcher) Deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string) (*Receipt, error) {
@@ -63,6 +64,9 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 	if target == "" {
 		target = session.ID
 	}
+	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
+		return nil, err
+	}
 	var intent *registry.DeliveryIntent
 	if d.Registry != nil {
 		sourceID := surface.SourceSessionID(ctx)
@@ -78,29 +82,18 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			return nil, fmt.Errorf("persist submitted delivery intent: %w", err)
 		}
 	}
-	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
-		if intent != nil {
-			_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, err.Error())
-		}
-		return nil, err
-	}
 	if err := adapter.Steer(ctx, session, message); err != nil {
 		if intent != nil {
 			if surface.IsDeliveryOutcomeUnknown(err) {
 				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 			}
-			_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, err.Error())
+			d.failIntent(intent.ID, err.Error())
 		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
 		return nil, err
 	}
 	receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID}
-	if intent != nil {
-		if changed, err := d.Registry.MarkDeliveryIntentSent(intent.ID, "", receipt.Evidence); err != nil || !changed {
-			return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
-		}
-		receipt.DeliveryID = intent.ID
-	}
+	d.markSent(receipt, intent, "", target)
 	d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, Message: "steer"})
 	return receipt, nil
 }
@@ -200,7 +193,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return receipt, nil
 		}
 		if intent != nil {
-			_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, err.Error())
+			d.failIntent(intent.ID, err.Error())
 		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
@@ -220,12 +213,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
 		receipt.Detail = fmt.Sprintf("Sent to %s.", target)
-		if intent != nil {
-			if changed, intentErr := d.Registry.MarkDeliveryIntentSent(intent.ID, result.UUID, receipt.Evidence); intentErr != nil || !changed {
-				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, TurnID: result.UUID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
-			}
-			receipt.DeliveryID = intent.ID
-		}
+		d.markSent(receipt, intent, result.UUID, target)
 		if d.Registry != nil && !peerTransport {
 			if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, baselineCompletionID); err != nil {
 				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result.UUID, Error: err.Error()})
@@ -270,27 +258,18 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 				if surface.IsDeliveryOutcomeUnknown(steerErr) {
 					return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 				}
-				_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, steerErr.Error())
+				d.failIntent(intent.ID, steerErr.Error())
 			}
 			d.record(registry.HistoryEntry{Kind: failureKind(steerErr, "control-failed"), SessionID: session.ID, Message: message, Error: steerErr.Error()})
 			return nil, steerErr
 		}
-		if intent != nil {
-			if changed, err := d.Registry.MarkDeliveryIntentSent(intent.ID, "", surface.EvidenceDelivered); err != nil || !changed {
-				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
-			}
-		}
-		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: fmt.Sprintf("Sent to %s.", target)}
-		if intent != nil {
-			receipt.DeliveryID = intent.ID
-		}
+		d.markSent(receipt, intent, "", target)
+		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
 		return receipt, nil
 	}
 	if !allowQueue {
-		if intent != nil {
-			_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, ErrTargetBusy.Error())
-		}
+		d.discardIntent(intent, session.ID)
 		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
 		return nil, ErrTargetBusy
 	}
@@ -311,12 +290,50 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		queueID, deliveryID, err = d.Registry.QueueDeliveryWithIntent(session.ID, message, deliveryKey, options)
 	}
 	if err != nil {
-		if intent != nil {
-			_, _ = d.Registry.FailDeliveryIntentWithNotice(intent.ID, fmt.Sprintf("queue storage failed: %s", err))
-		}
+		d.discardIntent(intent, session.ID)
+		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: fmt.Sprintf("queue storage failed: %s", err)})
 		return nil, err
 	}
 	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil
+}
+
+func (d Dispatcher) failIntent(id int64, failure string) {
+	if _, err := d.Registry.FailDeliveryIntentWithNotice(id, failure); err != nil {
+		d.record(registry.HistoryEntry{Kind: "runtime-error", Error: fmt.Sprintf("record delivery %d failure: %s", id, err)})
+	}
+	if d.ProblemCommitted != nil {
+		d.ProblemCommitted()
+	}
+}
+
+func (d Dispatcher) discardIntent(intent *registry.DeliveryIntent, sessionID string) {
+	if intent == nil {
+		return
+	}
+	if err := d.Registry.DiscardDeliveryIntent(intent.ID); err != nil {
+		d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: sessionID, Error: fmt.Sprintf("discard refused delivery %d: %s", intent.ID, err)})
+	}
+}
+
+// markSent keeps the receipt equal to the durable intent: when the sent
+// transition cannot persist, callers still finish post-effect bookkeeping but
+// report the stored submitted state.
+func (d Dispatcher) markSent(receipt *Receipt, intent *registry.DeliveryIntent, providerKey, target string) {
+	if intent == nil {
+		return
+	}
+	receipt.DeliveryID = intent.ID
+	changed, err := d.Registry.MarkDeliveryIntentSent(intent.ID, providerKey, receipt.Evidence)
+	if err == nil && changed {
+		return
+	}
+	if err == nil {
+		err = fmt.Errorf("intent was no longer submitted")
+	}
+	d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: receipt.SessionID, Result: providerKey, Error: fmt.Sprintf("record sent delivery %d: %s", intent.ID, err)})
+	receipt.Evidence = surface.EvidenceSubmitted
+	receipt.Status = string(registry.DeliveryIntentSubmitted)
+	receipt.Detail = fmt.Sprintf("Submitted to %s.", target)
 }
 
 func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, error) {

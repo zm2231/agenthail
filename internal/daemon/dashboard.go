@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -1343,7 +1342,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			receipt, deliverErr := (delivery.Dispatcher{Registry: d.Registry}).Deliver(operationCtx, adapter, session, request.Message, "")
+			receipt, deliverErr := d.dispatcher().Deliver(operationCtx, adapter, session, request.Message, "")
 			if deliverErr != nil {
 				failed++
 				continue
@@ -1583,7 +1582,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		receipt, actionErr := (delivery.Dispatcher{Registry: d.Registry}).DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions})
+		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return
@@ -1601,7 +1600,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
 		}
-		result, err = (delivery.Dispatcher{Registry: d.Registry}).Steer(ctx, adapter, session, request.Message)
+		result, err = d.dispatcher().Steer(ctx, adapter, session, request.Message)
 	case "interrupt":
 		if !effective.Interrupt {
 			http.Error(w, "this session cannot be interrupted", http.StatusBadRequest)
@@ -1613,7 +1612,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be compacted", http.StatusBadRequest)
 			return
 		}
-		result, err = (delivery.Dispatcher{Registry: d.Registry}).Compact(ctx, adapter, session)
+		result, err = d.dispatcher().Compact(ctx, adapter, session)
 	case "goal-set", "goal-edit", "goal-pause", "goal-resume", "goal-budget":
 		controller, ok := adapter.(surface.GoalController)
 		if !effective.Goal || !ok {

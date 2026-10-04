@@ -235,6 +235,13 @@ func (r *Registry) MarkDeliveryIntentSent(id int64, providerKey string, evidence
 	return n == 1, err
 }
 
+// DiscardDeliveryIntent drops a submitted intent refused before any provider
+// effect; the caller already holds the error, so it is not a durable problem.
+func (r *Registry) DiscardDeliveryIntent(id int64) error {
+	_, err := r.db.Exec(`DELETE FROM delivery_intents WHERE id=? AND status=?`, id, DeliveryIntentSubmitted)
+	return err
+}
+
 // QueueDeliveryUsingIntent moves a pre-effect submitted intent into the
 // durable queue without creating a second delivery identity.
 func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey string, options surface.SendOptions) (int64, int64, error) {
