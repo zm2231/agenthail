@@ -335,7 +335,6 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 		payload.Body = string(prefix)
 		payload.Truncated = true
-		payload.TruncationReason = "full_body_not_retained"
 		ref, refErr := newSessionBodyRef()
 		if refErr == nil {
 			payload.BodyRef = ref
@@ -346,6 +345,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 		if payload.BodyRef == "" || len(encoded)+len(fullBody) > sessionJournalRetentionBytes {
 			payload.BodyRef = ""
+			payload.TruncationReason = "full_body_not_retained"
 			encoded, err = json.Marshal(payload)
 			if err != nil {
 				return
@@ -355,6 +355,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 		if errors.Is(err, registry.ErrSessionJournalEntryTooLarge) && payload.BodyRef != "" {
 			payload.BodyRef = ""
+			payload.TruncationReason = "full_body_not_retained"
 			fullBody = nil
 			encoded, err = json.Marshal(payload)
 			if err == nil {

@@ -42,7 +42,7 @@ func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if !utf8.ValidString(payload.Body) || strings.ContainsRune(payload.Body, utf8.RuneError) || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.BodyRef == "" {
+	if !utf8.ValidString(payload.Body) || strings.ContainsRune(payload.Body, utf8.RuneError) || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.BodyRef == "" || payload.TruncationReason != "" {
 		t.Fatalf("invalid bounded body: %+v", payload)
 	}
 	full, _, err := reg.SessionJournalBody(from.ID, payload.BodyRef, 0, len(body))
