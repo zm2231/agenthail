@@ -323,7 +323,7 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
             } catch {
                 localSends[sessionID]?.removeAll { $0.id == pending.id }
-                if composer.isEmpty { composer = text }
+                restoreToComposer(text)
                 operationError = error.localizedDescription
             }
         }
@@ -346,8 +346,13 @@ final class AgenthailModel: ObservableObject {
                 _ = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message)
                 operationError = nil
             } catch {
-                if composer.isEmpty { composer = item.message }
-                operationError = "Steer failed, so the message is back in the composer. \(error.localizedDescription)"
+                do {
+                    _ = try await api.sendInstruction(action: "send", sessionID: item.sessionId, message: item.message)
+                    operationError = nil
+                } catch {
+                    restoreToComposer(item.message)
+                    operationError = "The message could not be delivered, so it is back in the composer. \(error.localizedDescription)"
+                }
             }
             _ = await refresh(fresh: true)
         }
@@ -358,13 +363,18 @@ final class AgenthailModel: ObservableObject {
         Task {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
-                if restoreToComposer { composer = item.message }
+                if restoreToComposer { self.restoreToComposer(item.message) }
                 operationError = nil
             } catch {
                 operationError = error.localizedDescription
             }
             _ = await refresh(fresh: true)
         }
+    }
+
+    private func restoreToComposer(_ text: String) {
+        let draft = composer.trimmingCharacters(in: .whitespacesAndNewlines)
+        composer = draft.isEmpty ? text : "\(composer)\n\n\(text)"
     }
 
     func interruptSelected() {

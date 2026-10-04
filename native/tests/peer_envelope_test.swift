@@ -9,6 +9,15 @@ struct PeerEnvelopeTest {
         expect(parsed.body == "Three more items.\n9. Roles.", "body excludes the envelope")
         let plain = PeerEnvelope("Run the tests")
         expect(plain.sender == nil && plain.body == "Run the tests", "plain text is unchanged")
+        for malformed in [
+            "<cross-session-message from=\"a\">",
+            "<cross-session-message from=\"a\">hello",
+            "<cross-session-message>hello</cross-session-message>",
+            "[Claude peer message from x] just text",
+        ] {
+            let result = PeerEnvelope(malformed)
+            expect(result.sender == nil && result.body == malformed, "malformed envelope is preserved: \(malformed)")
+        }
         print("peer envelope tests passed")
     }
 

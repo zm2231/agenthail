@@ -6,20 +6,21 @@ struct PeerEnvelope: Equatable {
 
     init(_ text: String) {
         var remaining = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var sender: String?
-        if remaining.hasPrefix("[Claude peer message from "), let close = remaining.firstIndex(of: "]") {
-            remaining = String(remaining[remaining.index(after: close)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if remaining.hasPrefix("[Claude peer message from "), let lineEnd = remaining.firstIndex(of: "\n") {
+            remaining = String(remaining[remaining.index(after: lineEnd)...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if remaining.hasPrefix("<cross-session-message"), let tagEnd = remaining.firstIndex(of: ">") {
-            let tag = String(remaining[..<tagEnd])
-            sender = Self.attribute("from-name", in: tag) ?? Self.attribute("from", in: tag)
-            remaining = String(remaining[remaining.index(after: tagEnd)...])
-            if let end = remaining.range(of: "</cross-session-message>", options: .backwards) {
-                remaining = String(remaining[..<end.lowerBound])
-            }
+        guard remaining.hasPrefix("<cross-session-message "),
+              remaining.hasSuffix("</cross-session-message>"),
+              let tagEnd = remaining.firstIndex(of: ">"),
+              let sender = Self.attribute("from-name", in: String(remaining[..<tagEnd])) ?? Self.attribute("from", in: String(remaining[..<tagEnd]))
+        else {
+            self.sender = nil
+            self.body = text
+            return
         }
+        let inner = remaining[remaining.index(after: tagEnd)...].dropLast("</cross-session-message>".count)
         self.sender = sender
-        self.body = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.body = inner.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func attribute(_ name: String, in tag: String) -> String? {
