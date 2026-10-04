@@ -16,7 +16,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var loadingOlder = false
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
-    let composerDraft = ComposerDraft()
+    @Published private(set) var composerDraft = ComposerDraft()
     var composer: String {
         get { composerDraft.text }
         set { composerDraft.text = newValue }
@@ -27,6 +27,9 @@ final class SessionPane: ObservableObject, Identifiable {
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
     private var detailReloadTask: Task<Void, Never>?
+    private var detailLoadTask: Task<Void, Never>?
+    private var olderTask: Task<Void, Never>?
+    private var closed = false
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
     private var detailLoadedAt: Date?
@@ -44,14 +47,11 @@ final class SessionPane: ObservableObject, Identifiable {
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
 
     func select(_ id: String) {
-        guard id != selectedSessionID || detail == nil else { return }
+        guard !closed, id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
         frozenOlderCursor = nil
-        if selectedSessionID != id {
-            if let previous = selectedSessionID { model.saveDraft(composer, for: previous) }
-            composer = model.takeDraft(for: id)
-        }
+        composerDraft = model.draft(for: id)
         selectedSessionID = id
         model.markSeen(id)
         olderItems = []
@@ -68,19 +68,25 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadTask?.cancel()
         detailReloadTask = nil
         startSessionStream(id)
-        Task { await loadSession(id) }
+        startDetailLoad(id)
     }
 
     func close() {
-        if let current = selectedSessionID { model.saveDraft(composer, for: current) }
+        closed = true
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
+        detailLoadTask?.cancel()
+        olderTask?.cancel()
         sessionStreamTask = nil
         detailReloadTask = nil
+        detailLoadTask = nil
+        olderTask = nil
+        selectionGeneration &+= 1
+        detailAppliedGeneration = detailRequestGeneration
     }
 
     func loadSession(_ id: String) async {
-        guard let api = model.api else { return }
+        guard !closed, let api = model.api else { return }
         detailRequestGeneration &+= 1
         let generation = detailRequestGeneration
         do {
@@ -107,6 +113,14 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     func loadOlder() async {
+        guard !closed, olderTask == nil else { return }
+        let task = Task { await fetchOlder() }
+        olderTask = task
+        await task.value
+        olderTask = nil
+    }
+
+    private func fetchOlder() async {
         guard let api = model.api, let id = selectedSessionID, !detailStale, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
         let selection = selectionGeneration
         loadingOlder = true
@@ -135,7 +149,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     func reconcile() {
-        guard model.snapshot != nil else { return }
+        guard !closed, model.snapshot != nil else { return }
         let sessions = model.knownSessions
         if let selected = selectedSessionID {
             if let live = sessions.first(where: { $0.id == selected }) {
@@ -145,7 +159,7 @@ final class SessionPane: ObservableObject, Identifiable {
                     olderCursor = frozenOlderCursor
                     frozenOlderCursor = nil
                     startSessionStream(selected)
-                    Task { await loadSession(selected) }
+                    startDetailLoad(selected)
                 }
             } else if removedSession?.id != selected, selectedSnapshot?.id == selected {
                 removedSession = selectedSnapshot
@@ -162,8 +176,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadPending = false
         detail = nil
         detailStale = false
-        if let current = selectedSessionID { model.saveDraft(composer, for: current) }
-        composer = ""
+        composerDraft = ComposerDraft()
         selectedSessionID = nil
         if let next { select(next) }
     }
@@ -173,7 +186,7 @@ final class SessionPane: ObservableObject, Identifiable {
         removedSession = nil
         selectedSnapshot = nil
         frozenOlderCursor = nil
-        if let current = selectedSessionID { model.saveDraft(composer, for: current) }
+        composerDraft = ComposerDraft()
         sessionStreamTask?.cancel()
         detail = nil
         detailStale = false
@@ -198,10 +211,6 @@ final class SessionPane: ObservableObject, Identifiable {
         model.perform(action: "interrupt", sessionID: sessionID)
     }
 
-    func restoreToComposer(_ text: String) {
-        composer = composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : "\(composer)\n\n\(text)"
-    }
-
     private func freezeRemovedSession() {
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
@@ -215,8 +224,13 @@ final class SessionPane: ObservableObject, Identifiable {
         detailRefreshFailed = false
     }
 
+    private func startDetailLoad(_ id: String) {
+        detailLoadTask?.cancel()
+        detailLoadTask = Task { await loadSession(id) }
+    }
+
     private func scheduleDetailReload(_ id: String) {
-        guard selectedSessionID == id, removedSession == nil else { return }
+        guard !closed, selectedSessionID == id, removedSession == nil else { return }
         detailReloadPending = true
         guard detailReloadTask == nil else { return }
         let owner = UUID()
@@ -236,6 +250,7 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func startSessionStream(_ id: String) {
         sessionStreamTask?.cancel()
+        guard !closed else { return }
         sessionCursor = 0
         sessionStreamTask = Task {
             let backoff = EventRetryBackoff()

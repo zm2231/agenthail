@@ -50,7 +50,7 @@ final class AgenthailModel: ObservableObject {
     private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
     private var detailCache: [String: SessionDetail] = [:]
     private var detailCacheOrder: [String] = []
-    private var drafts: [String: String] = [:]
+    private var drafts: [String: ComposerDraft] = [:]
     private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
         cache.totalCostLimit = 64 * 1024 * 1024
@@ -179,12 +179,11 @@ final class AgenthailModel: ObservableObject {
         operationError = nil
     }
 
-    func saveDraft(_ text: String, for sessionID: String) {
-        drafts[sessionID] = text
-    }
-
-    func takeDraft(for sessionID: String) -> String {
-        drafts.removeValue(forKey: sessionID) ?? ""
+    func draft(for sessionID: String) -> ComposerDraft {
+        if let draft = drafts[sessionID] { return draft }
+        let draft = ComposerDraft()
+        drafts[sessionID] = draft
+        return draft
     }
 
     func markSeen(_ id: String) {
@@ -533,12 +532,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func restoreToComposer(_ text: String, sessionID: String) {
-        if let pane = panes.first(where: { $0.selectedSessionID == sessionID }) {
-            pane.restoreToComposer(text)
-            return
-        }
-        let current = drafts[sessionID] ?? ""
-        drafts[sessionID] = current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : "\(current)\n\n\(text)"
+        draft(for: sessionID).restore(text)
     }
 
     private func updateLocalSend(_ id: UUID, in sessionID: String, status: String) {
@@ -715,4 +709,8 @@ extension Error {
 @MainActor
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
+
+    func restore(_ restored: String) {
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
+    }
 }
