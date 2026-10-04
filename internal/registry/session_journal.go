@@ -2,10 +2,14 @@ package registry
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+var ErrSessionJournalEntryTooLarge = errors.New("session journal entry exceeds byte retention")
 
 type SessionJournalHistoryGapError struct {
 	EarliestSeq uint64
@@ -64,7 +68,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 		return SessionJournalPage{}, err
 	}
 	if before > 0 {
-		if !earliest.Valid || (prunedBefore.Valid && prunedBefore.Int64 > 0 && before > 1) {
+		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) {
 			var earliestSeq, latestSeq uint64
 			if earliest.Valid {
 				earliestSeq = uint64(earliest.Int64)
@@ -99,6 +103,8 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if len(entries) > limit {
 		entries = entries[:limit]
 		next = entries[len(entries)-1].Seq
+	} else if prunedBefore.Valid && prunedBefore.Int64 > 0 && len(entries) > 0 && entries[len(entries)-1].Seq == uint64(earliest.Int64) {
+		next = entries[len(entries)-1].Seq
 	}
 	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
 		entries[left], entries[right] = entries[right], entries[left]
@@ -128,7 +134,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 	input.FullBody = append([]byte(nil), input.FullBody...)
 	input.Bytes = len(input.Payload) + len(input.FullBody)
 	if input.Bytes > retention.Bytes {
-		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry exceeds byte retention")
+		return SessionJournalEntry{}, false, fmt.Errorf("%w: %d > %d", ErrSessionJournalEntryTooLarge, input.Bytes, retention.Bytes)
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -302,8 +308,14 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	if start > len(body) {
 		return nil, 0, fmt.Errorf("session journal body range is outside the retained body")
 	}
+	if start < len(body) && !utf8.RuneStart(body[start]) {
+		return nil, 0, fmt.Errorf("session journal body range starts inside a UTF-8 code point")
+	}
 	if end > len(body) {
 		end = len(body)
+	}
+	for end > start && end < len(body) && !utf8.RuneStart(body[end]) {
+		end--
 	}
 	return append([]byte(nil), body[start:end]...), len(body), nil
 }
