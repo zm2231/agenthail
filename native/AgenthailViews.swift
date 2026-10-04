@@ -278,6 +278,30 @@ struct ConversationHeader: View {
 			} else if !session.isReadOnly && session.capabilities.goal {
 					Button("Set goal") { goalText = ""; goalEditor.begin(.newGoal, sessionID: session.id) }
 				}
+			if let runs = currentDetail?.claudeRuns, !runs.isEmpty {
+				VStack(alignment: .leading, spacing: 5) {
+					Text("Claude runs").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+					ForEach(runs) { run in
+						VStack(alignment: .leading, spacing: 2) {
+							Text(run.jobId).font(.callout.weight(.medium))
+							if let state = run.providerState, !state.isEmpty { Text(state).font(.caption).foregroundStyle(.secondary) }
+							if let type = run.runType, !type.isEmpty { Text(type).font(.caption).foregroundStyle(.secondary) }
+							if let updated = run.updatedAt, !updated.isEmpty { Text("Updated \(updated)").font(.caption).foregroundStyle(.secondary) }
+						}
+					}
+				}
+			}
+			if let links = currentDetail?.claudeSubagents, !links.isEmpty {
+				VStack(alignment: .leading, spacing: 5) {
+					Text("Claude subagents").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+					ForEach(links) { link in
+						VStack(alignment: .leading, spacing: 2) {
+							Text(link.agentId).font(.callout.weight(.medium))
+							if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1) }
+						}
+					}
+				}
+			}
 		}
 		.padding(24)
 		.sheet(isPresented: Binding(get: { goalEditor.mode != nil }, set: { if !$0 { resetGoalEditor() } })) {
