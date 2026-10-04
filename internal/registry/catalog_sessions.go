@@ -92,22 +92,22 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	}
 	defer tx.Rollback()
 	var priorFingerprint string
-	var priorGeneration, priorMisses int64
-	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration, &priorMisses)
+	var priorGeneration, priorMisses, priorDiscoveryFailures int64
+	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration, &priorMisses, &priorDiscoveryFailures)
 	if err != nil && err != sql.ErrNoRows {
 		return CatalogEvent{}, false, err
 	}
-	changed := err == sql.ErrNoRows || priorFingerprint != state.ProjectionFingerprint || priorMisses > 0
+	changed := err == sql.ErrNoRows || priorFingerprint != state.ProjectionFingerprint || priorMisses > 0 || priorDiscoveryFailures > 0
 	if changed {
 		priorGeneration++
 	}
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation)
-		VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
+		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
-		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation`,
+		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0`,
 		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration); err != nil {
 		return CatalogEvent{}, false, err
 	}
@@ -158,13 +158,14 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=?`, string(kind))
+	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.observed_at,s.surface,s.name,s.cwd,s.status FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=?`, string(kind))
 	if err != nil {
 		return nil, err
 	}
 	type failedRow struct {
 		id, fingerprint string
 		generation      int64
+		observedAt      string
 		surface         string
 		name, cwd       string
 		status          string
@@ -172,7 +173,7 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 	var failed []failedRow
 	for rows.Next() {
 		var row failedRow
-		if err := rows.Scan(&row.id, &row.fingerprint, &row.generation, &row.surface, &row.name, &row.cwd, &row.status); err != nil {
+		if err := rows.Scan(&row.id, &row.fingerprint, &row.generation, &row.observedAt, &row.surface, &row.name, &row.cwd, &row.status); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -184,14 +185,18 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 	events := make([]CatalogEvent, 0, len(failed))
 	for _, row := range failed {
 		generation := row.generation + 1
-		if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=misses+1,observed_at=?,projection_generation=? WHERE session_id=?`, observedAt.Format(time.RFC3339Nano), generation, row.id); err != nil {
+		if _, err := tx.Exec(`UPDATE catalog_sessions SET discovery_failures=discovery_failures+1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
 			return nil, err
+		}
+		lastObserved, err := time.Parse(time.RFC3339Nano, row.observedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse catalog observation: %w", err)
 		}
 		var session map[string]any
 		if err := json.Unmarshal([]byte(row.fingerprint), &session); err != nil {
 			session = map[string]any{"id": row.id, "surface": row.surface, "name": row.name, "cwd": row.cwd, "status": row.status}
 		}
-		session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: observedAt, Stale: true}
+		session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: lastObserved, Stale: true}
 		envelope, err := json.Marshal(map[string]any{"session": session})
 		if err != nil {
 			return nil, err
@@ -291,7 +296,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0)
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0)
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
 	if err != nil {
@@ -310,11 +315,11 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		var kind, status, observedAt string
 		var hasLocal int
 		var lastActiveMS int64
-		var generation, misses int64
+		var generation, misses, discoveryFailures int64
 		var launcher string
 		var location []byte
 		var focusable int
-		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &launcher, &location, &focusable); err != nil {
+		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable); err != nil {
 			return CatalogSnapshot{}, err
 		}
 		state.Session.Surface = surface.SurfaceKind(kind)
@@ -328,7 +333,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 			return CatalogSnapshot{}, fmt.Errorf("parse catalog observation: %w", err)
 		}
 		state.ObservedAt = parsed
-		state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0}
+		state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0}
 		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
 			return CatalogSnapshot{}, err
 		} else {

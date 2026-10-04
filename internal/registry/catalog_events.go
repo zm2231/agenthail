@@ -37,7 +37,8 @@ func (r *Registry) EnsureCatalogState() error {
 		observed_at TEXT NOT NULL,
 		misses INTEGER NOT NULL DEFAULT 0,
 		projection_fingerprint TEXT NOT NULL DEFAULT '',
-		projection_generation INTEGER NOT NULL DEFAULT 0
+		projection_generation INTEGER NOT NULL DEFAULT 0,
+		discovery_failures INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return err
 	}
@@ -48,6 +49,9 @@ func (r *Registry) EnsureCatalogState() error {
 		return err
 	}
 	if err := r.ensureColumn("catalog_sessions", "projection_generation", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("catalog_sessions", "discovery_failures", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (
