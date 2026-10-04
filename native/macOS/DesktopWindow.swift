@@ -1441,12 +1441,14 @@ struct DetailsTab: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject var pane: SessionPane
     let session: SessionState
-    @State private var fetchedModels: (surface: String, options: [ModelOption])?
-
     private var modelOptions: [ModelOption] {
         if let options = pane.detail?.models, !options.isEmpty { return options }
-        guard let fetchedModels, fetchedModels.surface == session.surface else { return [] }
-        return fetchedModels.options
+        return model.modelCatalog[session.surface] ?? []
+    }
+
+    private var catalogNeeded: String? {
+        guard session.capabilities.model, let detail = pane.detail, detail.models?.isEmpty ?? true else { return nil }
+        return session.surface
     }
 
     var body: some View {
@@ -1508,10 +1510,8 @@ struct DetailsTab: View {
             GoalSection(model: model, pane: pane, session: session)
             ClaudeObservationsSection(detail: pane.detail)
         }
-        .task(id: session.surface) {
-            guard session.capabilities.model, fetchedModels?.surface != session.surface, let api = model.api,
-                  let options = try? await api.creationModels(surface: session.surface) else { return }
-            fetchedModels = (session.surface, options)
+        .task(id: catalogNeeded) {
+            if let surface = catalogNeeded { await model.loadModelCatalog(surface: surface) }
         }
     }
 

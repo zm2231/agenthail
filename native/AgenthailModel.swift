@@ -569,6 +569,16 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    @Published private(set) var modelCatalog: [String: [ModelOption]] = [:]
+    private var modelCatalogLoads: Set<String> = []
+
+    func loadModelCatalog(surface: String) async {
+        guard modelCatalog[surface] == nil, !modelCatalogLoads.contains(surface), let api else { return }
+        modelCatalogLoads.insert(surface)
+        defer { modelCatalogLoads.remove(surface) }
+        if let options = try? await api.creationModels(surface: surface) { modelCatalog[surface] = options }
+    }
+
     func rename(_ sessionID: String, to alias: String) async -> String? {
         guard let api else { return "Agenthail isn't connected." }
         do {
