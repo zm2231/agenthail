@@ -106,11 +106,7 @@ AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" \
 
 xattr -cr "$root"
 pkgbuild --analyze --root "$root" "$components"
-index=0
-while /usr/libexec/PlistBuddy -c "Print :$index:RootRelativeBundlePath" "$components" >/dev/null 2>&1; do
-	/usr/libexec/PlistBuddy -c "Set :$index:BundleIsRelocatable false" "$components"
-	index=$((index + 1))
-done
+"$ROOT/scripts/normalize-pkg-components.sh" "$components"
 COPYFILE_DISABLE=1 pkgbuild --root "$root" --scripts "$ROOT/packaging/scripts" --component-plist "$components" --identifier com.agenthail.pkg --version "$package_version" --install-location / "$component"
 if [ -n "$installer_identity" ]; then
 	COPYFILE_DISABLE=1 productbuild --package "$component" --sign "$installer_identity" "$output"
