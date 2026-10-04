@@ -72,10 +72,10 @@ final class AgenthailModel: ObservableObject {
         SessionTree.build(knownSessions, filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
 
-    init() {
+    init(connecting: Bool = true) {
         mainPane = SessionPane(model: self, restoresSelection: true)
         panes = [mainPane]
-        connect()
+        if connecting { connect() }
     }
 
     func openPane() -> SessionPane {

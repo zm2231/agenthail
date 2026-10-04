@@ -106,7 +106,7 @@ final class SessionPane: ObservableObject, Identifiable {
             detailRefreshFailed = false
             model.detailLoaded(loaded, for: id)
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
+            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
             model.operationError = error.localizedDescription
             if detailStale { detailRefreshFailed = true }
         }
