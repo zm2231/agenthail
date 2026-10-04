@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -76,6 +77,15 @@ func (h *catalogHub) publishSurface(state registry.CatalogSurfaceState, event re
 		return persisted, created, err
 	}
 	return persisted, created, nil
+}
+
+func (h *catalogHub) updateProjection(sessionID, priorFingerprint, nextFingerprint string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, _, err := h.registry.UpdateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint); err != nil {
+		return err
+	}
+	return h.flushCommittedLocked()
 }
 
 func (h *catalogHub) reconcileOmissions(kind surface.SurfaceKind, seen map[string]struct{}) error {
@@ -359,6 +369,51 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
 		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 	}
+}
+
+func (d *Daemon) publishCatalogQueueCounts() {
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("catalog queue counts: %s", err)
+		return
+	}
+	d.catalogQueueMu.Lock()
+	defer d.catalogQueueMu.Unlock()
+	if d.catalogQueueCounts != nil && maps.Equal(d.catalogQueueCounts, counts) {
+		return
+	}
+	snapshot, err := d.Registry.CatalogSnapshot()
+	if err != nil {
+		d.log.Printf("catalog queue snapshot: %s", err)
+		return
+	}
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		d.log.Printf("catalog config: %s", err)
+		return
+	}
+	now := time.Now()
+	for _, record := range snapshot.Sessions {
+		var projection dashboardSession
+		if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+			continue
+		}
+		count := counts[record.Session.ID]
+		if projection.QueueCount == count {
+			continue
+		}
+		projection.QueueCount = count
+		projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
+		fingerprint, err := json.Marshal(projection)
+		if err != nil {
+			continue
+		}
+		if err := d.catalog.updateProjection(record.Session.ID, record.ProjectionFingerprint, string(fingerprint)); err != nil {
+			d.log.Printf("catalog queue projection %s: %s", d.resolveDisplay(record.Session.ID), err)
+			return
+		}
+	}
+	d.catalogQueueCounts = counts
 }
 
 func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surface.Session) {

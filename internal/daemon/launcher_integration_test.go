@@ -80,7 +80,7 @@ func TestSessionCreateStarterLauncherKeepsCreatedSessionWhenTurnOutcomeIsUnknown
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["ok"] != true || body["accepted"] != true || body["retryable"] != false || body["sessionId"] != "started" || body["warning"] == nil {
+	if body["ok"] != true || body["accepted"] != true || body["retryable"] != false || body["sessionId"] != "started" || body["deliveryId"] == nil {
 		t.Fatalf("body=%s", w.Body.String())
 	}
 	created, err := r.Session("started")

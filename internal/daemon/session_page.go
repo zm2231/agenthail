@@ -23,18 +23,14 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			return result, fmt.Errorf("decode journal item: %w", err)
 		}
 		if payload.Kind == "source-error" {
-			if newestSourceErrorSeq == 0 {
-				newestSourceErrorSeq = entry.Seq
-				result.UnavailableReason = payload.Reason
-			}
+			newestSourceErrorSeq = entry.Seq
+			result.UnavailableReason = payload.Reason
 			continue
 		}
 		if payload.Op == "remove" {
 			continue
 		}
-		if newestSourceErrorSeq == 0 {
-			result.UnavailableReason = ""
-		}
+		result.UnavailableReason = ""
 		title := payload.Title
 		if title == "" {
 			title = payload.Kind

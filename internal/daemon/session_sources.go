@@ -25,6 +25,12 @@ const (
 	sessionJournalSeedTimeout    = 12 * time.Second
 )
 
+var (
+	sessionSeedRetryDelay          = 2 * time.Second
+	sessionSeedRetryMaxDelay       = time.Minute
+	sessionSnapshotRefreshInterval = 5 * time.Second
+)
+
 type sessionJournalPayload struct {
 	Context          *surface.ContextUsage `json:"context,omitempty"`
 	Goal             *surface.GoalState    `json:"goal"`
@@ -121,8 +127,13 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 }
 
 func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Surface, holder string) (func(), error) {
+	_, release, err := m.holdSource(session, adapter, holder)
+	return release, err
+}
+
+func (m *sessionSourceManager) holdSource(session *surface.Session, adapter surface.Surface, holder string) (*sessionSource, func(), error) {
 	if strings.TrimSpace(holder) == "" {
-		return nil, fmt.Errorf("session source holder is required")
+		return nil, nil, fmt.Errorf("session source holder is required")
 	}
 	m.mu.Lock()
 	source := m.sources[session.ID]
@@ -131,7 +142,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 		epoch, err := m.registry.BeginSessionJournalSource(session.ID)
 		if err != nil {
 			m.mu.Unlock()
-			return nil, err
+			return nil, nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
@@ -145,7 +156,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 	if start {
 		go source.run()
 	}
-	return func() { source.releaseHolder(holder) }, nil
+	return source, func() { source.releaseHolder(holder) }, nil
 }
 
 func (s *sessionSource) subscribe(holder string) sessionSourceSubscription {
@@ -222,21 +233,29 @@ func (s *sessionSource) run() {
 			}
 		}
 	}
-	s.seedJournal()
-	close(s.seeded)
-	if s.streamCursorErr != nil || s.seedErr != nil {
-		if s.streamCursorErr != nil {
-			s.appendSourceError(s.streamCursorErr)
-		}
-		<-s.ctx.Done()
+	defer func() {
 		s.closeSubscribers()
 		s.remove()
+	}()
+	seedErr := s.seedJournal()
+	s.setSeedErr(seedErr)
+	close(s.seeded)
+	if s.streamCursorErr != nil {
+		s.appendSourceError(s.streamCursorErr)
+		<-s.ctx.Done()
 		return
 	}
+	for delay := sessionSeedRetryDelay; seedErr != nil; delay = min(2*delay, sessionSeedRetryMaxDelay) {
+		if !s.wait(delay) {
+			return
+		}
+		seedErr = s.seedJournal()
+		s.setSeedErr(seedErr)
+	}
 	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
-		<-s.ctx.Done()
-		s.closeSubscribers()
-		s.remove()
+		for s.wait(sessionSnapshotRefreshInterval) {
+			s.setSeedErr(s.seedJournal())
+		}
 		return
 	}
 	for {
@@ -279,8 +298,6 @@ func (s *sessionSource) run() {
 		case <-time.After(time.Second):
 		}
 	}
-	s.closeSubscribers()
-	s.remove()
 }
 
 func (s *sessionSource) closeSubscribers() {
@@ -301,20 +318,25 @@ func (s *sessionSource) remove() {
 }
 
 func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
-	release, err := m.hold(session, adapter, "page-seed")
+	source, release, err := m.holdSource(session, adapter, "page-seed")
 	if err != nil {
 		return err
 	}
 	defer func() { time.AfterFunc(sessionPageHandoffGrace, release) }()
-	m.mu.Lock()
-	source := m.sources[session.ID]
-	m.mu.Unlock()
 	select {
 	case <-source.seeded:
-		return source.seedErr
+		return source.seedError()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (m *sessionSourceManager) refresh(session *surface.Session, adapter surface.Surface) {
+	release, err := m.hold(session, adapter, "page-refresh")
+	if err != nil {
+		return
+	}
+	time.AfterFunc(sessionPageHandoffGrace, release)
 }
 
 func (s *sessionSource) appendSourceError(streamErr error) {
@@ -357,50 +379,41 @@ func boundedSessionSourceReason(value string) string {
 	return string(runes[:limit-1]) + "…"
 }
 
-func (s *sessionSource) seedJournal() {
+func (s *sessionSource) seedJournal() error {
+	err := s.loadSeed()
+	if err != nil {
+		s.appendSourceError(err)
+	}
+	return err
+}
+
+func (s *sessionSource) loadSeed() error {
 	seedStatus, seedSeq, trustedIdentity, statusErr := s.manager.registry.SessionJournalSeedCheckpoint(s.session.ID)
 	localTranscript := false
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
 	}
-	if statusErr == nil && seedStatus == registry.SessionJournalSeeded {
-		if !localTranscript {
-			return
-		}
+	streamable := surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream
+	if statusErr == nil && seedStatus == registry.SessionJournalSeeded && !localTranscript && streamable {
+		return nil
 	}
 	if localTranscript && trustedIdentity == "" && seedSeq > 0 {
-		err := fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
-		s.seedErr = err
-		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
-		s.appendSourceError(err)
-		return
+		return fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
-	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
 	if seedStatus == registry.SessionJournalSeeded && localTranscript {
-		if err := s.catchUpLocalTranscript(ctx, trustedIdentity); err != nil {
-			s.seedErr = err
-			_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
-			s.appendSourceError(err)
-		}
-		return
+		return s.catchUpLocalTranscript(ctx, trustedIdentity)
 	}
 	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
 	if err != nil || read == nil {
 		if err == nil {
 			err = fmt.Errorf("session source returned no activity result")
 		}
-		s.seedErr = err
-		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
-		s.appendSourceError(err)
-		return
+		return err
 	}
 	if trustedIdentity != "" && read.TranscriptIdentity != trustedIdentity {
-		err := fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
-		s.seedErr = err
-		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
-		s.appendSourceError(err)
-		return
+		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
 	}
 	if read.TranscriptOffsetSet {
 		s.session.TranscriptOffset = read.TranscriptOffset
@@ -409,23 +422,34 @@ func (s *sessionSource) seedJournal() {
 		s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
 		s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
 		s.session.TranscriptIdentity = read.TranscriptIdentity
-	} else if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok && provider.RequiresLocalTranscript(&s.session) {
-		err := fmt.Errorf("Codex local transcript is unavailable")
-		s.seedErr = err
-		s.appendSourceError(err)
-		return
+	} else if localTranscript {
+		return fmt.Errorf("Codex local transcript is unavailable")
 	}
 	if localTranscript && read.TranscriptIdentity == "" {
-		err := fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
-		s.seedErr = err
-		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
-		s.appendSourceError(err)
-		return
+		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	s.appendSeedItems(read.Items)
-	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
-		s.seedErr = err
-		s.appendSourceError(err)
+	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
+}
+
+func (s *sessionSource) setSeedErr(err error) {
+	s.mu.Lock()
+	s.seedErr = err
+	s.mu.Unlock()
+}
+
+func (s *sessionSource) seedError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seedErr
+}
+
+func (s *sessionSource) wait(delay time.Duration) bool {
+	select {
+	case <-s.ctx.Done():
+		return false
+	case <-time.After(delay):
+		return true
 	}
 }
 
@@ -536,6 +560,13 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 		if s.session.Surface == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
 			providerKey = item.ID
 		}
+		operation := "upsert"
+		if item.Kind == "done" {
+			operation = "phase"
+		}
+		if s.journalSupersedesSeed(providerKey, operation, item) {
+			continue
+		}
 		if item.Text != "" && item.Kind != "done" {
 			s.mu.Lock()
 			s.appendBodies[providerKey] = item.Text
@@ -549,7 +580,7 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 			ID:          item.ID,
 			ProviderKey: providerKey,
 			Version:     uint64(len(item.Text)),
-			Operation:   "upsert",
+			Operation:   operation,
 			TurnID:      item.TurnID,
 			CallID:      item.CallID,
 			Attachment:  item.Attachment,
@@ -558,6 +589,31 @@ func (s *sessionSource) appendSeedItems(items []surface.TimelineItem) {
 			Text:        item.Text,
 		})
 	}
+}
+
+func (s *sessionSource) journalSupersedesSeed(providerKey, operation string, item surface.TimelineItem) bool {
+	if operation == "phase" {
+		providerKey += ":phase:" + item.Kind
+	}
+	entry, found, err := s.manager.registry.SessionJournalEntryByProviderKey(s.session.ID, providerKey)
+	if err != nil || !found {
+		return false
+	}
+	var payload sessionJournalPayload
+	if json.Unmarshal(entry.Payload, &payload) != nil || payload.Kind != item.Kind {
+		return false
+	}
+	if item.Attachment != nil && (payload.Attachment == nil || payload.Attachment.ID != item.Attachment.ID) {
+		return false
+	}
+	body := payload.Body
+	if payload.BodyRef != "" {
+		if len(entry.FullBody) == 0 {
+			return false
+		}
+		body = string(entry.FullBody)
+	}
+	return body == item.Text || (item.Truncated && strings.HasPrefix(body, item.Text))
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {
@@ -677,6 +733,10 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if strings.HasPrefix(event.ProviderKey, "renderer:") {
 		itemID = s.epoch + ":" + itemID
 	}
+	if event.Kind == "context" || event.Kind == "goal" {
+		itemID = "state:" + event.Kind
+		providerKey = itemID
+	}
 	if itemID == "" {
 		itemID = providerKey
 	}
@@ -729,8 +789,7 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 		subscription.Cancel()
 		return sessionstream.Subscription{}, ctx.Err()
 	}
-	if source.seedErr != nil {
-		err := source.seedErr
+	if err := source.seedError(); err != nil {
 		subscription.Cancel()
 		return sessionstream.Subscription{}, fmt.Errorf("seed session source: %w", err)
 	}

@@ -40,7 +40,8 @@ type LaunchRequest struct {
 type LaunchResult struct {
 	SessionID string
 	Location  *Location
-	Session   *Session `json:"-"`
+	Session   *Session    `json:"-"`
+	Sent      *SendResult `json:"-"`
 }
 
 type Launcher interface {
@@ -99,7 +100,7 @@ func (l starterLauncher) Launch(ctx context.Context, request LaunchRequest) (Lau
 	if !contains(l.agents, request.Agent) {
 		return LaunchResult{}, fmt.Errorf("launcher %s does not support agent %q", l.id, request.Agent)
 	}
-	session, _, err := l.starter.StartSession(ctx, SessionStartOptions{
+	session, sent, err := l.starter.StartSession(ctx, SessionStartOptions{
 		Cwd: request.Cwd, Message: request.Message, Model: request.Model, Name: request.Name,
 	})
 	if session == nil || session.ID == "" {
@@ -108,7 +109,7 @@ func (l starterLauncher) Launch(ctx context.Context, request LaunchRequest) (Lau
 		}
 		return LaunchResult{}, errors.New("session starter returned no session id")
 	}
-	return LaunchResult{SessionID: session.ID, Session: session}, err
+	return LaunchResult{SessionID: session.ID, Session: session, Sent: sent}, err
 }
 
 type unavailableLauncher struct {

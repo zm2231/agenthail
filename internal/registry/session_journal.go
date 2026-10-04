@@ -357,6 +357,17 @@ type sessionJournalRow interface {
 	Scan(...any) error
 }
 
+func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey string) (SessionJournalEntry, bool, error) {
+	entry, found, err := sessionJournalByProviderKey(r.db, sessionID, providerKey)
+	if err != nil || !found || entry.BodyRef == "" {
+		return entry, found, err
+	}
+	if err := r.db.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, entry.BodyRef).Scan(&entry.FullBody); err != nil && err != sql.ErrNoRows {
+		return SessionJournalEntry{}, false, err
+	}
+	return entry, true, nil
+}
+
 func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row }, sessionID, providerKey string) (SessionJournalEntry, bool, error) {
 	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=?`, sessionID, providerKey))
 	if err == sql.ErrNoRows {
