@@ -1594,6 +1594,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "this session cannot be steered", http.StatusBadRequest)
 			return
 		}
+		if request.SourceSessionID != "" {
+			if _, sourceErr := d.Registry.Session(request.SourceSessionID); sourceErr != nil {
+				http.Error(w, "source session not found", http.StatusBadRequest)
+				return
+			}
+			ctx = surface.WithSourceSessionID(ctx, request.SourceSessionID)
+		}
 		result, err = (delivery.Dispatcher{Registry: d.Registry}).Steer(ctx, adapter, session, request.Message)
 	case "interrupt":
 		if !effective.Interrupt {

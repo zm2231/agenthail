@@ -38,6 +38,11 @@ func TestDispatcherAppliesSourceSessionIDToImmediateAndDeferredSend(t *testing.T
 	if err := r.RegisterSession(*session); err != nil {
 		t.Fatal(err)
 	}
+	for _, sourceID := range []string{"source-immediate", "source-deferred"} {
+		if err := r.RegisterSession(surface.Session{ID: sourceID, Surface: surface.SurfaceKind("agenthail")}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	adapter := &sourceCheckingSurface{fakeSurface: fakeSurface{kind: surface.KindClaude, result: &surface.SendResult{UUID: "turn", Accepted: true}}}
 	options := surface.SendOptions{Model: "sonnet", SourceSessionID: "source-immediate"}
 	if _, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "now", "", options); err != nil {
