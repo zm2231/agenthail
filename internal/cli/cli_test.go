@@ -27,13 +27,9 @@ type cliSurface struct {
 	listErr       error
 	listCalls     int
 	caps          surface.Capabilities
-	observation   *surface.TurnObservation
-	observations  []*surface.TurnObservation
 	observeErr    error
 	sendResult    *surface.SendResult
 	sendErr       error
-	reply         *surface.ReplyResult
-	replyWait     bool
 	sendWait      bool
 	tailBlock     <-chan struct{}
 	sent          []string
@@ -42,7 +38,6 @@ type cliSurface struct {
 	tail          []surface.Exchange
 	streamEvents  []surface.StreamEvent
 	searchResults []surface.SessionSearchResult
-	searchErr     error
 	compactCalls  int
 }
 
@@ -72,17 +67,6 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	}
 }
 
-type readinessCLISurface struct {
-	*cliSurface
-	readyCalls int
-	readyErr   error
-}
-
-func (f *readinessCLISurface) Ready(context.Context) error {
-	f.readyCalls++
-	return f.readyErr
-}
-
 func (f *cliSurface) Name() surface.SurfaceKind { return f.kind }
 func (f *cliSurface) List(context.Context) ([]surface.Session, error) {
 	f.listCalls++
@@ -96,15 +80,10 @@ func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session
 	return &session, nil
 }
 func (f *cliSurface) SearchSessions(context.Context, string, int) ([]surface.SessionSearchResult, error) {
-	return f.searchResults, f.searchErr
+	return f.searchResults, nil
 }
 func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
-	if len(f.observations) > 0 {
-		observation := f.observations[0]
-		f.observations = f.observations[1:]
-		return observation, f.observeErr
-	}
-	return f.observation, f.observeErr
+	return nil, f.observeErr
 }
 func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
@@ -120,14 +99,7 @@ func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message strin
 	}
 	return f.sendResult, nil
 }
-func (f *cliSurface) Reply(ctx context.Context, _ *surface.Session, _ int) (*surface.ReplyResult, error) {
-	if f.replyWait {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
-	if f.reply != nil {
-		return f.reply, nil
-	}
+func (*cliSurface) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
 	return &surface.ReplyResult{Done: true}, nil
 }
 
