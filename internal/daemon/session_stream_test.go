@@ -3,9 +3,11 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -95,5 +97,50 @@ func TestAPISessionStreamReturnsTypedGap(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d", response.StatusCode)
+	}
+}
+
+func TestAPISessionStreamBodyRequiresReadAuthorizationAndBoundsRanges(t *testing.T) {
+	d, reg, _, from, _ := daemonFixture(t)
+	body := strings.Repeat("x", sessionStreamBodyBytes+1)
+	if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "body", Payload: []byte(`{"itemId":"body","version":1,"bodyRef":"opaque"}`), BodyRef: "opaque", FullBody: []byte(body)}, registry.SessionJournalRetention{Count: 2, Bytes: sessionJournalRetentionBytes}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	unauthorized, err := http.Get(server.URL + "/api/v1/session-stream-body?id=" + from.ID + "&ref=opaque&start=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unauthorized.Body.Close()
+	if unauthorized.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d", unauthorized.StatusCode)
+	}
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream-body?id="+from.ID+"&ref=opaque&start=0&end="+strconv.Itoa(sessionStreamBodyBytes+1), nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	tooLarge, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tooLarge.Body.Close()
+	if tooLarge.StatusCode != http.StatusBadRequest {
+		t.Fatalf("range status=%d", tooLarge.StatusCode)
+	}
+	request, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream-body?id="+from.ID+"&ref=opaque&start=2&end=8", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var payload struct {
+		Body      string `json:"body"`
+		Start     int    `json:"start"`
+		End       int    `json:"end"`
+		Total     int    `json:"total"`
+		Truncated bool   `json:"truncated"`
+	}
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&payload) != nil || payload.Body != "xxxxxx" || payload.Start != 2 || payload.End != 8 || payload.Total != len(body) || !payload.Truncated {
+		t.Fatalf("status=%d payload=%+v", response.StatusCode, payload)
 	}
 }
