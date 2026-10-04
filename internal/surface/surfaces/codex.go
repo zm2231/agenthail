@@ -1050,11 +1050,11 @@ func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, body s
 	if itemID == "" {
 		itemID = strconv.FormatInt(sequence, 10)
 	}
-	key := codexDesktopStreamKey(s.turnID, "tool", itemID)
+	key := codexDesktopStreamKey(s.turnID, "toolCall", itemID)
 	if body == "" {
 		body = name
 	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, Kind: "tool_use", Title: name, Text: body}, true
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, CallID: itemID, Kind: "toolCall", Title: name, Text: body}, true
 }
 
 func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEvent, bool) {
@@ -1073,10 +1073,10 @@ func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEve
 		kind, role = "message", "user"
 	case strings.Contains(typ, "reason"):
 		kind, role = "reasoning", "assistant"
-	case strings.Contains(typ, "functioncall") || strings.Contains(typ, "toolcall"):
-		kind, role = "tool_use", "assistant"
 	case strings.Contains(typ, "functioncalloutput") || strings.Contains(typ, "toolresult"):
-		kind, role = "tool_result", "assistant"
+		kind, role = "toolResult", "user"
+	case strings.Contains(typ, "functioncall") || strings.Contains(typ, "toolcall"):
+		kind, role = "toolCall", "assistant"
 	case strings.Contains(typ, "agentmessage") || typ == "assistant":
 		kind, role = "text", "assistant"
 	default:
@@ -1094,7 +1094,11 @@ func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEve
 		return surface.StreamEvent{}, false
 	}
 	key := codexDesktopStreamKey(turnID, kind, itemID)
-	result := surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(body)), Operation: "upsert", TurnID: turnID, Kind: kind, Role: role, Title: str(item, "name"), Text: body, Status: str(item, "status")}
+	callID := ""
+	if kind == "toolCall" || kind == "toolResult" {
+		callID = itemID
+	}
+	result := surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(body)), Operation: "upsert", TurnID: turnID, CallID: callID, Kind: kind, Role: role, Title: str(item, "name"), Text: body, Status: str(item, "status")}
 	if kind == "text" && str(item, "phase") == "final_answer" {
 		result.Final = true
 	}
@@ -1125,6 +1129,7 @@ func (s *codexDesktopStreamState) doneEvent(sequence int64, turnID string) (surf
 }
 
 func codexDesktopStreamKey(turnID, kind, itemID string) string {
+	kind = codexDesktopKeyKind(kind)
 	if turnID == "" {
 		return "renderer:" + kind + ":" + itemID
 	}
@@ -1133,6 +1138,19 @@ func codexDesktopStreamKey(turnID, kind, itemID string) string {
 		key += ":" + itemID
 	}
 	return key
+}
+
+func codexDesktopKeyKind(kind string) string {
+	switch kind {
+	case "text", "assistant":
+		return "assistant"
+	case "tool_use", "toolCall":
+		return "toolCall"
+	case "tool_result", "toolResult":
+		return "toolResult"
+	default:
+		return kind
+	}
 }
 
 func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {

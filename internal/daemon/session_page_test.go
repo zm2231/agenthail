@@ -215,7 +215,7 @@ func TestDesktopStreamIdentityPreservesJournalAndPageBoundaries(t *testing.T) {
 	}
 	appendPayload(sessionJournalPayload{ItemID: "user-2", Kind: "message", Role: "user", Body: "next question", Op: "upsert", Version: 1})
 	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "hel", Op: "upsert", Version: 1})
-	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-tool-tool-1", Kind: "tool_use", Role: "assistant", Body: "lookup", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-toolCall-tool-1", Kind: "toolCall", Role: "assistant", CallID: "tool-1", Body: "lookup", Op: "upsert", Version: 1})
 	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "authoritative answer", Op: "upsert", Version: 2})
 	appendPayload(sessionJournalPayload{ItemID: "codex-turn-2-assistant-assistant-2", Kind: "text", Role: "assistant", Body: "second answer", Op: "upsert", Version: 1})
 
@@ -226,7 +226,7 @@ func TestDesktopStreamIdentityPreservesJournalAndPageBoundaries(t *testing.T) {
 	if len(page.Items) != 4 {
 		t.Fatalf("items=%+v", page.Items)
 	}
-	if page.Items[1].ID != "codex-turn-1-tool-tool-1" || page.Items[2].ID != "codex-turn-1-assistant-assistant-1" || page.Items[2].Text != "authoritative answer" {
+	if page.Items[1].ID != "codex-turn-1-toolCall-tool-1" || page.Items[1].CallID != "tool-1" || page.Items[2].ID != "codex-turn-1-assistant-assistant-1" || page.Items[2].Text != "authoritative answer" {
 		t.Fatalf("first turn page items=%+v", page.Items)
 	}
 	if len(page.Exchanges) != 2 || page.Exchanges[0].User != "next question" || page.Exchanges[0].Assistant != "authoritative answer" || page.Exchanges[1].Assistant != "second answer" {

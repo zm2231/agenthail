@@ -1315,10 +1315,10 @@ func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *te
 	if events[2].ID != "codex:turn-1:assistant:assistant-1" || events[3].ID != events[2].ID || events[3].Text != "lo" || events[3].Version != 5 {
 		t.Fatalf("delta identity/accumulation=%+v", events[2:4])
 	}
-	if events[4].ID != "codex:turn-1:tool:tool-1" || events[4].Kind != "tool_use" || !strings.Contains(events[4].Text, `"query": "status"`) {
+	if events[4].ID != "codex:turn-1:toolCall:tool-1" || events[4].Kind != "toolCall" || events[4].CallID != "tool-1" || !strings.Contains(events[4].Text, `"query": "status"`) {
 		t.Fatalf("tool boundary=%+v", events[4])
 	}
-	if events[5].ID != "codex:turn-1:tool_result:tool-1" || events[5].Kind != "tool_result" || events[5].Text != "found" {
+	if events[5].ID != "codex:turn-1:toolResult:tool-1" || events[5].Kind != "toolResult" || events[5].CallID != "tool-1" || events[5].Text != "found" {
 		t.Fatalf("tool result=%+v", events[5])
 	}
 	if events[6].ID != "codex:turn-1:assistant:assistant-2" || events[6].Kind != "text" {

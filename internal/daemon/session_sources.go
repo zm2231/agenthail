@@ -36,6 +36,7 @@ type sessionJournalPayload struct {
 	Op               string                `json:"op"`
 	Kind             string                `json:"kind"`
 	TurnID           string                `json:"turnId,omitempty"`
+	CallID           string                `json:"callId,omitempty"`
 	TS               string                `json:"ts"`
 	Body             string                `json:"body,omitempty"`
 	Truncated        bool                  `json:"truncated"`
