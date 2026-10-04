@@ -43,7 +43,8 @@ final class AgenthailModel: ObservableObject {
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var workingSessions: [SessionState] { snapshot?.sessions.filter(\.isWorking) ?? [] }
     var selectedSession: SessionState? { snapshot?.sessions.first { $0.id == selectedSessionID } }
-    var attentionSessionIDs: Set<String> { Set(snapshot?.attention.map(\.sessionId) ?? []) }
+    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
     var sessionTree: SessionTree {
         SessionTree.build(snapshot?.sessions ?? [], filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
@@ -367,6 +368,33 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func deliveryProblems(for sessionID: String) -> [DeliveryProblem] {
+        deliveryProblems.filter { $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
+    }
+
+    func dismissDeliveryProblem(_ problem: DeliveryProblem) {
+        guard let api else { return }
+        removeDeliveryProblem(problem.deliveryId)
+        Task {
+            do {
+                try await api.action("delivery-dismiss", deliveryID: problem.deliveryId)
+                operationError = nil
+            } catch {
+                operationError = error.localizedDescription
+                _ = await refresh(fresh: true)
+            }
+        }
+    }
+
+    private func removeDeliveryProblem(_ deliveryID: Int64) {
+        snapshot?.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }
+    }
+
+    func resendDeliveryProblem(_ problem: DeliveryProblem) {
+        dismissDeliveryProblem(problem)
+        restoreToComposer(problem.message)
+    }
+
     private func restoreToComposer(_ text: String) {
         let draft = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         composer = draft.isEmpty ? text : "\(composer)\n\n\(text)"
@@ -419,6 +447,16 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+        case "delivery.problem":
+            guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
+            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", at: event.data.at)
+            var problems = current.deliveryProblems ?? []
+            problems.removeAll { $0.deliveryId == deliveryID }
+            problems.insert(problem, at: 0)
+            current.deliveryProblems = problems
+        case "delivery.dismissed":
+            guard let deliveryID = event.data.deliveryId else { return }
+            current.deliveryProblems?.removeAll { $0.deliveryId == deliveryID }
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
             let previous = current.surfaces[index]

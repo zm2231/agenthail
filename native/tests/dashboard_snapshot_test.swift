@@ -27,6 +27,9 @@ struct DashboardSnapshotTest {
         let visibleChange = snapshot(updatedAt: "2026-07-24T00:00:30Z", eventCursor: 13, hostEpoch: "host-a", catalogSeq: 13, totalSessions: 5)
         precondition(current.hasSamePresentation(as: transportOnlyChange))
         precondition(!current.hasSamePresentation(as: visibleChange))
+        var problemChange = transportOnlyChange
+        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", message: "Run the tests", reason: "target_not_writable", at: nil)]
+        precondition(!current.hasSamePresentation(as: problemChange))
         print("dashboard snapshot tests passed")
     }
 }

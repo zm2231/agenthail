@@ -222,6 +222,7 @@ struct DashboardSnapshot: Decodable {
     let relays: [RelayState]
     let history: [HistoryState]
     let attention: [AttentionState]
+    var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
@@ -234,6 +235,7 @@ struct DashboardSnapshot: Decodable {
             relays == other.relays &&
             history == other.history &&
             attention == other.attention &&
+            deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours
     }
 }
@@ -432,6 +434,28 @@ struct CatalogStreamData: Decodable {
     let surface: String?
     let health: String?
     let detail: String?
+    let deliveryId: Int64?
+    let sourceSessionId: String?
+    let message: String?
+    let reason: String?
+    let at: String?
+}
+
+struct DeliveryProblem: Decodable, Identifiable, Equatable {
+    let deliveryId: Int64
+    let sessionId: String
+    let sourceSessionId: String?
+    let message: String
+    let reason: String
+    let at: String?
+
+    var id: Int64 { deliveryId }
+
+    var reasonText: String {
+        let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = words.first else { return "The message was not delivered." }
+        return first.uppercased() + words.dropFirst()
+    }
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {
