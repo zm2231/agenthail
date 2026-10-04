@@ -1094,6 +1094,16 @@ func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.S
 				continue
 			}
 			if event.Kind == "done" {
+				if event.Failed() {
+					reason := event.Reason
+					if reason == "" {
+						reason = event.Status
+					}
+					if reason == "" {
+						reason = "terminal failure"
+					}
+					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+				}
 				fmt.Println()
 				return nil
 			}

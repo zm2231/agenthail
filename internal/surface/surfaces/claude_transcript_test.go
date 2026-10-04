@@ -247,19 +247,24 @@ func TestClaudeStreamDoesNotDuplicateTurnDurationCompletion(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"turn_duration","content":"done"}
+{"type":"user","uuid":"u2","message":{"content":"two"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
 {"type":"system","subtype":"turn_duration","content":"done"}`)
 	claude := NewClaude("Default", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	done := 0
+	done := map[string]int{}
 	err := claude.Stream(ctx, &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
-			done++
-			cancel()
+			done[event.TurnID]++
+			if len(done) == 2 {
+				cancel()
+			}
 		}
 	}, time.Second)
-	if err != context.Canceled || done != 1 {
-		t.Fatalf("stream err=%v done=%d", err, done)
+	if err != context.Canceled || done["u1"] != 1 || done["u2"] != 1 {
+		t.Fatalf("stream err=%v done=%v", err, done)
 	}
 }
 

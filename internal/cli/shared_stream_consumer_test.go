@@ -67,6 +67,27 @@ func TestSendStreamActiveDaemonUsesPreparedJournalAndFastReply(t *testing.T) {
 	}
 }
 
+func TestSendStreamActiveDaemonFailsOnCancelledTerminal(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{
+		kind:         surface.KindCodex,
+		sessions:     map[string]surface.Session{"s": session},
+		caps:         surface.Capabilities{Send: true, Stream: true},
+		sendResult:   &surface.SendResult{UUID: "turn-a", Accepted: true},
+		streamEvents: []surface.StreamEvent{},
+	}
+	app, _ := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	app.daemonSessionPageReader = func() (sessionPageReader, error) { return testSessionPageReader{}, nil }
+	app.daemonSessionStreamReader = func() (sessionStreamReader, error) {
+		return testSessionStreamReader{events: []sessionstream.Event{{Seq: 11, ItemID: "cancelled", Kind: "done", Status: "cancelled", TurnID: "turn-a"}}}, nil
+	}
+	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	if err == nil || !strings.Contains(err.Error(), "did not complete successfully: cancelled") || output != "" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestSendStreamActiveDaemonFailsClosedOnSourceError(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true, Stream: true}, sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true}}
