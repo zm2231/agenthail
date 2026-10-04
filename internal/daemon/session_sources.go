@@ -31,6 +31,7 @@ type sessionJournalPayload struct {
 	Body        string `json:"body,omitempty"`
 	Truncated   bool   `json:"truncated"`
 	BodyRef     string `json:"bodyRef,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -40,18 +41,19 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
-	manager      *sessionSourceManager
-	session      *surface.Session
-	adapter      surface.Surface
-	epoch        string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.Mutex
-	subscribers  map[uint64]chan registry.SessionJournalEntry
-	nextID       uint64
-	holders      map[string]int
-	appendBodies map[string]string
-	anonymous    uint64
+	manager       *sessionSourceManager
+	session       *surface.Session
+	adapter       surface.Surface
+	epoch         string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.Mutex
+	subscribers   map[uint64]chan registry.SessionJournalEntry
+	nextID        uint64
+	holders       map[string]int
+	appendBodies  map[string]string
+	anonymous     uint64
+	sourceVersion uint64
 }
 
 type sessionSourceSubscription struct {
@@ -168,7 +170,10 @@ func (s *sessionSource) stop() {
 func (s *sessionSource) run() {
 	s.seedJournal()
 	for {
-		_ = s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		if streamErr != nil && s.ctx.Err() == nil {
+			s.appendSourceError(streamErr)
+		}
 		s.mu.Lock()
 		for id, subscriber := range s.subscribers {
 			delete(s.subscribers, id)
@@ -189,6 +194,43 @@ func (s *sessionSource) run() {
 		delete(s.manager.sources, s.session.ID)
 	}
 	s.manager.mu.Unlock()
+}
+
+func (s *sessionSource) appendSourceError(streamErr error) {
+	s.mu.Lock()
+	s.sourceVersion++
+	payload := sessionJournalPayload{
+		ItemID:      s.epoch + ":source",
+		ProviderKey: s.epoch + ":source",
+		Version:     s.sourceVersion,
+		Op:          "reset",
+		Kind:        "source-error",
+		TS:          time.Now().UTC().Format(time.RFC3339Nano),
+		Reason:      boundedSessionSourceReason(streamErr.Error()),
+	}
+	s.mu.Unlock()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	if err != nil {
+		return
+	}
+	s.publish(entry)
+}
+
+func boundedSessionSourceReason(value string) string {
+	const limit = 240
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return "The session source stopped unexpectedly."
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 func (s *sessionSource) seedJournal() {
