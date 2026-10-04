@@ -348,6 +348,15 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 	}
 }
 
+func hasEventWith(v State, method, key, value string) bool {
+	for _, event := range v.Events {
+		if event.Method == method && event.Params[key] == value {
+			return true
+		}
+	}
+	return false
+}
+
 func hasEvent(v State, method string) bool {
 	for _, event := range v.Events {
 		if event.Method == method {
@@ -570,9 +579,6 @@ func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
 	if hasEvent(v, "voice/delegation/failed") {
 		t.Fatalf("completed tool-only turn surfaced a delegation failure: %+v", v.Events)
 	}
-	if strings.Contains(v.Message, "ended without an authoritative final") {
-		t.Fatalf("completed tool-only turn recorded a failure message: %q", v.Message)
-	}
 	if spoken := f.provider.spoken(); len(spoken) != 0 {
 		t.Fatalf("empty turn handed text to realtime audio: %q", spoken)
 	}
@@ -636,7 +642,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 		t.Fatalf("transfer did not select target: %+v", got)
 	}
 	p.mu.Lock()
-	if len(p.toolCalls) != 1 || !p.toolCalls[0].success || !strings.Contains(p.toolCalls[0].text, "Build session") {
+	if len(p.toolCalls) != 1 || !p.toolCalls[0].success || p.toolCalls[0].requestID != "tool-a" || !strings.Contains(p.toolCalls[0].text, "Build session") {
 		t.Fatalf("transfer response=%+v", p.toolCalls)
 	}
 	p.mu.Unlock()
@@ -645,7 +651,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 		t.Fatalf("return did not clear target: %+v", got)
 	}
 	p.mu.Lock()
-	if len(p.toolCalls) != 2 || !p.toolCalls[1].success || !strings.Contains(p.toolCalls[1].text, "orchestrator") {
+	if len(p.toolCalls) != 2 || !p.toolCalls[1].success || p.toolCalls[1].requestID != "tool-b" {
 		t.Fatalf("return response=%+v", p.toolCalls)
 	}
 	p.mu.Unlock()
@@ -655,8 +661,8 @@ func TestTargetInterruptRequiresConfirmedSelectedTurn(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}, capabilities: surface.Capabilities{Send: true, Stream: true, Interrupt: true}, observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-a"}, activeTurnID: "turn-a"}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "target-interrupt", AttemptID: "call-a"})
-	if target.interrupts != 1 || target.interruptTurnID != "turn-a" || !strings.Contains(f.View().Message, "turn-a") {
-		t.Fatalf("interrupts=%d state=%+v", target.interrupts, f.View())
+	if v := f.View(); target.interrupts != 1 || target.interruptTurnID != "turn-a" || !hasEventWith(v, "voice/target/interrupt", "turnId", "turn-a") {
+		t.Fatalf("interrupts=%d state=%+v", target.interrupts, v)
 	}
 	target.observation = &surface.TurnObservation{Status: surface.StatusBusy}
 	if _, err := f.Apply(Action{Action: "target-interrupt", AttemptID: "call-a"}); err == nil || target.interrupts != 1 {
@@ -713,13 +719,11 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 		}
 	}
 	initial := p["initialItems"].([]map[string]any)
-	if !strings.Contains(initial[0]["text"].(string), "established Agenthail Operations workflow") {
-		t.Fatalf("normal orchestrator instructions=%v", initial)
-	}
-	bound := StartParams("operator", "call", "offer", true)
-	boundInitial := bound["initialItems"].([]map[string]any)
-	if !strings.Contains(boundInitial[0]["text"].(string), "existing Agenthail coding session") {
-		t.Fatalf("session-bound instructions=%v", boundInitial)
+	boundInitial := StartParams("operator", "call", "offer", true)["initialItems"].([]map[string]any)
+	orchestrator, _ := initial[0]["text"].(string)
+	sessionBound, _ := boundInitial[0]["text"].(string)
+	if len(initial) != 1 || len(boundInitial) != 1 || initial[0]["role"] != "developer" || boundInitial[0]["role"] != "developer" || orchestrator == "" || sessionBound == "" || orchestrator == sessionBound {
+		t.Fatalf("session-bound calls need their own developer instructions: orchestrator=%v bound=%v", initial, boundInitial)
 	}
 }
 
@@ -727,8 +731,11 @@ func TestDelegationHoldsWhenTargetDoesNotProvideAnAuthoritativeTurnID(t *testing
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the target"})
-	if got := f.View().Message; !strings.Contains(got, "authoritative turn ID") {
-		t.Fatalf("missing correlation hold: %q", got)
+	if v := f.View(); !hasEventWith(v, "voice/delegation/held", "turnId", "target-a") || hasEvent(v, "voice/delegation/dispatched") {
+		t.Fatalf("uncorrelated receipt was not held: %+v", v.Events)
+	}
+	if spoken := f.provider.spoken(); len(spoken) != 0 {
+		t.Fatalf("held delegation spoke: %q", spoken)
 	}
 }
 

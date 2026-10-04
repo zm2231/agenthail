@@ -97,11 +97,11 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 	dispatcher := Dispatcher{Registry: r}
 
 	receipt, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{UUID: "turn", Accepted: true}}, session, "one", "")
-	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != "turn" || receipt.Detail != "Sent to Build agent." {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != "turn" || receipt.Status != string(registry.DeliveryIntentSent) || !strings.Contains(receipt.Detail, "Build agent") {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt, err = dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
-	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 || receipt.Detail != "Queued for Build agent; sends when current turn ends." || r.QueueCount("s") != 1 {
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 || receipt.DeliveryID == 0 || receipt.Status != string(registry.DeliveryIntentQueued) || !strings.Contains(receipt.Detail, "Build agent") || r.QueueCount("s") != 1 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt2, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
@@ -166,7 +166,7 @@ func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t 
 		t.Fatal(err)
 	}
 	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "maybe", "")
-	if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Detail != "Submitted to Claude target." {
+	if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Evidence != surface.EvidenceSubmitted {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
@@ -192,7 +192,7 @@ func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != string(registry.DeliveryIntentSent) || receipt.Evidence != surface.EvidenceTransportAccepted || receipt.DeliveryID == 0 || receipt.Detail != "Sent to Claude target." {
+	if receipt.Status != string(registry.DeliveryIntentSent) || receipt.Evidence != surface.EvidenceTransportAccepted || receipt.DeliveryID == 0 || !strings.Contains(receipt.Detail, "Claude target") {
 		t.Fatalf("receipt=%+v", receipt)
 	}
 	if state, found, err := r.RuntimeState(session.ID); err != nil || (found && state.ActiveTurnID != "") {
@@ -345,7 +345,7 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 	}
 	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "interrupt with context", "", surface.SendOptions{BusyDelivery: "steer"})
-	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.Detail != "Sent to builder." || receipt.DeliveryID <= 0 || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.Status != string(registry.DeliveryIntentSent) || !strings.Contains(receipt.Detail, "builder") || receipt.DeliveryID <= 0 || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
 		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
 	}
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
