@@ -24,6 +24,13 @@ struct DesktopWindow: View {
         .sheet(isPresented: $model.newSessionVisible) {
             NewSessionSheet(model: model)
         }
+        .onAppear {
+            NSApplication.shared.setActivationPolicy(.regular)
+            NSApplication.shared.activate()
+        }
+        .onDisappear {
+            NSApplication.shared.setActivationPolicy(.accessory)
+        }
     }
 }
 
@@ -703,7 +710,12 @@ struct TranscriptBlock: Identifiable, Equatable {
             switch item.kind {
             case "message", "text":
                 flushTools()
-                guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                if item.role == "user", text.hasPrefix("[Image: "), text.hasSuffix("]"), !text.dropFirst().contains("[") {
+                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached")))
+                    continue
+                }
                 blocks.append(TranscriptBlock(id: item.id, kind: item.role == "user" ? .user(item.text) : .assistant(item.text)))
             case "event" where item.title == "Turn duration":
                 flushTools()
@@ -809,16 +821,23 @@ struct ToolRunView: View {
             if expanded {
                 ForEach(calls) { call in
                     let callFailed = call.callId.map(failedCallIDs.contains) ?? false
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(call.title)
+                    let presentation = ToolPresentation(name: call.title, text: call.text)
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Image(systemName: presentation.symbol)
+                            .font(.system(size: 10.5))
                             .foregroundStyle(callFailed ? DesktopPalette.red : DesktopPalette.text2)
-                            .frame(width: 64, alignment: .leading)
-                        Text(call.text.split(separator: "\n").first.map(String.init) ?? "")
+                            .frame(width: 14)
+                        Text(presentation.title)
+                            .foregroundStyle(callFailed ? DesktopPalette.red : DesktopPalette.text2)
+                            .lineLimit(1)
+                            .fixedSize()
+                        Text(rowSummary(presentation))
+                            .font(.system(size: 11.5, design: .monospaced))
                             .foregroundStyle(DesktopPalette.text)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .font(.system(size: 12))
                     .textSelection(.enabled)
                     .contextMenu {
                         Button("Copy input") {
@@ -831,6 +850,12 @@ struct ToolRunView: View {
         }
         .padding(.leading, 12)
         .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.line).frame(width: 2) }
+    }
+
+    private func rowSummary(_ presentation: ToolPresentation) -> String {
+        let firstLine = presentation.summary.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        if case .command = presentation.content { return "$ " + firstLine }
+        return firstLine
     }
 }
 

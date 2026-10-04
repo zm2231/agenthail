@@ -27,6 +27,7 @@ let package = Package(
                 "AgenthailAPI.swift",
                 "SessionSelection.swift",
                 "EventRetryBackoff.swift",
+                "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",
                 "AgenthailModel.swift",
                 "AgenthailViews.swift",

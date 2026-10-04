@@ -24,22 +24,40 @@ enum ToolRunSummary {
         item.status == "failed" || item.status == "error"
     }
 
+    static func mcpParts(_ title: String) -> (server: String, tool: String)? {
+        guard title.hasPrefix("mcp__") else { return nil }
+        let rest = title.dropFirst(5)
+        guard let separator = rest.range(of: "__") else { return nil }
+        return (String(rest[..<separator.lowerBound]), String(rest[separator.upperBound...]))
+    }
+
     static func label(_ items: [TimelineItem]) -> String {
         let calls = items.filter(isCall)
         guard !calls.isEmpty else { return "Thought" }
         var counts = Array(repeating: 0, count: categories.count)
+        var servers: [String: Int] = [:]
+        var serverOrder: [String] = []
         var other = 0
         for call in calls {
             if let index = categories.firstIndex(where: { $0.names.contains(call.title) }) {
                 counts[index] += 1
+            } else if let parts = mcpParts(call.title) {
+                if servers[parts.server] == nil { serverOrder.append(parts.server) }
+                servers[parts.server, default: 0] += 1
             } else {
                 other += 1
             }
         }
         var phrases = counts.enumerated()
             .filter { $0.element > 0 }
-            .sorted { $0.element != $1.element ? $0.element > $1.element : $0.offset < $1.offset }
             .map { (count: $0.element, text: $0.element == 1 ? categories[$0.offset].singular : String(format: categories[$0.offset].plural, $0.element)) }
+        phrases += serverOrder.map { server in
+            let count = servers[server] ?? 0
+            return (count: count, text: count == 1 ? "used 1 \(server) tool" : "used \(count) \(server) tools")
+        }
+        phrases = phrases.enumerated()
+            .sorted { $0.element.count != $1.element.count ? $0.element.count > $1.element.count : $0.offset < $1.offset }
+            .map(\.element)
         if other > 0 {
             phrases.append((count: other, text: other == 1 ? "used 1 other tool" : "used \(other) other tools"))
         }

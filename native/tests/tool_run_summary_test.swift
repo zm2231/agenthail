@@ -2,8 +2,8 @@ import Foundation
 
 @main
 struct ToolRunSummaryTest {
-    static func item(_ kind: String, _ title: String, status: String? = nil) -> TimelineItem {
-        TimelineItem(id: UUID().uuidString, kind: kind, role: nil, title: title, text: "", timestamp: nil, callId: nil, status: status, truncated: false, bodyRef: nil)
+    static func item(_ kind: String, _ title: String, status: String? = nil, text: String = "") -> TimelineItem {
+        TimelineItem(id: UUID().uuidString, kind: kind, role: nil, title: title, text: text, timestamp: nil, callId: nil, status: status, truncated: false, bodyRef: nil)
     }
 
     static func main() {
@@ -13,6 +13,8 @@ struct ToolRunSummaryTest {
         expect(ToolRunSummary.label([item("reasoning", "Thinking")]) == "Thought", "reasoning only")
         expect(ToolRunSummary.label([item("toolCall", "Web search")]) == "Made 1 web lookup", "Codex web search")
         expect(ToolRunSummary.isFailure(item("toolResult", "Tool result", status: "error")), "error result is a failure")
+        let mcp = [item("toolCall", "mcp__agent-hands__press_key"), item("toolCall", "mcp__agent-hands__list_apps"), item("toolCall", "Bash")]
+        expect(ToolRunSummary.label(mcp) == "Used 2 agent-hands tools and ran 1 command", ToolRunSummary.label(mcp))
         print("tool run summary tests passed")
     }
 

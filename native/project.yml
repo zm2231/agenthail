@@ -24,6 +24,7 @@ targets:
       - path: AgenthailAPI.swift
       - path: SessionSelection.swift
       - path: EventRetryBackoff.swift
+      - path: ToolPresentation.swift
       - path: iOS
     settings:
       base:
