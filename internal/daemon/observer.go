@@ -241,7 +241,11 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer
 	if (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue || canSteerQueued {
 		queued := d.Registry.QueueCount(session.ID)
-		d.drainMessageQueue(ctx, adapter, session)
+		if canSteerQueued && observation.Status == surface.StatusBusy {
+			d.drainSteerMessageQueue(ctx, adapter, session)
+		} else {
+			d.drainMessageQueue(ctx, adapter, session)
+		}
 		if queued > 0 {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})
 		}

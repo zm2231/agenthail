@@ -1136,6 +1136,32 @@ func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 	}
 }
 
+func TestSteerClaimSkipsOlderExplicitQueueWithoutReorderingIt(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusBusy}); err != nil {
+		t.Fatal(err)
+	}
+	queueID, err := r.QueueMessageWithOptions("target", "explicit queue", "", surface.SendOptions{BusyDelivery: "queue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerID, err := r.QueueMessageWithOptions("target", "busy steer", "", surface.SendOptions{BusyDelivery: "steer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steer, err := r.ClaimNextSteerMessage("target", time.Now())
+	if err != nil || steer == nil || steer.ID != steerID {
+		t.Fatalf("steer=%+v err=%v", steer, err)
+	}
+	if err := r.AckMessage(steer.ID); err != nil {
+		t.Fatal(err)
+	}
+	queue, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || queue == nil || queue.ID != queueID || queue.Message != "explicit queue" {
+		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+}
+
 func TestDeliveryHistoryIsBoundedAndFilterable(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "writer", "reviewer")
