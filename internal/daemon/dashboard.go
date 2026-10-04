@@ -1569,7 +1569,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "name must be 1 to 80 characters without spaces, /, or #", http.StatusBadRequest)
 			return
 		}
-		if err := d.Registry.ReplaceAlias(alias, session.ID); err != nil {
+		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
+			var taken registry.AliasTakenError
+			if errors.As(err, &taken) {
+				http.Error(w, fmt.Sprintf("@%s is already used by another session", alias), http.StatusConflict)
+				return
+			}
 			http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
 			return
 		}

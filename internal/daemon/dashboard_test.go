@@ -458,6 +458,15 @@ func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	if response := setAlias("shipper"); response.Code != http.StatusOK {
 		t.Fatalf("second alias status=%d body=%s", response.Code, response.Body.String())
 	}
+	if err := registry.SetAlias("taken", "to"); err != nil {
+		t.Fatal(err)
+	}
+	if response := setAlias("@taken"); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "@taken is already used by another session") {
+		t.Fatalf("taken alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	if owner, err := registry.LookupAlias("taken"); err != nil || owner != "to" {
+		t.Fatalf("taken alias moved: owner=%q err=%v", owner, err)
+	}
 	if _, err := registry.LookupAlias("reviewer"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("old alias still resolves: %v", err)
 	}

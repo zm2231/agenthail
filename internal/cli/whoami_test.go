@@ -20,7 +20,7 @@ func TestWhoamiUsesBoundSessionInsteadOfSharedCWD(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := store.ReplaceAlias("builder", "codex-two"); err != nil {
+	if err := store.SetAlias("builder", "codex-two"); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CODEX_THREAD_ID", "codex-two")

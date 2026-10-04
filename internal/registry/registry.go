@@ -677,28 +677,6 @@ func setAliasTx(tx *sql.Tx, name, sessionID string) error {
 	return err
 }
 
-func (r *Registry) ReplaceAlias(name, sessionID string) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := replaceAliasTx(tx, name, sessionID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func replaceAliasTx(tx *sql.Tx, name, sessionID string) error {
-	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, name, sessionID); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error) {
 	tx, err := r.db.Begin()
 	if err != nil {

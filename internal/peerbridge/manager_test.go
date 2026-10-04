@@ -232,7 +232,7 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if count := reg.QueueCount("older"); count != 5 {
 		t.Fatalf("duplicate inbound queue count=%d", count)
 	}
-	if err := reg.ReplaceAlias("renamed", "older"); err != nil {
+	if err := reg.SetAlias("renamed", "older"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(2200 * time.Millisecond)

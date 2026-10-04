@@ -308,7 +308,7 @@ func TestForeignKeysAndChannelValidation(t *testing.T) {
 	}
 }
 
-func TestReplaceAliasKeepsOneNamePerSession(t *testing.T) {
+func TestSetAliasKeepsOneNamePerSession(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "session-alias", Surface: surface.KindClaude, Name: "Alias test"}
 	if err := r.RegisterSession(session); err != nil {
