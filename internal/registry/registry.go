@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,6 +121,9 @@ func (r *Registry) migrate() error {
 	for _, column := range []struct{ name, decl string }{
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
 		{"notification_armed", `INTEGER NOT NULL DEFAULT 0`},
+		{"runtime_launcher", `TEXT NOT NULL DEFAULT ''`},
+		{"runtime_location", `BLOB NOT NULL DEFAULT '{}'`},
+		{"runtime_focusable", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
 			return err
@@ -268,6 +272,15 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	relay_hops INTEGER NOT NULL DEFAULT 0,
 	notification_armed INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS launcher_pending (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	launcher TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	cwd TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL DEFAULT '',
+	location BLOB NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS relay_deliveries (
 	route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
@@ -445,6 +458,15 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, lastActiveMS)
 	if err != nil {
 		return err
+	}
+	if s.Runtime != nil {
+		location, err := json.Marshal(s.Runtime.Location)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,runtime_launcher,runtime_location,runtime_focusable,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET runtime_launcher=excluded.runtime_launcher,runtime_location=excluded.runtime_location,runtime_focusable=excluded.runtime_focusable,updated_at=datetime('now')`, s.ID, string(s.Runtime.Launcher), location, b2i(s.Runtime.Focusable)); err != nil {
+			return err
+		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
 		rows, err := tx.Query(`SELECT id FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID)
@@ -1875,8 +1897,11 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var kind, status string
 	var hasLocal int
 	var lastActiveMS int64
-	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms FROM sessions WHERE id = ?`, id).Scan(
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS,
+	var launcher string
+	var location []byte
+	var focusable int
+	err := r.db.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0) FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable,
 	)
 	if err != nil {
 		return nil, err
@@ -1886,6 +1911,11 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	session.HasLocal = hasLocal != 0
 	if lastActiveMS > 0 {
 		session.LastActive = time.UnixMilli(lastActiveMS)
+	}
+	if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+		return nil, err
+	} else {
+		session.Runtime = runtime
 	}
 	return &session, nil
 }
@@ -1899,8 +1929,8 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms
-		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id
+	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0)
+		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
 	if err != nil {
@@ -1913,7 +1943,10 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS); err != nil {
+		var launcher string
+		var location []byte
+		var focusable int
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)
@@ -1922,13 +1955,24 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		if lastActiveMS > 0 {
 			session.LastActive = time.UnixMilli(lastActiveMS)
 		}
+		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+			return nil, err
+		} else {
+			session.Runtime = runtime
+		}
 		results = append(results, session)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0) FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -1945,7 +1989,10 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS); err != nil {
+		var launcher string
+		var location []byte
+		var focusable int
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)
@@ -1954,9 +2001,20 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		if lastActiveMS > 0 {
 			session.LastActive = time.UnixMilli(lastActiveMS)
 		}
+		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+			return nil, err
+		} else {
+			session.Runtime = runtime
+		}
 		results = append(results, session)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {

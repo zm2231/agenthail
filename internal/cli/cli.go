@@ -54,6 +54,9 @@ func (a *App) Run(args []string) error {
 	if cmd == "codex" {
 		return a.cmdCodex(rest)
 	}
+	if cmd == "launcher-exec" {
+		return a.cmdLauncherExec(rest)
+	}
 	if err := validateCommandFlags(cmd, rest); err != nil {
 		return err
 	}
@@ -888,6 +891,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
 		}
+		if err := surface.ValidateRuntimeTransport(session); err != nil {
+			return nil, nil, err
+		}
 		return session, adapter, nil
 	}
 	target = strings.TrimPrefix(target, "@")
@@ -906,6 +912,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				}
 				if err := a.Registry.RegisterSession(*session); err != nil {
 					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+				}
+				if err := surface.ValidateRuntimeTransport(session); err != nil {
+					return nil, nil, err
 				}
 				return session, adapter, nil
 			}
@@ -944,6 +953,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 			if err := a.Registry.RegisterSession(*candidate.session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", candidate.adapter.Name(), err)
 			}
+		}
+		if err := surface.ValidateRuntimeTransport(candidate.session); err != nil {
+			return nil, nil, err
 		}
 		return candidate.session, candidate.adapter, nil
 	}

@@ -38,6 +38,11 @@ type Daemon struct {
 	sourceHoldMu      sync.Mutex
 	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
+	transportResolver *SessionTransportResolver
+}
+
+func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
+	d.transportResolver = NewSessionTransportResolver(launchers)
 }
 
 type observedError struct {
@@ -76,6 +81,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
 	}
+	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
 	if err := reg.EnsureCatalogState(); err != nil {
 		d.log.Printf("catalog state: %s", err)
 	}

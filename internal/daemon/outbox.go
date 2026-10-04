@@ -26,6 +26,10 @@ func (d *Daemon) drainSteerMessageQueue(ctx context.Context, adapter surface.Sur
 }
 
 func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surface, session *surface.Session, claim func(time.Time) (*registry.QueuedMessage, error)) {
+	if err := surface.ValidateRuntimeTransport(session); err != nil {
+		d.log.Printf("transport for %s unavailable: %s", d.resolveDisplay(session.ID), err)
+		return
+	}
 	now := time.Now()
 	item, err := claim(now)
 	if err != nil {

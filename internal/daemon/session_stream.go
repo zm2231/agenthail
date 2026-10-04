@@ -37,6 +37,10 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusNotFound, "session_not_found", "The requested session was not found.")
 		return
 	}
+	if err := surface.ValidateRuntimeTransport(session); err != nil {
+		writeAPIError(w, http.StatusConflict, "transport_unavailable", err.Error())
+		return
+	}
 	adapter := d.surfaceForKind(session.Surface)
 	if adapter == nil {
 		writeAPIError(w, http.StatusConflict, "stream_unsupported", "This session does not expose a live stream.")

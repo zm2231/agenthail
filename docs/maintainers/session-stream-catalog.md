@@ -27,6 +27,35 @@ with the delivery failure/notice state. A failed discovery records
 freshness/health without changing presence rows. A successful omission must
 meet the configured removal threshold before producing `session.removed`.
 
+## Runtime launchers
+
+Each catalog session may include `runtime`:
+
+```json
+{"launcher":"cmux","location":{"workspace":"...","surface":"..."},"focusable":true}
+```
+
+The launcher is one of `cmux`, `tmux`, `claude-bg`, `codex-app-server`,
+`claude-sdk`, or `external`. cmux locations use `workspace` and `surface`;
+tmux locations use `session` and `pane`. A location is focusable only after
+the authoritative launcher `Locate` path correlates the discovered Agenthail
+session. Persisted locations are revalidated before focus, so stale panes or
+reused process IDs are never focused. `claude-sdk` remains unavailable until
+its real transport is registered; no peer fallback is allowed.
+
+`GET /api/v1/session-options` also returns `launchers` with `{id,label,agents,
+available,detail}`. Explicit `session-create` launcher requests return the
+terminal result `{ok,launcher,location,sessionId?}` only after discovery
+correlation. An omitted launcher preserves the existing creation path.
+
+## Durable delivery problems
+
+Snapshot responses include `deliveryProblems`, the newest 50 undismissed
+durable problems. Each problem carries its numeric `deliveryId`, an RFC3339
+timestamp, and the persisted status/evidence fields. `POST /api/action` with
+`{"action":"delivery-dismiss","deliveryId":123}` atomically marks that
+problem dismissed; the operation is idempotent and never resends the message.
+
 `GET /api/v1/session?id=<id>` returns a bounded page from the session journal.
 `GET /api/v1/session-stream?id=<id>&after=<sessionSeq>` is an SSE view over the
 same journal. `Last-Event-ID` is accepted as the same per-session cursor.

@@ -63,6 +63,10 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("load watched session %s: %s", truncate(watchedSession.ID, 16), sessionErr)
 			continue
 		}
+		if err := surface.ValidateRuntimeTransport(session); err != nil {
+			d.log.Printf("transport for watched session %s unavailable: %s", d.resolveDisplay(session.ID), err)
+			continue
+		}
 		if relayTargetInactive(session) {
 			continue
 		}
@@ -347,4 +351,18 @@ func (d *Daemon) surfaceForKind(kind surface.SurfaceKind) surface.Surface {
 		}
 	}
 	return nil
+}
+
+func (d *Daemon) surfaceForSession(session *surface.Session) (surface.Surface, error) {
+	if session == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	if err := surface.ValidateRuntimeTransport(session); err != nil {
+		return nil, err
+	}
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil {
+		return nil, fmt.Errorf("surface %q is not configured", session.Surface)
+	}
+	return adapter, nil
 }

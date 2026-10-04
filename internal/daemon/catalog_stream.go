@@ -284,7 +284,11 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			continue
 		}
 		seen := make(map[string]struct{}, len(sessions))
+		d.correlatePendingLaunches(operationCtx, sessions)
 		for _, session := range sessions {
+			if session.Runtime == nil {
+				session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
+			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
 			identity := catalogIdentityForSession(identityCtx, session)
@@ -326,6 +330,45 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	}
 }
 
+func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surface.Session) {
+	if d.transportResolver == nil {
+		return
+	}
+	pending, err := d.Registry.PendingLaunches()
+	if err != nil {
+		return
+	}
+	for _, item := range pending {
+		launcher, ok := d.transportResolver.Launcher(item.Launcher)
+		if !ok {
+			continue
+		}
+		locations := launcher.Locate(ctx, sessions)
+		matched := ""
+		for id, location := range locations {
+			if location != item.Location {
+				continue
+			}
+			if matched != "" {
+				matched = ""
+				break
+			}
+			matched = id
+		}
+		if matched == "" {
+			continue
+		}
+		for index := range sessions {
+			if sessions[index].ID == matched {
+				sessions[index].Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &item.Location, Focusable: true}
+				_ = d.Registry.RegisterSession(sessions[index])
+				_ = d.Registry.DeletePendingLaunch(item.ID)
+				break
+			}
+		}
+	}
+}
+
 func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time) dashboardSession {
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
@@ -337,7 +380,10 @@ func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface,
 }
 
 func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {
+	if session.Runtime == nil {
+		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
+	}
 	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
 	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime}
 }
