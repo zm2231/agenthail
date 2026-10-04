@@ -39,15 +39,16 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
 
-    private func deliveryLabel(_ evidence: String?) -> String {
+    private func deliveryLabel(_ evidence: String?, detail: String?) -> String {
         switch evidence {
-        case "queued": return "Queued for the agent"
-        case "transport_accepted": return "Accepted by the transport; receiver policy and completion are pending"
-        case "delivered": return "Instruction delivered"
-        case "reply_observed": return "Reply observed"
-        case "held": return "Held by the receiving agent"
+        case "submitted": return detail ?? "Submitted"
+        case "queued": return detail ?? "Queued"
+        case "transport_accepted", "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
-        case "unknown", nil: return "Delivery outcome unconfirmed. Check activity before retrying."
+        case "unknown", nil: return "Delivery outcome unknown. Check activity before retrying."
+        case "held": return "Delivery held. Review it in Inbox before retrying."
+        case "expired": return "Instruction expired. Review it in Inbox history."
+        case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
     }
@@ -129,6 +130,7 @@ final class AgenthailIOSModel: ObservableObject {
     private var catalogStreamTask: Task<Void, Never>?
     private var catalogStreamCursor: UInt64 = 0
     private var sessionStreamTask: Task<Void, Never>?
+    private var sessionMetadataTask: Task<Void, Never>?
     private var sessionStreamCursor: UInt64 = 0
     private var connectionTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
@@ -310,6 +312,7 @@ final class AgenthailIOSModel: ObservableObject {
         if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
+            sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
             composer = drafts[id] ?? ""
             selectedDetail = nil
@@ -321,7 +324,10 @@ final class AgenthailIOSModel: ObservableObject {
         sessionError = nil
         loadingSession = selectedDetail == nil
         await refreshSession(id)
-        if selectedSessionID == id { startSessionStream(id) }
+        if selectedSessionID == id {
+            startSessionStream(id)
+            startSessionMetadata(id, requestID: sessionRequestID)
+        }
         if selectedSessionID == id { loadingSession = false }
     }
 
@@ -359,15 +365,16 @@ final class AgenthailIOSModel: ObservableObject {
                     continue
                 }
                 switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
-                case "queued": deliveryStatus[sessionID] = item.status == "inflight" ? "Sending to the agent" : "Queued for the agent"
-                case "unknown": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
+                case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
+                case "queued": deliveryStatus[sessionID] = "Queued for \(item.target); sends when current turn ends."
+                case "unknown": deliveryStatus[sessionID] = "Delivery outcome unknown. Review it in Inbox before sending again."
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
                 case "unknown-expired": deliveryStatus[sessionID] = "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again."
                 case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
                 case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
-                case "transport_accepted": deliveryStatus[sessionID] = "Accepted by the transport; receiver policy and completion are pending"
-                case "delivered": deliveryStatus[sessionID] = "Instruction delivered"
-                case "canceled": deliveryStatus[sessionID] = "Instruction canceled"
+                case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
+                case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
+                case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
                 default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
                 }
                 if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
@@ -377,6 +384,30 @@ final class AgenthailIOSModel: ObservableObject {
                 deliveryStatus[sessionID] = "Delivery status could not be refreshed. Check Inbox before retrying."
             }
         }
+    }
+
+    private func startSessionMetadata(_ id: String, requestID: UUID) {
+        sessionMetadataTask?.cancel()
+        guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        sessionMetadataTask = Task { [weak self, api] in
+            do {
+                let metadata = try await api.sessionMetadata(id: id)
+                guard !Task.isCancelled else { return }
+                self?.applySessionMetadata(metadata, for: id, requestID: requestID)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func applySessionMetadata(_ metadata: SessionMetadata, for id: String, requestID: UUID) {
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
+              var detail = selectedDetail, detail.session.id == id else { return }
+        if let context = metadata.context { detail.context = context }
+        if let goal = metadata.goal { detail.goal = goal }
+        if let model = metadata.model { detail.model = model }
+        if let models = metadata.models { detail.models = models }
+        selectedDetail = detail
     }
 
     func loadOlderActivity() async {
@@ -440,7 +471,7 @@ final class AgenthailIOSModel: ObservableObject {
             defer { sendingSessionIDs.remove(session.id) }
             do {
                 let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
-                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence)
+                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[session.id] = queueID
                 }
@@ -509,6 +540,7 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
+        sessionMetadataTask?.cancel()
         api = nil
         endpoint = nil
         token = nil
@@ -720,7 +752,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated, bodyRef: event.data.bodyRef)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: event.data.status, truncated: event.data.truncated, bodyRef: event.data.bodyRef)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {

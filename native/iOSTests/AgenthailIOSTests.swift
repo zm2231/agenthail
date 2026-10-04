@@ -89,6 +89,22 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStreamPreservesJournalItemMetadataAndBodyReference() throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"message-1","version":1,"kind":"message","op":"append","role":"user","title":"user","status":"complete","turnId":"turn-1","ts":"2026-10-03T12:00:00Z","body":"journal body","truncated":false,"bodyRef":"body-ref-1"}}"#.utf8))
+        model.applySessionStreamEvent(event)
+        let item = try XCTUnwrap(model.selectedDetail?.timeline?.items.first)
+        XCTAssertEqual(item.role, "user")
+        XCTAssertEqual(item.title, "user")
+        XCTAssertEqual(item.status, "complete")
+        XCTAssertEqual(item.bodyRef, "body-ref-1")
+    }
+
+    @MainActor
     func testSessionStreamSourceResetShowsTheBoundedReasonWithoutAddingTimelineActivity() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
