@@ -47,6 +47,18 @@ func TestObserveClaudeRunsReadsTypedRunFields(t *testing.T) {
 	}
 }
 
+func TestObserveClaudeConfiguredContextWindowRequiresExplicitLaunchValue(t *testing.T) {
+	if got := ObserveClaudeConfiguredContextWindow(""); got.Source != ClaudeContextWindowSourceUnknown || got.Window != 0 || got.Reliable {
+		t.Fatalf("empty model observation=%+v", got)
+	}
+	if got := ObserveClaudeConfiguredContextWindow("claude-opus-5-5"); got.Source != ClaudeContextWindowSourceUnknown || got.Window != 0 || got.Reliable {
+		t.Fatalf("plain model observation=%+v", got)
+	}
+	if got := ObserveClaudeConfiguredContextWindow("claude-opus-5-5[1m]"); got.Source != ClaudeContextWindowSourceConfigured || got.Window != 1_000_000 || !got.Reliable {
+		t.Fatalf("configured model observation=%+v", got)
+	}
+}
+
 func TestObserveClaudeRunsDoesNotInferUnavailableWakeFields(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".claude", "jobs", "job-123", "state.json")
