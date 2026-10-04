@@ -44,6 +44,13 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["voice-entry"].exists)
         XCTAssertFalse(app.staticTexts["Working on your Mac"].exists)
         XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
+        app.buttons["Session menu"].tap()
+        let allEvents = app.buttons["All events"]
+        let call = app.buttons["Call this session"]
+        XCTAssertTrue(allEvents.waitForExistence(timeout: 5))
+        XCTAssertTrue(call.waitForExistence(timeout: 5))
+        XCTAssertLessThan(allEvents.frame.maxY, call.frame.minY)
+        app.buttons["Chat"].tap()
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.tabBars.buttons["Inbox"].isHittable)
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -77,6 +84,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
         app.buttons["Session details"].tap()
+        XCTAssertFalse(app.buttons["Call this session"].exists)
         let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
         for _ in 0..<5 {

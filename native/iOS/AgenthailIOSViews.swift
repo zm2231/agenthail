@@ -376,6 +376,7 @@ struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
     @State private var showingInfo = false
+    @State private var showingVoice = false
     @State private var activityOnly = false
     @State private var followingLatest = true
     @State private var atLatest = true
@@ -533,6 +534,9 @@ struct SessionScreen: View {
                             Text("Chat").tag(false)
                             Text("All events").tag(true)
                         }
+                        Button("Call this session", systemImage: "phone.fill") {
+                            showingVoice = true
+                        }
                     } label: { Image(systemName: "ellipsis") }
                     .accessibilityLabel("Session menu")
                     .disabled(detail == nil)
@@ -540,6 +544,9 @@ struct SessionScreen: View {
             }
             .sheet(isPresented: $showingInfo) {
                 if let detail { SessionInspector(model: model, session: session, detail: detail) }
+            }
+            .sheet(isPresented: $showingVoice) {
+                AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
             }
             .task(id: session.id) {
                 let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
@@ -870,7 +877,6 @@ struct SessionInspector: View {
     let detail: SessionDetail
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
-    @State private var showingVoice = false
     var body: some View {
         NavigationStack {
             List {
@@ -884,12 +890,6 @@ struct SessionInspector: View {
                     if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
                     if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
-                }
-                Section("Voice") {
-                    Button("Call this session", systemImage: "phone.fill") { showingVoice = true }
-                    Text("Starts a Codex Voice call routed to this exact session. During a call, you can transfer back to the Agenthail orchestrator or to another session.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 Section("Context") {
                     if let context = detail.context {
@@ -951,9 +951,6 @@ struct SessionInspector: View {
                         dismiss()
                     }
                 }, reload: { try await model.creationModels(surface: session.surface) })
-            }
-            .sheet(isPresented: $showingVoice) {
-                AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
             }
         }
     }

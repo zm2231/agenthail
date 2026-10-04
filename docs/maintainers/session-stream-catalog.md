@@ -50,7 +50,7 @@ separate. The following shapes are canonical:
 
 ```json
 {"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","hostProject":{"id":"host-project-1","displayName":"agenthail","commonDir":"/repo/.git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}
-{"stream":"catalog","seq":42,"type":"delivery.problem","data":{"deliveryId":"d1","sessionId":"s1","sourceSessionId":"s2","message":"Run the tests","reason":"target_not_writable","at":"2026-10-03T12:00:01Z"}}
+{"stream":"catalog","seq":42,"type":"delivery.problem","data":{"deliveryId":1,"sessionId":"s1","sourceSessionId":"s2","message":"Run the tests","reason":"target_not_writable","at":"2026-10-03T12:00:01Z"}}
 {"stream":"session","sessionId":"s1","seq":9,"type":"item","data":{"itemId":"m1","providerKey":"m1","version":6,"op":"append","kind":"text","turnId":"u1","ts":"2026-10-03T12:00:02Z","body":"answer","truncated":false}}
 ```
 

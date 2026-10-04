@@ -77,6 +77,10 @@ func failureKind(err error, fallback string) string {
 }
 
 func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool) (*Receipt, error) {
+	target := session.Name
+	if target == "" {
+		target = session.ID
+	}
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
@@ -124,7 +128,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: intentErr.Error()})
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("persist submitted delivery intent: %w", intentErr))
 			}
-			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: "delivery intent recorded; receipt is pending"}
+			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}
 			d.record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
 			return receipt, nil
 		}
@@ -141,8 +145,8 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		peerTransport := session.Surface == surface.KindClaude && session.Transport == "uds"
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
-			receipt.Detail = "receiver policy and model completion are pending"
 		}
+		receipt.Detail = fmt.Sprintf("Sent to %s.", target)
 		if d.Registry != nil && options.SourceSessionID != "" {
 			intent, intentErr := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: options.SourceSessionID, TargetSessionID: session.ID, ProviderKey: result.UUID, Message: message, Status: registry.DeliveryIntentSent, Evidence: receipt.Evidence})
 			if intentErr != nil {
@@ -176,7 +180,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err != nil {
 		return nil, err
 	}
-	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, DeliveryID: deliveryID, Detail: "target busy"}, nil
+	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: result.UUID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil
 }
 
 func (d Dispatcher) record(entry registry.HistoryEntry) {
