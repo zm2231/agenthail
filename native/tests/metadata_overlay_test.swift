@@ -27,6 +27,10 @@ struct MetadataOverlayTest {
         let fromLegacy = older.apply(to: legacy)
         check(fromLegacy.context?.usedTokens == 900 && fromLegacy.goal?.objective == "Old" && fromLegacy.model == "gpt-old", "older daemons that send metadata in detail keep working")
 
+        let options = try JSONDecoder().decode([ModelOption].self, from: Data(#"[{"id":"gpt-5","displayName":"GPT-5"}]"#.utf8))
+        overlay.absorb(context: nil, goal: nil, model: nil, models: options)
+        check(overlay.apply(to: bare).models?.map(\.id) == ["gpt-5"] && overlay.apply(to: bare).model == "gpt-5", "model options arrive without clearing the current model")
+
         let seeded = MetadataOverlay(seed: first).apply(to: bare)
         check(seeded.context?.usedTokens == 400 && seeded.model == "gpt-5", "a cached detail seeds the overlay")
     }
