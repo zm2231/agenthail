@@ -33,14 +33,15 @@ type SurfaceEntry struct {
 }
 
 type App struct {
-	Registry            *registry.Registry
-	Surfaces            []SurfaceEntry
-	DefaultTimeout      time.Duration
-	Version             string
-	Revision            string
-	BuiltAt             string
-	daemonServiceLoaded func() bool
-	update              *updateDeps
+	Registry             *registry.Registry
+	Surfaces             []SurfaceEntry
+	DefaultTimeout       time.Duration
+	Version              string
+	Revision             string
+	BuiltAt              string
+	catalogDaemonRunning func() bool
+	daemonServiceLoaded  func() bool
+	update               *updateDeps
 }
 
 func (a *App) Run(args []string) error {
@@ -443,28 +444,58 @@ func (a *App) cmdList(args []string) error {
 
 	allSessions := make([]surface.Session, 0)
 	surfaceErrors := map[string]string{}
-	successfulSurfaces := 0
-	for _, s := range a.allSurfaces() {
-		sessions, err := s.List(ctx)
-		if err != nil {
-			surfaceErrors[string(s.Name())] = err.Error()
-			continue
+	catalog, catalogBacked, catalogErr := a.listCatalogSnapshot()
+	if catalogErr != nil {
+		if jsonOut {
+			if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"sessions": allSessions, "errors": map[string]string{"catalog": catalogErr.Error()}}); err != nil {
+				return err
+			}
 		}
-		successfulSurfaces++
-		for _, sess := range sessions {
-			var normalizeErr error
-			sess, normalizeErr = normalizeSessionCwd(sess)
-			if normalizeErr != nil {
-				surfaceErrors[string(s.Name())] = fmt.Sprintf("normalize session workspace: %s", normalizeErr)
+		return catalogErr
+	}
+	successfulSurfaces := 0
+	if catalogBacked {
+		successfulSurfaces = 1
+		for _, record := range catalog.Sessions {
+			session, err := normalizeSessionCwd(record.Session)
+			if err != nil {
+				surfaceErrors[string(record.Session.Surface)] = fmt.Sprintf("normalize session workspace: %s", err)
 				continue
 			}
-			if a.Registry != nil {
-				if err := a.Registry.RegisterSession(sess); err != nil {
-					surfaceErrors[string(s.Name())] = fmt.Sprintf("register session: %s", err)
+			allSessions = append(allSessions, session)
+		}
+		for _, record := range catalog.Surfaces {
+			if record.Health != "healthy" {
+				detail := record.Detail
+				if detail == "" {
+					detail = "catalog health is " + record.Health
+				}
+				surfaceErrors[string(record.Surface)] = detail
+			}
+		}
+	} else {
+		for _, s := range a.allSurfaces() {
+			sessions, err := s.List(ctx)
+			if err != nil {
+				surfaceErrors[string(s.Name())] = err.Error()
+				continue
+			}
+			successfulSurfaces++
+			for _, sess := range sessions {
+				var normalizeErr error
+				sess, normalizeErr = normalizeSessionCwd(sess)
+				if normalizeErr != nil {
+					surfaceErrors[string(s.Name())] = fmt.Sprintf("normalize session workspace: %s", normalizeErr)
 					continue
 				}
+				if a.Registry != nil {
+					if err := a.Registry.RegisterSession(sess); err != nil {
+						surfaceErrors[string(s.Name())] = fmt.Sprintf("register session: %s", err)
+						continue
+					}
+				}
+				allSessions = append(allSessions, sess)
 			}
-			allSessions = append(allSessions, sess)
 		}
 	}
 
@@ -539,7 +570,11 @@ func (a *App) cmdList(args []string) error {
 		allSessions = allSessions[:max]
 	}
 	if jsonOut {
-		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"sessions": allSessions, "errors": surfaceErrors}); err != nil {
+		document := map[string]any{"sessions": allSessions, "errors": surfaceErrors}
+		if catalogBacked {
+			document["catalog"] = listCatalogMetadata(catalog)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(document); err != nil {
 			return err
 		}
 		if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
@@ -548,7 +583,11 @@ func (a *App) cmdList(args []string) error {
 		return nil
 	}
 	for name, message := range surfaceErrors {
-		fmt.Fprintf(os.Stderr, "warning: %s discovery failed: %s\n", name, message)
+		if catalogBacked {
+			fmt.Fprintf(os.Stderr, "warning: %s catalog health: %s\n", name, message)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: %s discovery failed: %s\n", name, message)
+		}
 	}
 	if len(allSessions) == 0 {
 		fmt.Println("no sessions found")
@@ -591,6 +630,62 @@ func (a *App) cmdList(args []string) error {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+type listCatalogSurface struct {
+	Surface    string    `json:"surface"`
+	Health     string    `json:"health"`
+	Detail     string    `json:"detail,omitempty"`
+	ObservedAt time.Time `json:"observedAt"`
+}
+
+type listCatalogMetadataView struct {
+	Source     string                          `json:"source"`
+	HostEpoch  string                          `json:"hostEpoch"`
+	CatalogSeq uint64                          `json:"catalogSeq"`
+	Surfaces   []listCatalogSurface            `json:"surfaces"`
+	Freshness  map[string]listCatalogFreshness `json:"freshness"`
+}
+
+type listCatalogFreshness struct {
+	ObservedAt        time.Time `json:"observedAt"`
+	UnavailableReason string    `json:"unavailableReason,omitempty"`
+}
+
+func (a *App) listCatalogSnapshot() (registry.CatalogSnapshot, bool, error) {
+	if a.Registry == nil || !a.daemonIsRunning() {
+		return registry.CatalogSnapshot{}, false, nil
+	}
+	snapshot, err := a.Registry.CatalogSnapshot()
+	if err != nil {
+		return registry.CatalogSnapshot{}, true, fmt.Errorf("read daemon catalog: %w", err)
+	}
+	return snapshot, true, nil
+}
+
+func (a *App) daemonIsRunning() bool {
+	if a.catalogDaemonRunning != nil {
+		return a.catalogDaemonRunning()
+	}
+	_, running := daemon.IsRunning()
+	return running
+}
+
+func listCatalogMetadata(snapshot registry.CatalogSnapshot) listCatalogMetadataView {
+	metadata := listCatalogMetadataView{
+		Source:     "daemon",
+		HostEpoch:  snapshot.HostEpoch,
+		CatalogSeq: snapshot.CatalogSeq,
+		Surfaces:   make([]listCatalogSurface, 0, len(snapshot.Surfaces)),
+		Freshness:  make(map[string]listCatalogFreshness, len(snapshot.Sessions)),
+	}
+	for _, record := range snapshot.Surfaces {
+		metadata.Surfaces = append(metadata.Surfaces, listCatalogSurface{Surface: string(record.Surface), Health: record.Health, Detail: record.Detail, ObservedAt: record.ObservedAt})
+	}
+	for _, record := range snapshot.Sessions {
+		metadata.Freshness[record.Session.ID] = listCatalogFreshness{ObservedAt: record.ObservedAt, UnavailableReason: record.UnavailableReason}
+	}
+	return metadata
 }
 
 func normalizeSessionCwd(session surface.Session) (surface.Session, error) {
