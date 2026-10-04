@@ -366,16 +366,21 @@ final class AgenthailModel: ObservableObject {
     }
 
     func perform(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil) {
-        guard let api else { return }
-        Task {
-            do {
-                try await api.action(action, sessionID: sessionID, message: message, model: model, queueID: queueID)
-                operationError = nil
-                await refresh(fresh: true)
-            } catch {
-                operationError = error.localizedDescription
-                if let message, let sessionID { restoreToComposer(message, sessionID: sessionID) }
-            }
+        Task { await performNow(action: action, sessionID: sessionID, message: message, model: model, queueID: queueID) }
+    }
+
+    @discardableResult
+    func performNow(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil) async -> Bool {
+        guard let api else { return false }
+        do {
+            try await api.action(action, sessionID: sessionID, message: message, model: model, queueID: queueID)
+            operationError = nil
+            _ = await refresh(fresh: true)
+            return true
+        } catch {
+            operationError = error.localizedDescription
+            if let message, let sessionID { restoreToComposer(message, sessionID: sessionID) }
+            return false
         }
     }
 

@@ -1450,6 +1450,13 @@ struct DetailsTab: View {
                         Text("Context").foregroundStyle(DesktopPalette.text2)
                         Spacer()
                         Text(usage)
+                        if canControl && session.capabilities.compact {
+                            Button("Compact") { pane.compactContext() }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(DesktopPalette.accentText)
+                                .disabled(pane.controlPending)
+                                .help("Ask the agent to compact its context")
+                        }
                     }
                     if let ratio = context.fraction {
                         ProgressView(value: min(ratio, 1))
@@ -1469,7 +1476,27 @@ struct DetailsTab: View {
                     }
                 }
                 detailRow("Surface", session.surface.capitalized)
-                if let modelName = pane.detail?.model { detailRow("Model", modelName) }
+                if let modelName = pane.detail?.model {
+                    if canControl && session.capabilities.model, let options = pane.detail?.models, !options.isEmpty {
+                        GridRow {
+                            Text("Model").foregroundStyle(DesktopPalette.text2)
+                            Menu(options.first { $0.id == modelName }?.displayName ?? modelName) {
+                                ForEach(options) { option in
+                                    Button {
+                                        pane.changeModel(to: option.id)
+                                    } label: {
+                                        if option.id == modelName { Label(option.displayName, systemImage: "checkmark") } else { Text(option.displayName) }
+                                    }
+                                }
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+                            .disabled(pane.controlPending)
+                        }
+                    } else {
+                        detailRow("Model", modelName)
+                    }
+                }
                 if let project = session.hostProject?.displayName { detailRow("Project", project) }
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
@@ -1478,6 +1505,8 @@ struct DetailsTab: View {
             ClaudeObservationsSection(detail: pane.detail)
         }
     }
+
+    private var canControl: Bool { !session.isReadOnly && pane.removedSession == nil }
 
     @ViewBuilder
     private func detailRow(_ label: String, _ value: String, monospaced: Bool = false) -> some View {

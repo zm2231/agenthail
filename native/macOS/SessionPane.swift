@@ -17,6 +17,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
     @Published var renamingSession: SessionState?
+    @Published private(set) var controlPending = false
     @Published private(set) var composerDraft = ComposerDraft()
     var composer: String {
         get { composerDraft.text }
@@ -208,6 +209,29 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func sessionChanged(_ id: String) {
         scheduleDetailReload(id)
+    }
+
+    func changeModel(to modelID: String) {
+        guard let sessionID = selectedSessionID else { return }
+        var settings = model.turnSettings(for: sessionID)
+        settings.effort = nil
+        model.setTurnSettings(settings, for: sessionID)
+        runControl(action: "model", sessionID: sessionID, modelID: modelID)
+    }
+
+    func compactContext() {
+        guard let sessionID = selectedSessionID else { return }
+        runControl(action: "compact", sessionID: sessionID, modelID: nil)
+    }
+
+    private func runControl(action: String, sessionID: String, modelID: String?) {
+        guard !controlPending, removedSession == nil else { return }
+        controlPending = true
+        Task {
+            let succeeded = await model.performNow(action: action, sessionID: sessionID, model: modelID)
+            controlPending = false
+            if succeeded, !closed, selectedSessionID == sessionID { startMetadataLoad(sessionID) }
+        }
     }
 
     func submit(busyDelivery: String?) {

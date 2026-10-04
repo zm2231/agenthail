@@ -8,7 +8,7 @@ The Mac app keeps your connected conversations in one window.
 
 - **Sessions** sit in the sidebar, grouped by Mac workspace, with **Running**, **Recent**, and **All** (⌘1, ⌘2, ⌘3). Sessions that need you appear first. Search (⌘F) filters the list; typing at least three characters also searches older Codex history.
 - **Conversations** open at the latest work. You can send, steer, stop (⌘.), and jump to latest (⌘L). ⌘↩ queues a message while an agent works and ⌥⌘↩ steers the running turn; Settings can swap the two for every Agenthail app, including your iPhone. Codex sessions can set effort and Plan or Work mode for the next message from the slider button under the message box. Drafts belong to their session. Dropping files from Finder onto the message box adds their paths.
-- The **inspector** (⌥⌘I) shows a session's details, context, and delivery work, and lets you set, edit, pause, budget, or clear its goal when the agent supports goals.
+- The **inspector** (⌥⌘I) shows a session's details, context, and delivery work, switches its model or compacts its context when the agent supports it, and lets you set, edit, pause, budget, or clear its goal when the agent supports goals.
 - **⌘K** opens a command palette for jumping to any session, starting a new one (⌘N), and session actions.
 - Any session can open in its own window from its context menu or the palette, and can be renamed there or from the inspector. A name another session already uses is refused. Windows showing the same session share its draft.
 - A session that disappears from the host stays readable with a notice until you close it.
