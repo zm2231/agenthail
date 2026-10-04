@@ -19,7 +19,7 @@ func TestActiveLastUsesDaemonPageAndDoesNotReadProvider(t *testing.T) {
 		return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: []surface.Exchange{{User: "q", Assistant: "a"}}, NextBefore: 42}}, nil
 	}
 
-	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestActiveDaemonFailureDoesNotFallBackToProvider(t *testing.T) {
 	app.catalogDaemonRunning = func() bool { return true }
 	app.daemonSessionPageReader = func() (sessionPageReader, error) { return nil, errors.New("daemon unavailable") }
 
-	if err := app.cmdLast([]string{"codex:s"}); err == nil || !strings.Contains(err.Error(), "active daemon session page") {
+	if err := app.Run([]string{"last", "codex:s"}); err == nil || !strings.Contains(err.Error(), "active daemon session page") {
 		t.Fatalf("err=%v", err)
 	}
 	if len(provider.requests) != 0 {
@@ -62,7 +62,7 @@ func TestActiveReplyDerivesDoneFromResolvedSessionStatus(t *testing.T) {
 			app.daemonSessionPageReader = func() (sessionPageReader, error) {
 				return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: []surface.Exchange{{Assistant: "answer"}}}}, nil
 			}
-			output, err := captureStdout(t, func() error { return app.cmdReply([]string{"codex:s", "--json"}) })
+			output, err := captureStdout(t, func() error { return app.Run([]string{"reply", "codex:s", "--json"}) })
 			if err != nil || !strings.Contains(output, `"done":`+map[bool]string{true: "true", false: "false"}[test.done]) {
 				t.Fatalf("output=%s err=%v", output, err)
 			}

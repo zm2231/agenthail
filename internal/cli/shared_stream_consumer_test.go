@@ -61,7 +61,7 @@ func TestSendStreamActiveDaemonUsesPreparedJournalAndFastReply(t *testing.T) {
 			{Seq: 13, ItemID: "done", Kind: "done", TurnID: "turn-a"},
 		}}, nil
 	}
-	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:s", "hello", "--stream"}) })
 	if err != nil || output != "fast\n" {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -82,7 +82,7 @@ func TestSendStreamActiveDaemonFailsOnCancelledTerminal(t *testing.T) {
 	app.daemonSessionStreamReader = func() (sessionStreamReader, error) {
 		return testSessionStreamReader{events: []sessionstream.Event{{Seq: 11, ItemID: "cancelled", Kind: "done", Status: "cancelled", TurnID: "turn-a"}}}, nil
 	}
-	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:s", "hello", "--stream"}) })
 	if err == nil || !strings.Contains(err.Error(), "did not complete successfully: cancelled") || output != "" {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -96,7 +96,7 @@ func TestSendStreamActiveDaemonFailsClosedOnSourceError(t *testing.T) {
 	app.daemonSessionPageReader = func() (sessionPageReader, error) {
 		return unavailableSessionPageReader{}, nil
 	}
-	err := app.cmdSend([]string{"codex:s", "hello", "--stream"})
+	err := app.Run([]string{"send", "codex:s", "hello", "--stream"})
 	if err == nil || !strings.Contains(err.Error(), "source unavailable") || len(fake.sent) != 0 {
 		t.Fatalf("err=%v sent=%v", err, fake.sent)
 	}
@@ -117,7 +117,7 @@ func TestStreamActiveDaemonTimeoutCancelsSubscription(t *testing.T) {
 		return testSessionStreamReader{blocked: true, cancelled: &cancelled}, nil
 	}
 	started := time.Now()
-	err := app.cmdStream([]string{"codex:s", "--timeout", "20ms"})
+	err := app.Run([]string{"stream", "codex:s", "--timeout", "20ms"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v, want context deadline exceeded", err)
 	}
@@ -147,7 +147,7 @@ func TestSendReplyToNewNotionThreadNeverStealsTakenAlias(t *testing.T) {
 	app.catalogDaemonRunning = func() bool { return true }
 	app.daemonSessionPageReader = func() (sessionPageReader, error) { return testSessionPageReader{}, nil }
 	app.daemonSessionStreamReader = func() (sessionStreamReader, error) { return testSessionStreamReader{}, nil }
-	err := app.cmdSend([]string{"notion:new:launch-notes", "draft", "--reply"})
+	err := app.Run([]string{"send", "notion:new:launch-notes", "draft", "--reply"})
 	if err == nil || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("err=%v, want alias registration failure", err)
 	}

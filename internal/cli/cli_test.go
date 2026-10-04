@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -219,7 +220,7 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "source")
 	output, err := captureStdout(t, func() error {
-		return app.cmdSteer([]string{"target", "focus now"})
+		return app.Run([]string{"steer", "target", "focus now"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -236,8 +237,8 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	}
 }
 
-func TestValidateCommandFlags(t *testing.T) {
-	tests := []struct {
+func TestSendFlagValidation(t *testing.T) {
+	for _, test := range []struct {
 		name      string
 		args      []string
 		wantError string
@@ -245,19 +246,26 @@ func TestValidateCommandFlags(t *testing.T) {
 		{"unknown", []string{"--bogus"}, "unknown flag"},
 		{"missing value", []string{"--model", "--json"}, "requires a value"},
 		{"duplicate", []string{"--reply", "--reply"}, "only be specified once"},
-		{"no queue", []string{"target", "message", "--no-queue", "--json"}, ""},
-		{"terminator", []string{"target", "--", "--literal"}, ""},
-	}
-	for _, test := range tests {
+	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := validateCommandFlags("send", test.args)
-			if test.wantError == "" && err != nil {
-				t.Fatal(err)
-			}
-			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+			err := (&App{}).Run(append([]string{"send"}, test.args...))
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("err=%v", err)
 			}
 		})
+	}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, Status: surface.StatusIdle}}, caps: surface.Capabilities{Send: true}}
+	app, _ := cliFixture(t, fake)
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", "codex:target", "message", "--no-queue", "--json"})
+	}); err != nil {
+		t.Fatalf("--no-queue --json rejected: %v", err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:target", "--", "--literal"}) }); err != nil {
+		t.Fatalf("terminator rejected: %v", err)
+	}
+	if len(fake.sent) != 2 || fake.sent[1] != "--literal" {
+		t.Fatalf("sent=%q", fake.sent)
 	}
 }
 
@@ -267,7 +275,7 @@ func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
 	app.daemonServiceLoaded = func() bool { return false }
-	output, err := captureStdout(t, func() error { return app.cmdDoctor([]string{"--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	if err == nil || !strings.Contains(err.Error(), "unhealthy") {
 		t.Fatalf("err=%v output=%s", err, output)
 	}
@@ -292,7 +300,7 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
 	app.daemonServiceLoaded = func() bool { return true }
-	output, err := captureStdout(t, func() error { return app.cmdDoctor([]string{"--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	if err != nil {
 		t.Fatalf("err=%v output=%s", err, output)
 	}
@@ -303,29 +311,22 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 
 func TestHomebrewDaemonLifecycleUsesHomebrewSupervisor(t *testing.T) {
 	logPath := installHomebrewLaunchctl(t)
+	t.Setenv("HOME", t.TempDir())
 	app := &App{}
 	for name, check := range map[string]struct {
-		call func() error
+		args []string
 		want string
 	}{
-		"start":     {call: app.daemonStart, want: "brew services start agenthail"},
-		"stop":      {call: app.daemonStop, want: "brew services stop agenthail"},
-		"install":   {call: app.daemonInstallService, want: "brew services restart agenthail"},
-		"uninstall": {call: app.daemonUninstallService, want: "brew services stop agenthail"},
+		"start":     {args: []string{"daemon", "start"}, want: "brew services start agenthail"},
+		"stop":      {args: []string{"daemon", "stop"}, want: "brew services stop agenthail"},
+		"install":   {args: []string{"daemon", "install"}, want: "brew services restart agenthail"},
+		"uninstall": {args: []string{"daemon", "uninstall"}, want: "brew services stop agenthail"},
+		"restart":   {args: []string{"daemon", "restart"}, want: "restart launchd service"},
+		"dashboard": {args: []string{"dashboard", "enable", "--no-open"}, want: "restart launchd service"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := check.call()
+			err := app.Run(check.args)
 			if err == nil || !strings.Contains(err.Error(), check.want) {
-				t.Fatalf("err=%v", err)
-			}
-		})
-	}
-	for name, call := range map[string]func() error{
-		"restart":   app.daemonRestart,
-		"dashboard": app.restartDaemonForDashboard,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := call(); err == nil || !strings.Contains(err.Error(), "restart launchd service") {
 				t.Fatalf("err=%v", err)
 			}
 		})
@@ -379,21 +380,35 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_SESSION_ID", "caller")
-	rows, err := r.ListQueue(false)
-	if err != nil {
-		t.Fatal(err)
+	list := func(filters ...string) []string {
+		t.Helper()
+		output, err := captureStdout(t, func() error { return app.Run(append([]string{"queue", "list", "--json"}, filters...)) })
+		if err != nil {
+			t.Fatalf("filters=%v err=%v", filters, err)
+		}
+		var document struct {
+			Messages []struct {
+				Message string `json:"message"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal([]byte(output), &document); err != nil {
+			t.Fatalf("output=%s err=%v", output, err)
+		}
+		var messages []string
+		for _, row := range document.Messages {
+			messages = append(messages, row.Message)
+		}
+		sort.Strings(messages)
+		return messages
 	}
-	mine, err := app.filterQueueRows(context.Background(), rows, "", true, "")
-	if err != nil || len(mine) != 2 {
-		t.Fatalf("mine=%+v err=%v", mine, err)
+	if got := list("--mine"); strings.Join(got, ",") != "inbound,outbound" {
+		t.Fatalf("mine=%v", got)
 	}
-	nested, err := app.filterQueueRows(context.Background(), rows, "", false, "/work/root")
-	if err != nil || len(nested) != 2 {
-		t.Fatalf("workspace=%+v err=%v", nested, err)
+	if got := list("--cwd", "/work/root"); strings.Join(got, ",") != "inbound,outbound" {
+		t.Fatalf("workspace=%v", got)
 	}
-	target, err := app.filterQueueRows(context.Background(), rows, "codex:nested", false, "")
-	if err != nil || len(target) != 1 || target[0].Message != "outbound" {
-		t.Fatalf("target=%+v err=%v", target, err)
+	if got := list("--target", "codex:nested"); strings.Join(got, ",") != "outbound" {
+		t.Fatalf("target=%v", got)
 	}
 }
 
@@ -401,7 +416,7 @@ func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 	session := surface.Session{ID: "fresh", Surface: surface.KindClaude, Status: surface.StatusBusy}
 	fake := &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"fresh": session}}
 	app, r := cliFixture(t, fake)
-	if _, err := captureStdout(t, func() error { return app.cmdQueue([]string{"claude:fresh", "later"}) }); err != nil {
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", "claude:fresh", "later"}) }); err != nil {
 		t.Fatal(err)
 	}
 	if r.QueueCount("fresh") != 1 {
@@ -417,7 +432,7 @@ func TestCompactUsesTypedControlForWorkingClaudeSession(t *testing.T) {
 		caps:     surface.Capabilities{Compact: true},
 	}
 	app, registry := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"busy"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"compact", "busy"}) })
 	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("busy") != 1 {
 		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("busy"), err)
 	}
@@ -431,7 +446,7 @@ func TestQueueRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 		"plain": {ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
 	}}
 	app, r := cliFixture(t, fake)
-	err := app.cmdQueue([]string{"codex:plain", "do not queue"})
+	err := app.Run([]string{"queue", "codex:plain", "do not queue"})
 	if err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("err=%v", err)
 	}
@@ -445,7 +460,7 @@ func TestQueueAllowsUnloadedCodexDesktopSession(t *testing.T) {
 		"desktop": {ID: "desktop", Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"},
 	}}
 	app, r := cliFixture(t, fake)
-	if err := app.cmdQueue([]string{"codex:desktop", "deliver later"}); err != nil {
+	if err := app.Run([]string{"queue", "codex:desktop", "deliver later"}); err != nil {
 		t.Fatal(err)
 	}
 	if count := r.QueueCount("desktop"); count != 1 {
@@ -470,7 +485,7 @@ func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	if err := r.NackMessage(id, errors.New("read only"), time.Now(), 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.cmdQueue([]string{"retry", strconv.FormatInt(id, 10)}); err == nil || !strings.Contains(err.Error(), "read only") {
+	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("retry err=%v", err)
 	}
 	item, err := r.QueueItem(id)
@@ -488,10 +503,10 @@ func TestRoutingRejectsReadOnlyCodexTerminalDestination(t *testing.T) {
 	if _, err := r.CreateChannel("reviewers"); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.cmdChannel([]string{"add", "reviewers", "codex:plain"}); err == nil || !strings.Contains(err.Error(), "read only") {
+	if err := app.Run([]string{"channel", "add", "reviewers", "codex:plain"}); err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("channel add err=%v", err)
 	}
-	if err := app.cmdRelay([]string{"add", "codex:source", "codex:plain"}); err == nil || !strings.Contains(err.Error(), "read only") {
+	if err := app.Run([]string{"relay", "add", "codex:source", "codex:plain"}); err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("relay add err=%v", err)
 	}
 	members, err := r.ChannelMembers("reviewers")
@@ -547,7 +562,7 @@ func TestNotionNewRegistersPersistedThreadInsteadOfSyntheticTarget(t *testing.T)
 		sendResult: &surface.SendResult{UUID: threadID, Accepted: true},
 	}
 	app, registry := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"notion:new:launch-notes", "draft", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "notion:new:launch-notes", "draft", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +589,7 @@ func TestNotionNewCannotBeQueuedBeforePersistence(t *testing.T) {
 	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, Name: "launch-notes", Status: surface.StatusIdle}
 	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"new:launch-notes": synthetic}, caps: surface.Capabilities{Send: true}}
 	app, registry := cliFixture(t, fake)
-	err := app.cmdQueue([]string{"notion:new:launch-notes", "later"})
+	err := app.Run([]string{"queue", "notion:new:launch-notes", "later"})
 	if err == nil || !strings.Contains(err.Error(), "cannot be queued") {
 		t.Fatalf("err=%v", err)
 	}
@@ -587,7 +602,7 @@ func TestSendReplyFailsClosedWhenBaselineObservationFails(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true, Reply: true}, observeErr: errors.New("cursor unavailable")}
 	app, _ := cliFixture(t, fake)
-	err := app.cmdSend([]string{"codex:s", "hello", "--reply"})
+	err := app.Run([]string{"send", "codex:s", "hello", "--reply"})
 	if err == nil || !strings.Contains(err.Error(), "establish reply cursor") || len(fake.sent) != 0 {
 		t.Fatalf("err=%v sent=%v", err, fake.sent)
 	}
@@ -597,11 +612,11 @@ func TestSendStreamPreservesFragmentBytes(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true, Stream: true}, streamEvents: []surface.StreamEvent{{Kind: "text", Text: "hel"}, {Kind: "text", Text: "lo"}, {Kind: "done"}}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:s", "hello", "--stream"}) })
 	if err != nil || output != "hello\n" {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	if err := app.cmdSend([]string{"codex:s", "hello", "--stream", "--json"}); err == nil {
+	if err := app.Run([]string{"send", "codex:s", "hello", "--stream", "--json"}); err == nil {
 		t.Fatal("incompatible stream JSON accepted")
 	}
 }
@@ -622,7 +637,7 @@ func TestSendDirectStreamDisplaysNormalizedClaudeTimelineAndFailsTerminal(t *tes
 		},
 	}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"claude:s", "hello", "--stream"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "claude:s", "hello", "--stream"}) })
 	if err == nil || !strings.Contains(err.Error(), "did not complete successfully: cancelled") || output != "answer  -> Read x\n  <- contents\n" {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -643,7 +658,7 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 		},
 	}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:s", "hello", "--stream"}) })
 	if err != nil || output != "hello final\n" {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -654,7 +669,7 @@ func TestSendTimeoutBoundsDelivery(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true}, sendWait: true}
 	app, _ := cliFixture(t, fake)
 	started := time.Now()
-	err := app.cmdSend([]string{"codex:s", "hello", "--timeout", "50ms"})
+	err := app.Run([]string{"send", "codex:s", "hello", "--timeout", "50ms"})
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
 		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
 	}
@@ -665,7 +680,7 @@ func TestReplyRejectsFailedCompletion(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Reply: &surface.ReplyResult{Text: "partial", Done: true, Error: "turn failed"}, Source: "rpc"}}
-	err := app.cmdReply([]string{"codex:s"})
+	err := app.Run([]string{"reply", "codex:s"})
 	if err == nil || !strings.Contains(err.Error(), "did not complete successfully") {
 		t.Fatalf("err=%v", err)
 	}
@@ -677,7 +692,7 @@ func TestListJSONUsesDefaultLimit(t *testing.T) {
 		fake.listed = append(fake.listed, surface.Session{ID: string(rune('a' + i)), Surface: surface.KindCodex, LastActive: time.Now().Add(-time.Duration(i) * time.Minute)})
 	}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,11 +725,11 @@ func TestListCwdFiltersByCanonicalAncestryInTextAndJSON(t *testing.T) {
 		{ID: "other", Surface: surface.KindCodex, Name: "other", Cwd: other},
 	}}
 	app, _ := cliFixture(t, fake)
-	text, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", alias}) })
+	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", alias}) })
 	if err != nil || !strings.Contains(text, "root") || !strings.Contains(text, "nested") || strings.Contains(text, "other") {
 		t.Fatalf("text=%q err=%v", text, err)
 	}
-	jsonText, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", alias, "--json"}) })
+	jsonText, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", alias, "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +789,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 		t.Fatal(err)
 	}
 
-	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", root, "--wide", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", root, "--wide", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,11 +835,11 @@ func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
 		{ID: "three", Surface: surface.KindCodex, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
 	}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdList(nil) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
 	if err != nil || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail") || strings.Contains(output, "/work/three/other") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	wide, err := captureStdout(t, func() error { return app.cmdList([]string{"--wide"}) })
+	wide, err := captureStdout(t, func() error { return app.Run([]string{"list", "--wide"}) })
 	if err != nil || !strings.Contains(wide, "CWD") || !strings.Contains(wide, fake.listed[2].Cwd) {
 		t.Fatalf("wide=%q err=%v", wide, err)
 	}
@@ -834,7 +849,7 @@ func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing
 	working := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "live", Surface: surface.KindCodex}}}
 	optionalFailure := &cliSurface{kind: surface.KindNotion, listErr: errors.New("choose a Notion space")}
 	app := App{Surfaces: []SurfaceEntry{{Name: "codex", Surface: working}, {Name: "notion", Surface: optionalFailure}}}
-	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
 	if err != nil || !strings.Contains(output, `"id":"live"`) || !strings.Contains(output, `"notion":"choose a Notion space"`) {
 		t.Fatalf("output=%s err=%v", output, err)
 	}
@@ -843,7 +858,7 @@ func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing
 func TestListFailsWhenEverySurfaceDiscoveryFails(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindNotion, listErr: errors.New("unavailable")}
 	app := App{Surfaces: []SurfaceEntry{{Name: "notion", Surface: fake}}}
-	_, err := captureStdout(t, func() error { return app.cmdList([]string{"--json"}) })
+	_, err := captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
 	if err == nil || !strings.Contains(err.Error(), "1 surface(s) failed discovery") {
 		t.Fatalf("err=%v", err)
 	}
@@ -855,7 +870,7 @@ func TestListAllIncludesSavedSessionsWithoutSurfaceDiscovery(t *testing.T) {
 	if err := registry.RegisterSession(surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}); err != nil {
 		t.Fatal(err)
 	}
-	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--all", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
 	if err != nil || !strings.Contains(output, "old project") || fake.listCalls != 1 {
 		t.Fatalf("output=%s calls=%d err=%v", output, fake.listCalls, err)
 	}
@@ -865,7 +880,7 @@ func TestSearchCodexPrintsAndRegistersHistoryHits(t *testing.T) {
 	hit := surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}
 	fake := &cliSurface{kind: surface.KindCodex, searchResults: []surface.SessionSearchResult{{Session: hit, Snippet: "matched text"}}}
 	app, registry := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdSearch([]string{"codex", "project"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"search", "codex", "project"}) })
 	if err != nil || !strings.Contains(output, "old project") || !strings.Contains(output, "matched text") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -877,7 +892,7 @@ func TestSearchCodexPrintsAndRegistersHistoryHits(t *testing.T) {
 func TestSearchCodexRequiresThreeCharacters(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, _ := cliFixture(t, fake)
-	err := app.cmdSearch([]string{"codex", "Q"})
+	err := app.Run([]string{"search", "codex", "Q"})
 	if err == nil || !strings.Contains(err.Error(), "at least 3") {
 		t.Fatalf("err=%v", err)
 	}
@@ -887,7 +902,7 @@ func TestLastEmptyJSONIsOneDocument(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindNotion}
 	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"s": session}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"notion:s", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "notion:s", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -901,11 +916,11 @@ func TestLastLabelsTranscriptSourceInTextAndJSON(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "local-transcript"}}}
 	app, _ := cliFixture(t, fake)
-	text, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s"}) })
+	text, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s"}) })
 	if err != nil || !strings.Contains(text, "[local-transcript]") {
 		t.Fatalf("text=%q err=%v", text, err)
 	}
-	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "--json"}) })
 	if err != nil || !strings.Contains(output, `"source":"local-transcript"`) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -917,7 +932,7 @@ func TestLastPassesExplicitOlderCursorAndReportsNextPage(t *testing.T) {
 	reader := &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{Assistant: "older", Source: "local-transcript"}}, Source: "local-transcript", NextBefore: 123}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = reader
-	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--before", "456", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "--before", "456", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -932,16 +947,16 @@ func TestLastKeepsExchangesWhenOnlyDetailIsUnavailableAndSurfacesWarning(t *test
 	reader := &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{User: "q", Assistant: "a", Source: "rpc"}}, Source: "rpc", UnavailableReason: "no local transcript yet"}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = reader
-	output, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "--json"}) })
 	if err != nil || !strings.Contains(output, `"assistant":"a"`) || !strings.Contains(output, `"readError":"no local transcript yet"`) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	reader.result = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "local-transcript", UnavailableReason: "no local transcript yet"}
-	if _, err := captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) }); err == nil || !strings.Contains(err.Error(), "no local transcript yet") {
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "--json"}) }); err == nil || !strings.Contains(err.Error(), "no local transcript yet") {
 		t.Fatalf("err=%v", err)
 	}
 	reader.result = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{Assistant: "a", Source: "local-transcript"}}, Source: "local-transcript", Warning: "native read failed"}
-	output, err = captureStdout(t, func() error { return app.cmdLast([]string{"codex:s", "--json"}) })
+	output, err = captureStdout(t, func() error { return app.Run([]string{"last", "codex:s", "--json"}) })
 	if err != nil || !strings.Contains(output, `"warning":"native read failed"`) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -951,7 +966,7 @@ func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "rpc"}}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdReply([]string{"codex:s", "--json", "--timeout", "50ms"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"reply", "codex:s", "--json", "--timeout", "50ms"}) })
 	if err != nil || !strings.Contains(output, `"source":"rpc"`) {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -960,7 +975,7 @@ func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	blocked := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tailBlock: blockedTail}
 	app, _ = cliFixture(t, blocked)
 	started := time.Now()
-	err = app.cmdReply([]string{"codex:s", "--timeout", "50ms"})
+	err = app.Run([]string{"reply", "codex:s", "--timeout", "50ms"})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
 		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
 	}
