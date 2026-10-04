@@ -430,6 +430,19 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || !bytes.Equal(response.Body.Bytes(), imageBytes) {
 		t.Fatalf("status=%d content-type=%q body=%d", response.Code, response.Header().Get("Content-Type"), response.Body.Len())
 	}
+	pairing, err := registry.CreateDevicePairing("control-only", []string{"control"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, controlToken, err := registry.CompleteDevicePairing(pairing.Secret, "control-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil)
+	request.Header.Set("Authorization", "Bearer "+controlToken)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusUnauthorized, "unauthorized")
 	oversize := bytes.Repeat([]byte{0x01}, 10<<20+1)
 	encoded := base64.StdEncoding.EncodeToString(oversize)
 	overPath := filepath.Join(t.TempDir(), "oversize.jsonl")
