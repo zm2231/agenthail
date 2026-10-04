@@ -633,7 +633,9 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 				turnID = currentTurnID
 			}
 			items := claudeTimelineItems(record)
-			decorateTimelineAttachments(items, record, "claude", lineOffset)
+			if err := decorateTimelineAttachments(ctx, items, record, "claude", lineOffset); err != nil {
+				return err
+			}
 			for index, item := range items {
 				key := stableTimelineItemID(lineOffset, line, index)
 				version := uint64(len(item.Text))
