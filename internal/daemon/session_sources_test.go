@@ -392,8 +392,23 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	}
 	defer subscription.Cancel()
 	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
-	if err != nil || len(window.Entries) != 2 {
+	if err != nil {
 		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	seedBodies := map[string]string{}
+	seedCounts := map[string]int{}
+	for _, entry := range window.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Kind == "message" {
+			seedBodies[payload.Role] = payload.Body
+			seedCounts[payload.Role]++
+		}
+	}
+	if seedBodies["user"] != "seed" || seedBodies["assistant"] != "seed answer" || seedCounts["user"] != 1 || seedCounts["assistant"] != 1 {
+		t.Fatalf("seed bodies=%+v window=%+v", seedBodies, window)
 	}
 	time.Sleep(100 * time.Millisecond)
 	appendTranscript := func(records string) {
