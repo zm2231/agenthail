@@ -157,7 +157,9 @@ ALTER TABLE routes DROP COLUMN active;
 ALTER TABLE routes DROP COLUMN once_only;
 ALTER TABLE message_queue DROP COLUMN evidence;
 ALTER TABLE message_queue DROP COLUMN operation;
-PRAGMA user_version=6;
+ALTER TABLE session_journal_state DROP COLUMN seed_status;
+ALTER TABLE session_journal_state DROP COLUMN seed_seq;
+PRAGMA user_version=10;
 SQL
 
 install_once "$TEST_HOME" "$NEW_BIN" "$DATA_DIR" >"$TMP/upgrade.log"
@@ -176,7 +178,9 @@ test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "10"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "11"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_status'")" = "1"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_seq'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('launcher_pending') WHERE name='alias'")" = "1"
 
 test -f "$DATA_DIR/skills/agenthail-operations/SKILL.md"
