@@ -66,6 +66,7 @@ struct TimelineGroup: Identifiable {
 
 struct CompactActivityGroup: View {
     let group: TimelineGroup
+    var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var onInspect: () -> Void = {}
     @State private var expanded = false
 
@@ -86,8 +87,8 @@ struct CompactActivityGroup: View {
                 if expanded {
                     ForEach(group.invocations) { invocation in
                         if let call = invocation.items.first, call.kind == "toolCall" {
-                            ToolActivityRow(call: call, results: Array(invocation.items.dropFirst()))
-                        } else { ForEach(invocation.items) { IOSTimelineRow(item: $0) } }
+                            ToolActivityRow(call: call, results: Array(invocation.items.dropFirst()), attachmentLoader: attachmentLoader)
+                        } else { ForEach(invocation.items) { IOSTimelineRow(item: $0, attachmentLoader: attachmentLoader) } }
                     }
                     Button("Collapse activity", systemImage: "chevron.up") { expanded = false }
                         .font(.subheadline.weight(.medium))
@@ -96,7 +97,7 @@ struct CompactActivityGroup: View {
                 }
             }
         } else {
-            ForEach(group.items) { IOSTimelineRow(item: $0) }
+            ForEach(group.items) { IOSTimelineRow(item: $0, attachmentLoader: attachmentLoader) }
         }
     }
 }
@@ -104,6 +105,7 @@ struct CompactActivityGroup: View {
 struct ToolActivityRow: View {
     let call: TimelineItem
     let results: [TimelineItem]
+    var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     var standaloneRecord = false
     @State private var expanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -146,7 +148,11 @@ struct ToolActivityRow: View {
                             Spacer()
                             SessionTimestamp(value: result.timestamp)
                         }.foregroundStyle(.secondary)
-                        ToolOutput(text: result.text)
+                        if result.kind == "attachment" {
+                            AttachmentRow(item: result, loader: attachmentLoader.map { loader in { await loader(result) } })
+                        } else {
+                            ToolOutput(text: result.text)
+                        }
                         if result.truncated { shortened }
                     }
                     if call.truncated { shortened }
