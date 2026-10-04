@@ -355,22 +355,57 @@ private struct AgenthailMenuContent: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Label(model.isConnected ? "Connected" : "Not connected", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-        Divider()
-        Text("Working: \(model.workingSessions.count.formatted())")
-        Text("Needs attention: \((model.snapshot?.attention.count ?? 0).formatted())")
-        Text("Queued: \((model.snapshot?.queue.count ?? 0).formatted())")
-        Divider()
-        Button("Open Agenthail") {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-            openWindow(id: "main")
+        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: model.attentionSessionIDs, now: Date())
+        let working = model.knownSessions.filter(\.isWorking).sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let recent = model.knownSessions
+            .filter { !$0.isWorking && !model.attentionSessionIDs.contains($0.id) }
+            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        Label(model.isConnected ? "Connected" : "Agenthail isn't running", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        if !tree.needsYou.isEmpty {
+            Section("Needs you") {
+                ForEach(tree.needsYou.prefix(5)) { session in sessionItem(session) }
+            }
         }
-        .keyboardShortcut("o")
+        if !working.isEmpty {
+            Section("Working") {
+                ForEach(working.prefix(5)) { session in sessionItem(session) }
+            }
+        }
+        if !recent.isEmpty {
+            Section("Recent") {
+                ForEach(recent.prefix(5)) { session in sessionItem(session) }
+            }
+        }
+        Divider()
+        Button("New Session…") {
+            open()
+            model.newSessionVisible = true
+        }
+        .keyboardShortcut("n")
+        Button("Open Agenthail") { open() }
+            .keyboardShortcut("o")
+        SettingsLink { Text("Settings…") }
+            .keyboardShortcut(",")
+        Divider()
         Button("Restart Agenthail") { model.restartDaemon() }
         Button("Open Login Item Settings") { _ = NativeCommand.run(["service", "settings"]) }
         Divider()
         Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    private func sessionItem(_ session: SessionState) -> some View {
+        Button {
+            model.selectSession(session.id)
+            open()
+        } label: {
+            Text("\(session.title)  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))")
+        }
+    }
+
+    private func open() {
+        NSApplication.shared.activate()
+        openWindow(id: "main")
     }
 }
 
