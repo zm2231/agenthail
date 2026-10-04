@@ -1298,3 +1298,67 @@ func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 		t.Fatalf("stream calls=%d", calls)
 	}
 }
+
+func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
+	_, reg, _, from, _ := daemonFixture(t)
+	transcript := t.TempDir() + "/session.jsonl"
+	if err := os.WriteFile(transcript, []byte(`{"type":"user","uuid":"u1","message":{"content":"seed"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"seed answer"}]}}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Surface = surface.KindClaude
+	from.Transcript = transcript
+	from.HasLocal = true
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	firstManager := newSessionSourceManager(reg)
+	first, err := firstManager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Cancel()
+	waitForSessionSourceGone(t, firstManager)
+	file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"type":"user","uuid":"u2","message":{"content":"unviewed question"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"unviewed answer"}]}}
+`); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	file.Close()
+	manager := newSessionSourceManager(reg)
+	second, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		second.Cancel()
+		waitForSessionSourceGone(t, manager)
+	}()
+	bodies := map[string]int{}
+	deadline := time.Now().Add(3 * time.Second)
+	for bodies["unviewed answer"] == 0 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		window, err := reg.SessionJournalAfter(from.ID, 0, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies = map[string]int{}
+		for _, entry := range window.Entries {
+			var payload sessionJournalPayload
+			if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.Body != "" {
+				bodies[payload.Body]++
+			}
+		}
+	}
+	for _, body := range []string{"seed", "seed answer", "unviewed question", "unviewed answer"} {
+		if bodies[body] != 1 {
+			t.Fatalf("body %q journaled %d times: %v", body, bodies[body], bodies)
+		}
+	}
+}
