@@ -42,6 +42,23 @@ struct SessionPaneTest {
         let idle = SessionState(id: "I", surface: "codex", name: "i", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
         check(!SessionPane.stopAvailable(idle, removed: false, draft: "") && !SessionPane.stopAvailable(nil, removed: false, draft: ""), "nothing to stop when idle or unselected")
 
+        let watched = model.openPane()
+        watched.select("E")
+        var changes = 0
+        let observation = watched.objectWillChange.sink { changes += 1 }
+        watched.composer = "a"
+        check(!watched.draftIsEmpty && changes == 1, "typing the first character republishes the pane once")
+        watched.composer = "ab"
+        watched.composer = "abc"
+        check(changes == 1, "further typing does not republish the pane")
+        watched.composer = "  "
+        check(watched.draftIsEmpty && changes == 2, "clearing the draft republishes the pane")
+        model.draft(for: "E").text = "from another pane"
+        check(!watched.draftIsEmpty, "edits from a pane sharing the draft are observed")
+        watched.select("F")
+        check(watched.draftIsEmpty, "a new session's empty draft is observed")
+        observation.cancel()
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }

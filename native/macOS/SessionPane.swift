@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -18,7 +19,11 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published var inspectorVisible = true
     @Published var renamingSession: SessionState?
     @Published private(set) var controlPending = false
-    @Published private(set) var composerDraft = ComposerDraft()
+    @Published private(set) var composerDraft = ComposerDraft() {
+        didSet { observeDraft() }
+    }
+    @Published private(set) var draftIsEmpty = true
+    private var draftObservation: AnyCancellable?
     var composer: String {
         get { composerDraft.text }
         set { composerDraft.text = newValue }
@@ -45,6 +50,17 @@ final class SessionPane: ObservableObject, Identifiable {
     init(model: AgenthailModel, restoresSelection: Bool) {
         self.model = model
         self.restoresSelection = restoresSelection
+        observeDraft()
+    }
+
+    private func observeDraft() {
+        draftObservation = composerDraft.$text
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .removeDuplicates()
+            .sink { [weak self] empty in
+                guard let self, self.draftIsEmpty != empty else { return }
+                self.draftIsEmpty = empty
+            }
     }
 
     var selectedSession: SessionState? { model.knownSessions.first { $0.id == selectedSessionID } }
@@ -248,7 +264,7 @@ final class SessionPane: ObservableObject, Identifiable {
         return draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var canStop: Bool { Self.stopAvailable(displayedSession, removed: removedSession != nil, draft: composer) }
+    var canStop: Bool { Self.stopAvailable(displayedSession, removed: removedSession != nil, draft: draftIsEmpty ? "" : composer) }
 
     func interrupt() {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
