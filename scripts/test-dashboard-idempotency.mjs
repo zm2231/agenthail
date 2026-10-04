@@ -22,11 +22,14 @@ const context = {
     return next;
   },
 };
-vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.runLogicalAction = logicalAction;`, context);
+vm.runInNewContext(`${source.slice(start, end)}\nglobalThis.runLogicalAction = logicalAction;\nglobalThis.deliveryStatusLabel = deliveryStatusLabel;`, context);
 
 const ok = (body = { ok: true }) => ({ ok: true, json: async () => body });
 const httpFailure = () => ({ ok: false, status: 502, text: async () => "typed failure" });
 const networkLoss = () => new TypeError("network lost");
+
+assert.equal(context.deliveryStatusLabel({ ok: true, status: "submitted" }), "Submitted", "pending 202 top-level status must remain Submitted");
+assert.equal(context.deliveryStatusLabel({ ok: true, result: { evidence: "transport_accepted" } }), "Sent", "transport acceptance is Sent");
 
 responses.push(networkLoss(), ok());
 await assert.rejects(() => context.runLogicalAction("send", "send", { message: "one", effort: "high" }));
