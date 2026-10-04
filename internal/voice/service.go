@@ -136,6 +136,20 @@ type Service struct {
 	setOperatorSourceActive func(session *surface.Session, active bool)
 	stream                  SessionStreamProvider
 	operatorSourceActive    bool
+	clock                   clock
+}
+
+type clock struct {
+	now    func() time.Time
+	ticker func() (<-chan time.Time, func())
+}
+
+var systemClock = clock{
+	now: time.Now,
+	ticker: func() (<-chan time.Time, func()) {
+		t := time.NewTicker(time.Second)
+		return t.C, t.Stop
+	},
 }
 
 func New(path string, provider Provider, register func(surface.Session) error, commandPath string) *Service {
@@ -151,7 +165,11 @@ func NewWithTargetsAndOperatorSource(path string, provider Provider, register fu
 }
 
 func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
-	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream}
+	return newService(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, stream, systemClock)
+}
+
+func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
+	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock}
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -198,7 +216,7 @@ func (s *Service) View(owner string) State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Owner == owner {
-		s.lastSeen = time.Now()
+		s.lastSeen = s.clock.now()
 		if s.active() && s.cursor.Source != "" && s.provider != nil && s.loadErr == nil {
 			s.observe()
 		}
@@ -270,7 +288,7 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 	if s.active() && s.state.Owner != owner {
 		return s.view(owner), errors.New("another device owns this call")
 	}
-	s.lastSeen = time.Now()
+	s.lastSeen = s.clock.now()
 	err := s.apply(ctx, owner, a)
 	return s.view(owner), err
 }
@@ -847,9 +865,9 @@ func (s *Service) observe() {
 	}
 	s.running = true
 	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
+		ticks, stop := s.clock.ticker()
+		defer stop()
+		for range ticks {
 			s.mu.Lock()
 			if !s.active() {
 				s.running = false
@@ -862,7 +880,7 @@ func (s *Service) observe() {
 			if err != nil {
 				s.state.State.Message = "Voice event connection interrupted: " + err.Error()
 			}
-			if time.Since(s.lastSeen) > 40*time.Second {
+			if s.clock.now().Sub(s.lastSeen) > 40*time.Second {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = s.apply(ctx, s.state.Owner, Action{Action: "stop", AttemptID: s.state.State.AttemptID})
 				cancel()

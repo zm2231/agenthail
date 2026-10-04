@@ -2,12 +2,11 @@ package voice
 
 import (
 	"context"
-	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -25,24 +24,14 @@ func (f *journalStreamFixture) PrepareSessionStream(context.Context, *surface.Se
 }
 
 func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
-	p := &fixtureProvider{}
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}, turnID: "turn-a"}
 	stream := &journalStreamFixture{events: make(chan sessionstream.Event, 8), prepared: make(chan struct{}), cancelled: make(chan struct{})}
-	s := NewWithTargetsAndOperatorSourceAndStream(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
-		resolved, err := target.Resolve(context.Background(), id)
-		if err != nil {
-			return nil, err
-		}
-		return &Target{Session: resolved, Adapter: target}, nil
-	}, delivery.Dispatcher{}, nil, stream)
-	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
-	apply(t, s, Action{Action: "prepare"})
-	apply(t, s, Action{Action: "select", TargetID: "target-a"})
-	startFixture(t, s)
-	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
-	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	f := newFixture(t, fixtureOptions{target: target, stream: stream})
+	apply(t, f, Action{Action: "prepare"})
+	apply(t, f, Action{Action: "select", TargetID: "target-a"})
+	connectFixture(t, f)
 
-	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this"})
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this"})
 	select {
 	case <-stream.prepared:
 	case <-time.After(time.Second):
@@ -56,40 +45,9 @@ func TestVoiceUsesPreparedJournalAndFiltersTurnWithBodyDelta(t *testing.T) {
 	stream.events <- sessionstream.Event{ItemID: "later-answer", Version: 1, Kind: "message", Role: "assistant", TurnID: "turn-a", Body: "later"}
 	stream.events <- sessionstream.Event{ItemID: "done", Version: 1, Kind: "done", TurnID: "turn-a"}
 
-	deadline := time.After(time.Second)
-	for {
-		p.mu.Lock()
-		count := 0
-		for _, params := range p.params {
-			if text, ok := params["text"].(string); ok && (text == "answer" || text == " final" || text == "later") {
-				count++
-			}
-		}
-		p.mu.Unlock()
-		if count >= 3 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("journal reply did not reach voice operator")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var spoken []string
-	for _, params := range p.params {
-		if text, ok := params["text"].(string); ok {
-			if text == "internal reasoning" || text == "tool arguments" || text == "unrelated" {
-				t.Fatalf("non-spoken journal content reached voice: %q", text)
-			}
-			if text == "answer" || text == " final" || text == "later" {
-				spoken = append(spoken, text)
-			}
-		}
-	}
-	if len(spoken) != 3 || spoken[0] != "answer" || spoken[1] != " final" || spoken[2] != "later" {
-		t.Fatalf("spoken=%v", spoken)
+	waitFor(t, "journal reply reaching the voice operator", func() bool { return len(f.provider.spoken()) >= 3 })
+	if spoken := f.provider.spoken(); !reflect.DeepEqual(spoken, []string{"answer", " final", "later"}) {
+		t.Fatalf("spoken=%q", spoken)
 	}
 	select {
 	case <-stream.cancelled:
