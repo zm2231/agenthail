@@ -854,7 +854,7 @@ func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message strin
 		return err
 	}
 	if current.Status != surface.StatusBusy {
-		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+		return surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
 	}
 	_, err = c.postMessage(ctx, current, message)
 	return err

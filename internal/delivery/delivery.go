@@ -87,7 +87,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 			if surface.IsDeliveryOutcomeUnknown(err) {
 				return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 			}
-			d.failIntent(intent.ID, err.Error())
+			d.failIntent(intent, session.ID, err)
 		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "control-failed"), SessionID: session.ID, Message: "steer", Error: err.Error()})
 		return nil, err
@@ -193,7 +193,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return receipt, nil
 		}
 		if intent != nil {
-			d.failIntent(intent.ID, err.Error())
+			d.failIntent(intent, session.ID, err)
 		}
 		d.record(registry.HistoryEntry{Kind: failureKind(err, "failed"), SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
@@ -258,7 +258,7 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 				if surface.IsDeliveryOutcomeUnknown(steerErr) {
 					return &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: fmt.Sprintf("Submitted to %s.", target)}, nil
 				}
-				d.failIntent(intent.ID, steerErr.Error())
+				d.failIntent(intent, session.ID, steerErr)
 			}
 			d.record(registry.HistoryEntry{Kind: failureKind(steerErr, "control-failed"), SessionID: session.ID, Message: message, Error: steerErr.Error()})
 			return nil, steerErr
@@ -297,9 +297,16 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: fmt.Sprintf("Queued for %s; sends when current turn ends.", target)}, nil
 }
 
-func (d Dispatcher) failIntent(id int64, failure string) {
-	if _, err := d.Registry.FailDeliveryIntentWithNotice(id, failure); err != nil {
-		d.record(registry.HistoryEntry{Kind: "runtime-error", Error: fmt.Sprintf("record delivery %d failure: %s", id, err)})
+// failIntent publishes a durable problem and sender notice only when the
+// provider may have seen the delivery; a refusal before anything started is
+// already returned synchronously and leaves only the history audit.
+func (d Dispatcher) failIntent(intent *registry.DeliveryIntent, sessionID string, failure error) {
+	if surface.IsDeliveryUnavailable(failure) {
+		d.discardIntent(intent, sessionID)
+		return
+	}
+	if _, err := d.Registry.FailDeliveryIntentWithNotice(intent.ID, failure.Error()); err != nil {
+		d.record(registry.HistoryEntry{Kind: "runtime-error", Error: fmt.Sprintf("record delivery %d failure: %s", intent.ID, err)})
 	}
 	if d.ProblemCommitted != nil {
 		d.ProblemCommitted()
