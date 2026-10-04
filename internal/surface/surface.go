@@ -43,8 +43,10 @@ type Session struct {
 	StreamCursorSet       bool          `json:"-"`
 	TranscriptOffset      int64         `json:"-"`
 	TranscriptOffsetSet   bool          `json:"-"`
+	TranscriptIdentity    string        `json:"-"`
 	CodexPendingEventUser bool          `json:"-"`
 	CodexPendingEventTurn string        `json:"-"`
+	CodexCurrentTurnID    string        `json:"-"`
 }
 
 type SessionSearchResult struct {
@@ -493,6 +495,8 @@ func truncate(s string, n int) string {
 func TruncateString(s string, n int) string { return truncate(s, n) }
 
 var ErrUnsupported = errUnsupported{}
+
+var ErrStreamWindow = errors.New("stream window elapsed")
 
 type errUnsupported struct{}
 

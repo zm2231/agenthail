@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -54,8 +55,10 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 		remote.UnavailableReason = local.UnavailableReason
 		remote.TranscriptOffset = local.TranscriptOffset
 		remote.TranscriptOffsetSet = local.TranscriptOffsetSet
+		remote.TranscriptIdentity = local.TranscriptIdentity
 		remote.CodexPendingEventUser = local.CodexPendingEventUser
 		remote.CodexPendingEventTurn = local.CodexPendingEventTurn
+		remote.CodexCurrentTurnID = local.CodexCurrentTurnID
 		return remote, nil
 	}
 	failure := codexNativeReadFailure(remoteErr)
@@ -105,15 +108,52 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
+func transcriptFileIdentity(info os.FileInfo) string {
+	if info == nil || info.Sys() == nil {
+		return ""
+	}
+	value := reflect.ValueOf(info.Sys())
+	if value.Kind() == reflect.Pointer {
+		value = value.Elem()
+	}
+	if value.IsValid() && value.Kind() == reflect.Struct {
+		dev := value.FieldByName("Dev")
+		ino := value.FieldByName("Ino")
+		if dev.IsValid() && ino.IsValid() && dev.CanInterface() && ino.CanInterface() {
+			return fmt.Sprintf("%v:%v", dev.Interface(), ino.Interface())
+		}
+	}
+	return ""
+}
+
 func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	path := codexTranscriptPath(session)
 	if path == "" {
 		return fmt.Errorf("Codex local transcript is unavailable")
 	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
+	}
+	identity := transcriptFileIdentity(fileInfo)
+	if identity == "" {
+		return fmt.Errorf("Codex transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
+	}
+	if session.TranscriptIdentity != "" && session.TranscriptIdentity != identity {
+		return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
+	}
+	session.TranscriptIdentity = identity
 	offset := session.TranscriptOffset
+	if fileInfo.Size() < offset {
+		return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
+	}
 	deadline := time.Now().Add(timeout)
-	currentTurnID := ""
+	currentTurnID := session.CodexCurrentTurnID
 	for time.Now().Before(deadline) {
+		currentInfo, statErr := os.Stat(path)
+		if statErr != nil || currentInfo == nil || !os.SameFile(fileInfo, currentInfo) || currentInfo.Size() < offset {
+			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)
+		}
 		lineOffset := offset
 		next, err := scanAppendedJSONL(ctx, path, offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
 			var record map[string]any
@@ -124,20 +164,23 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 				currentTurnID = turnID
 			}
 			items := codexTimelineItems(record)
-			if turnID := codexRecordTurnID(record); turnID != "" {
+			effectiveTurnID := currentTurnID
+			if effectiveTurnID != "" {
 				for index := range items {
-					items[index].TurnID = turnID
+					items[index].TurnID = effectiveTurnID
 				}
 			}
 			projection := codexUserProjection{pending: session.CodexPendingEventUser, turnID: session.CodexPendingEventTurn}
-			if projection.consume(record, items) {
+			if projection.consume(record, items, effectiveTurnID) {
 				lineOffset += int64(len(line))
 				session.CodexPendingEventUser = projection.pending
 				session.CodexPendingEventTurn = projection.turnID
+				session.CodexCurrentTurnID = currentTurnID
 				return nil
 			}
 			session.CodexPendingEventUser = projection.pending
 			session.CodexPendingEventTurn = projection.turnID
+			session.CodexCurrentTurnID = currentTurnID
 			if len(items) == 0 {
 				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
 					emitCodexTranscriptItem(session, uuid, record, line, lineOffset, 0, *opaque, currentTurnID, onEvent)
@@ -158,13 +201,15 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			return err
 		}
 		offset = next
+		session.TranscriptOffset = offset
+		session.TranscriptOffsetSet = true
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
 }
 
 func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[string]any, line []byte, offset int64, index int, item surface.TimelineItem, currentTurnID string, onEvent func(surface.StreamEvent)) {
@@ -211,23 +256,22 @@ type codexUserProjection struct {
 	turnID  string
 }
 
-func (p *codexUserProjection) consume(record map[string]any, items []surface.TimelineItem) bool {
+func (p *codexUserProjection) consume(record map[string]any, items []surface.TimelineItem, turnID string) bool {
 	payload, _ := record["payload"].(map[string]any)
 	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
 		p.pending = true
-		p.turnID = codexRecordTurnID(record)
+		p.turnID = turnID
 		return false
 	}
 	if str(record, "type") != "response_item" || !hasUserTimelineItem(items) {
 		if p.pending && p.turnID != "" {
-			if turnID := codexRecordTurnID(record); turnID != "" && turnID != p.turnID {
+			if turnID != "" && turnID != p.turnID {
 				p.pending = false
 				p.turnID = ""
 			}
 		}
 		return false
 	}
-	turnID := codexRecordTurnID(record)
 	duplicate := p.pending && p.turnID != "" && turnID != "" && p.turnID == turnID
 	p.pending = false
 	p.turnID = ""
@@ -308,6 +352,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	}
 	result.TranscriptOffset = completeEnd
 	result.TranscriptOffsetSet = true
+	result.TranscriptIdentity = transcriptFileIdentity(info)
 	start := max(int64(0), end-timelineReadBudget)
 	windowStart := start
 	data := make([]byte, end-start)
@@ -333,19 +378,26 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	lines := bytes.SplitAfter(data, []byte{'\n'})
 	projection := codexUserProjection{}
 	skipResponseUsers := map[int]bool{}
+	recordTurnIDs := map[int]string{}
+	currentTurnID := ""
 	if source == "codex" {
 		for index, line := range lines {
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				continue
 			}
-			if projection.consume(record, codexTimelineItems(record)) {
+			if turnID := codexRecordTurnID(record); turnID != "" {
+				currentTurnID = turnID
+			}
+			recordTurnIDs[index] = currentTurnID
+			if projection.consume(record, codexTimelineItems(record), currentTurnID) {
 				skipResponseUsers[index] = true
 			}
 		}
 	}
 	result.CodexPendingEventUser = projection.pending
 	result.CodexPendingEventTurn = projection.turnID
+	result.CodexCurrentTurnID = currentTurnID
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
@@ -375,7 +427,7 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 					items = []surface.TimelineItem{*opaque}
 				}
 			}
-			if turnID := codexRecordTurnID(record); turnID != "" {
+			if turnID := recordTurnIDs[index]; turnID != "" {
 				for itemIndex := range items {
 					items[itemIndex].TurnID = turnID
 				}

@@ -161,6 +161,42 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 	}
 }
 
+func TestSessionSourceDoesNotJournalNormalStreamWindow(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		streamErr:     surface.ErrStreamWindow,
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	time.Sleep(50 * time.Millisecond)
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range window.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Kind == "source-error" {
+			t.Fatalf("normal stream window journaled source error: %+v", payload)
+		}
+	}
+}
+
 func TestSessionSourceSeedsJournalBeforeSubscribeReturns(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{

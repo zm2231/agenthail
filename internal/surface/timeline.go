@@ -49,8 +49,10 @@ type SessionReadResult struct {
 	JournalSeq            uint64         `json:"journalSeq,omitempty"`
 	TranscriptOffset      int64          `json:"-"`
 	TranscriptOffsetSet   bool           `json:"-"`
+	TranscriptIdentity    string         `json:"-"`
 	CodexPendingEventUser bool           `json:"-"`
 	CodexPendingEventTurn string         `json:"-"`
+	CodexCurrentTurnID    string         `json:"-"`
 	Items                 []TimelineItem `json:"items"`
 	Exchanges             []Exchange     `json:"exchanges"`
 	Reply                 *ReplyResult   `json:"reply,omitempty"`
