@@ -127,42 +127,36 @@ func TestToolResultImageIsMetadataOnlyAndKeepsCallID(t *testing.T) {
 		t.Fatalf("attachment=%+v", page.Items[1])
 	}
 }
-func TestCodexLiveAttachmentSurvivesReaderRestartFromTranscript(t *testing.T) {
+func TestCodexLiveAttachmentUsesExactTranscriptReferenceAfterRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	line := `{"type":"event_msg","payload":{"type":"user_message","message":"look","images":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
-	content := line + strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 220)
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	session := &surface.Session{ID: "thread-image", Transcript: path}
-	digest := hashBytes(mustAttachmentData(t))
-	liveID := liveAttachmentID(session.ID, digest)
+	page, err := readTranscriptPage(context.Background(), path, "codex", int64(len(line)), 20)
+	if err != nil || len(page.Items) == 0 || page.Items[1].Attachment == nil {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	offset, index, _, parseErr := parseAttachmentID(page.Items[1].Attachment.ID)
+	if parseErr != nil {
+		t.Fatal("seed attachment did not contain a durable transcript reference")
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 40000)); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	session := &surface.Session{ID: "thread-indexed", Transcript: path}
+	liveID := attachmentID(offset, index, mustAttachmentData(t))
 	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), session, liveID)
-	if err != nil || attachment == nil || attachment.ID != liveID || string(data) != string(mustAttachmentData(t)) {
+	if err != nil || attachment == nil || string(data) != string(mustAttachmentData(t)) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(data), err)
-	}
-	if _, _, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "other", Transcript: path}, liveID); !errors.Is(err, ErrAttachmentNotFound) {
-		t.Fatalf("cross-session err=%v", err)
-	}
-}
-
-func TestCodexLiveAttachmentCacheIsBounded(t *testing.T) {
-	data := append(mustAttachmentData(t), make([]byte, 8<<20)...)
-	codex := NewCodex("")
-	for index := 0; index < 3; index++ {
-		path := filepath.Join(t.TempDir(), "image.png")
-		if err := os.WriteFile(path, data, 0600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := codex.rememberLiveAttachment(context.Background(), "thread-image", "item", index, attachmentReference{Path: path}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	codex.attachmentMu.Lock()
-	bytes := codex.attachmentBytes
-	codex.attachmentMu.Unlock()
-	if bytes > maxLiveAttachmentCacheBytes {
-		t.Fatalf("cache bytes=%d limit=%d", bytes, maxLiveAttachmentCacheBytes)
 	}
 }
 

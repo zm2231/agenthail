@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -328,36 +327,6 @@ func codexEventCallID(value any) string {
 		}
 	}
 	return ""
-}
-
-func codexEventImageReferences(value any) []attachmentReference {
-	var refs []attachmentReference
-	var visit func(any)
-	visit = func(current any) {
-		switch value := current.(type) {
-		case map[string]any:
-			typ := strings.ToLower(str(value, "type"))
-			if strings.Contains(typ, "image") {
-				if ref, ok := attachmentReferenceFromValue(value); ok {
-					refs = append(refs, ref)
-				}
-			}
-			keys := make([]string, 0, len(value))
-			for key := range value {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			for _, key := range keys {
-				visit(value[key])
-			}
-		case []any:
-			for _, child := range value {
-				visit(child)
-			}
-		}
-	}
-	visit(value)
-	return refs
 }
 
 func codexEventNamedString(value any, keys ...string) string {

@@ -4,10 +4,65 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 )
+
+func codexTranscriptUsesEventUsers(ctx context.Context, path string, end int64) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	if end == 0 {
+		info, statErr := file.Stat()
+		if statErr != nil {
+			return false, statErr
+		}
+		end = info.Size()
+	}
+	reader := bufio.NewReaderSize(file, 64*1024)
+	var offset int64
+	for offset < end {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		var line []byte
+		for {
+			part, readErr := reader.ReadSlice('\n')
+			if int64(len(line)+len(part)) > maxCodexTranscriptRecordBytes {
+				return false, fmt.Errorf("transcript record exceeds %d bytes", maxCodexTranscriptRecordBytes)
+			}
+			line = append(line, part...)
+			if readErr != bufio.ErrBufferFull {
+				if readErr != nil && readErr != io.EOF {
+					return false, readErr
+				}
+				break
+			}
+		}
+		if len(line) == 0 {
+			break
+		}
+		offset += int64(len(line))
+		if offset > end {
+			break
+		}
+		var record map[string]any
+		if json.Unmarshal(line, &record) == nil {
+			payload, _ := record["payload"].(map[string]any)
+			if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
+				return true, nil
+			}
+		}
+		if len(line) == 0 || offset >= end {
+			break
+		}
+	}
+	return false, nil
+}
 
 func readRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit int64, recordLimit int) ([][]byte, int64, error) {
 	file, err := os.Open(path)
@@ -97,18 +152,27 @@ func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 		if err := ctx.Err(); err != nil {
 			return current, err
 		}
-		line, readErr := reader.ReadBytes('\n')
-		if readErr == io.EOF && len(line) > limit {
-			return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
+		var line []byte
+		var readErr error
+		for {
+			part, partErr := reader.ReadSlice('\n')
+			if len(line)+len(part) > limit {
+				return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
+			}
+			line = append(line, part...)
+			readErr = partErr
+			if partErr != bufio.ErrBufferFull {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return current, err
+			}
 		}
 		if readErr == io.EOF && len(line) > 0 {
 			return current, nil
 		}
 		if readErr != nil && readErr != io.EOF {
 			return current, readErr
-		}
-		if len(line) > limit {
-			return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
 		}
 		if len(line) > 1 {
 			if err := visit(line); err != nil {
