@@ -432,6 +432,25 @@ struct CatalogStreamData: Decodable {
     let surface: String?
     let health: String?
     let detail: String?
+    let sourceSessionId: String?
+    let message: String?
+    let reason: String?
+    let at: String?
+}
+
+struct DeliveryProblem: Identifiable, Equatable {
+    let id: UInt64
+    let sessionId: String
+    let sourceSessionId: String?
+    let message: String
+    let reason: String
+    let at: String?
+
+    var reasonText: String {
+        let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = words.first else { return "The message was not delivered." }
+        return first.uppercased() + words.dropFirst()
+    }
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {

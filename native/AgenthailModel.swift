@@ -23,6 +23,7 @@ final class AgenthailModel: ObservableObject {
     @Published var sessionFilter: SessionFilter = .recent
     @Published var inspectorVisible = true
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
+    @Published private(set) var deliveryProblems: [DeliveryProblem] = []
 
     private var api: AgenthailAPI?
     private var connectionTask: Task<Void, Never>?
@@ -43,7 +44,7 @@ final class AgenthailModel: ObservableObject {
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var workingSessions: [SessionState] { snapshot?.sessions.filter(\.isWorking) ?? [] }
     var selectedSession: SessionState? { snapshot?.sessions.first { $0.id == selectedSessionID } }
-    var attentionSessionIDs: Set<String> { Set(snapshot?.attention.map(\.sessionId) ?? []) }
+    var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
     var sessionTree: SessionTree {
         SessionTree.build(snapshot?.sessions ?? [], filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
@@ -372,6 +373,19 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func deliveryProblems(for sessionID: String) -> [DeliveryProblem] {
+        deliveryProblems.filter { $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
+    }
+
+    func dismissDeliveryProblem(_ problem: DeliveryProblem) {
+        deliveryProblems.removeAll { $0.id == problem.id }
+    }
+
+    func resendDeliveryProblem(_ problem: DeliveryProblem) {
+        dismissDeliveryProblem(problem)
+        restoreToComposer(problem.message)
+    }
+
     private func restoreToComposer(_ text: String) {
         let draft = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         composer = draft.isEmpty ? text : "\(composer)\n\n\(text)"
@@ -424,6 +438,10 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+        case "delivery.problem":
+            guard let sessionID = event.data.sessionId, !deliveryProblems.contains(where: { $0.id == event.seq }) else { return }
+            deliveryProblems.append(DeliveryProblem(id: event.seq, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", at: event.data.at))
+            return
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
             let previous = current.surfaces[index]
