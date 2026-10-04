@@ -177,6 +177,9 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 			if source == "claude" {
 				items[i].ID = stableTimelineItemID(offset, line, i)
 			} else {
+				items[i].ID = codexTranscriptItemKey(record, items[i], i)
+			}
+			if items[i].ID == "" {
 				digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
 				items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
 			}
@@ -249,6 +252,41 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		result.Items = append(result.Items, groups[i]...)
 	}
 	return result, nil
+}
+
+func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, index int) string {
+	payload, _ := record["payload"].(map[string]any)
+	semanticID := str(payload, "id")
+	if semanticID == "" {
+		semanticID = item.CallID
+	}
+	if semanticID == "" {
+		semanticID = str(payload, "call_id")
+	}
+	if semanticID == "" {
+		semanticID = str(record, "uuid")
+	}
+	if semanticID == "" {
+		return ""
+	}
+	turnID := str(payload, "turn_id")
+	if turnID == "" {
+		turnID = str(payload, "turnId")
+	}
+	if turnID == "" {
+		turnID = str(record, "turn_id")
+	}
+	if turnID == "" {
+		turnID = str(record, "turnId")
+	}
+	kind := codexDesktopKeyKind(item.Kind)
+	if kind == "" {
+		kind = fmt.Sprintf("item%d", index)
+	}
+	if turnID == "" {
+		return "codex:" + kind + ":" + semanticID
+	}
+	return codexDesktopStreamKey(turnID, kind, semanticID)
 }
 
 func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]surface.Exchange, []int64, *surface.ReplyResult) {

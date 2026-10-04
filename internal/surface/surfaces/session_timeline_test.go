@@ -90,6 +90,9 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	if first.Items[len(first.Items)-1].ID != second.Items[len(second.Items)-2].ID {
 		t.Fatal("identity changed on append")
 	}
+	if second.Items[len(second.Items)-1].Kind != "toolResult" || second.Items[len(second.Items)-1].CallID != "call-449" || second.Items[len(second.Items)-1].Text != "ok" {
+		t.Fatalf("function call output=%+v", second.Items[len(second.Items)-1])
+	}
 }
 
 func TestCodexTimelineSkipsOversizedRecordAndAdvancesCursor(t *testing.T) {
