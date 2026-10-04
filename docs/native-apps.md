@@ -12,6 +12,7 @@ The Mac app keeps your connected conversations in one window.
 - **⌘K** opens a command palette for jumping to any session, starting a new one (⌘N), and session actions.
 - Any session can open in its own window from its context menu or the palette. Windows showing the same session share its draft.
 - A session that disappears from the host stays readable with a notice until you close it.
+- Links open the app from anywhere: `agenthail://session/<id or @handle>` opens a session, `agenthail://new` starts one, and `agenthail://open` brings the app forward.
 
 The menu bar item and the Dock icon's menu list sessions that need you, sessions that are working, and the most recently active idle sessions. The menu bar item also opens the app, a new session, or Settings.
 

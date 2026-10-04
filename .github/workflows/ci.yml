@@ -92,8 +92,10 @@ jobs:
           "$RUNNER_TEMP/peer-envelope-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/ToolRunSummary.swift native/tests/tool_run_summary_test.swift -o "$RUNNER_TEMP/tool-run-summary-test"
           "$RUNNER_TEMP/tool-run-summary-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/AgenthailModel.swift native/TurnSettings.swift native/EventRetryBackoff.swift native/SessionSelection.swift native/OperationsRefreshPolicy.swift native/StatusRefreshPolicy.swift native/macOS/SessionPane.swift native/macOS/CatalogPosition.swift native/macOS/LocalSend.swift native/macOS/SessionTree.swift native/macOS/AgenthailProcess.swift native/tests/session_pane_test.swift -o "$RUNNER_TEMP/session-pane-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/AgenthailModel.swift native/TurnSettings.swift native/EventRetryBackoff.swift native/SessionSelection.swift native/OperationsRefreshPolicy.swift native/StatusRefreshPolicy.swift native/macOS/SessionPane.swift native/macOS/CatalogPosition.swift native/macOS/LocalSend.swift native/macOS/SessionTree.swift native/macOS/AgenthailProcess.swift native/macOS/AgenthailLink.swift native/tests/session_pane_test.swift -o "$RUNNER_TEMP/session-pane-test"
           "$RUNNER_TEMP/session-pane-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/AgenthailLink.swift native/tests/agenthail_link_test.swift -o "$RUNNER_TEMP/agenthail-link-test"
+          "$RUNNER_TEMP/agenthail-link-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

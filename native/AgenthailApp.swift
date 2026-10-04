@@ -235,6 +235,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         NotificationRoute.shared.open(sessionID: sessionID)
     }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleURLEvent(_:reply:)), forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    @MainActor
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              let url = URL(string: text),
+              let link = AgenthailLink(url: url) else { return }
+        NotificationRoute.shared.open(link)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -292,7 +304,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
 final class NotificationRoute: ObservableObject {
     struct Request: Equatable {
         let id = UUID()
-        let sessionID: String?
+        var sessionID: String?
+        var newSession = false
     }
 
     static let shared = NotificationRoute()
@@ -301,6 +314,14 @@ final class NotificationRoute: ObservableObject {
 
     func open(sessionID: String?) {
         latest = Request(sessionID: sessionID)
+    }
+
+    func open(_ link: AgenthailLink) {
+        switch link {
+        case .open: latest = Request(sessionID: nil)
+        case .newSession: latest = Request(sessionID: nil, newSession: true)
+        case .session(let reference): latest = Request(sessionID: reference)
+        }
     }
 
     func claim() -> Request? {
@@ -331,9 +352,10 @@ private struct MenuBarLabel: View {
 
     private func handleRoute() {
         guard let request = route.claim() else { return }
-        if let sessionID = request.sessionID { model.openNotifiedSession(sessionID) }
+        if let sessionID = request.sessionID { model.openSession(reference: sessionID) }
         NSApplication.shared.activate()
         openWindow(id: "main")
+        if request.newSession { model.newSessionVisible = true }
     }
 }
 

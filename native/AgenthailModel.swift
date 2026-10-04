@@ -7,6 +7,10 @@ final class AgenthailModel: ObservableObject {
         didSet {
             trackFinishedSessions(from: oldValue)
             pruneDetailCache()
+            if snapshot != nil, let reference = pendingSessionReference {
+                pendingSessionReference = nil
+                openSession(reference: reference)
+            }
         }
     }
     @Published private(set) var finishedUnseen: Set<String> = []
@@ -51,6 +55,7 @@ final class AgenthailModel: ObservableObject {
     private var detailCache: [String: SessionDetail] = [:]
     private var detailCacheOrder: [String] = []
     private var drafts: [String: ComposerDraft] = [:]
+    private var pendingSessionReference: String?
     private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
         cache.totalCostLimit = 64 * 1024 * 1024
@@ -253,10 +258,10 @@ final class AgenthailModel: ObservableObject {
 
     private func openCreatedSession(_ id: String) async {
         await refresh(fresh: true)
-        if !knownSessions.contains(where: { $0.id == id }), let api, let detail = try? await api.sessionDetail(id: id) {
+        if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
             pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
         }
-        if knownSessions.contains(where: { $0.id == id }) { mainPane.select(id) }
+        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { mainPane.select(session.id) }
     }
 
     func attachmentData(sessionID: String, attachment: TimelineAttachment) async throws -> Data {
@@ -297,11 +302,15 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func openNotifiedSession(_ id: String) {
-        if knownSessions.contains(where: { $0.id == id }) {
-            mainPane.select(id)
+    func openSession(reference: String) {
+        guard snapshot != nil else {
+            pendingSessionReference = reference
+            return
+        }
+        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: reference) }) {
+            mainPane.select(session.id)
         } else {
-            Task { await openCreatedSession(id) }
+            Task { await openCreatedSession(reference) }
         }
     }
 
