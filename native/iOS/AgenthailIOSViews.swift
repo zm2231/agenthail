@@ -866,7 +866,11 @@ struct SessionSummary: View {
     }
     @ViewBuilder private var context: some View {
         if let context = detail.context, context.contextWindow > 0 {
-            Text("\(context.windowEstimated == true ? "~" : "")\(Int(context.fraction * 100))% context").monospacedDigit()
+            if detail.session.surface == "claude", context.exceedsEstimatedWindow {
+                Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
+            } else {
+                Text("\(context.windowEstimated == true ? "~" : "")\(Int(context.fraction * 100))% context").monospacedDigit()
+            }
         }
     }
 }

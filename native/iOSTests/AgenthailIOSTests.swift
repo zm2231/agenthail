@@ -76,6 +76,24 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(model.snapshot?.totalSessions, before - 1)
     }
 
+    func testEstimatedClaudeContextOverflowKeepsTokenCountEvidence() throws {
+        let context = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":210,"contextWindow":200,"compacting":false,"compactionCount":0,"windowEstimated":true}"#.utf8))
+        XCTAssertTrue(context.exceedsEstimatedWindow)
+
+        let knownWindow = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":210,"contextWindow":200,"compacting":false,"compactionCount":0}"#.utf8))
+        XCTAssertFalse(knownWindow.exceedsEstimatedWindow)
+    }
+
+    @MainActor
+    func testSessionDeltaEventsUseTheirOwnStreamsWithoutSnapshotRefresh() {
+        XCTAssertFalse(AgenthailIOSModel.shouldRefreshSnapshot(for: "session.updated"))
+        XCTAssertFalse(AgenthailIOSModel.shouldRefreshSnapshot(for: "turn.completed"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "state.changed"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "settings.updated"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "device.push.updated"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "stream.reset"))
+    }
+
     @MainActor
     func testSessionStreamRejectsEmptyItemIdentity() async throws {
         let model = AgenthailIOSModel(autoConnect: false)

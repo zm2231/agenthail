@@ -246,6 +246,10 @@ struct ContextState: Decodable {
         guard contextWindow > 0 else { return 0 }
         return min(1, Double(usedTokens) / Double(contextWindow))
     }
+
+    var exceedsEstimatedWindow: Bool {
+        windowEstimated == true && contextWindow > 0 && usedTokens > contextWindow
+    }
 }
 
 struct ModelOption: Decodable, Identifiable {

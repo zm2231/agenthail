@@ -4,6 +4,10 @@ import UserNotifications
 
 @MainActor
 final class AgenthailIOSModel: ObservableObject {
+    static func shouldRefreshSnapshot(for eventType: String) -> Bool {
+        eventType == "stream.reset" || eventType == "state.changed" || eventType == "settings.updated" || eventType.hasPrefix("device.")
+    }
+
     @Published var snapshot: DashboardSnapshot?
     @Published var selectedDetail: SessionDetail?
     @Published var selectedSessionID: String?
@@ -128,7 +132,8 @@ final class AgenthailIOSModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
     private var catalogStreamTask: Task<Void, Never>?
-    private var catalogStreamCursor: UInt64 = 0
+    private(set) var catalogStreamCursor: UInt64 = 0
+    private var catalogHostEpoch: String?
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionMetadataTask: Task<Void, Never>?
     private(set) var sessionStreamCursor: UInt64 = 0
@@ -299,7 +304,12 @@ final class AgenthailIOSModel: ObservableObject {
             let loaded = try await api.snapshot(fresh: fresh)
             snapshot = loaded
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
+            if catalogHostEpoch != loaded.hostEpoch {
+                catalogHostEpoch = loaded.hostEpoch
+                catalogStreamCursor = loaded.catalogSeq ?? 0
+            } else {
+                catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
+            }
             connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The Mac could not refresh its agents.") : nil
             await refreshDeliveries()
             return true
@@ -562,6 +572,7 @@ final class AgenthailIOSModel: ObservableObject {
         deliveryQueueIDs = [:]
         lastEventID = 0
         catalogStreamCursor = 0
+        catalogHostEpoch = nil
         connectionError = nil
         reconnecting = false
     }
@@ -785,11 +796,12 @@ final class AgenthailIOSModel: ObservableObject {
 
     private func receive(_ event: AgenthailEvent) async {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
+        guard Self.shouldRefreshSnapshot(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, let self else { return }
-            await self.refresh()
+            await self.refresh(fresh: event.type == "stream.reset")
         }
     }
 
