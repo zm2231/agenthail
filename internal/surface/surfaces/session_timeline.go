@@ -164,7 +164,9 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		} else {
 			items = codexTimelineItems(record)
 		}
-		decorateTimelineAttachments(items, record, source, offset)
+		if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
+			return nil, err
+		}
 		if source == "codex" && str(record, "type") == "event_msg" && len(items) == 1 && items[0].Role == "user" && responseUsers[str(record, "timestamp")+"\x00"+items[0].Text] {
 			continue
 		}
