@@ -495,12 +495,16 @@ struct ConversationPane: View {
     @ObservedObject var model: AgenthailModel
 
     var body: some View {
-        if let session = model.selectedSession {
+        if let session = model.displayedSession {
             VStack(spacing: 0) {
                 ConversationHeader(session: session, model: model.detail?.model, context: model.detail?.context, inspectorVisible: $model.inspectorVisible, onFocusTerminal: { model.focusInTerminal(session) })
                 TranscriptView(model: model, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        ComposerView(model: model, session: session)
+                        if model.removedSession?.id == session.id {
+                            RemovedSessionBar(onClose: model.closeRemovedSession)
+                        } else {
+                            ComposerView(model: model, session: session)
+                        }
                     }
             }
             .background(DesktopPalette.window)
@@ -528,6 +532,34 @@ struct ConversationPane: View {
             }
             .background(DesktopPalette.window)
         }
+    }
+}
+
+struct RemovedSessionBar: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "archivebox")
+                .foregroundStyle(DesktopPalette.text2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("This session is no longer available")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DesktopPalette.text)
+                Text("Agenthail stopped finding it. You're reading its last loaded content.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
+            Spacer()
+            Button("Close", action: onClose)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(DesktopPalette.dock, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DesktopPalette.line))
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 16)
     }
 }
 

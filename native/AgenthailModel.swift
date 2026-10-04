@@ -24,6 +24,8 @@ final class AgenthailModel: ObservableObject {
     @Published var detail: SessionDetail?
     @Published private(set) var detailStale = false
     @Published private(set) var detailRefreshFailed = false
+    @Published private(set) var removedSession: SessionState?
+    private var selectedSnapshot: SessionState?
     @Published var devices: [DeviceState] = []
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
@@ -87,6 +89,7 @@ final class AgenthailModel: ObservableObject {
         return listed + pinnedSessions.filter { !listedIDs.contains($0.id) }
     }
     var selectedSession: SessionState? { knownSessions.first { $0.id == selectedSessionID } }
+    var displayedSession: SessionState? { selectedSession ?? removedSession }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
     var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
@@ -164,6 +167,8 @@ final class AgenthailModel: ObservableObject {
 
     func selectSession(_ id: String) {
         guard id != selectedSessionID || detail == nil else { return }
+        removedSession = nil
+        selectedSnapshot = knownSessions.first { $0.id == id }
         if selectedSessionID != id {
             if let previous = selectedSessionID { drafts[previous] = composer }
             composer = drafts.removeValue(forKey: id) ?? ""
@@ -326,6 +331,19 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func closeRemovedSession() {
+        guard removedSession != nil else { return }
+        removedSession = nil
+        selectedSnapshot = nil
+        if let current = selectedSessionID { drafts[current] = composer }
+        sessionStreamTask?.cancel()
+        detail = nil
+        detailStale = false
+        selectedSessionID = nil
+        UserDefaults.standard.removeObject(forKey: "lastSelectedSessionID")
+        reconcileSelection()
+    }
+
     func openNotifiedSession(_ id: String) {
         if knownSessions.contains(where: { $0.id == id }) {
             selectSession(id)
@@ -376,6 +394,15 @@ final class AgenthailModel: ObservableObject {
     private func reconcileSelection() {
         guard snapshot != nil else { return }
         let sessions = knownSessions
+        if let selected = selectedSessionID {
+            if let live = sessions.first(where: { $0.id == selected }) {
+                selectedSnapshot = live
+                if removedSession != nil { removedSession = nil }
+            } else if removedSession?.id != selected {
+                removedSession = selectedSnapshot?.id == selected ? selectedSnapshot : nil
+            }
+            if removedSession != nil || sessions.contains(where: { $0.id == selected }) { return }
+        }
         let next = reconciledSelection(selected: selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID"), sessions: sessions)
         guard next != selectedSessionID else { return }
         sessionStreamTask?.cancel()
