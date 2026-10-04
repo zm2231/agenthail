@@ -29,7 +29,9 @@ struct DesktopWindow: View {
         .background(DesktopPalette.window)
         .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
-        .sheet(isPresented: $model.newSessionVisible) {
+        .sheet(isPresented: $model.newSessionVisible, onDismiss: {
+            if model.newSessionMessage != nil { model.newSessionVisible = true }
+        }) {
             NewSessionSheet(model: model)
         }
         .overlay(alignment: .top) {

@@ -107,10 +107,11 @@ struct NewSessionSheet: View {
         }
         .onChange(of: agent) { selectDefaultLauncher() }
         .onChange(of: model.newSessionMessage) { takeSharedMessage() }
+        .onChange(of: starting) { takeSharedMessage() }
     }
 
     private func takeSharedMessage() {
-        guard let shared = model.newSessionMessage else { return }
+        guard !starting, submitted == nil, let shared = model.newSessionMessage else { return }
         model.newSessionMessage = nil
         message = message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? shared : "\(message)\n\n\(shared)"
     }
