@@ -857,9 +857,13 @@ struct SessionSummary: View {
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
-    @ViewBuilder private var context: some View {
-        if let context = detail.context, context.contextWindow > 0 {
-            Text("\(context.windowEstimated == true ? "~" : "")\(Int(context.fraction * 100))% context").monospacedDigit()
+	@ViewBuilder private var context: some View {
+		if let context = detail.context {
+			if let fraction = context.fraction {
+				Text("\(context.windowEstimated == true ? "~" : "")\(Int(fraction * 100))% context").monospacedDigit()
+			} else {
+				Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
+			}
         }
     }
 }
@@ -894,7 +898,7 @@ struct SessionInspector: View {
                 Section("Context") {
                     if let context = detail.context {
                         LabeledContent("Used tokens", value: context.usedTokens.formatted())
-                        LabeledContent(context.windowEstimated == true ? "Estimated window" : "Context window", value: context.contextWindow > 0 ? context.contextWindow.formatted() : "Unavailable")
+						LabeledContent(context.windowEstimated == true ? "Estimated window" : (context.contextWindowSource == "configured" ? "Configured window" : "Context window"), value: context.contextWindow > 0 ? context.contextWindow.formatted() : "Unavailable")
                         if let value = context.inputTokens { LabeledContent("Input", value: value.formatted()) }
                         if let value = context.cachedInputTokens { LabeledContent("Cached input", value: value.formatted()) }
                         if let value = context.outputTokens { LabeledContent("Output", value: value.formatted()) }

@@ -1034,8 +1034,9 @@ function renderContextUsage(context) {
     indicator.className = "";
     return;
   }
-  const percent = context.contextWindow
-    ? Math.min(999, Math.round((context.usedTokens / context.contextWindow) * 100))
+  const hasSafeWindow = context.contextWindow > 0 && context.usedTokens <= context.contextWindow;
+  const percent = hasSafeWindow
+    ? Math.round((context.usedTokens / context.contextWindow) * 100)
     : 0;
   indicator.hidden = false;
   indicator.className = context.compacting
@@ -1047,11 +1048,12 @@ function renderContextUsage(context) {
         : "context-usage";
   indicator.textContent = context.compacting
     ? "Compacting context"
-    : context.contextWindow
+    : hasSafeWindow
       ? `Context ${compactTokenCount(context.usedTokens)} / ${compactTokenCount(context.contextWindow)} · ${percent}%`
-      : `${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`;
+      : `${compactTokenCount(context.usedTokens)} tokens · context window unavailable`;
   const details = [];
-  if (context.windowEstimated) details.push("Claude context window is estimated from the active model");
+  if (context.windowEstimated) details.push("Claude context window is estimated");
+  if (context.contextWindowSource === "unknown") details.push("Claude did not report a configured context window");
   if (context.compactionCount) details.push(`${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`);
   if (context.preCompactTokens && context.postCompactTokens)
     details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ const (
 	sessionJournalRetentionCount = 2048
 	sessionJournalRetentionBytes = 8 << 20
 	sessionStreamBodyBytes       = 16 << 10
+	sessionJournalSeedTimeout    = 12 * time.Second
 )
 
 type sessionJournalPayload struct {
@@ -54,6 +56,7 @@ type sessionSource struct {
 	appendBodies  map[string]string
 	anonymous     uint64
 	sourceVersion uint64
+	seedReady     chan struct{}
 }
 
 type sessionSourceSubscription struct {
@@ -79,7 +82,7 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, seedReady: make(chan struct{})}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -87,6 +90,10 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 	m.mu.Unlock()
 	if start {
 		go source.run()
+	}
+	select {
+	case <-source.seedReady:
+	case <-time.After(sessionJournalSeedTimeout):
 	}
 	return subscription, nil
 }
@@ -105,7 +112,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 			return nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, seedReady: make(chan struct{})}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -169,9 +176,25 @@ func (s *sessionSource) stop() {
 
 func (s *sessionSource) run() {
 	s.seedJournal()
+	close(s.seedReady)
+	if s.session.Surface == surface.KindClaude && s.session.Transport == "uds" {
+		s.mu.Lock()
+		for id, subscriber := range s.subscribers {
+			delete(s.subscribers, id)
+			close(subscriber)
+		}
+		s.mu.Unlock()
+		s.manager.mu.Lock()
+		if s.manager.sources[s.session.ID] == s {
+			delete(s.manager.sources, s.session.ID)
+		}
+		s.manager.mu.Unlock()
+		return
+	}
 	for {
 		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
-		if streamErr != nil && s.ctx.Err() == nil {
+		unsupported := errors.Is(streamErr, surface.ErrUnsupported)
+		if streamErr != nil && !unsupported && s.ctx.Err() == nil {
 			s.appendSourceError(streamErr)
 		}
 		s.mu.Lock()
@@ -181,7 +204,7 @@ func (s *sessionSource) run() {
 		}
 		hasHolders := len(s.holders) > 0
 		s.mu.Unlock()
-		if s.ctx.Err() != nil || !hasHolders {
+		if unsupported || s.ctx.Err() != nil || !hasHolders {
 			break
 		}
 		select {

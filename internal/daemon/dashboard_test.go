@@ -33,7 +33,7 @@ func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 
 func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
-	fake.contextUsage = &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}
+	fake.contextUsage = &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 1_000_000, ContextWindowSource: "configured", CompactionCount: 2}
 	response := httptest.NewRecorder()
 	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from", nil))
 	if response.Code != http.StatusOK {
@@ -45,7 +45,7 @@ func TestDashboardSessionIncludesContextUsage(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Context.UsedTokens != 150000 || body.Context.ContextWindow != 200000 || body.Context.CompactionCount != 2 {
+	if body.Context.UsedTokens != 150000 || body.Context.ContextWindow != 1_000_000 || body.Context.ContextWindowSource != "configured" || body.Context.CompactionCount != 2 {
 		t.Fatalf("context=%+v", body.Context)
 	}
 }
@@ -374,6 +374,7 @@ func TestDashboardShowsCompactContextUsage(t *testing.T) {
 		`id="context-usage"`,
 		`delta.kind === "context"`,
 		`Context ${compactTokenCount(context.usedTokens)}`,
+		`context window unavailable`,
 		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
 		`.context-usage.critical`,
 	} {
