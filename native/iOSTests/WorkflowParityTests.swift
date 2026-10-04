@@ -65,6 +65,23 @@ final class WorkflowParityTests: XCTestCase {
         XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
     }
 
+    @MainActor
+    func testCmuxLauncherUsesTerminalContractForAdvancedSettings() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "cmux")
+        XCTAssertTrue(created)
+        XCTAssertEqual(ParityProtocol.state.actions[0]["launcher"] as? String, "cmux")
+        XCTAssertNil(ParityProtocol.state.actions[0]["effort"])
+        XCTAssertNil(ParityProtocol.state.actions[0]["mode"])
+
+        let settings = TurnSettings(effort: "high", mode: .plan)
+        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: "cmux")
+        XCTAssertFalse(rejected)
+        XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+        XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
+    }
+
     func testQueueDecodesIntegratedTurnSettings() throws {
         let data = Data(#"{"id":7,"sessionId":"demo","sourceSessionId":"sender","target":"demo","message":"next","status":"pending","evidence":"queued","attempts":0,"queuedAt":"now","effort":"high","mode":"plan","serviceTier":"fast","outputSchema":{"type":"object","required":["answer"],"additionalProperties":false}}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)

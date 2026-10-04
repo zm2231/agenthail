@@ -19,6 +19,9 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var sessionError: String?
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
+    private var attachmentCache: [String: Data] = [:]
+    private var attachmentCacheBytes = 0
+    private let attachmentCacheLimit = 20 * 1024 * 1024
     @Published var deliveryStatus: [String: String] = [:]
     @Published var deliveryIDs: [String: Int64] = [:]
     private var deliveryQueueIDs: [String: Int64] = [:]
@@ -149,6 +152,27 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    func sessionAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
+        guard let api, let attachment = item.attachment, selectedSessionID == sessionID else { return nil }
+        let cacheKey = "\(sessionID):\(attachment.id)"
+        if let cached = attachmentCache[cacheKey] { return cached }
+        do {
+            let data = try await api.sessionAttachment(sessionID: sessionID, id: attachment.id)
+            guard !Task.isCancelled, selectedSessionID == sessionID else { return nil }
+            if data.count <= attachmentCacheLimit {
+                if attachmentCacheBytes + data.count > attachmentCacheLimit {
+                    attachmentCache.removeAll()
+                    attachmentCacheBytes = 0
+                }
+                attachmentCache[cacheKey] = data
+                attachmentCacheBytes += data.count
+            }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
     private var endpoint: URL?
     private var token: String?
     private var eventTask: Task<Void, Never>?
@@ -253,6 +277,8 @@ final class AgenthailIOSModel: ObservableObject {
                 self.endpoint = pendingPairing.endpoint
                 token = response.token
                 api = pairedAPI
+                attachmentCache.removeAll()
+                attachmentCacheBytes = 0
                 pairing = false
                 operationError = nil
                 if automaticallyConnect {
@@ -583,6 +609,8 @@ final class AgenthailIOSModel: ObservableObject {
         sessionStreamTask?.cancel()
         sessionMetadataTask?.cancel()
         api = nil
+        attachmentCache.removeAll()
+        attachmentCacheBytes = 0
         endpoint = nil
         token = nil
         pushRelayURL = nil
@@ -822,7 +850,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.reason, bodyRef: event.data.bodyRef)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {

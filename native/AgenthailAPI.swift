@@ -93,6 +93,29 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func sessionAttachment(sessionID: String, id: String) async throws -> Data {
+        var components = URLComponents()
+        components.path = "/api/v1/session-attachment"
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        let (bytes, response) = try await session.bytes(for: authorizedRequest(path: path))
+        guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
+        guard response.statusCode == 200 else {
+            if response.statusCode == 413 { throw AgenthailAPIError.request(413, "This image is too large to display on the device.") }
+            throw AgenthailAPIError.request(response.statusCode, HTTPURLResponse.localizedString(forStatusCode: response.statusCode))
+        }
+        if let length = response.value(forHTTPHeaderField: "Content-Length"), let length = Int(length), length > 10 * 1024 * 1024 {
+            throw AgenthailAPIError.request(413, "This image is too large to display on the device.")
+        }
+        var data = Data()
+        for try await byte in bytes {
+            if Task.isCancelled { throw CancellationError() }
+            data.append(byte)
+            if data.count > 10 * 1024 * 1024 { throw AgenthailAPIError.request(413, "This image is too large to display on the device.") }
+        }
+        return data
+    }
+
     func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init()) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body)
@@ -118,7 +141,7 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async throws -> SessionCreationReceipt {
-        if launcher == "tmux" && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+        if launcher.map(Self.terminalLaunchers.contains) == true && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         if surface == "codex" {
@@ -130,6 +153,8 @@ final class AgenthailAPI: @unchecked Sendable {
         if let launcher { body["launcher"] = launcher }
         return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
     }
+
+    private static let terminalLaunchers: Set<String> = ["cmux", "tmux"]
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {
         var components = URLComponents()
