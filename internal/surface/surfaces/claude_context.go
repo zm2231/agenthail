@@ -87,7 +87,7 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				// capacity provenance. Claude can omit the launch-time [1m]
 				// selection from later records, so an unknown window must remain
 				// unknown rather than becoming a guessed denominator.
-				window := ObserveClaudeConfiguredContextWindow(sess.ConfiguredModel)
+				window := observeClaudeCurrentContextWindow(sess.ConfiguredModel, record.Message.Model)
 				state.usage.ContextWindow = window.Window
 				state.usage.ContextWindowSource = window.Source
 				state.usage.WindowEstimated = false
@@ -161,6 +161,24 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 	}
 	usage := state.usage
 	return &usage, nil
+}
+
+func observeClaudeCurrentContextWindow(configuredModel, observedModel string) ClaudeContextWindowObservation {
+	window := ObserveClaudeConfiguredContextWindow(configuredModel)
+	configuredBase := claudeModelBase(configuredModel)
+	observedBase := claudeModelBase(observedModel)
+	if window.Window > 0 && configuredBase != "" && observedBase != "" && configuredBase != observedBase {
+		return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: observedModel}
+	}
+	return window
+}
+
+func claudeModelBase(model string) string {
+	model = strings.TrimSpace(model)
+	if index := strings.IndexByte(model, '['); index >= 0 {
+		model = model[:index]
+	}
+	return strings.TrimSpace(model)
 }
 
 func compactBoundaryKey(record claudeContextRecord) string {

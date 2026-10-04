@@ -23,6 +23,20 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+type dashboardClaudeRunSurface struct {
+	*daemonSurface
+	runs  []surface.ClaudeRunObservation
+	links []surface.ClaudeSubagentLink
+}
+
+func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeRunObservation, error) {
+	return s.runs, nil
+}
+
+func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(context.Context) ([]surface.ClaudeSubagentLink, error) {
+	return s.links, nil
+}
+
 func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
 		if err := validateDashboardListen(listen); err != nil {
@@ -130,6 +144,36 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 	}
 	if got := probe.contextCalls.Load() + probe.modelCalls.Load() + probe.modelsCalls.Load() + probe.readCalls.Load(); got != 0 {
 		t.Fatalf("provider reads=%d (context=%d model=%d models=%d session=%d)", got, probe.contextCalls.Load(), probe.modelCalls.Load(), probe.modelsCalls.Load(), probe.readCalls.Load())
+	}
+}
+
+func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testing.T) {
+	_, registry, _, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.ID = "claude-session"
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	fake := &dashboardClaudeRunSurface{
+		daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{from.ID: from}, accepted: true},
+		runs:          []surface.ClaudeRunObservation{{JobID: "job-1", SessionID: from.ID, RunType: "bg", ProviderState: "working"}, {JobID: "other", SessionID: "other", RunType: "bg"}},
+		links:         []surface.ClaudeSubagentLink{{ParentSessionID: from.ID, AgentID: "agent-1", TranscriptPath: "/tmp/agent-1.jsonl"}, {ParentSessionID: "other", AgentID: "agent-2"}},
+	}
+	d := New(registry, []surface.Surface{fake})
+	response := httptest.NewRecorder()
+	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Runs  []surface.ClaudeRunObservation `json:"claudeRuns"`
+		Links []surface.ClaudeSubagentLink   `json:"claudeSubagents"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Runs) != 1 || body.Runs[0].JobID != "job-1" || len(body.Links) != 1 || body.Links[0].AgentID != "agent-1" {
+		t.Fatalf("body=%+v", body)
 	}
 }
 

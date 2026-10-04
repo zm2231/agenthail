@@ -418,6 +418,32 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 	}
 }
 
+func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"one"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transport: "uds", Transcript: path, HasLocal: true}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		file, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+		defer file.Close()
+		file.WriteString(`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}` + "\n")
+	}()
+	var events []surface.StreamEvent
+	streamContext, cancel := context.WithCancel(context.Background())
+	err := claude.Stream(streamContext, session, "", func(event surface.StreamEvent) {
+		events = append(events, event)
+		if event.Kind == "done" {
+			cancel()
+		}
+	}, time.Second)
+	if err != context.Canceled {
+		t.Fatalf("stream err=%v", err)
+	}
+	if len(events) != 3 || events[0].ProviderKey != "m1" || events[2].Kind != "done" {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
 func TestClaudeStreamWaitsForNewTurnAfterCompletedBaseline(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}

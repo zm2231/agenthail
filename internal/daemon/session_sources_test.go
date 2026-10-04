@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type sourceCountingSurface struct {
@@ -192,6 +194,117 @@ func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 	}
 	if payload.ItemID != "seed-uds" || payload.Kind == "source-error" || adapter.calls.Load() != 0 {
 		t.Fatalf("payload=%+v streamCalls=%d", payload, adapter.calls.Load())
+	}
+}
+
+func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	from.Transcript = "/local/transcript.jsonl"
+	from.HasLocal = true
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-unsupported", Kind: "text", Text: "seed"}},
+		streamErr:     surface.ErrUnsupported,
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if calls := adapter.calls.Load(); calls != 1 {
+		t.Fatalf("unsupported provider calls=%d", calls)
+	}
+	if window, err := reg.SessionJournalAfter(from.ID, 0, 10); err != nil || len(window.Entries) != 1 {
+		t.Fatalf("retry/source-error window=%+v err=%v", window, err)
+	}
+	subscription.Cancel()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case _, open := <-subscription.Entries:
+			if !open {
+				return
+			}
+		case <-deadline:
+			t.Fatal("source did not close after cancellation")
+		}
+	}
+}
+
+func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
+	_, reg, _, from, _ := daemonFixture(t)
+	transcript := t.TempDir() + "/session.jsonl"
+	seed := `{"type":"user","uuid":"u1","message":{"content":"seed"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"seed answer"}]}}
+`
+	if err := os.WriteFile(transcript, []byte(seed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	from.Transcript = transcript
+	from.HasLocal = true
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := providers.NewClaude("Default", t.TempDir())
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 2 {
+		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	appendTranscript := func(records string) {
+		t.Helper()
+		file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.WriteString(records); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for _, turn := range []struct{ message, records string }{
+		{"m2", `{"type":"user","uuid":"u2","message":{"content":"second"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
+`},
+		{"m3", `{"type":"user","uuid":"u3","message":{"content":"third"}}
+{"type":"assistant","uuid":"a3","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"third answer"}]}}
+`},
+	} {
+		appendTranscript(turn.records)
+		deadline := time.After(3 * time.Second)
+		for !seen[turn.message] {
+			select {
+			case entry := <-subscription.Entries:
+				var payload sessionJournalPayload
+				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.ItemID == turn.message && payload.Kind == "done" {
+					seen[turn.message] = true
+				}
+			case <-deadline:
+				t.Fatalf("provider did not tail turn %s", turn.message)
+			}
+		}
 	}
 }
 

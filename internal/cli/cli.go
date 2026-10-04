@@ -61,6 +61,8 @@ func (a *App) Run(args []string) error {
 	switch cmd {
 	case "list", "ls":
 		return a.cmdList(rest)
+	case "runs":
+		return a.cmdClaudeRuns(rest)
 	case "whoami":
 		return a.cmdWhoami(rest)
 	case "search":
@@ -132,6 +134,7 @@ Session commands:
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
   list [--all] [--cwd <path>] [--wide]
                                  List sessions; --cwd includes that workspace and descendants
+  runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Show the caller session bound to this process
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
@@ -367,7 +370,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -423,6 +426,35 @@ func validateCommandFlags(command string, args []string) error {
 			continue
 		}
 		return fmt.Errorf("unknown flag %s for %s", arg, command)
+	}
+	return nil
+}
+
+func (a *App) cmdClaudeRuns(args []string) error {
+	if len(stripFlags(args)) != 0 {
+		return fmt.Errorf("usage: agenthail runs [--json]")
+	}
+	adapter := a.surfaceByKind(surface.KindClaude)
+	observer, ok := adapter.(surface.ClaudeRunObserver)
+	if !ok {
+		return fmt.Errorf("Claude run observation is unavailable")
+	}
+	runs, err := observer.ObserveClaudeRuns(context.Background())
+	if err != nil {
+		return fmt.Errorf("read Claude job records: %w", err)
+	}
+	links, err := observer.ObserveClaudeSubagentLinks(context.Background())
+	if err != nil {
+		return fmt.Errorf("read Claude subagent records: %w", err)
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"runs": runs, "subagents": links})
+	}
+	for _, run := range runs {
+		fmt.Printf("%s\t%s\t%s\t%s\n", run.JobID, run.ProviderState, run.SessionID, run.RunType)
+	}
+	for _, link := range links {
+		fmt.Printf("subagent\t%s\t%s\t%s\n", link.ParentSessionID, link.AgentID, link.TranscriptPath)
 	}
 	return nil
 }
@@ -1411,6 +1443,11 @@ func (a *App) cmdModel(args []string) error {
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
 		return err
+	}
+	if name != "" && sess.Surface == surface.KindClaude && a.Registry != nil {
+		if err := a.Registry.RegisterSession(*sess); err != nil {
+			return fmt.Errorf("persist Claude model state: %w", err)
+		}
 	}
 	if current != "" {
 		fmt.Println(current)

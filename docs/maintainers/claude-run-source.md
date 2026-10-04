@@ -19,9 +19,10 @@ The command is read-only and is the authoritative producer for the session
 catalog, but it does not expose child relationships or wake times.
 
 Claude Code also writes local background-job records at
-`~/.claude/jobs/<job-id>/state.json`. `internal/surface/surfaces/claude_run_source.go`
-reads those files without invoking Claude Code. The source exposes only fields
-observed in that producer:
+`~/.claude/jobs/<job-id>/state.json`. The Claude session-detail API reads these
+records through `surface.ClaudeRunObserver` and filters them to matching
+session or resume-session IDs. It exposes only fields observed in that
+producer:
 
 - `runType` is the exact `template` value, such as `bg`.
 - `providerState` is the exact `state` value, such as `working`, `blocked`,
@@ -33,7 +34,9 @@ The job record's `children` array is not used for session relationship
 observation. Its observed member was an artifact descriptor (`kind: frame`),
 not a Claude agent identity.
 
-Subagent relationships use a separate local producer:
+Subagent relationships use a separate local producer. The Claude
+session-detail API exposes only links whose validated parent ID matches the
+requested session:
 `~/.claude/projects/<encoded-cwd>/<parent-session-id>/subagents/agent-<agent-id>.jsonl`.
 `ObserveClaudeSubagentLinks` derives the parent session and agent ID from that
 path, then requires a JSONL record with matching exact `sessionId` and
@@ -67,12 +70,19 @@ provider-side validator in
 `[1m]` launch value as a configured 1,000,000-token window; a plain model name
 and a missing model both produce `source: "unknown"` and no denominator.
 
-The shared API projection must carry the provider source as a typed optional
-field, for example `contextWindowSource: "configured" | "provider" |
-"unknown"`. Native clients must show `usedTokens` without a percentage when
-the window is zero or an estimated denominator would exceed 100 percent.
-They must not reconstruct a window from transcript model names or observed
-usage.
+The shared API projection carries the provider source as the typed optional
+field `contextWindowSource`. Native clients show `usedTokens` without a
+percentage when the window is zero or an estimated denominator would exceed
+100 percent. They must not reconstruct a window from transcript model names or
+observed usage.
+
+The captured launch model is not authoritative forever. A confirmed `/model`
+control result updates the in-memory session model; a provider assistant record
+with a different model base invalidates a previously configured `[1m]` window.
+A transcript model that only omits the `[1m]` suffix does not prove a switch,
+so the configured denominator is retained in that case. Successful dashboard
+and CLI model controls persist the returned current model back into the session
+registry; metadata reads remain best-effort and non-blocking.
 
 ## Shared-surface integration
 
@@ -90,22 +100,18 @@ producer, and it is displayed as configured rather than estimated.
 
 ## Journal production wiring
 
-The native client consumes `/api/v1/session-stream`; the web dashboard's
-`/api/stream` path is a direct provider stream and does not consume the
-session journal. The current session source starts `seedJournal` in a
-goroutine, while the API reads the journal immediately after subscribing.
-That ordering permits an initially empty replay. The current source also
-records an unsupported provider stream as `source-error` and retries it,
-although a bounded `ReadSession` seed may still be available.
+The native client consumes `/api/v1/session-stream`. The source completes its
+bounded `ReadSession` seed before replay, then shares one provider tail per
+session. Claude UDS sessions with a reliable local transcript use the same
+transcript reader for live polling across completed turns; the source stays
+open and does not reseed between turns. A reader without reliable live-stream
+capability remains seed-only and stays open until its client cancels, avoiding
+unsupported-stream retry and reconnect noise.
 
-The daemon integration makes seed completion observable before the first
-journal replay, allows Claude UDS seed-only sessions when `ReadSession` is
-available, and terminates unsupported live tails without appending retry noise.
-The coverage is a first-replay seed assertion, an unsupported-stream seed-only
-assertion, an API replay assertion, and a no-retry/no-source-error assertion.
+The coverage is a first-replay seed assertion, a real Claude transcript
+seed-and-two-turn tail assertion, a UDS transcript stream assertion, a bounded
+seed-only API replay assertion, and a no-provider-call seed-only assertion.
 
-The contention investigation reproduced `SQLITE_BUSY` in an isolated fresh
-WAL database when an external writer held an uncommitted transaction while
-`ListAttentionItems(false)` ran. The saved PID 63833 sample and isolated CPU
-profile do not identify a production Go owner, so no registry read-path
-change is justified by this evidence alone.
+The API does not expose `waiting`, `wakeAt`, cron, schedule, or cancellation
+fields. Those values have no reliable local producer in the installed records;
+their absence is intentional and must remain an unavailable state.

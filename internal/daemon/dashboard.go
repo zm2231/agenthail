@@ -1408,6 +1408,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result, err = adapter.Model(ctx, session, request.Model)
+		if err == nil && session.Surface == surface.KindClaude {
+			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
+				err = fmt.Errorf("persist Claude model state: %w", persistErr)
+			}
+		}
 	default:
 		http.Error(w, "unsupported dashboard action", http.StatusBadRequest)
 		return
@@ -1624,6 +1629,28 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 		requests["model"] = func() (any, error) { return adapter.Model(ctx, session, "") }
 		if lister, ok := adapter.(surface.ModelLister); ok {
 			requests["models"] = func() (any, error) { return lister.Models(ctx) }
+		}
+	}
+	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
+		requests["claudeRuns"] = func() (any, error) {
+			runs, err := observer.ObserveClaudeRuns(ctx)
+			filtered := []surface.ClaudeRunObservation{}
+			for _, run := range runs {
+				if run.SessionID == session.ID || run.ResumeSessionID == session.ID {
+					filtered = append(filtered, run)
+				}
+			}
+			return filtered, err
+		}
+		requests["claudeSubagents"] = func() (any, error) {
+			links, err := observer.ObserveClaudeSubagentLinks(ctx)
+			filtered := []surface.ClaudeSubagentLink{}
+			for _, link := range links {
+				if link.ParentSessionID == session.ID {
+					filtered = append(filtered, link)
+				}
+			}
+			return filtered, err
 		}
 	}
 	response := map[string]any{"sessionId": session.ID}

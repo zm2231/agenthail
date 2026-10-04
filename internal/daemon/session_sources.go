@@ -78,6 +78,10 @@ func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
 }
 
 func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {
+	return m.subscribeContext(context.Background(), session, adapter)
+}
+
+func (m *sessionSourceManager) subscribeContext(waitContext context.Context, session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {
 	if session == nil || adapter == nil {
 		return sessionSourceSubscription{}, fmt.Errorf("session source requires session and adapter")
 	}
@@ -103,6 +107,7 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 	select {
 	case <-source.seeded:
 	case <-time.After(sessionJournalSeedTimeout):
+	case <-waitContext.Done():
 	}
 	return subscription, nil
 }
@@ -201,22 +206,24 @@ func (s *sessionSource) run() {
 	s.seedJournal()
 	close(s.seeded)
 	if !surface.EffectiveCapabilities(s.session, s.adapter.Capabilities()).Stream {
+		<-s.ctx.Done()
+		s.closeSubscribers()
+		s.remove()
 		return
 	}
 	for {
 		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
-		unsupported := errors.Is(streamErr, surface.ErrUnsupported)
-		if streamErr != nil && !unsupported && s.ctx.Err() == nil {
+		if errors.Is(streamErr, surface.ErrUnsupported) {
+			<-s.ctx.Done()
+			break
+		}
+		if streamErr != nil && s.ctx.Err() == nil {
 			s.appendSourceError(streamErr)
 		}
 		s.mu.Lock()
-		for id, subscriber := range s.subscribers {
-			delete(s.subscribers, id)
-			close(subscriber)
-		}
 		hasHolders := len(s.holders) > 0
 		s.mu.Unlock()
-		if unsupported || s.ctx.Err() != nil || !hasHolders {
+		if s.ctx.Err() != nil || !hasHolders {
 			break
 		}
 		select {
@@ -224,11 +231,25 @@ func (s *sessionSource) run() {
 		case <-time.After(time.Second):
 		}
 	}
+	s.closeSubscribers()
+	s.remove()
+}
+
+func (s *sessionSource) closeSubscribers() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, subscriber := range s.subscribers {
+		delete(s.subscribers, id)
+		close(subscriber)
+	}
+}
+
+func (s *sessionSource) remove() {
 	s.manager.mu.Lock()
+	defer s.manager.mu.Unlock()
 	if s.manager.sources[s.session.ID] == s {
 		delete(s.manager.sources, s.session.ID)
 	}
-	s.manager.mu.Unlock()
 }
 
 func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
