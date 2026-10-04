@@ -31,6 +31,17 @@ struct MetadataOverlayTest {
         let failed = overlay.apply(to: bare)
         check(failed.claudeRuns == nil && failed.claudeSubagents == nil && failed.metadataErrors == nil && failed.model == "gpt-5", "a failed metadata load clears observations only")
 
+        var pending = MetadataOverlay(seed: bare)
+        check(!pending.needsModelCatalog, "the model catalog fallback waits while metadata is in flight")
+        pending.absorb(try JSONDecoder().decode(SessionMetadata.self, from: Data(#"{"models":[{"id":"gpt-5","displayName":"GPT-5"}]}"#.utf8)))
+        check(!pending.needsModelCatalog, "metadata that lists models needs no fallback")
+        var withoutModels = MetadataOverlay(seed: bare)
+        withoutModels.absorb(try JSONDecoder().decode(SessionMetadata.self, from: Data(#"{"errors":{"models":"timeout"}}"#.utf8)))
+        check(withoutModels.needsModelCatalog, "metadata without models asks for the fallback")
+        var unreachable = MetadataOverlay(seed: bare)
+        unreachable.metadataFailed()
+        check(unreachable.needsModelCatalog, "a failed metadata load asks for the fallback")
+
         var older = MetadataOverlay()
         older.absorb(context: legacy.context, goal: legacy.goal, model: legacy.model, models: legacy.models)
         let fromLegacy = older.apply(to: legacy)

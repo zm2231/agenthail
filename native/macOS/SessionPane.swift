@@ -33,6 +33,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var metadata = MetadataOverlay()
+    @Published private(set) var modelCatalogNeeded = false
     private var closed = false
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
@@ -72,6 +73,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadTask?.cancel()
         detailReloadTask = nil
         metadata = MetadataOverlay(seed: detail)
+        modelCatalogNeeded = false
         startSessionStream(id)
         startDetailLoad(id)
         startMetadataLoad(id)
@@ -269,6 +271,7 @@ final class SessionPane: ObservableObject, Identifiable {
             let loaded = try? await api.sessionMetadata(id: id)
             guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil else { return }
             if let loaded { metadata.absorb(loaded) } else { metadata.metadataFailed() }
+            modelCatalogNeeded = metadata.needsModelCatalog
             applyMetadata(to: id)
         }
     }

@@ -1447,7 +1447,7 @@ struct DetailsTab: View {
     }
 
     private var catalogNeeded: String? {
-        guard session.capabilities.model, let detail = pane.detail, detail.models?.isEmpty ?? true else { return nil }
+        guard session.capabilities.model, pane.modelCatalogNeeded, pane.detail?.models?.isEmpty ?? true else { return nil }
         return session.surface
     }
 

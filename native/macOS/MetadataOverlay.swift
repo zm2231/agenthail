@@ -8,6 +8,7 @@ struct MetadataOverlay {
     private(set) var claudeRuns: [ClaudeRunObservation]?
     private(set) var claudeSubagents: [ClaudeSubagentLink]?
     private(set) var metadataErrors: [String: String]?
+    private(set) var settled = false
     private var streamed: Set<String> = []
 
     init(seed detail: SessionDetail? = nil) {
@@ -25,12 +26,16 @@ struct MetadataOverlay {
         claudeRuns = metadata.claudeRuns
         claudeSubagents = metadata.claudeSubagents
         metadataErrors = metadata.errors
+        settled = true
     }
+
+    var needsModelCatalog: Bool { settled && models?.isEmpty ?? true }
 
     mutating func metadataFailed() {
         claudeRuns = nil
         claudeSubagents = nil
         metadataErrors = nil
+        settled = true
     }
 
     mutating func absorb(context: ContextState?, goal: GoalState?, model: String?, models: [ModelOption]?) {
