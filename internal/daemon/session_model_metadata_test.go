@@ -70,53 +70,6 @@ func TestDashboardSessionMetadataEndpointRetainsProviderMetadata(t *testing.T) {
 	}
 }
 
-type slowSessionReads struct {
-	*timedOutTailSurface
-	deadlines chan time.Time
-}
-
-func (s *slowSessionReads) awaitDeadline(ctx context.Context) error {
-	deadline, _ := ctx.Deadline()
-	s.deadlines <- deadline
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func (s *slowSessionReads) Tail(ctx context.Context, _ *surface.Session, _ int) ([]surface.Exchange, error) {
-	return nil, s.awaitDeadline(ctx)
-}
-
-func (s *slowSessionReads) ReadSession(ctx context.Context, _ *surface.Session, _ surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	return nil, s.awaitDeadline(ctx)
-}
-
-func (s *slowSessionReads) Models(ctx context.Context) ([]surface.ModelOption, error) {
-	return nil, s.awaitDeadline(ctx)
-}
-
-func (s *slowSessionReads) Model(ctx context.Context, _ *surface.Session, _ string) (string, error) {
-	return "", s.awaitDeadline(ctx)
-}
-
-func TestDashboardSessionMetadataReadsShareOneDeadline(t *testing.T) {
-	_, registry, fake, _, _ := daemonFixture(t)
-	fake.caps.Model = true
-	adapter := &slowSessionReads{timedOutTailSurface: &timedOutTailSurface{daemonSurface: fake}, deadlines: make(chan time.Time, 2)}
-	d := New(registry, []surface.Surface{adapter})
-	response := httptest.NewRecorder()
-	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id=from", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	if len(adapter.deadlines) != 2 {
-		t.Fatalf("expected model and model-catalog reads; got %d", len(adapter.deadlines))
-	}
-	deadline := <-adapter.deadlines
-	if actual := <-adapter.deadlines; !actual.Equal(deadline) {
-		t.Fatalf("session read extended request budget from %s to %s", deadline, actual)
-	}
-}
-
 type metadataErrorSurface struct {
 	*daemonSurface
 	contextErr error

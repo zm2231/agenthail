@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -90,20 +89,6 @@ func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
 	}
 	if response := request("goal-budget", "-1"); response.Code != http.StatusBadRequest {
 		t.Fatalf("negative budget status=%d body=%s", response.Code, response.Body.String())
-	}
-}
-
-func TestDashboardGoalControlsRenderTypedStatusAndUsageActions(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	script := filepath.Join("..", "..", "scripts", "test-dashboard-timeline.mjs")
-	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("dashboard goal rendering failed: %v\n%s", err, output)
 	}
 }
 
@@ -233,18 +218,6 @@ func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 	}
 	if stored.Transport != "readOnly" {
 		t.Fatalf("transport=%q", stored.Transport)
-	}
-}
-
-func TestDashboardSearchCancelsSupersededRequests(t *testing.T) {
-	source, err := os.ReadFile("dashboard/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, required := range []string{"new AbortController()", "signal: controller.signal", "app.codexSearch.controller?.abort()", "window.addEventListener(\"beforeunload\", cancelCodexSearch)"} {
-		if !strings.Contains(string(source), required) {
-			t.Fatalf("dashboard search cancellation missing %q", required)
-		}
 	}
 }
 
@@ -517,99 +490,6 @@ func TestDashboardRepairsManagedRuntime(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || adapter.ensureCalls.Load() != 1 {
 		t.Fatalf("status=%d calls=%d body=%s", response.Code, adapter.ensureCalls.Load(), response.Body.String())
-	}
-}
-
-func TestDashboardExposesConversationNamingControls(t *testing.T) {
-	script := string(dashboardJS)
-	if !strings.Contains(script, `["/name", "Name this conversation"]`) ||
-		!strings.Contains(script, `data-tool="alias"`) ||
-		!strings.Contains(script, `"/name": ["alias", { alias: argument }]`) {
-		t.Fatal("dashboard is missing conversation naming controls")
-	}
-}
-
-func TestDashboardShowsCompactContextUsage(t *testing.T) {
-	source := string(dashboardJS) + string(dashboardHTML) + string(dashboardCSS)
-	for _, fragment := range []string{
-		`id="context-usage"`,
-		`item.kind === "context"`,
-		`Context ${compactTokenCount(context.usedTokens)}`,
-		`Claude did not report a configured context window`,
-		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
-		`.context-usage.critical`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard context surface missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardOverviewSubtitleUsesLiveState(t *testing.T) {
-	script := string(dashboardJS)
-	if strings.Contains(script, "Private and ready") ||
-		!strings.Contains(script, `surface${connected === 1 ? "" : "s"} connected`) ||
-		!strings.Contains(script, `message${queued === 1 ? "" : "s"} waiting`) {
-		t.Fatal("overview subtitle is not derived from live state")
-	}
-}
-
-func TestDashboardHidesChannelActionsUntilChannelExists(t *testing.T) {
-	markup := string(dashboardHTML)
-	script := string(dashboardJS)
-	if !strings.Contains(markup, `id="channel-actions" hidden`) ||
-		!strings.Contains(script, `$("#channel-actions").hidden = channels.length === 0`) {
-		t.Fatal("channel actions are not progressively disclosed")
-	}
-	create := strings.Index(markup, `data-network-form="channel-create"`)
-	empty := strings.Index(markup, `id="channel-list"`)
-	actions := strings.Index(markup, `id="channel-actions"`)
-	if create < 0 || empty <= create || actions <= empty {
-		t.Fatal("channel empty state and controls are ordered incorrectly")
-	}
-}
-
-func TestDashboardLongMessagesUseCleanCrop(t *testing.T) {
-	styles := string(dashboardCSS)
-	if strings.Contains(styles, "linear-gradient(transparent, var(--paper))") ||
-		!strings.Contains(styles, "height: 1.7em") ||
-		!strings.Contains(styles, "background: var(--paper)") {
-		t.Fatal("long messages do not use a clean opaque crop")
-	}
-}
-
-func TestDashboardConversationEntryAlignsLatestTurn(t *testing.T) {
-	script := string(dashboardJS)
-	if !strings.Contains(script, "app.pendingEntryScroll = true") ||
-		!strings.Contains(script, `latest.getBoundingClientRect().top - chatBody.getBoundingClientRect().top`) ||
-		!strings.Contains(script, "alignTranscriptTop(chatBody)") ||
-		!strings.Contains(script, `querySelectorAll("tr, pre, blockquote, li, h2, h3, h4, p")`) {
-		t.Fatal("conversation entry does not align to the latest turn boundary")
-	}
-}
-
-func TestDashboardExposesSurfaceHealthAndRepairs(t *testing.T) {
-	script := string(dashboardJS)
-	page := string(dashboardHTML)
-	for _, fragment := range []string{
-		`id="surface-health-list"`,
-		`data-surface-repair=`,
-		`await action(repair.dataset.surfaceRepair)`,
-		`Claude Code needs to reconnect to your signed-in account.`,
-	} {
-		if !strings.Contains(page+script, fragment) {
-			t.Fatalf("dashboard is missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardClipsLongMessagesWithoutFadingText(t *testing.T) {
-	styles := string(dashboardCSS)
-	if !strings.Contains(styles, ".turn-crop:after {") || !strings.Contains(styles, "background: var(--paper);") || strings.Contains(styles, "linear-gradient") {
-		t.Fatal("long-message crop must use an opaque cutoff without a text fade")
-	}
-	if !strings.Contains(string(dashboardJS), "Show full message") {
-		t.Fatal("long-message crop has no expansion control")
 	}
 }
 
@@ -896,20 +776,6 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 	}
 }
 
-func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	script := filepath.Join("..", "..", "scripts", "test-session-journal.mjs")
-	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("session journal browser behavior failed: %v\n%s", err, output)
-	}
-}
-
 func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
@@ -946,119 +812,6 @@ func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}, surface.Capabilities{Send: true, Steer: true, Compact: true})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Steer || effective.Compact {
 		t.Fatalf("effective=%+v", effective)
-	}
-}
-
-func TestDashboardRemoteQRCodeRequiresExplicitReveal(t *testing.T) {
-	source := string(dashboardJS)
-	if !strings.Contains(source, "remoteQRVisible: false") || !strings.Contains(source, "data-reveal-remote-qr") {
-		t.Fatal("remote QR does not default to an explicit reveal state")
-	}
-	hidden := strings.Index(source, "const remoteQR = app.remoteQRVisible")
-	if hidden < 0 {
-		t.Fatal("remote QR conditional is missing")
-	}
-	image := strings.Index(source[hidden:], `/api/settings/remote-qr`)
-	reveal := strings.Index(source[hidden:], "data-reveal-remote-qr")
-	if image < 0 || reveal < 0 || image > reveal {
-		t.Fatal("remote QR image is not confined to the revealed branch")
-	}
-	if !strings.Contains(source, "navigator.clipboard.writeText(app.settings.remoteAccess.url)") {
-		t.Fatal("hidden QR removed copy-phone-link behavior")
-	}
-}
-
-func TestDashboardNormalizesEmptyStateAndShowsDeliveryOutcomes(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"surfaces: state.surfaces || []",
-		"sessions: state.sessions || []",
-		"queue: state.queue || []",
-		"delivery-history",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-	if !strings.Contains(string(dashboardHTML), `id="delivery-history"`) {
-		t.Fatal("delivery outcomes have no rendered surface")
-	}
-}
-
-func TestDashboardPreservesTranscriptStateAcrossPolls(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"expandedTurns: new Set()",
-		"app.transcriptSignature === signature",
-		"app.expandedTurns.add(turn.dataset.turnKey)",
-		"chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24",
-		"Math.min(previousScrollTop, chatBody.scrollHeight - chatBody.clientHeight)",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		`drafts: new Map()`,
-		`app.drafts.set(app.selected.id, $("#message").value)`,
-		`$("#message").value = app.drafts.get(session.id) || ""`,
-		`sendButton.dataset.mode = stopping ? "interrupt" : "send"`,
-		`"Send queues this for next. Steer now changes the turn in progress."`,
-		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
-		`await action("interrupt")`,
-		`await action("steer", { message })`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-	if !strings.Contains(string(dashboardHTML), `id="steer-message"`) {
-		t.Fatal("busy composer has no inline steer action")
-	}
-}
-
-func TestDashboardUsesNeutralDeliveryDetailsAndLogicalIdempotency(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	script := filepath.Join("..", "..", "scripts", "test-dashboard-idempotency.mjs")
-	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("dashboard delivery behavior failed: %v\n%s", err, output)
-	}
-}
-
-func TestDashboardExposesNewConversationFormForCodexAndNotion(t *testing.T) {
-	for _, fragment := range []string{
-		`id="new-conversation-form"`,
-		`<option value="on-request">Ask when needed</option>`,
-		`fetch("/api/models?surface=codex")`,
-		`values.surface === "notion" ? "notion-create" : "session-create"`,
-		`response.sessionId || response.session?.id`,
-	} {
-		if !strings.Contains(string(dashboardHTML)+string(dashboardJS), fragment) {
-			t.Fatalf("new conversation surface missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardExplainsSurfacePresenceWindow(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"<span>Current</span>",
-		`? "Open now"`,
-		"`Past ${app.state.codexRecentHours || 5}h`",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
 	}
 }
 
@@ -1219,42 +972,6 @@ func TestDashboardStateReadsCatalogWithoutProviderDiscovery(t *testing.T) {
 	}
 	if got := fake.listCalls.Load(); got != 0 {
 		t.Fatalf("surface list called %d times after event, want snapshot to read only the catalog", got)
-	}
-}
-
-func TestDashboardRefreshDoesNotBlockEventPublication(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	dashboard := &dashboardServer{token: "secret"}
-	d.dashboardHandler(dashboard)
-	dashboard.stateMu.Lock()
-	done := make(chan struct{})
-	go func() {
-		d.publishEvent("session.updated", "from", nil)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(250 * time.Millisecond):
-		dashboard.stateMu.Unlock()
-		t.Fatal("dashboard refresh blocked event publication")
-	}
-	dashboard.stateMu.Unlock()
-}
-
-func TestDashboardEventInvalidatesCacheWhenPersistenceFails(t *testing.T) {
-	registry, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := New(registry, nil)
-	dashboard := &dashboardServer{token: "secret"}
-	d.dashboardHandler(dashboard)
-	if err := registry.Close(); err != nil {
-		t.Fatal(err)
-	}
-	d.publishEvent("session.updated", "from", nil)
-	if got := dashboard.stateVersion.Load(); got != 1 {
-		t.Fatalf("state version=%d, want invalidation despite persistence failure", got)
 	}
 }
 

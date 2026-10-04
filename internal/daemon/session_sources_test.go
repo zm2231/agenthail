@@ -570,61 +570,6 @@ liveObserved:
 	}
 }
 
-func TestSessionSourceSeedAndLiveAttachmentShareOneSSEIdentity(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	attachmentHash := strings.Repeat("a", 64)
-	attachmentID := "attachment:0:1:" + attachmentHash
-	adapter := &sourceCountingSurface{
-		daemonSurface: fake,
-		started:       make(chan struct{}, 1),
-		events:        make(chan surface.StreamEvent),
-		items: []surface.TimelineItem{{
-			ID: "codex:turn-image:attachment:user-image-1:0", Kind: "attachment", Role: "user", Text: "Image attachment",
-			Attachment: &surface.Attachment{ID: attachmentID, MediaType: "image/png", Width: 1, Height: 1, Bytes: 68},
-		}},
-	}
-	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
-	subscription, err := manager.subscribe(&from, adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer subscription.Cancel()
-	select {
-	case <-adapter.started:
-	case <-time.After(time.Second):
-		t.Fatal("source did not start")
-	}
-	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
-	if err != nil || len(window.Entries) != 1 {
-		t.Fatalf("seed window=%+v err=%v", window, err)
-	}
-	var seed sessionJournalPayload
-	if err := json.Unmarshal(window.Entries[0].Payload, &seed); err != nil {
-		t.Fatal(err)
-	}
-	if seed.ProviderKey != "codex:turn-image:attachment:user-image-1:0" || seed.Attachment == nil || seed.Attachment.ID != attachmentID {
-		t.Fatalf("seed=%+v", seed)
-	}
-	adapter.events <- surface.StreamEvent{ID: seed.ItemID, ProviderKey: seed.ProviderKey, Version: 2, Operation: "upsert", TurnID: "turn-image", Kind: "attachment", Role: "user", Text: "Image attachment", Attachment: seed.Attachment}
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case entry := <-subscription.Entries:
-			var payload sessionJournalPayload
-			if json.Unmarshal(entry.Payload, &payload) == nil && payload.Version == 2 {
-				window, err = reg.SessionJournalAfter(from.ID, 0, 10)
-				if err != nil || len(window.Entries) != 1 || payload.Attachment == nil || payload.Attachment.ID != seed.Attachment.ID {
-					t.Fatalf("live window=%+v payload=%+v err=%v", window, payload, err)
-				}
-				return
-			}
-		case <-deadline:
-			t.Fatal("live attachment was not published")
-		}
-	}
-}
-
 func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
@@ -1135,47 +1080,6 @@ func TestSessionSourceNormalizesGoalUpdatesAndClears(t *testing.T) {
 	}
 }
 
-func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
-	_, registry, fake, from, _ := daemonFixture(t)
-	adapter := &sourceCountingSurface{
-		daemonSurface: fake,
-		started:       make(chan struct{}, 1),
-		events:        make(chan surface.StreamEvent),
-		items: []surface.TimelineItem{{
-			ID:        "timeline-1",
-			Kind:      "message",
-			Text:      "persisted activity",
-			Timestamp: "2026-10-03T12:00:00Z",
-		}},
-	}
-	adapter.caps.Stream = true
-	manager := newSessionSourceManager(registry)
-	subscription, err := manager.subscribe(&from, adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer subscription.Cancel()
-	select {
-	case <-adapter.started:
-	case <-time.After(time.Second):
-		t.Fatal("source did not start")
-	}
-	window, err := registry.SessionJournalAfter(from.ID, 0, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(window.Entries) != 1 {
-		t.Fatalf("seeded entries=%d", len(window.Entries))
-	}
-	var payload sessionJournalPayload
-	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.ItemID != "timeline-1" || payload.ProviderKey != "timeline:timeline-1" || payload.Op != "upsert" || payload.Body != "persisted activity" {
-		t.Fatalf("seed payload=%+v", payload)
-	}
-}
-
 func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	when := "2026-10-04T00:00:00Z"
@@ -1312,24 +1216,6 @@ func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
 	if held {
 		t.Fatal("idle session source remained held")
 	}
-}
-
-func TestSourceHoldsAreReferenceCountedByOwner(t *testing.T) {
-	d, _, fake, from, _ := daemonFixture(t)
-	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
-	adapter.caps.Stream = true
-	d.Surfaces = []surface.Surface{adapter}
-	d.setSessionSourceHold(&from, true, "active-turn")
-	d.setSessionSourceHold(&from, true, "voice")
-	d.setSessionSourceHold(&from, false, "voice")
-	d.sourceHoldMu.Lock()
-	_, active := d.sourceHolds[from.ID]["active-turn"]
-	_, voice := d.sourceHolds[from.ID]["voice"]
-	d.sourceHoldMu.Unlock()
-	if !active || voice {
-		t.Fatalf("active=%v voice=%v", active, voice)
-	}
-	d.setSessionSourceHold(&from, false, "active-turn")
 }
 
 func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {

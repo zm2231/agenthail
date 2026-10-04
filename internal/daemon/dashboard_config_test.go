@@ -34,10 +34,17 @@ func TestDashboardConfigPersistsBusyDelivery(t *testing.T) {
 	}
 }
 
-func TestDashboardConfigRejectsInvalidBusyDelivery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "drop"}); err == nil {
-		t.Fatal("invalid busy delivery accepted")
+func TestDashboardConfigRejectsInvalidValues(t *testing.T) {
+	for name, config := range map[string]DashboardConfig{
+		"busy delivery": {BusyDelivery: "drop"},
+		"codex recency": {CodexRecentHours: 169},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			if err := SaveDashboardConfig(config); err == nil {
+				t.Fatalf("invalid config accepted: %+v", config)
+			}
+		})
 	}
 }
 
@@ -77,12 +84,5 @@ func TestDashboardConfigMigratesMissingCodexRecency(t *testing.T) {
 	}
 	if config.CodexRecentHours != defaultCodexRecentHours {
 		t.Fatalf("Codex recent hours=%d, want %d", config.CodexRecentHours, defaultCodexRecentHours)
-	}
-}
-
-func TestDashboardConfigRejectsInvalidCodexRecency(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{CodexRecentHours: 169}); err == nil {
-		t.Fatal("invalid Codex recency accepted")
 	}
 }
