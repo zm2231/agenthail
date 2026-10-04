@@ -103,7 +103,7 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.deliveryStatus["demo"], "Delivery status could not be refreshed. Check Inbox before retrying.")
         RecoveryProtocol.state.configure(queueStatus: "dead", evidence: "unknown", queueFailure: false)
         await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery needs review in Inbox. Check the session before sending again.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Submitted to demo.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -113,10 +113,10 @@ final class SessionRecoveryTests: XCTestCase {
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueStatus: "dead", queueHistorical: false, evidence: "unknown")
         await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery needs review in Inbox. Check the session before sending again.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Submitted to demo.")
         RecoveryProtocol.state.configure(queueHistorical: true)
         await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Instruction expired. You can review it in Inbox history.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
