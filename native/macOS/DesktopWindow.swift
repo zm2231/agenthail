@@ -58,6 +58,7 @@ struct SessionSidebar: View {
     @Environment(\.openWindow) private var openWindow
     @State private var expandedProjects: Set<String> = []
     @FocusState private var searchFocused: Bool
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         let tree = model.sessionTree
@@ -80,7 +81,7 @@ struct SessionSidebar: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
-                    .help("\(filter.rawValue) ⌘\(filter.shortcut)")
+                    .help(shortcuts.help(filter.rawValue, filter.command))
                 }
                 Spacer()
                 Button {
@@ -90,7 +91,7 @@ struct SessionSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
-                .help("New session ⌘N")
+                .help(shortcuts.help("New session", .newSession))
                 .accessibilityLabel("New session")
             }
             .font(.system(size: 12.5))
@@ -129,7 +130,7 @@ struct SessionSidebar: View {
             .padding(.bottom, 10)
             .background {
                 Button("") { searchFocused = true }
-                    .keyboardShortcut("f", modifiers: .command)
+                    .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
                     .hidden()
             }
 
@@ -190,10 +191,10 @@ struct SessionSidebar: View {
         .background {
             let order = visibleOrder(tree)
             Button("") { step(order, by: -1) }
-                .keyboardShortcut(.upArrow, modifiers: .command)
+                .keyboardShortcut(shortcuts.keyboardShortcut(.previousSession))
                 .hidden()
             Button("") { step(order, by: 1) }
-                .keyboardShortcut(.downArrow, modifiers: .command)
+                .keyboardShortcut(shortcuts.keyboardShortcut(.nextSession))
                 .hidden()
         }
     }
@@ -568,6 +569,7 @@ struct ConversationHeader: View {
     let context: ContextState?
     @Binding var inspectorVisible: Bool
     var leadingInset: CGFloat = 22
+    @ObservedObject private var shortcuts = ShortcutStore.shared
     var onFocusTerminal: () -> Void = {}
 
     var body: some View {
@@ -608,7 +610,7 @@ struct ConversationHeader: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.text2)
-            .help("Inspector ⌥⌘I")
+            .help(shortcuts.help("Inspector", .toggleInspector))
             .accessibilityLabel("Toggle inspector")
             .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
         }
@@ -627,6 +629,7 @@ struct TranscriptView: View {
     @State private var pinned = true
     @State private var prepending = false
     @State private var underfilled = false
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         let blocks = TranscriptBlock.build(pane.timelineItems)
@@ -701,7 +704,7 @@ struct TranscriptView: View {
         }
         .background {
             Button("", action: jumpToLatest)
-                .keyboardShortcut("l", modifiers: .command)
+                .keyboardShortcut(shortcuts.keyboardShortcut(.jumpToLatest))
                 .hidden()
         }
         .overlay {
@@ -1119,6 +1122,7 @@ struct ComposerView: View {
     let session: SessionState
     @FocusState private var focused: Bool
     @State private var dropTargeted = false
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private var followUp: FollowUpAction { model.busyDelivery }
     @ObservedObject private var draft: ComposerDraft
@@ -1188,9 +1192,9 @@ struct ComposerView: View {
                         .opacity(!session.isWorking && !hasText ? 0.45 : 1)
                         .accessibilityLabel(primaryLabel)
                         .help(primaryHelp)
-                        .keyboardShortcut(.return, modifiers: .command)
+                        .keyboardShortcut(shortcuts.keyboardShortcut(.send))
                         Button("") { submit(alternate: true) }
-                            .keyboardShortcut(.return, modifiers: [.command, .option])
+                            .keyboardShortcut(shortcuts.keyboardShortcut(.sendAlternate))
                             .hidden()
                             .frame(width: 0, height: 0)
                     }
@@ -1239,14 +1243,17 @@ struct ComposerView: View {
         return resolvedAction(alternate: false) == .queue ? "Queue" : "Steer"
     }
     private var primaryHelp: String {
-        if primaryIsStop { return "Stop ⌘." }
-        if !session.isWorking { return "Send ⌘↩" }
-        guard canSteer else { return "Queue ⌘↩" }
-        return resolvedAction(alternate: false) == .queue ? "Queue ⌘↩ · Steer ⌥⌘↩" : "Steer ⌘↩ · Queue ⌥⌘↩"
+        if primaryIsStop { return shortcuts.help("Stop", .stop) }
+        if !session.isWorking { return shortcuts.help("Send", .send) }
+        guard canSteer else { return shortcuts.help("Queue", .send) }
+        let queueFirst = resolvedAction(alternate: false) == .queue
+        return [shortcuts.help(queueFirst ? "Queue" : "Steer", .send), shortcuts.help(queueFirst ? "Steer" : "Queue", .sendAlternate)].joined(separator: " · ")
     }
     private var hint: String {
         guard canSteer else { return "Sends after this turn" }
-        return resolvedAction(alternate: false) == .queue ? "Sends after this turn · ⌥⌘↩ steers now" : "Steers now · ⌥⌘↩ queues"
+        let queueFirst = resolvedAction(alternate: false) == .queue
+        guard let alternate = shortcuts.label(.sendAlternate) else { return queueFirst ? "Sends after this turn" : "Steers now" }
+        return queueFirst ? "Sends after this turn · \(alternate) steers now" : "Steers now · \(alternate) queues"
     }
 
     private func resolvedAction(alternate: Bool) -> FollowUpAction {

@@ -7,6 +7,7 @@ struct CommandPalette: View {
     @State private var query = ""
     @State private var highlightedID: String?
     @FocusState private var fieldFocused: Bool
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private struct Entry: Identifiable {
         let id: String
@@ -55,15 +56,15 @@ struct CommandPalette: View {
 
     private var actionEntries: [Entry] {
         var actions = [
-            Entry(id: "new", icon: "square.and.pencil", title: "New session", detail: "", shortcut: "⌘N") { model.newSessionVisible = true },
-            Entry(id: "inspector", icon: "sidebar.right", title: pane.inspectorVisible ? "Hide inspector" : "Show inspector", detail: "", shortcut: "⌥⌘I") { pane.inspectorVisible.toggle() },
+            Entry(id: "new", icon: "square.and.pencil", title: "New session", detail: "", shortcut: shortcuts.label(.newSession)) { model.newSessionVisible = true },
+            Entry(id: "inspector", icon: "sidebar.right", title: pane.inspectorVisible ? "Hide inspector" : "Show inspector", detail: "", shortcut: shortcuts.label(.toggleInspector)) { pane.inspectorVisible.toggle() },
         ]
         if let session = pane.selectedSession {
             if session.isWorking {
                 actions.append(Entry(id: "stop", icon: "stop.circle", title: "Stop \(session.title)", detail: "") { pane.interrupt() })
             }
-            actions.append(Entry(id: "window", icon: "macwindow.badge.plus", title: "Open \(session.title) in new window", detail: "") { openWindow(id: "session", value: session.id) })
-            actions.append(Entry(id: "rename", icon: "pencil", title: "Rename \(session.title)", detail: "") { pane.renamingSession = session })
+            actions.append(Entry(id: "window", icon: "macwindow.badge.plus", title: "Open \(session.title) in new window", detail: "", shortcut: shortcuts.label(.openInNewWindow)) { openWindow(id: "session", value: session.id) })
+            actions.append(Entry(id: "rename", icon: "pencil", title: "Rename \(session.title)", detail: "", shortcut: shortcuts.label(.rename)) { pane.renamingSession = session })
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 actions.append(Entry(id: "focus", icon: "terminal", title: "Open in \(host)", detail: session.title) { model.focusInTerminal(session) })
             }

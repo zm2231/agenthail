@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import CoreSpotlight
 import Darwin
+import KeyboardShortcuts
 import ServiceManagement
 import SwiftUI
 import UserNotifications
@@ -282,6 +283,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         registerNotificationCategories(center)
+        KeyboardShortcuts.onKeyUp(for: .openPalette) { NotificationRoute.shared.showPalette() }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         terminateDuplicateApplications()
         duplicateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -384,7 +386,6 @@ private struct MenuBarLabel: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject private var route = NotificationRoute.shared
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
-    @AppStorage(GlobalShortcut.preferenceKey) private var globalShortcut = GlobalShortcut.off.rawValue
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -403,11 +404,6 @@ private struct MenuBarLabel: View {
         .onChange(of: spotlightSessions) { syncSpotlight() }
         .onChange(of: SessionTree.needsYou(model.knownSessions, attentionSessionIDs: model.attentionSessionIDs).count, initial: true) { _, count in
             NSApplication.shared.dockTile.badgeLabel = count > 0 ? String(count) : nil
-        }
-        .onChange(of: globalShortcut, initial: true) {
-            GlobalShortcutCenter.shared.register(GlobalShortcut(rawValue: globalShortcut) ?? .off) {
-                NotificationRoute.shared.showPalette()
-            }
         }
     }
 

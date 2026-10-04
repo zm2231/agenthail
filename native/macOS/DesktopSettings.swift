@@ -9,6 +9,8 @@ struct DesktopSettings: View {
         TabView {
             GeneralSettings(model: model)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            KeyboardSettings()
+                .tabItem { Label("Keyboard", systemImage: "keyboard") }
             DevicesSettings(model: model)
                 .tabItem { Label("Devices", systemImage: "iphone") }
             NotificationSettings(model: model)
@@ -39,8 +41,7 @@ private struct SettingsError: View {
 struct GeneralSettings: View {
     @ObservedObject var model: AgenthailModel
     @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
-    @AppStorage(GlobalShortcut.preferenceKey) private var globalShortcut = GlobalShortcut.off.rawValue
-    @ObservedObject private var shortcuts = GlobalShortcutCenter.shared
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     var body: some View {
         Form {
@@ -65,29 +66,15 @@ struct GeneralSettings: View {
                 }
             }
             Section("Sending while an agent works") {
-                Picker("⌘↩", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
+                Picker(shortcuts.label(.send) ?? "Send", selection: Binding(get: { model.busyDelivery }, set: { model.setBusyDelivery($0) })) {
                     Text("Queue the message (default)").tag(FollowUpAction.queue)
                     Text("Steer the running turn").tag(FollowUpAction.steer)
                 }
                 .pickerStyle(.radioGroup)
                 .disabled(model.snapshot == nil)
-                Text("⌥⌘↩ always does the other one. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.")
+                Text("\(shortcuts.label(.sendAlternate).map { "\($0) always does" } ?? "Send the other way does") the other one. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
-            }
-            Section("Shortcut") {
-                Picker("Open sessions from any app", selection: $globalShortcut) {
-                    ForEach(GlobalShortcut.allCases) { Text($0.label).tag($0.rawValue) }
-                }
-                if let unavailable = shortcuts.unavailable {
-                    Text("\(unavailable.label) couldn't be turned on. Choose a different shortcut.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(DesktopPalette.amber)
-                } else {
-                    Text("Brings Agenthail forward with the session palette open.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(DesktopPalette.text2)
-                }
             }
             Section("Spotlight") {
                 Toggle("Show sessions in Spotlight", isOn: $spotlightSessions)

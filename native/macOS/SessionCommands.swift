@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionCommands: Commands {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject private var shortcuts = ShortcutStore.shared
     @FocusedObject private var pane: SessionPane?
     @Environment(\.openWindow) private var openWindow
 
@@ -14,26 +15,28 @@ struct SessionCommands: Commands {
                 showMainWindow()
                 model.newSessionVisible = true
             }
-            .keyboardShortcut("n", modifiers: .command)
+            .keyboardShortcut(shortcuts.keyboardShortcut(.newSession))
         }
         CommandMenu("Session") {
             Button("Go to Session…") {
                 showMainWindow()
                 model.paletteVisible.toggle()
             }
-            .keyboardShortcut("k", modifiers: .command)
+            .keyboardShortcut(shortcuts.keyboardShortcut(.goToSession))
             Divider()
             Button("Rename…") { pane?.renamingSession = session }
+                .keyboardShortcut(shortcuts.keyboardShortcut(.rename))
                 .disabled(!writable)
             Button("Open in New Window") {
                 if let id = session?.id { openWindow(id: "session", value: id) }
             }
+            .keyboardShortcut(shortcuts.keyboardShortcut(.openInNewWindow))
             .disabled(session == nil)
             Divider()
             Button("Stop") {
                 if let pane, pane.canStop { pane.interrupt() }
             }
-            .keyboardShortcut(".", modifiers: .command)
+            .keyboardShortcut(shortcuts.keyboardShortcut(.stop))
             .disabled(pane?.canStop != true)
         }
         CommandGroup(before: .sidebar) {
@@ -42,11 +45,11 @@ struct SessionCommands: Commands {
                     showMainWindow()
                     model.sessionFilter = filter
                 }
-                .keyboardShortcut(KeyEquivalent(Character("\(filter.shortcut)")), modifiers: .command)
+                .keyboardShortcut(shortcuts.keyboardShortcut(filter.command))
             }
             Divider()
             Button(pane?.inspectorVisible == true ? "Hide Inspector" : "Show Inspector") { pane?.inspectorVisible.toggle() }
-                .keyboardShortcut("i", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.toggleInspector))
                 .disabled(pane == nil)
             Divider()
         }
@@ -59,11 +62,11 @@ struct SessionCommands: Commands {
 }
 
 extension SessionFilter {
-    var shortcut: Int {
+    var command: AppCommand {
         switch self {
-        case .running: return 1
-        case .recent: return 2
-        case .all: return 3
+        case .running: return .showRunning
+        case .recent: return .showRecent
+        case .all: return .showAll
         }
     }
 }
