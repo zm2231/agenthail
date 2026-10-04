@@ -208,9 +208,12 @@ struct ConversationDetailView: View {
 struct ConversationHeader: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
-    @State private var showingGoalEditor = false
-    @State private var editingBudget = false
-    @State private var settingNewGoal = false
+    private enum GoalEditorMode {
+        case newGoal
+        case editGoal
+        case budget
+    }
+    @State private var goalEditorMode: GoalEditorMode?
     @State private var goalText = ""
     @State private var budgetText = ""
 
@@ -262,10 +265,10 @@ struct ConversationHeader: View {
 					.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
 					if !session.isReadOnly && session.capabilities.goal {
 						HStack(spacing: 10) {
-							Button("Edit goal") { goalText = goal.objective; settingNewGoal = false; showingGoalEditor = true }
+							Button("Edit goal") { goalText = goal.objective; goalEditorMode = .editGoal }
 							if goal.status == "active" { Button("Pause") { model.perform(action: "goal-pause", sessionID: session.id) } }
 							if goal.status == "paused" { Button("Resume") { model.perform(action: "goal-resume", sessionID: session.id) } }
-							Button(goal.tokenBudget == nil ? "Set budget" : "Edit budget") { budgetText = goal.tokenBudget.map(String.init) ?? ""; editingBudget = true }
+							Button(goal.tokenBudget == nil ? "Set budget" : "Edit budget") { budgetText = goal.tokenBudget.map(String.init) ?? ""; goalEditorMode = .budget }
 							if !goal.objective.isEmpty { Button("Clear", role: .destructive) { model.perform(action: "goal-clear", sessionID: session.id) } }
 						}
 						.controlSize(.small)
@@ -273,14 +276,14 @@ struct ConversationHeader: View {
 				}
 				.padding(.top, 2)
 			} else if !session.isReadOnly && session.capabilities.goal {
-					Button("Set goal") { goalText = ""; settingNewGoal = true; showingGoalEditor = true }
+					Button("Set goal") { goalText = ""; goalEditorMode = .newGoal }
 				}
 		}
 		.padding(24)
-		.sheet(isPresented: Binding(get: { showingGoalEditor || editingBudget }, set: { if !$0 { showingGoalEditor = false; editingBudget = false } })) {
+		.sheet(isPresented: Binding(get: { goalEditorMode != nil }, set: { if !$0 { goalEditorMode = nil } })) {
 				VStack(alignment: .leading, spacing: 16) {
-					Text(editingBudget ? "Token budget" : "Goal objective").font(.headline)
-					if editingBudget {
+					Text(goalEditorMode == .budget ? "Token budget" : "Goal objective").font(.headline)
+					if goalEditorMode == .budget {
 						TextField("Token budget", text: $budgetText)
 							.textFieldStyle(.roundedBorder)
 					} else {
@@ -289,13 +292,20 @@ struct ConversationHeader: View {
 							.border(Color(nsColor: .separatorColor))
 					}
 					HStack {
-						Button("Cancel") { showingGoalEditor = false; editingBudget = false }
+						Button("Cancel") { goalEditorMode = nil }
 						Spacer()
 						Button("Save") {
-							model.perform(action: settingNewGoal ? "goal-set" : editingBudget ? "goal-budget" : "goal-edit", sessionID: session.id, message: editingBudget ? budgetText : goalText)
-							showingGoalEditor = false; editingBudget = false; settingNewGoal = false
+							let action: String
+							switch goalEditorMode {
+							case .newGoal: action = "goal-set"
+							case .editGoal: action = "goal-edit"
+							case .budget: action = "goal-budget"
+							case nil: return
+							}
+							model.perform(action: action, sessionID: session.id, message: goalEditorMode == .budget ? budgetText : goalText)
+							goalEditorMode = nil
 						}
-						.disabled((editingBudget ? budgetText : goalText).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+						.disabled((goalEditorMode == .budget ? budgetText : goalText).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 					}
 				}
 				.padding(24)
