@@ -94,16 +94,32 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
-    func testDeliveryRefreshFailureAndUnknownOutcomeStayExplicit() async throws {
+    func testDeliveryRefreshFailurePreservesReceiptWithoutResending() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
         RecoveryProtocol.state.configure(queueFailure: true)
         await model.refreshSession("demo")
-        XCTAssertEqual(model.deliveryStatus["demo"], "Delivery status could not be refreshed. Check Inbox before retrying.")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
         RecoveryProtocol.state.configure(queueStatus: "dead", evidence: "unknown", queueFailure: false)
         await model.refreshSession("demo")
         XCTAssertEqual(model.deliveryStatus["demo"], "Submitted to demo.")
+        XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
+    }
+
+    func testMissingOrUnrecognizedQueueRowPreservesReceiptWithoutResending() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        try await sendQueuedInstruction(model)
+        RecoveryProtocol.state.configure(queueMissing: true)
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
+        RecoveryProtocol.state.configure(evidence: "future-evidence", queueMissing: false)
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
+        RecoveryProtocol.state.configure(evidence: "delivered")
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Sent to demo.")
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
@@ -169,6 +185,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var queueHistorical: Bool?
         private var evidence: String?
         private var queueFailure = false
+        private var queueMissing = false
         private var deliveryProblem = false
         private var historyGap = false
         private var catalogEpoch: String?
@@ -181,14 +198,15 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         var actionCount: Int { lock.withLock { actions } }
         var actionNames: [String] { lock.withLock { actionHistory } }
         var freshSnapshotReads: Int { lock.withLock { freshSnapshots } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; deliveryProblem = false; historyGap = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
-        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, deliveryProblem: Bool? = nil, historyGap: Bool? = nil) {
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; queueMissing = false; deliveryProblem = false; historyGap = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
+        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, queueMissing: Bool? = nil, deliveryProblem: Bool? = nil, historyGap: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
                 if let queueStatus { self.queueStatus = queueStatus }
                 if let queueHistorical { self.queueHistorical = queueHistorical }
                 if let evidence { self.evidence = evidence }
                 if let queueFailure { self.queueFailure = queueFailure }
+                if let queueMissing { self.queueMissing = queueMissing }
                 if let deliveryProblem { self.deliveryProblem = deliveryProblem }
                 if let historyGap { self.historyGap = historyGap }
             }
@@ -224,6 +242,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     return (200, #"{"ok":true,"result":{"deliveryId":42,"evidence":"queued","queueId":7}}"#)
                 case "/api/v1/queue":
                     if queueFailure { return (503, #"{"error":{"message":"Queue unavailable"}}"#) }
+                    if queueMissing { return (200, #"{"items":[]}"#) }
                     var fields = ""
                     if let queueHistorical { fields += ",\"historical\":\(queueHistorical)" }
                     fields += ",\"evidence\":\"\(evidence ?? (queueStatus == "pending" || queueStatus == "inflight" ? "queued" : queueStatus))\""

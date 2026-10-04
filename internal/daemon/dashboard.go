@@ -1116,7 +1116,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				var acceptedErr surface.LaunchAcceptedError
 				switch {
 				case errors.As(launchErr, &acceptedErr):
-					writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "submitted", "accepted": true, "retryable": false, "launcher": request.Launcher, "warning": launchErr.Error()})
+					d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, launchErr.Error())
 					return
 				default:
 					http.Error(w, launchErr.Error(), http.StatusBadGateway)
@@ -1125,17 +1125,17 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session, location, launchErr := locateLaunchedSession(ctx, launcher, adapter, launchResult)
 			if launchErr != nil {
-				writeAcceptedLaunch(w, request.Launcher, launchResult.Location, fmt.Sprintf("launcher accepted the session, but discovery failed: %s; check the catalog before retrying", launchErr))
+				d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, fmt.Sprintf("discovery failed: %s", launchErr))
 				return
 			}
 			if session == nil {
 				if location == nil {
-					writeAcceptedLaunch(w, request.Launcher, nil, "launcher accepted the session, but its location is still unresolved; check the catalog before retrying")
+					d.writeAcceptedLaunch(w, request.Launcher, nil, "location is unresolved")
 					return
 				}
 				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, alias, *location)
 				if err != nil {
-					writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but pending correlation could not be persisted: %s; check the catalog before retrying", err))
+					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist pending correlation: %s", err))
 					return
 				}
 				_ = pendingID
@@ -1149,12 +1149,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
 			if err := d.Registry.RegisterSession(*session); err != nil {
-				writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but registration failed: %s; check the catalog before retrying", err))
+				d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("register session: %s", err))
 				return
 			}
 			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
 				if err := d.Registry.SetAlias(alias, session.ID); err != nil {
-					writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but its name could not be persisted: %s; check the catalog before retrying", err))
+					d.writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("persist session name: %s", err))
 					return
 				}
 			}
@@ -2117,14 +2117,15 @@ func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, 
 	}, extra)
 }
 
-func writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, warning string) {
+func (d *Daemon) writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, detail string) {
+	d.log.Printf("accepted %s launch: %s", launcher, detail)
 	body := map[string]any{
 		"ok":        true,
 		"status":    "submitted",
 		"accepted":  true,
 		"retryable": false,
 		"launcher":  launcher,
-		"warning":   warning,
+		"warning":   fmt.Sprintf("Submitted to %s.", launcher),
 	}
 	if location != nil {
 		body["location"] = location

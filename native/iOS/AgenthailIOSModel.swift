@@ -466,7 +466,6 @@ final class AgenthailIOSModel: ObservableObject {
             let items = try await api.queuedInstructions()
             for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
                 guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
-                    deliveryStatus[sessionID] = "Delivery is no longer in recent history. Check the session before retrying."
                     continue
                 }
                 switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
@@ -480,15 +479,11 @@ final class AgenthailIOSModel: ObservableObject {
                 case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
                 case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
-                default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
+                default: continue
                 }
                 if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
             }
-        } catch {
-            for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
-                deliveryStatus[sessionID] = "Delivery status could not be refreshed. Check Inbox before retrying."
-            }
-        }
+        } catch {}
     }
 
     private func startSessionMetadata(_ id: String, requestID: UUID) {
