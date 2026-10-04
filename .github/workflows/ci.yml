@@ -90,6 +90,8 @@ jobs:
           "$RUNNER_TEMP/local-send-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/CatalogPosition.swift native/tests/catalog_position_test.swift -o "$RUNNER_TEMP/catalog-position-test"
           "$RUNNER_TEMP/catalog-position-test"
+          swiftc -parse-as-library native/macOS/PeerEnvelope.swift native/tests/peer_envelope_test.swift -o "$RUNNER_TEMP/peer-envelope-test"
+          "$RUNNER_TEMP/peer-envelope-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

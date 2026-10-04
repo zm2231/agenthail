@@ -120,6 +120,7 @@ final class AgenthailModel: ObservableObject {
     func selectSession(_ id: String) {
         guard id != selectedSessionID || detail == nil else { return }
         selectedSessionID = id
+        UserDefaults.standard.set(id, forKey: "lastSelectedSessionID")
         detail = nil
         detailLoadedAt = nil
         detailReloadPending = false
@@ -149,7 +150,7 @@ final class AgenthailModel: ObservableObject {
 
     private func reconcileSelection() {
         guard let sessions = snapshot?.sessions else { return }
-        let next = reconciledSelection(selected: selectedSessionID, sessions: sessions)
+        let next = reconciledSelection(selected: selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID"), sessions: sessions)
         guard next != selectedSessionID else { return }
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
@@ -325,6 +326,44 @@ final class AgenthailModel: ObservableObject {
                 if composer.isEmpty { composer = text }
                 operationError = error.localizedDescription
             }
+        }
+    }
+
+    func queuedItems(for sessionID: String) -> [QueueState] {
+        (snapshot?.queue ?? []).filter { $0.sessionId == sessionID && $0.status == "pending" && ["", "message"].contains($0.operation ?? "") }
+    }
+
+    func steerQueued(_ item: QueueState) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.action("queue-cancel", queueID: item.id)
+            } catch {
+                operationError = error.localizedDescription
+                return
+            }
+            do {
+                _ = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message)
+                operationError = nil
+            } catch {
+                if composer.isEmpty { composer = item.message }
+                operationError = "Steer failed, so the message is back in the composer. \(error.localizedDescription)"
+            }
+            _ = await refresh(fresh: true)
+        }
+    }
+
+    func removeQueued(_ item: QueueState, restoreToComposer: Bool = false) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.action("queue-cancel", queueID: item.id)
+                if restoreToComposer { composer = item.message }
+                operationError = nil
+            } catch {
+                operationError = error.localizedDescription
+            }
+            _ = await refresh(fresh: true)
         }
     }
 

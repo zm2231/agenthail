@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Textual
 
@@ -276,10 +277,10 @@ struct ConversationPane: View {
         if let session = model.selectedSession {
             VStack(spacing: 0) {
                 ConversationHeader(session: session, model: model.detail?.model, inspectorVisible: $model.inspectorVisible)
-                ZStack(alignment: .bottom) {
-                    TranscriptView(model: model, session: session)
-                    ComposerView(model: model, session: session)
-                }
+                TranscriptView(model: model, session: session)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        ComposerView(model: model, session: session)
+                    }
             }
             .background(DesktopPalette.window)
         } else {
@@ -369,7 +370,7 @@ struct TranscriptView: View {
             .frame(maxWidth: 700)
             .padding(.horizontal, 24)
             .padding(.top, 28)
-            .padding(.bottom, 170)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity)
         }
         .defaultScrollAnchor(.bottom)
@@ -441,8 +442,14 @@ struct UserBubble: View {
     let receipt: String?
 
     var body: some View {
+        let envelope = PeerEnvelope(text)
         VStack(alignment: .trailing, spacing: 5) {
-            Text(text)
+            if let sender = envelope.sender {
+                Text("From \(sender)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
+            Text(envelope.body)
                 .font(.system(size: 14))
                 .lineSpacing(3)
                 .textSelection(.enabled)
@@ -522,6 +529,11 @@ struct ComposerView: View {
                     .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
+                let queued = model.queuedItems(for: session.id)
+                if !queued.isEmpty {
+                    QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
+                        .padding(.horizontal, 10)
+                }
                 VStack(spacing: 0) {
                     TextField("Message \(session.title)", text: $model.composer, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -628,6 +640,83 @@ struct ComposerView: View {
         let steer = session.isWorking && resolvedAction(alternate: alternate) == .steer
         model.submit(model.composer, steer: steer)
         model.composer = ""
+    }
+}
+
+struct QueueDock: View {
+    @ObservedObject var model: AgenthailModel
+    let items: [QueueState]
+    let canSteer: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(items) { item in
+                let envelope = PeerEnvelope(item.message)
+                HStack(spacing: 10) {
+                    Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DesktopPalette.text2)
+                    HStack(spacing: 6) {
+                        if let sender = envelope.sender {
+                            Text(sender)
+                                .foregroundStyle(DesktopPalette.text2)
+                        }
+                        Text(envelope.body.split(separator: "\n").first.map(String.init) ?? envelope.body)
+                            .foregroundStyle(DesktopPalette.text)
+                    }
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if canSteer {
+                        Button {
+                            model.steerQueued(item)
+                        } label: {
+                            Label("Steer", systemImage: "arrow.turn.down.right")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.text2)
+                        .help("Steer into the current turn")
+                    }
+                    Button {
+                        model.removeQueued(item)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.text2)
+                    .accessibilityLabel("Remove queued message")
+                    Menu {
+                        if canSteer {
+                            Button("Steer into current turn") { model.steerQueued(item) }
+                        }
+                        Button("Send after this turn (current)") {}
+                            .disabled(true)
+                        Button("Interrupt and send now") { model.interruptSelected() }
+                        Divider()
+                        Button("Edit") { model.removeQueued(item, restoreToComposer: true) }
+                        Button("Copy text") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(item.message, forType: .string)
+                        }
+                        Divider()
+                        Button("Remove", role: .destructive) { model.removeQueued(item) }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("More actions")
+                }
+                .font(.system(size: 13))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+            }
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .background(DesktopPalette.dock, in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
+        .overlay(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14).strokeBorder(DesktopPalette.line))
     }
 }
 
