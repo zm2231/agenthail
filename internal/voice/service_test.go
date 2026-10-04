@@ -45,6 +45,7 @@ type targetFixture struct {
 	interruptTurnID string
 	activeTurnID    string
 	capabilities    surface.Capabilities
+	watchDone       chan struct{}
 }
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
@@ -78,7 +79,10 @@ func (f *targetFixture) Reply(context.Context, *surface.Session, int) (*surface.
 func (f *targetFixture) Tail(context.Context, *surface.Session, int) ([]surface.Exchange, error) {
 	return nil, nil
 }
-func (f *targetFixture) Stream(_ context.Context, _ *surface.Session, turnID string, callback func(surface.StreamEvent), _ time.Duration) error {
+func (f *targetFixture) Stream(ctx context.Context, _ *surface.Session, turnID string, callback func(surface.StreamEvent), _ time.Duration) error {
+	if f.watchDone != nil {
+		go func() { <-ctx.Done(); close(f.watchDone) }()
+	}
 	if turnID != "target-turn" {
 		return errors.New("wrong turn")
 	}
@@ -561,22 +565,18 @@ func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
 }
 
 func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}}
-	streamed := make(chan struct{})
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}, watchDone: make(chan struct{})}
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "codex:target-turn:done", Operation: "phase", TurnID: "target-turn", Kind: "done"})
-		close(streamed)
 	}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the tool only"})
 	select {
-	case <-streamed:
+	case <-target.watchDone:
 	case <-time.After(time.Second):
-		t.Fatal("tool-only target stream did not complete")
+		t.Fatal("tool-only delegation did not finish")
 	}
-	time.Sleep(100 * time.Millisecond)
-	v := f.View()
-	if hasEvent(v, "voice/delegation/failed") {
+	if v := f.View(); hasEvent(v, "voice/delegation/failed") {
 		t.Fatalf("completed tool-only turn surfaced a delegation failure: %+v", v.Events)
 	}
 	if spoken := f.provider.spoken(); len(spoken) != 0 {
