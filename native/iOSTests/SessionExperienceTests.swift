@@ -69,7 +69,7 @@ final class SessionExperienceTests: XCTestCase {
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls.first?["action"] as? String, "send")
         XCTAssertEqual(calls.first?["message"] as? String, "Only for A")
-        XCTAssertEqual(model.deliveryStatus["A"], "Queued for the agent")
+        XCTAssertEqual(model.deliveryStatus["A"], "Queued for A; sends when current turn ends.")
         await model.loadSession("B")
         XCTAssertEqual(model.composer, "Only for B")
         model.send(to: session(id: "B", busy: false))
@@ -91,6 +91,30 @@ final class SessionExperienceTests: XCTestCase {
         XCTAssertFalse(model.searching)
         await model.searchSessions("")
         XCTAssertTrue(model.searchResults.isEmpty)
+    }
+
+    @MainActor
+    func testSessionMetadataLoadsAfterJournalWithoutBlockingThePage() async throws {
+        SessionExperienceProtocol.state.reset()
+        let model = makeModel()
+        await model.loadSession("metadata")
+        XCTAssertFalse(model.loadingSession)
+        XCTAssertEqual(model.selectedDetail?.session.id, "metadata")
+        for _ in 0..<100 where model.selectedDetail?.model != "Metadata model" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.selectedDetail?.model, "Metadata model")
+        XCTAssertEqual(model.selectedDetail?.goal?.status, "active")
+        XCTAssertEqual(model.selectedDetail?.models?.first?.id, "metadata-model")
+    }
+
+    @MainActor
+    func testSessionMetadataFailureDoesNotHideJournal() async throws {
+        let model = makeModel()
+        await model.loadSession("metadata-fails")
+        XCTAssertFalse(model.loadingSession)
+        XCTAssertEqual(model.selectedDetail?.session.id, "metadata-fails")
+        XCTAssertNil(model.sessionError)
     }
 
     @MainActor
@@ -128,7 +152,17 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 var session = object["session"] as! [String: Any]
                 session["id"] = id; session["status"] = "idle"
                 object["session"] = session; object["readOnly"] = id == "B"
+                if id == "metadata" || id == "metadata-fails" {
+                    object["context"] = NSNull(); object["goal"] = NSNull(); object["model"] = NSNull(); object["models"] = NSNull()
+                }
                 body = String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
+            }
+        } else if request.url!.path == "/api/v1/session-metadata" {
+            let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "id" }!.value!
+            if id == "metadata-fails" {
+                status = 503; body = #"{"error":{"message":"Metadata unavailable"}}"#
+            } else {
+                body = #"{"context":{"usedTokens":10,"contextWindow":100,"compacting":false,"compactionCount":0},"goal":{"objective":"Metadata goal","status":"active"},"model":"Metadata model","models":[{"id":"metadata-model","displayName":"Metadata model"}],"errors":{"context":"fixture warning"}}"#
             }
         } else if request.url!.path == "/api/v1/queue" {
             body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"}]}"#
@@ -140,7 +174,7 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; data.append(buffer, count: count) }
             }
             Self.state.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
-            body = #"{"ok":true,"result":{"evidence":"queued","queueId":7}}"#
+            body = #"{"ok":true,"result":{"evidence":"queued","queueId":7,"detail":"Queued for A; sends when current turn ends."}}"#
         } else if request.url!.path == "/api/v1/search" {
             body = #"{"results":[{"session":{"id":"older","surface":"codex","name":"Old build","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":false,"stream":false,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}},"snippet":"Saved"}],"remoteError":""}"#
         }

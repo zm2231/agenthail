@@ -258,6 +258,14 @@ struct ModelOption: Decodable, Identifiable {
     let defaultReasoningEffort: String?
 }
 
+struct SessionMetadata: Decodable {
+    let context: ContextState?
+    let goal: GoalState?
+    let model: String?
+    let models: [ModelOption]?
+    let errors: [String: String]?
+}
+
 struct SessionDetail: Decodable {
     let session: RawSession
     let alias: String?
@@ -265,10 +273,10 @@ struct SessionDetail: Decodable {
     let capabilities: Capabilities
     let readOnly: Bool
     let readOnlyReason: String
-    let context: ContextState?
-    let goal: GoalState?
-    let model: String?
-    let models: [ModelOption]?
+    var context: ContextState?
+    var goal: GoalState?
+    var model: String?
+    var models: [ModelOption]?
     var timeline: SessionTimeline?
     let readSource: String?
     let readError: String?
@@ -412,6 +420,9 @@ struct SessionStreamItem: Decodable {
     let turnId: String?
     let ts: String
     let body: String?
+    let role: String?
+    let title: String?
+    let status: String?
     let truncated: Bool
     let bodyRef: String?
     let reason: String?

@@ -83,6 +83,14 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
+    func sessionMetadata(id: String) async throws -> SessionMetadata {
+        var components = URLComponents()
+        components.path = "/api/v1/session-metadata"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init()) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body)
@@ -403,4 +411,5 @@ struct DeliveryReceipt: Decodable {
     let evidence: String?
     let status: String?
     let queueId: Int64?
+    let detail: String?
 }
