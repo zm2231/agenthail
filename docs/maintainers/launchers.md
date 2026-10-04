@@ -51,11 +51,16 @@ created or focused.
 Terminal launches can return an empty `SessionID`. Callers should persist the
 returned location and run `Locate` after the provider catalog observes the
 new session. A tmux `Location.Session` is a generated tmux server session
-name, not an Agenthail/provider session ID. tmux correlation requires a live
-registered session PID, matching cwd, a live pane PID, and proof that the
-registered PID descends from that pane PID. cmux correlation requires a live
-recorded PID from `cmux sessions list --json`; its location contains only the
-workspace and surface handles.
+name, not an Agenthail/provider session ID. tmux correlation for hand-started
+sessions requires a live registered session PID, matching cwd, a live pane PID,
+and proof that the registered PID descends from that pane PID. Agenthail-owned
+Codex launches use a launch-owned receipt: the wrapper creates the provider
+thread through managed `thread/start`, resumes that provider ID, and binds it
+to the generated tmux session and pane in a 0600 receipt. Discovery requires
+that receipt, the live pane, the exact provider ID, session, pane, and cwd all
+agree; it never derives identity from cwd or a title. cmux correlation requires
+a live recorded PID from `cmux sessions list --json`; its location contains
+only the workspace and surface handles.
 
 `Focuser` is implemented by cmux and tmux. Focus is an explicit caller action,
 not a side effect of `Launch`.

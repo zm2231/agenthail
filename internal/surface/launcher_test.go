@@ -214,6 +214,40 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	}
 }
 
+func TestTMUXCodexLaunchPassesLaunchOwnedReceiptBinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newTMUX().(*processLauncher)
+	var got []string
+	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		got = append([]string{name}, args...)
+		sessionIndex := slices.Index(got, "-s")
+		if sessionIndex < 0 || sessionIndex+1 >= len(got) {
+			t.Fatalf("tmux session argument missing: %#v", got)
+		}
+		return []byte(got[sessionIndex+1] + " %1"), nil
+	}
+	result, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindCodex, Cwd: "/work", Message: "hello"})
+	if err != nil || result.Location == nil {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if !containsLine(got, "env") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_ID=agenthail-") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_RECEIPT=") {
+		t.Fatalf("launch args=%#v", got)
+	}
+}
+
+func TestTMUXMalformedPostLaunchOutputIsAcceptedWithoutLocation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newTMUX().(*processLauncher)
+	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("created-but-unparseable"), nil
+	}
+	_, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindCodex, Cwd: "/work", Message: "hello"})
+	var acceptedErr LaunchAcceptedError
+	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherTMUX {
+		t.Fatalf("err=%v, want accepted tmux launch error", err)
+	}
+}
+
 func TestProcessLaunchFailsBeforeLaunchWhenClaudeIsMissing(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
@@ -261,6 +295,61 @@ func TestTMUXLocatePreservesCwdSpaces(t *testing.T) {
 	want := map[string]Location{"codex": {Session: "build", Pane: "%1"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations = %#v, want %#v", got, want)
+	}
+}
+
+func TestTMUXLocateUsesLaunchReceiptForCodexPIDZero(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newTMUX().(*processLauncher)
+	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("4242 agenthail-review %1 /work/project\n"), nil
+	}
+	launcher.pidAlive = func(pid int) bool { return pid == 4242 }
+	path, err := ManagedCodexLaunchReceiptPath("agenthail-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", TmuxSession: "agenthail-review", TmuxPane: "%1"}); err != nil {
+		t.Fatal(err)
+	}
+	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project", PID: 0}})
+	want := map[string]Location{"codex-thread": {Session: "agenthail-review", Pane: "%1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("locations=%#v want=%#v", got, want)
+	}
+}
+
+func TestTMUXLocateWaitsForCompleteReceiptAndRejectsTokenOrPaneMismatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launcher := newTMUX().(*processLauncher)
+	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("4242 agenthail-review %1 /work/project\n4343 agenthail-review %2 /work/project\n"), nil
+	}
+	launcher.pidAlive = func(pid int) bool { return pid == 4242 || pid == 4343 }
+	sessions := []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project", PID: 0}}
+	if got := launcher.Locate(context.Background(), sessions); len(got) != 0 {
+		t.Fatalf("late receipt unexpectedly correlated: %#v", got)
+	}
+	path, err := ManagedCodexLaunchReceiptPath("agenthail-review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"launchId":"other","threadId":"codex-thread","cwd":"/work/project","tmuxSession":"agenthail-review","tmuxPane":"%1"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := launcher.Locate(context.Background(), sessions); len(got) != 0 {
+		t.Fatalf("token-mismatched receipt correlated: %#v", got)
+	}
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", TmuxSession: "agenthail-review", TmuxPane: "%2"}); err != nil {
+		t.Fatal(err)
+	}
+	got := launcher.Locate(context.Background(), sessions)
+	want := map[string]Location{"codex-thread": {Session: "agenthail-review", Pane: "%2"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("locations=%#v want=%#v", got, want)
 	}
 }
 
@@ -313,6 +402,15 @@ func writeExecutable(t *testing.T, path, body string) {
 func containsLine(lines []string, want string) bool {
 	for _, line := range lines {
 		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPrefix(lines []string, want string) bool {
+	for _, line := range lines {
+		if strings.HasPrefix(line, want) {
 			return true
 		}
 	}
