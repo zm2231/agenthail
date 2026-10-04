@@ -3,7 +3,12 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +18,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
+
+const apiTestPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
 func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -355,6 +366,7 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 		{http.MethodGet, "/api/v1/snapshot"},
 		{http.MethodGet, "/api/v1/events"},
 		{http.MethodGet, "/api/v1/session?id=missing"},
+		{http.MethodGet, "/api/v1/session-attachment?sessionId=missing&id=missing"},
 		{http.MethodGet, "/api/v1/models?surface=missing"},
 		{http.MethodGet, "/api/v1/history"},
 		{http.MethodPost, "/api/v1/actions"},
@@ -368,6 +380,131 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 			handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
 			assertAPIV1Error(t, response, http.StatusUnauthorized, "unauthorized")
 		})
+	}
+}
+
+func TestAPIV1SessionAttachmentAuthenticatedReadScopeReachesSessionLookup(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=missing&id=attachment:0:0:"+strings.Repeat("0", 64), nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusNotFound, "session_not_found")
+}
+
+func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testing.T) {
+	d, registry, _, from, _ := daemonFixture(t)
+	transcript := filepath.Join(t.TempDir(), "claude.jsonl")
+	imagePath := filepath.Join(t.TempDir(), "image.png")
+	imageBytes, err := base64.StdEncoding.DecodeString(apiTestPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imagePath, imageBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"caption"},{"type":"image","source":{"type":"path","path":` + quoteJSON(imagePath) + `}}]}]}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Surface, from.Transcript = surface.KindClaude, transcript
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	claude := surfaces.NewClaude("", t.TempDir())
+	d.Surfaces = []surface.Surface{claude}
+	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
+	if err != nil || len(read.Items) != 2 || read.Items[1].Attachment == nil || read.Items[0].Text != "caption" || read.Items[1].CallID != "call-1" {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	id := read.Items[1].Attachment.ID
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil))
+	assertAPIV1Error(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || !bytes.Equal(response.Body.Bytes(), imageBytes) {
+		t.Fatalf("status=%d content-type=%q body=%d", response.Code, response.Header().Get("Content-Type"), response.Body.Len())
+	}
+	pairing, err := registry.CreateDevicePairing("control-only", []string{"control"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, controlToken, err := registry.CompleteDevicePairing(pairing.Secret, "control-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil)
+	request.Header.Set("Authorization", "Bearer "+controlToken)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusUnauthorized, "unauthorized")
+	oversize := bytes.Repeat([]byte{0x01}, 10<<20+1)
+	encoded := base64.StdEncoding.EncodeToString(oversize)
+	overPath := filepath.Join(t.TempDir(), "oversize.jsonl")
+	overLine := `{"type":"user","uuid":"u2","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + encoded + `"}}]}}` + "\n"
+	if err := os.WriteFile(overPath, []byte(overLine), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Transcript = overPath
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(oversize)
+	overID := "attachment:0:0:" + hex.EncodeToString(hash[:])
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+overID, nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusRequestEntityTooLarge, "attachment_too_large")
+}
+
+func quoteJSON(value string) string { data, _ := json.Marshal(value); return string(data) }
+
+func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "from", TargetSessionID: "to", Message: "delivery body", Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, "delivery failed"); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil))
+	assertAPIV1Error(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+	for _, deliveryID := range []int64{0, -1} {
+		badID := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(fmt.Sprintf(`{"action":"delivery-dismiss","deliveryId":%d}`, deliveryID)))
+		badID.Header.Set("Authorization", "Bearer secret")
+		badResponse := httptest.NewRecorder()
+		handler.ServeHTTP(badResponse, badID)
+		assertAPIV1Error(t, badResponse, http.StatusBadRequest, "invalid_request")
+	}
+	snapshotRequest := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
+	snapshotRequest.Header.Set("Authorization", "Bearer secret")
+	snapshotResponse := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotResponse, snapshotRequest)
+	if snapshotResponse.Code != http.StatusOK || !strings.Contains(snapshotResponse.Body.String(), `"deliveryProblems"`) || !strings.Contains(snapshotResponse.Body.String(), `"deliveryId":`+fmt.Sprint(intent.ID)) {
+		t.Fatalf("snapshot status=%d body=%s", snapshotResponse.Code, snapshotResponse.Body.String())
+	}
+	dismissRequest := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(fmt.Sprintf(`{"action":"delivery-dismiss","deliveryId":%d}`, intent.ID)))
+	dismissRequest.Header.Set("Authorization", "Bearer secret")
+	dismissResponse := httptest.NewRecorder()
+	handler.ServeHTTP(dismissResponse, dismissRequest)
+	if dismissResponse.Code != http.StatusOK || !strings.Contains(dismissResponse.Body.String(), `"dismissed":true`) {
+		t.Fatalf("dismiss status=%d body=%s", dismissResponse.Code, dismissResponse.Body.String())
+	}
+	repeatRequest := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(fmt.Sprintf(`{"action":"delivery-dismiss","deliveryId":%d}`, intent.ID)))
+	repeatRequest.Header.Set("Authorization", "Bearer secret")
+	repeatResponse := httptest.NewRecorder()
+	handler.ServeHTTP(repeatResponse, repeatRequest)
+	if repeatResponse.Code != http.StatusOK || !strings.Contains(repeatResponse.Body.String(), `"dismissed":false`) {
+		t.Fatalf("repeat status=%d body=%s", repeatResponse.Code, repeatResponse.Body.String())
 	}
 }
 

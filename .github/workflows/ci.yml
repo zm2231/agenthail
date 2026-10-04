@@ -31,6 +31,10 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+      - name: Session journal browser tests
+        run: |
+          node scripts/test-session-journal.mjs
+          node scripts/test-dashboard-idempotency.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Race tests
@@ -96,6 +100,8 @@ jobs:
           "$RUNNER_TEMP/session-pane-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/AgenthailLink.swift native/tests/agenthail_link_test.swift -o "$RUNNER_TEMP/agenthail-link-test"
           "$RUNNER_TEMP/agenthail-link-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/tests/goal_editor_state_test.swift -o "$RUNNER_TEMP/goal-editor-state-test"
+          "$RUNNER_TEMP/goal-editor-state-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

@@ -17,7 +17,9 @@ struct DashboardSnapshotTest {
             relays: [],
             history: [],
             attention: [],
-            codexRecentHours: 5
+            deliveryProblems: nil,
+            codexRecentHours: 5,
+            busyDelivery: "queue"
         )
     }
 
@@ -28,7 +30,7 @@ struct DashboardSnapshotTest {
         precondition(current.hasSamePresentation(as: transportOnlyChange))
         precondition(!current.hasSamePresentation(as: visibleChange))
         var problemChange = transportOnlyChange
-        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", message: "Run the tests", reason: "target_not_writable", at: nil)]
+        problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
         precondition(!current.hasSamePresentation(as: problemChange))
         print("dashboard snapshot tests passed")
     }

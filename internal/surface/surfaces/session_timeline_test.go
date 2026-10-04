@@ -50,6 +50,17 @@ func TestClaudeTimelinePreservesOrderedToolActivity(t *testing.T) {
 	}
 }
 
+func TestClaudeTimelineKeepsNonCodexProviderIdentity(t *testing.T) {
+	path := timelineFixture(t, `{"type":"assistant","uuid":"claude-message-1","timestamp":"2026-09-07T10:00:00Z","message":{"id":"claude-message-1","content":[{"type":"text","text":"answer"}]}}`+"\n")
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 0)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if strings.HasPrefix(page.Items[0].ID, "codex:") || page.Items[0].ID == "" {
+		t.Fatalf("Claude item got Codex identity: %+v", page.Items[0])
+	}
+}
+
 func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	var content strings.Builder
 	for i := 0; i < 450; i++ {
@@ -89,6 +100,9 @@ func TestCodexTimelinePagingIsOrderedStableAndComplete(t *testing.T) {
 	second, _ := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if first.Items[len(first.Items)-1].ID != second.Items[len(second.Items)-2].ID {
 		t.Fatal("identity changed on append")
+	}
+	if second.Items[len(second.Items)-1].Kind != "toolResult" || second.Items[len(second.Items)-1].CallID != "call-449" || second.Items[len(second.Items)-1].Text != "ok" {
+		t.Fatalf("function call output=%+v", second.Items[len(second.Items)-1])
 	}
 }
 

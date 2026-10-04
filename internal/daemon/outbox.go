@@ -14,8 +14,24 @@ const maxDeliveryAttempts = 5
 const compactOperationTimeout = 5 * time.Minute
 
 func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.drainClaimedMessage(ctx, adapter, session, func(now time.Time) (*registry.QueuedMessage, error) {
+		return d.Registry.ClaimNextMessage(session.ID, now)
+	})
+}
+
+func (d *Daemon) drainSteerMessageQueue(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.drainClaimedMessage(ctx, adapter, session, func(now time.Time) (*registry.QueuedMessage, error) {
+		return d.Registry.ClaimNextSteerMessage(session.ID, now)
+	})
+}
+
+func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surface, session *surface.Session, claim func(time.Time) (*registry.QueuedMessage, error)) {
+	if err := surface.ValidateRuntimeTransport(session); err != nil {
+		d.log.Printf("transport for %s unavailable: %s", d.resolveDisplay(session.ID), err)
+		return
+	}
 	now := time.Now()
-	item, err := d.Registry.ClaimNextMessage(session.ID, now)
+	item, err := claim(now)
 	if err != nil {
 		d.log.Printf("claim queue for %s: %s", d.resolveDisplay(session.ID), err)
 		return
@@ -35,7 +51,14 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	var result *surface.SendResult
 	var sendErr error
-	if item.Model != "" || !item.TurnOptions.Empty() {
+	steered := false
+	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+		sendErr = adapter.Steer(operationCtx, session, item.Message)
+		if sendErr == nil {
+			result = &surface.SendResult{Accepted: true}
+			steered = true
+		}
+	} else if item.Model != "" || !item.TurnOptions.Empty() {
 		if sender, ok := adapter.(surface.OptionSender); ok {
 			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions})
 		} else {
@@ -57,7 +80,7 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if session.Surface != surface.KindClaude || session.Transport != "uds" {
+	if !steered && (session.Surface != surface.KindClaude || session.Transport != "uds") {
 		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}

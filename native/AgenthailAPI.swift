@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case historyGap(String)
     case streamGap
     case streamClosed
 
@@ -14,6 +15,7 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
@@ -83,9 +85,40 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await get(path)
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init()) async throws -> ActionReceipt {
+    func sessionMetadata(id: String) async throws -> SessionMetadata {
+        var components = URLComponents()
+        components.path = "/api/v1/session-metadata"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
+    func sessionAttachment(sessionID: String, id: String) async throws -> Data {
+        var components = URLComponents()
+        components.path = "/api/v1/session-attachment"
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "id", value: id)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        let (bytes, response) = try await session.bytes(for: authorizedRequest(path: path))
+        guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
+        guard response.statusCode == 200 else {
+            if response.statusCode == 413 { throw AgenthailAPIError.request(413, "This image is too large to display on the device.") }
+            throw AgenthailAPIError.request(response.statusCode, HTTPURLResponse.localizedString(forStatusCode: response.statusCode))
+        }
+        if let length = response.value(forHTTPHeaderField: "Content-Length"), let length = Int(length), length > 10 * 1024 * 1024 {
+            throw AgenthailAPIError.request(413, "This image is too large to display on the device.")
+        }
+        var data = Data()
+        for try await byte in bytes {
+            if Task.isCancelled { throw CancellationError() }
+            data.append(byte)
+            if data.count > 10 * 1024 * 1024 { throw AgenthailAPIError.request(413, "This image is too large to display on the device.") }
+        }
+        return data
+    }
+
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), idempotencyKey: String? = nil) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
-        return try await requestEncoded("/api/v1/actions", method: "POST", body: body)
+        return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
     func sessionOptions() async throws -> SessionCreationOptions { try await get("/api/v1/session-options") }
@@ -107,33 +140,18 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func launchSession(launcher: String?, surface: String, message: String, cwd: String) async throws -> SessionCreationReceipt {
-        var body = ["action": "session-create", "surface": surface, "message": message, "cwd": cwd]
-        if let launcher { body["launcher"] = launcher }
-        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
-    }
-
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil) async throws -> SessionCreationReceipt {
+        if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+            throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
+        }
         if surface == "codex" {
-            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings)
-            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65)
+            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher)
+            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
         }
         var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
         if surface == "claude" { body.merge(claude.fields) { _, value in value } }
-        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
-    }
-
-    func attachmentData(sessionID: String, attachmentID: String) async throws -> Data {
-        var components = URLComponents()
-        components.path = "/api/v1/session-attachment"
-        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "id", value: attachmentID)]
-        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
-        var request = authorizedRequest(path: path)
-        request.setValue("image/*", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 30
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response, data: data)
-        return data
+        if let launcher { body["launcher"] = launcher }
+        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
     }
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {
@@ -205,20 +223,20 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
-        if let deliveryID { body["deliveryId"] = deliveryID }
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
         if let model { body["model"] = model }
         if let queueID { body["queueId"] = queueID }
+        if let deliveryID { body["deliveryId"] = deliveryID }
         if let channel { body["channel"] = channel }
         if let targetID { body["targetId"] = targetID }
         if let fromID { body["fromId"] = fromID }
         if let toID { body["toId"] = toID }
         if let pattern { body["pattern"] = pattern }
         if let relayID { body["relayId"] = relayID }
-        let _: EmptyResponse = try await post("/api/v1/actions", body: body)
+        let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
     func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
@@ -320,22 +338,23 @@ final class AgenthailAPI: @unchecked Sendable {
         try await request(path, method: "GET", body: nil)
     }
 
-    private func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
-        try await request(path, method: "POST", body: body)
+    private func post<T: Decodable>(_ path: String, body: [String: Any], idempotencyKey: String? = nil) async throws -> T {
+        try await request(path, method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
-    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25) async throws -> T {
+    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25, idempotencyKey: String? = nil) async throws -> T {
         var request = authorizedRequest(path: path)
         request.httpMethod = method
         request.timeoutInterval = timeout
         request.httpBody = try JSONEncoder().encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: path, method: method, key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func request<T: Decodable>(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval = 25) async throws -> T {
+    private func request<T: Decodable>(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval = 25, idempotencyKey: String? = nil) async throws -> T {
         var request = authorizedRequest(path: path)
         request.httpMethod = method
         request.timeoutInterval = timeout
@@ -343,6 +362,7 @@ final class AgenthailAPI: @unchecked Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        setIdempotencyHeader(on: &request, path: path, method: method, key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         if T.self == EmptyResponse.self {
@@ -359,6 +379,11 @@ final class AgenthailAPI: @unchecked Sendable {
         return request
     }
 
+    private func setIdempotencyHeader(on request: inout URLRequest, path: String, method: String, key: String?) {
+        guard method == "POST", path == "/api/v1/actions" else { return }
+        request.setValue(key ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
+    }
+
     private func validate(response: URLResponse, data: Data?) throws {
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
@@ -366,6 +391,9 @@ final class AgenthailAPI: @unchecked Sendable {
             if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
+                }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
+                    throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
                 }
             }
             throw AgenthailAPIError.request(response.statusCode, message)
@@ -387,8 +415,10 @@ private struct InstructionRequest: Encodable {
         try container.encode(action, forKey: .action)
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(message, forKey: .message)
-        try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
-        try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+        if action != "steer" {
+            try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
+            try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+        }
     }
 }
 
@@ -399,8 +429,9 @@ private struct SessionCreateRequest: Encodable {
     let cwd: String
     let model: String
     let turnSettings: TurnSettings
+    let launcher: String?
 
-    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode }
+    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode; case launcher }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -411,6 +442,7 @@ private struct SessionCreateRequest: Encodable {
         try container.encode(model, forKey: .model)
         try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
         try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+        try container.encodeIfPresent(launcher, forKey: .launcher)
     }
 }
 
@@ -420,7 +452,9 @@ struct ActionReceipt: Decodable {
     let result: DeliveryReceipt?
 }
 struct DeliveryReceipt: Decodable {
+    let deliveryId: Int64?
     let evidence: String?
     let status: String?
     let queueId: Int64?
+    let detail: String?
 }

@@ -38,7 +38,11 @@ func (d *Daemon) sessionOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(directories)
 	sort.Slice(options, func(i, j int) bool { return options[i].ID < options[j].ID })
-	writeDashboardJSON(w, http.StatusOK, map[string]any{"surfaces": options, "workspaces": directories})
+	launchers := []map[string]any{}
+	if d.transportResolver != nil {
+		launchers = d.transportResolver.Options(r.Context())
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"surfaces": options, "workspaces": directories, "launchers": launchers})
 }
 
 func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 8
+	schemaVersion   = 10
 	queueMessageTTL = time.Hour
 )
 
@@ -98,6 +99,7 @@ func (r *Registry) migrate() error {
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
+		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -109,6 +111,7 @@ func (r *Registry) migrate() error {
 	}{
 		{"source", `TEXT NOT NULL DEFAULT ''`},
 		{"transport", `TEXT NOT NULL DEFAULT ''`},
+		{"configured_model", `TEXT NOT NULL DEFAULT ''`},
 		{"last_active_ms", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
@@ -118,12 +121,21 @@ func (r *Registry) migrate() error {
 	for _, column := range []struct{ name, decl string }{
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
 		{"notification_armed", `INTEGER NOT NULL DEFAULT 0`},
+		{"runtime_launcher", `TEXT NOT NULL DEFAULT ''`},
+		{"runtime_location", `BLOB NOT NULL DEFAULT '{}'`},
+		{"runtime_focusable", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
 			return err
 		}
 	}
+	if err := r.ensureColumn("launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("session_journal_state", "pruned_before", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -134,6 +146,18 @@ func (r *Registry) migrate() error {
 	}
 	if err := r.ensureColumn("delivery_intents", "queue_id", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
+	}
+	if err := r.ensureColumn("delivery_intents", "dismissed_at", `TEXT`); err != nil {
+		return err
+	}
+	if version < 9 {
+		if _, err := r.db.Exec(`
+			UPDATE session_journal
+			SET bytes=length(payload)+CASE WHEN body_ref!='' THEN COALESCE((SELECT length(body) FROM session_journal_bodies WHERE session_journal_bodies.session_id=session_journal.session_id AND session_journal_bodies.ref=session_journal.body_ref),0) ELSE 0 END;
+			UPDATE session_journal_state
+			SET retained_bytes=COALESCE((SELECT SUM(bytes) FROM session_journal WHERE session_journal.session_id=session_journal_state.session_id),0);`); err != nil {
+			return err
+		}
 	}
 	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 		return err
@@ -199,6 +223,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
 	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
+	configured_model TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -250,6 +275,16 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	relay_hops INTEGER NOT NULL DEFAULT 0,
 	notification_armed INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS launcher_pending (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	launcher TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	cwd TEXT NOT NULL DEFAULT '',
+	name TEXT NOT NULL DEFAULT '',
+	alias TEXT NOT NULL DEFAULT '',
+	location BLOB NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS relay_deliveries (
 	route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
@@ -334,7 +369,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	next_seq INTEGER NOT NULL DEFAULT 0,
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
-	source_epoch TEXT NOT NULL DEFAULT ''
+	source_epoch TEXT NOT NULL DEFAULT '',
+	pruned_before INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
@@ -361,6 +397,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
+	dismissed_at TEXT,
 	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -396,14 +433,45 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 	return tx.Commit()
 }
 
+func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID int64, alias string) error {
+	if pendingID <= 0 {
+		return fmt.Errorf("pending launch id is required")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := registerSessionTx(tx, s); err != nil {
+		return err
+	}
+	if alias != "" {
+		if err := setAliasTx(tx, alias, s.ID); err != nil {
+			return err
+		}
+	}
+	result, err := tx.Exec(`DELETE FROM launcher_pending WHERE id=?`, pendingID)
+	if err != nil {
+		return err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted != 1 {
+		return fmt.Errorf("pending launch %d was not found", pendingID)
+	}
+	return tx.Commit()
+}
+
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	lastActiveMS := int64(0)
 	if !s.LastActive.IsZero() {
 		lastActiveMS = s.LastActive.UnixMilli()
 	}
 	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms,updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
@@ -418,12 +486,22 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.transport
 		     WHEN excluded.transport<>'' THEN excluded.transport
 		     ELSE sessions.transport
-		   END,
-		   last_active_ms=excluded.last_active_ms,
+			   END,
+			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
+			   last_active_ms=excluded.last_active_ms,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, lastActiveMS)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, lastActiveMS)
 	if err != nil {
 		return err
+	}
+	if s.Runtime != nil {
+		location, err := json.Marshal(s.Runtime.Location)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,runtime_launcher,runtime_location,runtime_focusable,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET runtime_launcher=excluded.runtime_launcher,runtime_location=excluded.runtime_location,runtime_focusable=excluded.runtime_focusable,updated_at=datetime('now')`, s.ID, string(s.Runtime.Launcher), location, b2i(s.Runtime.Focusable)); err != nil {
+			return err
+		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
 		rows, err := tx.Query(`SELECT id FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID)
@@ -539,8 +617,56 @@ func (r *Registry) LookupAlias(name string) (string, error) {
 	return sid, err
 }
 
+func (r *Registry) EnsureAliasAvailable(name string) error {
+	if name == "" {
+		return nil
+	}
+	var owner string
+	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return AliasTakenError{Name: name, Owner: owner}
+}
+
 func (r *Registry) SetAlias(name, sessionID string) error {
-	return r.ReplaceAlias(name, sessionID)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := setAliasTx(tx, name, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type AliasTakenError struct {
+	Name  string
+	Owner string
+}
+
+func (e AliasTakenError) Error() string {
+	return fmt.Sprintf("alias %q is already assigned to session %q", e.Name, e.Owner)
+}
+
+func setAliasTx(tx *sql.Tx, name, sessionID string) error {
+	var owner string
+	err := tx.QueryRow(`SELECT session_id FROM aliases WHERE name=?`, name).Scan(&owner)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil && owner != sessionID {
+		return AliasTakenError{Name: name, Owner: owner}
+	}
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?)`, name, sessionID)
+	return err
 }
 
 func (r *Registry) ReplaceAlias(name, sessionID string) error {
@@ -549,13 +675,20 @@ func (r *Registry) ReplaceAlias(name, sessionID string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := replaceAliasTx(tx, name, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func replaceAliasTx(tx *sql.Tx, name, sessionID string) error {
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, name, sessionID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error) {
@@ -780,13 +913,16 @@ func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey strin
 }
 
 func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
+	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
+		options.BusyDelivery = "queue"
+	}
 	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt, options.BusyDelivery)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -818,8 +954,10 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 }
 
 func (r *Registry) expireMessages(now time.Time) error {
-	_, err := r.ExpireMessages(now)
-	return err
+	if _, err := r.ExpireMessages(now); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) ExpireMessages(now time.Time) (int, error) {
@@ -865,17 +1003,19 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 }
 
 func (r *Registry) QueueCount(sessionID string) int {
-	_ = r.expireMessages(time.Now())
 	var n int
-	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
+	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, time.Now().UnixMilli()).Scan(&n)
 	return n
 }
 
+func (r *Registry) PendingSteer(sessionID string) (bool, error) {
+	var found int
+	err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
+	return found > 0, err
+}
+
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	if err := r.expireMessages(time.Now()); err != nil {
-		return nil, err
-	}
-	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`)
+	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -902,6 +1042,7 @@ type QueuedMessage struct {
 	Attempts        int
 	RelayHops       int
 	Operation       QueueOperation
+	BusyDelivery    string
 }
 
 const (
@@ -1107,6 +1248,7 @@ type QueueRow struct {
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       QueueOperation           `json:"operation"`
+	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 }
 
 type AttentionItem struct {
@@ -1124,10 +1266,7 @@ const uncertainDeliveryError = "delivery outcome is unknown after daemon interru
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	now := time.Now()
-	if err := r.expireMessages(now); err != nil {
-		return nil, err
-	}
-	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation FROM message_queue`
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
 	}
@@ -1145,7 +1284,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	for rows.Next() {
 		var row QueueRow
 		var evidence string
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation); err != nil {
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery); err != nil {
 			return nil, err
 		}
 		row.Historical = queueRowIsHistorical(row, now)
@@ -1157,12 +1296,9 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 
 func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	now := time.Now()
-	if err := r.expireMessages(now); err != nil {
-		return nil, err
-	}
 	var row QueueRow
 	var evidence string
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation)
+	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -1202,13 +1338,33 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 }
 
 func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, error) {
-	now := time.Now()
-	if err := r.expireMessages(now); err != nil {
-		return nil, err
+	query := `SELECT id,session_id,queue_id,reason,requested_action,created_at,resolved_at,resolution FROM attention_items`
+	if !includeResolved {
+		query += ` WHERE resolved_at=''`
 	}
-	tx, err := r.db.Begin()
+	query += ` ORDER BY created_at DESC,id DESC`
+	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
+	}
+	defer rows.Close()
+	items := make([]AttentionItem, 0)
+	for rows.Next() {
+		var item AttentionItem
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ReconcileAttentionItems materializes attention rows from queue state. It is
+// called by queue state writers and the background scan, never by snapshot reads.
+func (r *Registry) ReconcileAttentionItems(now time.Time) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
 	}
 	defer tx.Rollback()
 	_, err = tx.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action)
@@ -1242,40 +1398,19 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 			requested_action=excluded.requested_action
 		WHERE attention_items.resolved_at=''`, now.UnixMilli())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	_, err = tx.Exec(`UPDATE attention_items SET
 		resolved_at=datetime('now'),
 		resolution=COALESCE((SELECT CASE WHEN status='dead' AND expires_at_ms>0 AND expires_at_ms<=? THEN 'expired' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
 		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead' AND (expires_at_ms=0 OR expires_at_ms>?))`, now.UnixMilli(), now.UnixMilli())
 	if err != nil {
-		return nil, err
-	}
-	query := `SELECT id,session_id,queue_id,reason,requested_action,created_at,resolved_at,resolution FROM attention_items`
-	if !includeResolved {
-		query += ` WHERE resolved_at=''`
-	}
-	query += ` ORDER BY created_at DESC,id DESC`
-	rows, err := tx.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]AttentionItem, 0)
-	for rows.Next() {
-		var item AttentionItem
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return err
 	}
-	return items, nil
+	return nil
 }
 
 func (r *Registry) RetryMessage(id int64) error {
@@ -1289,7 +1424,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not dead-lettered or expired", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
-	return nil
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) CancelMessage(id int64) error {
@@ -1303,7 +1438,7 @@ func (r *Registry) CancelMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not pending or dead-lettered", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from delivery queue"})
-	return nil
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
@@ -1339,10 +1474,25 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	for _, entry := range pending {
 		_ = r.RecordHistory(entry)
 	}
-	return res.RowsAffected()
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+		return count, err
+	}
+	return count, nil
 }
 
 func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	return r.claimNextMessage(sessionID, now, "")
+}
+
+func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
+	return r.claimNextMessage(sessionID, now, "steer")
+}
+
+func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
@@ -1355,7 +1505,17 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') ORDER BY id LIMIT 1`, sessionID).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation)
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`
+	args := []any{sessionID}
+	if busyDelivery != "" {
+		query += ` AND busy_delivery=?`
+		args = append(args, busyDelivery)
+		if busyDelivery == "steer" {
+			query += ` AND model='' AND (turn_options='' OR turn_options='{}')`
+		}
+	}
+	query += ` ORDER BY id LIMIT 1`
+	err = tx.QueryRow(query, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1373,7 +1533,10 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
-		return nil, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, r.ReconcileAttentionItems(now)
 	}
 	if status != "pending" || availableAt > now.UnixMilli() {
 		return nil, nil
@@ -1400,7 +1563,7 @@ func (r *Registry) AckMessage(id int64) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not inflight", id)
 	}
-	return nil
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) AckMessageWithRelayHops(id int64, sessionID string, relayHops int) error {
@@ -1429,7 +1592,10 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,relay_hops,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET relay_hops=excluded.relay_hops,updated_at=datetime('now')`, sessionID, relayHops); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts int) error {
@@ -1469,7 +1635,10 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
@@ -1489,7 +1658,10 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
 		message = cause.Error()
 	}
 	_, err := r.db.Exec(`UPDATE message_queue SET status='pending',last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), id)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
@@ -1508,7 +1680,10 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 	if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
@@ -1528,7 +1703,13 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return notified, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+		return notified, err
+	}
+	return notified, nil
 }
 
 func deadLetterInflight(tx *sql.Tx, id int64, message string) error {
@@ -1559,7 +1740,15 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return n, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		if err := r.ReconcileAttentionItems(before); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 type RuntimeState struct {
@@ -1628,9 +1817,6 @@ type WatchedSession struct {
 }
 
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
-	if err := r.expireMessages(time.Now()); err != nil {
-		return nil, err
-	}
 	rows, err := r.db.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
@@ -1801,8 +1987,11 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var kind, status string
 	var hasLocal int
 	var lastActiveMS int64
-	err := r.db.QueryRow(`SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions WHERE id = ?`, id).Scan(
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS,
+	var launcher string
+	var location []byte
+	var focusable int
+	err := r.db.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0) FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable,
 	)
 	if err != nil {
 		return nil, err
@@ -1812,6 +2001,11 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	session.HasLocal = hasLocal != 0
 	if lastActiveMS > 0 {
 		session.LastActive = time.UnixMilli(lastActiveMS)
+	}
+	if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+		return nil, err
+	} else {
+		session.Runtime = runtime
 	}
 	return &session, nil
 }
@@ -1825,8 +2019,8 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.last_active_ms
-		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id
+	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0)
+		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
 	if err != nil {
@@ -1839,7 +2033,10 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+		var launcher string
+		var location []byte
+		var focusable int
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)
@@ -1848,13 +2045,24 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		if lastActiveMS > 0 {
 			session.LastActive = time.UnixMilli(lastActiveMS)
 		}
+		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+			return nil, err
+		} else {
+			session.Runtime = runtime
+		}
 		results = append(results, session)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT id,surface,name,cwd,pid,status,transcript,has_local,source,transport,last_active_ms FROM sessions ORDER BY last_active_ms DESC, updated_at DESC, id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0) FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -1871,7 +2079,10 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var kindText, status string
 		var hasLocal int
 		var lastActiveMS int64
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &lastActiveMS); err != nil {
+		var launcher string
+		var location []byte
+		var focusable int
+		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable); err != nil {
 			return nil, err
 		}
 		session.Surface = surface.SurfaceKind(kindText)
@@ -1880,9 +2091,20 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		if lastActiveMS > 0 {
 			session.LastActive = time.UnixMilli(lastActiveMS)
 		}
+		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
+			return nil, err
+		} else {
+			session.Runtime = runtime
+		}
 		results = append(results, session)
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {

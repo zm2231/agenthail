@@ -27,6 +27,7 @@ type Daemon struct {
 	log               *log.Logger
 	errorMu           sync.Mutex
 	observeErrors     map[string]observedError
+	pendingAliasWarns map[int64]bool
 	retryMu           sync.Mutex
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
@@ -38,6 +39,11 @@ type Daemon struct {
 	sourceHoldMu      sync.Mutex
 	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
+	transportResolver *SessionTransportResolver
+}
+
+func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
+	d.transportResolver = NewSessionTransportResolver(launchers)
 }
 
 type observedError struct {
@@ -70,12 +76,14 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors:     map[string]observedError{},
+		pendingAliasWarns: map[int64]bool{},
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
 	}
+	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
 	if err := reg.EnsureCatalogState(); err != nil {
 		d.log.Printf("catalog state: %s", err)
 	}
@@ -165,6 +173,7 @@ func (d *Daemon) logRuntimeError(key string, err error) {
 }
 
 func (d *Daemon) Run(ctx context.Context) error {
+	defer d.sources.shutdown()
 	d.log.Printf("started; %d surfaces", len(d.Surfaces))
 	if recovered, err := d.Registry.RecoverInflight(time.Now().Add(-time.Minute)); err != nil {
 		d.log.Printf("warn: recover inflight queue: %s", err)

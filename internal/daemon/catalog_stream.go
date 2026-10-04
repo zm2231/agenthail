@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -253,6 +255,26 @@ func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent)
 }
 
 func (d *Daemon) discoverCatalog(ctx context.Context) {
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		d.log.Printf("catalog config: %s", err)
+		return
+	}
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("catalog queue counts: %s", err)
+		return
+	}
+	aliases, err := d.Registry.ListAliases()
+	if err != nil {
+		d.log.Printf("catalog aliases: %s", err)
+		return
+	}
+	aliasByID := make(map[string]string, len(aliases))
+	for _, alias := range aliases {
+		aliasByID[alias.SessionID] = alias.Name
+	}
+	openClaude := claudeOpenProcesses(ctx)
 	for _, adapter := range d.Surfaces {
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		sessions, err := adapter.List(operationCtx)
@@ -263,8 +285,29 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "unavailable", Detail: "catalog discovery failed", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":unavailable", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
 			continue
 		}
-		seen := make(map[string]struct{}, len(sessions))
+		ids := make([]string, 0, len(sessions))
 		for _, session := range sessions {
+			ids = append(ids, session.ID)
+		}
+		runtimes, runtimeErr := d.Registry.SessionRuntimes(ids)
+		if runtimeErr != nil {
+			d.log.Printf("catalog session runtimes: %s", runtimeErr)
+			continue
+		}
+		for index := range sessions {
+			if runtime, found := runtimes[sessions[index].ID]; found {
+				sessions[index].Runtime = runtime
+			}
+		}
+		seen := make(map[string]struct{}, len(sessions))
+		locateCtx, locateCancel := context.WithTimeout(ctx, 12*time.Second)
+		d.correlatePendingLaunches(locateCtx, sessions)
+		d.correlateObservedTerminalLaunches(locateCtx, sessions)
+		locateCancel()
+		for _, session := range sessions {
+			if session.Runtime == nil {
+				session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
+			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
 			identity := catalogIdentityForSession(identityCtx, session)
@@ -278,7 +321,8 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 				continue
 			}
 			observedAt := time.Now().UTC()
-			row := d.catalogSessionRow(ctx, adapter, session, identity, observedAt)
+			open := session.Surface == surface.KindClaude && openClaude[session.PID]
+			row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], open, config)
 			payload, err := json.Marshal(map[string]any{"session": row})
 			if err != nil {
 				continue
@@ -305,6 +349,106 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	}
 }
 
+func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surface.Session) {
+	if d.transportResolver == nil {
+		return
+	}
+	pending, err := d.Registry.PendingLaunches()
+	if err != nil {
+		return
+	}
+	for _, item := range pending {
+		launcher, ok := d.transportResolver.Launcher(item.Launcher)
+		if !ok {
+			continue
+		}
+		candidates := make([]surface.Session, 0, len(sessions))
+		for _, session := range sessions {
+			if session.Surface != item.Agent || (item.Cwd != "" && filepath.Clean(session.Cwd) != filepath.Clean(item.Cwd)) {
+				continue
+			}
+			candidates = append(candidates, session)
+		}
+		locations := launcher.Locate(ctx, candidates)
+		matched := ""
+		for id, location := range locations {
+			if !locationMatches(item.Location, location) {
+				continue
+			}
+			if matched != "" {
+				matched = ""
+				break
+			}
+			matched = id
+		}
+		if matched == "" {
+			continue
+		}
+		for index := range sessions {
+			if sessions[index].ID == matched && sessions[index].Surface == item.Agent && filepath.Clean(sessions[index].Cwd) == filepath.Clean(item.Cwd) {
+				located := locations[matched]
+				locationsCopy := located
+				candidate := sessions[index]
+				candidate.Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
+				if err := d.Registry.RegisterSessionAndDeletePending(candidate, item.ID, item.Alias); err != nil {
+					var aliasErr registry.AliasTakenError
+					if errors.As(err, &aliasErr) {
+						d.errorMu.Lock()
+						first := !d.pendingAliasWarns[item.ID]
+						d.pendingAliasWarns[item.ID] = true
+						d.errorMu.Unlock()
+						if first {
+							d.log.Printf("pending launch %d awaiting alias %q: %s", item.ID, item.Alias, err)
+						}
+					} else {
+						d.log.Printf("correlate pending launch %d: %s", item.ID, err)
+					}
+					continue
+				}
+				sessions[index].Runtime = candidate.Runtime
+				break
+			}
+		}
+	}
+}
+
+func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions []surface.Session) {
+	if d.transportResolver == nil {
+		return
+	}
+	type observedLocation struct {
+		launcher string
+		location surface.Location
+	}
+	observed := make(map[string][]observedLocation)
+	for _, launcherID := range []string{surface.LauncherCMUX, surface.LauncherTMUX} {
+		launcher, ok := d.transportResolver.Launcher(launcherID)
+		if !ok {
+			continue
+		}
+		for sessionID, location := range launcher.Locate(ctx, sessions) {
+			observed[sessionID] = append(observed[sessionID], observedLocation{launcher: launcherID, location: location})
+		}
+	}
+	for index := range sessions {
+		if sessions[index].Runtime != nil && sessions[index].Runtime.Launcher != surface.LauncherExternal {
+			continue
+		}
+		matches := observed[sessions[index].ID]
+		if len(matches) != 1 {
+			continue
+		}
+		location := matches[0].location
+		candidate := sessions[index]
+		candidate.Runtime = &surface.Runtime{Launcher: matches[0].launcher, Location: &location, Focusable: true}
+		if err := d.Registry.RegisterSession(candidate); err != nil {
+			d.log.Printf("persist discovered terminal runtime for %s: %s", candidate.ID, err)
+			continue
+		}
+		sessions[index].Runtime = candidate.Runtime
+	}
+}
+
 func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time) dashboardSession {
 	alias, _ := d.Registry.ReverseAlias(session.ID)
 	open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
@@ -312,7 +456,14 @@ func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface,
 	if err != nil {
 		config = DashboardConfig{}
 	}
-	current, reason := dashboardSessionPresence(session, d.Registry.QueueCount(session.ID), open, config.CodexRecentHours, observedAt)
+	return d.catalogSessionProjection(adapter, session, identity, observedAt, alias, d.Registry.QueueCount(session.ID), open, config)
+}
+
+func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {
+	if session.Runtime == nil {
+		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
+	}
+	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
 	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: d.Registry.QueueCount(session.ID), Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime}
 }

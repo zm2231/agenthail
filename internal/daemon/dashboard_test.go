@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -12,14 +13,30 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+type dashboardClaudeRunSurface struct {
+	*daemonSurface
+	runs  []surface.ClaudeRunObservation
+	links []surface.ClaudeSubagentLink
+}
+
+func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeRunObservation, error) {
+	return s.runs, nil
+}
+
+func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(context.Context) ([]surface.ClaudeSubagentLink, error) {
+	return s.links, nil
+}
 
 func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
@@ -32,22 +49,132 @@ func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	}
 }
 
-func TestDashboardSessionIncludesContextUsage(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	fake.contextUsage = &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}
+type sessionPageReadProbe struct {
+	*daemonSurface
+	contextCalls atomic.Int32
+	modelCalls   atomic.Int32
+	modelsCalls  atomic.Int32
+	readCalls    atomic.Int32
+}
+
+type goalControlSurface struct {
+	*daemonSurface
+	updates []surface.GoalUpdate
+}
+
+func (s *goalControlSurface) UpdateGoal(_ context.Context, _ *surface.Session, update surface.GoalUpdate) error {
+	s.updates = append(s.updates, update)
+	return nil
+}
+
+func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
+	d, registry, fake, from, _ := daemonFixture(t)
+	fake.caps.Goal = true
+	adapter := &goalControlSurface{daemonSurface: fake}
+	d = New(registry, []surface.Surface{adapter})
+	request := func(action, message string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"action": action, "sessionId": from.ID, "message": message})
+		response := httptest.NewRecorder()
+		d.dashboardActionHandler(response, httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body)))
+		return response
+	}
+	if response := request("goal-edit", "keep paused"); response.Code != http.StatusOK {
+		t.Fatalf("goal-edit status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(adapter.updates) != 1 || adapter.updates[0].Objective == nil || *adapter.updates[0].Objective != "keep paused" || adapter.updates[0].Status != nil {
+		t.Fatalf("goal-edit update=%+v", adapter.updates)
+	}
+	if response := request("goal-budget", ""); response.Code != http.StatusOK || !adapter.updates[1].ClearTokenBudget {
+		t.Fatalf("blank budget status=%d updates=%+v", response.Code, adapter.updates)
+	}
+	if response := request("goal-budget", "-1"); response.Code != http.StatusBadRequest {
+		t.Fatalf("negative budget status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestDashboardGoalControlsRenderTypedStatusAndUsageActions(t *testing.T) {
+	source := string(dashboardJS)
+	for _, required := range []string{"goal-edit", "goal-pause", "goal-resume", "goal-budget", "Clear budget", "usageLimited", "budgetLimited", "Complete"} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("dashboard goal integration missing %q", required)
+		}
+	}
+}
+
+func (p *sessionPageReadProbe) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
+	p.contextCalls.Add(1)
+	return &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}, nil
+}
+
+func (p *sessionPageReadProbe) Model(context.Context, *surface.Session, string) (string, error) {
+	p.modelCalls.Add(1)
+	return "should-not-be-read", nil
+}
+
+func (p *sessionPageReadProbe) Models(context.Context) ([]surface.ModelOption, error) {
+	p.modelsCalls.Add(1)
+	return []surface.ModelOption{{ID: "should-not-be-read"}}, nil
+}
+
+func (p *sessionPageReadProbe) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	p.readCalls.Add(1)
+	return nil, errors.New("provider session read must not be used")
+}
+
+func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "warm-item", Payload: []byte(`{"itemId":"warm-item","version":1,"op":"upsert","kind":"text","role":"assistant","body":"journal"}`)}, registrypkg.SessionJournalRetention{Count: 8, Bytes: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	probe := &sessionPageReadProbe{daemonSurface: fake}
+	probe.caps.Model = true
+	d := New(registry, []surface.Surface{probe})
 	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from", nil))
+	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	var body struct {
-		Context surface.ContextUsage `json:"context"`
+		Timeline surface.SessionTimeline `json:"timeline"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Context.UsedTokens != 150000 || body.Context.ContextWindow != 200000 || body.Context.CompactionCount != 2 {
-		t.Fatalf("context=%+v", body.Context)
+	if body.Timeline.Source != "journal" || len(body.Timeline.Items) != 1 || body.Timeline.Items[0].Text != "journal" {
+		t.Fatalf("timeline=%+v", body.Timeline)
+	}
+	if got := probe.contextCalls.Load() + probe.modelCalls.Load() + probe.modelsCalls.Load() + probe.readCalls.Load(); got != 0 {
+		t.Fatalf("provider reads=%d (context=%d model=%d models=%d session=%d)", got, probe.contextCalls.Load(), probe.modelCalls.Load(), probe.modelsCalls.Load(), probe.readCalls.Load())
+	}
+}
+
+func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testing.T) {
+	_, registry, _, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.ID = "claude-session"
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	fake := &dashboardClaudeRunSurface{
+		daemonSurface: &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{from.ID: from}, accepted: true},
+		runs:          []surface.ClaudeRunObservation{{JobID: "job-1", SessionID: from.ID, RunType: "bg", ProviderState: "working"}, {JobID: "other", SessionID: "other", RunType: "bg"}},
+		links:         []surface.ClaudeSubagentLink{{ParentSessionID: from.ID, AgentID: "agent-1", TranscriptPath: "/tmp/agent-1.jsonl"}, {ParentSessionID: "other", AgentID: "agent-2"}},
+	}
+	d := New(registry, []surface.Surface{fake})
+	response := httptest.NewRecorder()
+	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Runs  []surface.ClaudeRunObservation `json:"claudeRuns"`
+		Links []surface.ClaudeSubagentLink   `json:"claudeSubagents"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Runs) != 1 || body.Runs[0].JobID != "job-1" || len(body.Links) != 1 || body.Links[0].AgentID != "agent-1" {
+		t.Fatalf("body=%+v", body)
 	}
 }
 
@@ -405,8 +532,9 @@ func TestDashboardShowsCompactContextUsage(t *testing.T) {
 	source := string(dashboardJS) + string(dashboardHTML) + string(dashboardCSS)
 	for _, fragment := range []string{
 		`id="context-usage"`,
-		`delta.kind === "context"`,
+		`item.kind === "context"`,
 		`Context ${compactTokenCount(context.usedTokens)}`,
+		`Claude did not report a configured context window`,
 		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
 		`.context-usage.critical`,
 	} {
@@ -541,15 +669,47 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"unknown":true`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"deliveryId":`) || !strings.Contains(response.Body.String(), `"id":"started"`) || !strings.Contains(response.Body.String(), `"detail":"Submitted to codex:started."`) || strings.Contains(strings.ToLower(response.Body.String()), "unresolved") || strings.Contains(strings.ToLower(response.Body.String()), "confirm") || strings.Contains(strings.ToLower(response.Body.String()), "inspect") || strings.Contains(strings.ToLower(response.Body.String()), "retrying") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := registry.Session("started"); err != nil {
 		t.Fatalf("created session was not registered: %v", err)
 	}
 	history, err := registry.ListHistory(5, "started")
-	if err != nil || len(history) != 1 || history[0].Kind != "unknown" {
+	if err != nil || len(history) != 1 || history[0].Kind != "submitted" {
 		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	var responseBody map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &responseBody); err != nil {
+		t.Fatal(err)
+	}
+	deliveryID, ok := responseBody["deliveryId"].(float64)
+	if !ok || deliveryID <= 0 {
+		t.Fatalf("body=%s", response.Body.String())
+	}
+	intent, err := registry.DeliveryIntent(int64(deliveryID))
+	if err != nil || intent.TargetSessionID != "started" || intent.Status != "submitted" {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	fake.startErr = errors.New("initial message rejected")
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"status":"failed"`) || strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"deliveryId":`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	problems, err := registry.ListDeliveryProblems()
+	if err != nil || len(problems) != 1 || problems[0].Status != "failed" || problems[0].SessionID != "started" {
+		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
 }
 
@@ -611,13 +771,35 @@ func TestDashboardStreamsSelectedSessionOverSSE(t *testing.T) {
 	fake.caps = surface.Capabilities{Stream: true}
 	fake.streamEvents = []surface.StreamEvent{{Kind: "context", Context: &surface.ContextUsage{UsedTokens: 90000, ContextWindow: 200000}}, {Kind: "text", Text: "hello"}, {Kind: "tool_use", Text: "tests"}, {Kind: "done"}}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	request := httptest.NewRequest(http.MethodGet, "/api/stream?id=from", nil)
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/session-stream?id=from&after=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	body := response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(body, `"kind":"context"`) || !strings.Contains(body, `"usedTokens":90000`) || !strings.Contains(body, `"kind":"text","text":"hello"`) || !strings.Contains(body, `"kind":"done"`) {
-		t.Fatalf("status=%d headers=%v body=%s", response.Code, response.Header(), body)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("status=%d headers=%v", response.StatusCode, response.Header)
+	}
+	reader := bufio.NewReader(response.Body)
+	var body string
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			body = line
+			break
+		}
+	}
+	if !strings.Contains(body, `"kind":"context"`) || !strings.Contains(body, `"usedTokens":90000`) {
+		t.Fatalf("stream body=%s", body)
 	}
 }
 
@@ -664,17 +846,16 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 }
 
 func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"new EventSource(`/api/stream?id=${encodeURIComponent(session.id)}`)",
-		`app.liveSource && app.liveSessionID === session.id`,
-		`app.liveText += delta.text || ""`,
-		`setInterval(() =>`,
-		`}, 30000)`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard live stream missing %q", fragment)
-		}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	script := filepath.Join("..", "..", "scripts", "test-session-journal.mjs")
+	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("session journal browser behavior failed: %v\n%s", err, output)
 	}
 }
 
@@ -786,6 +967,33 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 	}
 	if !strings.Contains(string(dashboardHTML), `id="steer-message"`) {
 		t.Fatal("busy composer has no inline steer action")
+	}
+}
+
+func TestDashboardUsesNeutralDeliveryDetailsAndLogicalIdempotency(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		`pendingIdempotency: new Map()`,
+		`logicalAction("send", "send", sendPayload)`,
+		`logicalAction("session-create", createAction, values)`,
+		`headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey }`,
+		`${status} to ${target}.`,
+		`response.status === "submitted" ? "Submitted" : "Sent"`,
+		`clearLogicalRequest("session-create")`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard is missing %q", fragment)
+		}
+	}
+	for _, stale := range []string{
+		"Accepted by Claude's socket",
+		"Launch submitted; location is still being resolved.",
+		"Conversation created. Delivery could not be confirmed. Check it before retrying.",
+		"response.accepted ?",
+	} {
+		if strings.Contains(source, stale) {
+			t.Fatalf("dashboard retains stale delivery copy %q", stale)
+		}
 	}
 }
 

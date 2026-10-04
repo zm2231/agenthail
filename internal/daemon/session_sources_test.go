@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	providers "github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 type sourceCountingSurface struct {
@@ -25,6 +28,119 @@ type sourceCountingSurface struct {
 type restartingSource struct {
 	*daemonSurface
 	calls atomic.Int32
+}
+
+type contextRefreshSurface struct {
+	*daemonSurface
+	seen chan string
+}
+
+func (s *contextRefreshSurface) ContextUsage(_ context.Context, session *surface.Session) (*surface.ContextUsage, error) {
+	s.seen <- session.ConfiguredModel
+	return &surface.ContextUsage{UsedTokens: 10, ContextWindow: 100}, nil
+}
+
+func TestSessionSourceRefreshesConfiguredModelBeforeContextEmission(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.ConfiguredModel = "claude-opus-5-5[1m]"
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &contextRefreshSurface{daemonSurface: fake, seen: make(chan string, 1)}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", appendBodies: map[string]string{}}
+	updated := from
+	updated.ConfiguredModel = "claude-sonnet-4"
+	if err := reg.RegisterSession(updated); err != nil {
+		t.Fatal(err)
+	}
+	source.append(surface.StreamEvent{ID: "context", Kind: "context", Context: &surface.ContextUsage{UsedTokens: 1}})
+	select {
+	case model := <-adapter.seen:
+		if model != updated.ConfiguredModel {
+			t.Fatalf("context model=%q, want %q", model, updated.ConfiguredModel)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("context provider was not refreshed")
+	}
+}
+
+func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source.append(surface.StreamEvent{ID: "tool-result", ProviderKey: "tool-result", Kind: "toolResult", Role: "user", Title: "Tool result", CallID: "call-1", Text: "caption", Attachment: &surface.Attachment{ID: "attachment:0:0:hash", MediaType: "image/png", Bytes: 4}})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if strings.Contains(string(page.Entries[0].Payload), "base64") || !strings.Contains(string(page.Entries[0].Payload), `"callId":"call-1"`) || !strings.Contains(string(page.Entries[0].Payload), `"attachment"`) {
+		t.Fatalf("payload=%s", page.Entries[0].Payload)
+	}
+}
+
+func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "upsert", Kind: "text", Role: "assistant", Text: "The complete answer", Version: 19})
+	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "phase", Kind: "done", Version: 19})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 2 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var body, phase sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(page.Entries[1].Payload, &phase); err != nil {
+		t.Fatal(err)
+	}
+	if body.Kind != "text" || body.Body != "The complete answer" || body.ItemID == phase.ItemID || phase.Kind != "done" {
+		t.Fatalf("body=%+v phase=%+v", body, phase)
+	}
+}
+
+func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(reg)
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	body := strings.Repeat("a", sessionStreamBodyBytes-1) + "é rest"
+	source.append(surface.StreamEvent{ID: "unicode", Kind: "text", Text: body})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(payload.Body) || strings.ContainsRune(payload.Body, utf8.RuneError) || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.BodyRef == "" || payload.TruncationReason != "" {
+		t.Fatalf("invalid bounded body: %+v", payload)
+	}
+	full, _, err := reg.SessionJournalBody(from.ID, payload.BodyRef, 0, len(body))
+	if err != nil || string(full) != body {
+		t.Fatalf("full body mismatch: err=%v", err)
+	}
+}
+
+func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(reg)
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	body := strings.Repeat("x", sessionJournalRetentionBytes)
+	source.append(surface.StreamEvent{ID: "oversized", Kind: "text", Text: body})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Body == "" || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.TruncationReason != "full_body_not_retained" || payload.BodyRef != "" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if len(payload.Body) > sessionStreamBodyBytes {
+		t.Fatalf("inline preview bytes=%d, want <=%d", len(payload.Body), sessionStreamBodyBytes)
+	}
 }
 
 func (s *restartingSource) Stream(ctx context.Context, _ *surface.Session, _ string, _ func(surface.StreamEvent), _ time.Duration) error {
@@ -66,6 +182,7 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 		events:        make(chan surface.StreamEvent),
 		streamErr:     errors.New(strings.Repeat("upstream unavailable ", 32)),
 	}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(reg)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -91,9 +208,261 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 	}
 }
 
+func TestSessionSourceSeedsJournalBeforeSubscribeReturns(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-1", Kind: "text", Text: "seeded"}},
+	}
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ItemID != "seed-1" || payload.Body != "seeded" {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestSessionSourceUnifiesCodexSeedAndLiveProviderIdentity(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "codex:turn-1:assistant:item-1", Kind: "text", Text: "seeded"}},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	var seed sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &seed); err != nil {
+		t.Fatal(err)
+	}
+	if seed.ProviderKey != "codex:turn-1:assistant:item-1" {
+		t.Fatalf("seed identity=%+v", seed)
+	}
+	adapter.events <- surface.StreamEvent{ID: seed.ItemID, ProviderKey: seed.ProviderKey, Version: 2, Operation: "upsert", TurnID: "turn-1", Kind: "text", Text: "live"}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case entry := <-subscription.Entries:
+			var payload sessionJournalPayload
+			if json.Unmarshal(entry.Payload, &payload) == nil && payload.Body == "live" {
+				goto liveObserved
+			}
+		case <-deadline:
+			t.Fatal("live event was not journaled")
+		}
+	}
+
+liveObserved:
+	window, err = reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("live window=%+v err=%v", window, err)
+	}
+	var live sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &live); err != nil {
+		t.Fatal(err)
+	}
+	if live.ProviderKey != seed.ProviderKey || live.Body != "live" {
+		t.Fatalf("live identity/body=%+v seed=%+v", live, seed)
+	}
+}
+
+func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-uds", Kind: "text", Text: "peer seed"}},
+	}
+	adapter.caps.Stream = false
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ItemID != "seed-uds" || payload.Kind == "source-error" || adapter.calls.Load() != 0 {
+		t.Fatalf("payload=%+v streamCalls=%d", payload, adapter.calls.Load())
+	}
+}
+
+func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	from.Transcript = "/local/transcript.jsonl"
+	from.HasLocal = true
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-unsupported", Kind: "text", Text: "seed"}},
+		streamErr:     surface.ErrUnsupported,
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if calls := adapter.calls.Load(); calls != 1 {
+		t.Fatalf("unsupported provider calls=%d", calls)
+	}
+	if window, err := reg.SessionJournalAfter(from.ID, 0, 10); err != nil || len(window.Entries) != 1 {
+		t.Fatalf("retry/source-error window=%+v err=%v", window, err)
+	}
+	subscription.Cancel()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case _, open := <-subscription.Entries:
+			if !open {
+				return
+			}
+		case <-deadline:
+			t.Fatal("source did not close after cancellation")
+		}
+	}
+}
+
+func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
+	_, reg, _, from, _ := daemonFixture(t)
+	transcript := t.TempDir() + "/session.jsonl"
+	seed := `{"type":"user","uuid":"u1","message":{"content":"seed"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"seed answer"}]}}
+`
+	if err := os.WriteFile(transcript, []byte(seed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	from.Transcript = transcript
+	from.HasLocal = true
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := providers.NewClaude("Default", t.TempDir())
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	seedBodies := map[string]string{}
+	seedCounts := map[string]int{}
+	for _, entry := range window.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Kind == "message" {
+			seedBodies[payload.Role] = payload.Body
+			seedCounts[payload.Role]++
+		}
+	}
+	if seedBodies["user"] != "seed" || seedBodies["assistant"] != "seed answer" || seedCounts["user"] != 1 || seedCounts["assistant"] != 1 {
+		t.Fatalf("seed bodies=%+v window=%+v", seedBodies, window)
+	}
+	time.Sleep(100 * time.Millisecond)
+	appendTranscript := func(records string) {
+		t.Helper()
+		file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.WriteString(records); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for _, turn := range []struct{ message, turnID, answer, records string }{
+		{"m2", "u2", "second answer", `{"type":"user","uuid":"u2","message":{"content":"second"}}
+{"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
+`},
+		{"m3", "u3", "third answer", `{"type":"user","uuid":"u3","message":{"content":"third"}}
+{"type":"assistant","uuid":"a3","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"third answer"}]}}
+`},
+	} {
+		appendTranscript(turn.records)
+		deadline := time.After(3 * time.Second)
+		answerID := ""
+		for !seen[turn.message] {
+			select {
+			case entry := <-subscription.Entries:
+				var payload sessionJournalPayload
+				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.TurnID == turn.turnID {
+					if payload.Kind == "message" && payload.Role == "assistant" && payload.Body == turn.answer {
+						answerID = payload.ItemID
+					}
+					if payload.Kind == "done" {
+						if answerID == "" || answerID == payload.ItemID {
+							t.Fatalf("completion lost or overwrote answer: answer=%q done=%+v", answerID, payload)
+						}
+						seen[turn.message] = true
+					}
+				}
+			case <-deadline:
+				t.Fatalf("provider did not tail turn %s", turn.message)
+			}
+		}
+	}
+}
+
 func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 1)}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	first, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -142,6 +511,7 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -175,11 +545,28 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(registry)
-	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	first := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
 	second := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
 	if first.ItemID == "" || first.ProviderKey == "" || second.ItemID == "" || first.ItemID == second.ItemID {
 		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+}
+
+func TestSessionSourceNormalizesGoalUpdatesAndClears(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(registry)
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	budget := int64(500)
+	updated := source.normalizeLocked(surface.StreamEvent{ID: "goal:1", ProviderKey: "goal:1", Kind: "goal", Operation: "replace", Goal: &surface.GoalState{Objective: "verify", Status: surface.GoalStatusPaused, TimeUsedSeconds: 12, TokensUsed: 34, TokenBudget: &budget}})
+	encoded, err := json.Marshal(updated)
+	if err != nil || updated.Goal == nil || updated.Goal.Status != surface.GoalStatusPaused || *updated.Goal.TokenBudget != 500 || !strings.Contains(string(encoded), `"goal"`) {
+		t.Fatalf("updated=%+v encoded=%s err=%v", updated, encoded, err)
+	}
+	cleared := source.normalizeLocked(surface.StreamEvent{ID: "goal:2", ProviderKey: "goal:2", Kind: "goal", Operation: "replace"})
+	clearedJSON, err := json.Marshal(cleared)
+	if err != nil || !strings.Contains(string(clearedJSON), `"goal":null`) {
+		t.Fatalf("cleared=%+v json=%s err=%v", cleared, clearedJSON, err)
 	}
 }
 
@@ -196,6 +583,7 @@ func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 			Timestamp: "2026-10-03T12:00:00Z",
 		}},
 	}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	subscription, err := manager.subscribe(&from, adapter)
 	if err != nil {
@@ -221,6 +609,80 @@ func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 	if payload.ItemID != "timeline-1" || payload.ProviderKey != "timeline:timeline-1" || payload.Op != "upsert" || payload.Body != "persisted activity" {
 		t.Fatalf("seed payload=%+v", payload)
 	}
+}
+
+func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	when := "2026-10-04T00:00:00Z"
+	body := strings.Repeat("x", sessionStreamBodyBytes+512)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent, 2),
+		items: []surface.TimelineItem{{
+			ID:        "timeline-1",
+			Kind:      "message",
+			Role:      "assistant",
+			Text:      body,
+			Timestamp: when,
+		}},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(registry)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	seeded, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(seeded.Entries) != 1 || seeded.LatestSeq != 1 {
+		t.Fatalf("seeded=%+v err=%v", seeded, err)
+	}
+	select {
+	case entry := <-subscription.Entries:
+		if entry.Seq != seeded.LatestSeq {
+			t.Fatalf("seed event=%+v, want seq %d", entry, seeded.LatestSeq)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("seed event was not published")
+	}
+	adapter.events <- surface.StreamEvent{ID: "timeline-1", ProviderKey: "timeline:timeline-1", Version: uint64(len(body)), Operation: "upsert", Kind: "message", Role: "assistant", Text: body, Timestamp: timeMustParse(t, when)}
+	select {
+	case entry := <-subscription.Entries:
+		t.Fatalf("identical overlap was published: %+v", entry)
+	case <-time.After(150 * time.Millisecond):
+	}
+	unchanged, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || unchanged.LatestSeq != seeded.LatestSeq || len(unchanged.Entries) != 1 {
+		t.Fatalf("unchanged=%+v err=%v", unchanged, err)
+	}
+	adapter.events <- surface.StreamEvent{ID: "timeline-1", ProviderKey: "timeline:timeline-1", Version: uint64(len(body) + 1), Operation: "upsert", Kind: "message", Role: "assistant", Text: body + "!", Timestamp: timeMustParse(t, when)}
+	select {
+	case entry := <-subscription.Entries:
+		if entry.Seq != seeded.LatestSeq+1 {
+			t.Fatalf("changed entry=%+v, want seq %d", entry, seeded.LatestSeq+1)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("changed overlap was not published")
+	}
+	changed, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || changed.LatestSeq != seeded.LatestSeq+1 || len(changed.Entries) != 1 {
+		t.Fatalf("changed=%+v err=%v", changed, err)
+	}
+}
+
+func timeMustParse(t *testing.T, value string) time.Time {
+	t.Helper()
+	at, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return at
 }
 
 func TestObservationHoldsActiveTurnSourceUntilIdle(t *testing.T) {
@@ -272,6 +734,7 @@ func TestSourceHoldsAreReferenceCountedByOwner(t *testing.T) {
 func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &restartingSource{daemonSurface: fake}
+	adapter.caps.Stream = true
 	manager := newSessionSourceManager(registry)
 	release, err := manager.hold(&from, adapter, "active-turn")
 	if err != nil {

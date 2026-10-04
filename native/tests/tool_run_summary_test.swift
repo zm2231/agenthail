@@ -3,7 +3,7 @@ import Foundation
 @main
 struct ToolRunSummaryTest {
     static func item(_ kind: String, _ title: String, status: String? = nil, text: String = "") -> TimelineItem {
-        TimelineItem(id: UUID().uuidString, kind: kind, role: nil, title: title, text: text, timestamp: nil, callId: nil, status: status, truncated: false, bodyRef: nil)
+        TimelineItem(id: UUID().uuidString, kind: kind, role: nil, title: title, text: text, timestamp: nil, callId: nil, status: status, truncated: false, truncationReason: nil, bodyRef: nil)
     }
 
     static func main() {

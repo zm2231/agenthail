@@ -16,7 +16,7 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-const timelineReadBudget = 4 << 20
+const timelineReadBudget = 16 << 20
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
@@ -164,15 +164,25 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		} else {
 			items = codexTimelineItems(record)
 		}
+		if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
+			return nil, err
+		}
 		if source == "codex" && str(record, "type") == "event_msg" && len(items) == 1 && items[0].Role == "user" && responseUsers[str(record, "timestamp")+"\x00"+items[0].Text] {
 			continue
 		}
 		if len(items) == 0 {
 			continue
 		}
-		digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
 		for i := range items {
-			items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+			if source == "claude" {
+				items[i].ID = stableTimelineItemID(offset, line, i)
+			} else if source == "codex" {
+				items[i].ID = codexTranscriptItemKey(record, items[i], i)
+			}
+			if items[i].ID == "" {
+				digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
+				items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+			}
 			items[i].Timestamp = str(record, "timestamp")
 		}
 		full := slices.Clone(items)
@@ -242,6 +252,41 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		result.Items = append(result.Items, groups[i]...)
 	}
 	return result, nil
+}
+
+func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, index int) string {
+	payload, _ := record["payload"].(map[string]any)
+	semanticID := str(payload, "id")
+	if semanticID == "" {
+		semanticID = item.CallID
+	}
+	if semanticID == "" {
+		semanticID = str(payload, "call_id")
+	}
+	if semanticID == "" {
+		semanticID = str(record, "uuid")
+	}
+	if semanticID == "" {
+		return ""
+	}
+	turnID := str(payload, "turn_id")
+	if turnID == "" {
+		turnID = str(payload, "turnId")
+	}
+	if turnID == "" {
+		turnID = str(record, "turn_id")
+	}
+	if turnID == "" {
+		turnID = str(record, "turnId")
+	}
+	kind := codexDesktopKeyKind(item.Kind)
+	if kind == "" {
+		kind = fmt.Sprintf("item%d", index)
+	}
+	if turnID == "" {
+		return "codex:" + kind + ":" + semanticID
+	}
+	return codexDesktopStreamKey(turnID, kind, semanticID)
 }
 
 func claudeTranscriptExchanges(records []transcriptRecord, source string) ([]surface.Exchange, []int64, *surface.ReplyResult) {
@@ -364,20 +409,98 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			item.Kind = "toolResult"
 			item.Title = "Tool result"
 			item.CallID = str(block, "tool_use_id")
-			item.Text = timelineValue(block["content"])
+			item.Text = timelineToolResultText(block["content"])
 			if failed, _ := block["is_error"].(bool); failed {
 				item.Status = "error"
 			}
 		case "image":
 			item.Kind = "attachment"
-			item.Title = "Image attachment"
-			item.Text = "Open the original agent app to view this image."
+			item.Title = "Image"
+			item.Text = "Image attachment"
 		default:
 			continue
 		}
 		items = append(items, item)
+		if str(block, "type") == "tool_result" {
+			for range toolResultImageContent(block["content"]) {
+				items = append(items, surface.TimelineItem{Kind: "attachment", Role: kind, Title: "Image", Text: "Image attachment", CallID: str(block, "tool_use_id")})
+			}
+		}
 	}
 	return items
+}
+
+func toolResultImageContent(value any) []map[string]any {
+	content, _ := value.([]any)
+	images := make([]map[string]any, 0)
+	for _, raw := range content {
+		block, _ := raw.(map[string]any)
+		if str(block, "type") == "image" {
+			images = append(images, block)
+		}
+	}
+	return images
+}
+
+func timelineToolResultText(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	if content, ok := value.([]any); ok {
+		var textParts []string
+		textOnly := true
+		for _, entry := range content {
+			block, isBlock := entry.(map[string]any)
+			if isBlock && str(block, "type") == "image" {
+				continue
+			}
+			if isBlock && str(block, "type") == "text" && str(block, "text") != "" {
+				textParts = append(textParts, str(block, "text"))
+				continue
+			}
+			textOnly = false
+		}
+		if textOnly && len(textParts) > 0 {
+			return strings.Join(textParts, "\n\n")
+		}
+	}
+	clean := sanitizeToolResultValue(value)
+	if clean == nil {
+		return ""
+	}
+	return timelineValue(clean)
+}
+
+func sanitizeToolResultValue(value any) any {
+	switch value := value.(type) {
+	case []any:
+		clean := make([]any, 0, len(value))
+		for _, entry := range value {
+			if block, ok := entry.(map[string]any); ok && str(block, "type") == "image" {
+				continue
+			}
+			if sanitized := sanitizeToolResultValue(entry); sanitized != nil {
+				clean = append(clean, sanitized)
+			}
+		}
+		return clean
+	case map[string]any:
+		if str(value, "type") == "image" {
+			return nil
+		}
+		clean := make(map[string]any, len(value))
+		for key, entry := range value {
+			if key == "data" && strings.Contains(strings.ToLower(str(value, "media_type")), "image/") {
+				continue
+			}
+			if sanitized := sanitizeToolResultValue(entry); sanitized != nil {
+				clean[key] = sanitized
+			}
+		}
+		return clean
+	default:
+		return value
+	}
 }
 
 func codexTimelineItems(record map[string]any) []surface.TimelineItem {
@@ -390,15 +513,19 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	}
 	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
 		text := str(payload, "message")
+		items := []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
 		if images, ok := payload["images"].([]any); ok && len(images) > 0 {
-			text += "\n[Image attachment: open the original agent app to view]"
+			for range images {
+				items = append(items, surface.TimelineItem{Kind: "attachment", Role: "user", Title: "Image", Text: "Image attachment"})
+			}
 		}
-		return []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: text}}
+		return items
 	}
 	if str(record, "type") != "response_item" {
 		return nil
 	}
 	item := surface.TimelineItem{}
+	messageAttachmentCount := 0
 	switch str(payload, "type") {
 	case "message":
 		item.Kind = "message"
@@ -414,6 +541,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			if text := str(block, "text"); text != "" {
 				parts = append(parts, text)
 			} else if strings.Contains(str(block, "type"), "image") {
+				messageAttachmentCount++
 				parts = append(parts, "[Image attachment: open the original agent app to view]")
 			}
 		}
@@ -454,5 +582,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	default:
 		return nil
 	}
-	return []surface.TimelineItem{item}
+	items := []surface.TimelineItem{item}
+	for i := 0; i < messageAttachmentCount; i++ {
+		items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment"})
+	}
+	return items
 }

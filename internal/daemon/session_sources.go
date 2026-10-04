@@ -5,10 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -18,20 +20,30 @@ const (
 	sessionJournalRetentionCount = 2048
 	sessionJournalRetentionBytes = 8 << 20
 	sessionStreamBodyBytes       = 16 << 10
+	sessionPageHandoffGrace      = 5 * time.Second
+	sessionJournalSeedTimeout    = 12 * time.Second
 )
 
 type sessionJournalPayload struct {
-	ItemID      string `json:"itemId"`
-	ProviderKey string `json:"providerKey,omitempty"`
-	Version     uint64 `json:"version"`
-	Op          string `json:"op"`
-	Kind        string `json:"kind"`
-	TurnID      string `json:"turnId,omitempty"`
-	TS          string `json:"ts"`
-	Body        string `json:"body,omitempty"`
-	Truncated   bool   `json:"truncated"`
-	BodyRef     string `json:"bodyRef,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	Context          *surface.ContextUsage `json:"context,omitempty"`
+	Goal             *surface.GoalState    `json:"goal"`
+	Role             string                `json:"role,omitempty"`
+	Title            string                `json:"title,omitempty"`
+	Status           string                `json:"status,omitempty"`
+	ItemID           string                `json:"itemId"`
+	ProviderKey      string                `json:"providerKey,omitempty"`
+	Version          uint64                `json:"version"`
+	Op               string                `json:"op"`
+	Kind             string                `json:"kind"`
+	TurnID           string                `json:"turnId,omitempty"`
+	CallID           string                `json:"callId,omitempty"`
+	TS               string                `json:"ts"`
+	Body             string                `json:"body,omitempty"`
+	Truncated        bool                  `json:"truncated"`
+	TruncationReason string                `json:"truncationReason,omitempty"`
+	BodyRef          string                `json:"bodyRef,omitempty"`
+	Reason           string                `json:"reason,omitempty"`
+	Attachment       *surface.Attachment   `json:"attachment,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -41,8 +53,10 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
+	seeded        chan struct{}
+	seedErr       error
 	manager       *sessionSourceManager
-	session       *surface.Session
+	session       surface.Session
 	adapter       surface.Surface
 	epoch         string
 	ctx           context.Context
@@ -66,6 +80,10 @@ func newSessionSourceManager(store *registry.Registry) *sessionSourceManager {
 }
 
 func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {
+	return m.subscribeContext(context.Background(), session, adapter)
+}
+
+func (m *sessionSourceManager) subscribeContext(waitContext context.Context, session *surface.Session, adapter surface.Surface) (sessionSourceSubscription, error) {
 	if session == nil || adapter == nil {
 		return sessionSourceSubscription{}, fmt.Errorf("session source requires session and adapter")
 	}
@@ -79,7 +97,7 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -87,6 +105,11 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 	m.mu.Unlock()
 	if start {
 		go source.run()
+	}
+	select {
+	case <-source.seeded:
+	case <-time.After(sessionJournalSeedTimeout):
+	case <-waitContext.Done():
 	}
 	return subscription, nil
 }
@@ -105,7 +128,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 			return nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -159,26 +182,51 @@ func (s *sessionSource) releaseHolder(holder string) {
 }
 
 func (s *sessionSource) stop() {
-	s.cancel()
 	s.manager.mu.Lock()
+	defer s.manager.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.subscribers) != 0 || len(s.holders) != 0 {
+		return
+	}
+	s.cancel()
 	if s.manager.sources[s.session.ID] == s {
 		delete(s.manager.sources, s.session.ID)
 	}
-	s.manager.mu.Unlock()
+}
+
+func (m *sessionSourceManager) shutdown() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, source := range m.sources {
+		source.cancel()
+		delete(m.sources, id)
+	}
 }
 
 func (s *sessionSource) run() {
 	s.seedJournal()
+	close(s.seeded)
+	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
+		<-s.ctx.Done()
+		s.closeSubscribers()
+		s.remove()
+		return
+	}
 	for {
-		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		current := s.session
+		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
+			current = *refreshed
+		}
+		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
+		if errors.Is(streamErr, surface.ErrUnsupported) {
+			<-s.ctx.Done()
+			break
+		}
 		if streamErr != nil && s.ctx.Err() == nil {
 			s.appendSourceError(streamErr)
 		}
 		s.mu.Lock()
-		for id, subscriber := range s.subscribers {
-			delete(s.subscribers, id)
-			close(subscriber)
-		}
 		hasHolders := len(s.holders) > 0
 		s.mu.Unlock()
 		if s.ctx.Err() != nil || !hasHolders {
@@ -189,11 +237,42 @@ func (s *sessionSource) run() {
 		case <-time.After(time.Second):
 		}
 	}
+	s.closeSubscribers()
+	s.remove()
+}
+
+func (s *sessionSource) closeSubscribers() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, subscriber := range s.subscribers {
+		delete(s.subscribers, id)
+		close(subscriber)
+	}
+}
+
+func (s *sessionSource) remove() {
 	s.manager.mu.Lock()
+	defer s.manager.mu.Unlock()
 	if s.manager.sources[s.session.ID] == s {
 		delete(s.manager.sources, s.session.ID)
 	}
-	s.manager.mu.Unlock()
+}
+
+func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
+	release, err := m.hold(session, adapter, "page-seed")
+	if err != nil {
+		return err
+	}
+	defer func() { time.AfterFunc(sessionPageHandoffGrace, release) }()
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	m.mu.Unlock()
+	select {
+	case <-source.seeded:
+		return source.seedErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *sessionSource) appendSourceError(streamErr error) {
@@ -213,11 +292,13 @@ func (s *sessionSource) appendSourceError(streamErr error) {
 	if err != nil {
 		return
 	}
-	entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	entry, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 	if err != nil {
 		return
 	}
-	s.publish(entry)
+	if changed {
+		s.publish(entry)
+	}
 }
 
 func boundedSessionSourceReason(value string) string {
@@ -236,8 +317,13 @@ func boundedSessionSourceReason(value string) string {
 func (s *sessionSource) seedJournal() {
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
-	read, err := surface.ReadSession(ctx, s.adapter, s.session, surface.SessionReadRequest{Limit: 40})
+	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
 	if err != nil || read == nil {
+		if err == nil {
+			err = fmt.Errorf("session source returned no activity result")
+		}
+		s.seedErr = err
+		s.appendSourceError(err)
 		return
 	}
 	for _, item := range read.Items {
@@ -245,12 +331,22 @@ func (s *sessionSource) seedJournal() {
 			continue
 		}
 		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		providerKey := "timeline:" + item.ID
+		if s.session.Surface == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
+			providerKey = item.ID
+		}
 		s.append(surface.StreamEvent{
+			Role:        item.Role,
+			Title:       item.Title,
+			Status:      item.Status,
+			Truncated:   item.Truncated,
 			ID:          item.ID,
-			ProviderKey: "timeline:" + item.ID,
+			ProviderKey: providerKey,
 			Version:     uint64(len(item.Text)),
 			Operation:   "upsert",
 			TurnID:      item.CallID,
+			CallID:      item.CallID,
+			Attachment:  item.Attachment,
 			Timestamp:   at,
 			Kind:        item.Kind,
 			Text:        item.Text,
@@ -259,6 +355,17 @@ func (s *sessionSource) seedJournal() {
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {
+	if event.Context != nil {
+		current := s.session
+		if refreshed, err := s.manager.registry.Session(s.session.ID); err == nil {
+			current = *refreshed
+		}
+		if provider, ok := s.adapter.(surface.ContextUsageProvider); ok {
+			if usage, err := provider.ContextUsage(s.ctx, &current); err == nil && usage != nil {
+				event.Context = usage
+			}
+		}
+	}
 	s.mu.Lock()
 	payload := s.normalizeLocked(event)
 	s.mu.Unlock()
@@ -268,29 +375,56 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	}
 	fullBody := []byte(payload.Body)
 	if len(fullBody) > sessionStreamBodyBytes {
-		ref, err := newSessionBodyRef()
-		if err != nil {
-			return
+		prefix := fullBody[:sessionStreamBodyBytes]
+		for !utf8.Valid(prefix) {
+			prefix = prefix[:len(prefix)-1]
 		}
-		payload.Body = string(fullBody[:sessionStreamBodyBytes])
+		payload.Body = string(prefix)
 		payload.Truncated = true
-		payload.BodyRef = ref
+		ref, refErr := newSessionBodyRef()
+		if refErr == nil {
+			payload.BodyRef = ref
+		}
 		encoded, err = json.Marshal(payload)
 		if err != nil {
 			return
 		}
-		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: ref, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+		if payload.BodyRef == "" || len(encoded)+len(fullBody) > sessionJournalRetentionBytes {
+			payload.BodyRef = ""
+			payload.TruncationReason = "full_body_not_retained"
+			encoded, err = json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			fullBody = nil
+		}
+		var entry registry.SessionJournalEntry
+		var changed bool
+		entry, changed, err = s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+		if errors.Is(err, registry.ErrSessionJournalEntryTooLarge) && payload.BodyRef != "" {
+			payload.BodyRef = ""
+			payload.TruncationReason = "full_body_not_retained"
+			fullBody = nil
+			encoded, err = json.Marshal(payload)
+			if err == nil {
+				entry, changed, err = s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+			}
+		}
 		if err != nil {
 			return
 		}
-		s.publish(entry)
+		if changed {
+			s.publish(entry)
+		}
 		return
 	}
-	entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	entry, changed, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 	if err != nil {
 		return
 	}
-	s.publish(entry)
+	if changed {
+		s.publish(entry)
+	}
 }
 
 func (s *sessionSource) publish(entry registry.SessionJournalEntry) {
@@ -331,6 +465,12 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 		itemID = fmt.Sprintf("%s:anonymous:%d", s.epoch, s.anonymous)
 		providerKey = itemID
 	}
+	if event.Operation == "phase" {
+		itemID += ":phase:" + event.Kind
+		if providerKey != "" {
+			providerKey += ":phase:" + event.Kind
+		}
+	}
 	op := event.Operation
 	if op == "" {
 		op = "append"
@@ -345,5 +485,5 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated}
 }

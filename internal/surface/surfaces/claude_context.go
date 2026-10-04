@@ -83,8 +83,14 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				state.usage.InputTokens = record.Message.Usage.InputTokens
 				state.usage.CachedInputTokens = record.Message.Usage.CacheCreationTokens + record.Message.Usage.CacheReadTokens
 				state.usage.OutputTokens = record.Message.Usage.OutputTokens
-				state.usage.ContextWindow = claudeContextWindow(record.Message.Model)
-				state.usage.WindowEstimated = true
+				// Transcript model names are usage metadata, not configured
+				// capacity provenance. Claude can omit the launch-time [1m]
+				// selection from later records, so an unknown window must remain
+				// unknown rather than becoming a guessed denominator.
+				window := observeClaudeCurrentContextWindow(sess.ConfiguredModel, record.Message.Model)
+				state.usage.ContextWindow = window.Window
+				state.usage.ContextWindowSource = window.Source
+				state.usage.WindowEstimated = false
 				state.usage.UpdatedAt = at
 			}
 		case record.Type == "user":
@@ -150,11 +156,29 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 		completedAt = state.latestCommandDoneAt
 	}
 	state.usage.Compacting = !state.latestCommandAt.IsZero() && state.latestCommandAt.After(completedAt)
-	if state.usage.ContextWindow == 0 && state.usage.CompactionCount == 0 {
+	if state.usage.UsedTokens == 0 && state.usage.ContextWindow == 0 && state.usage.CompactionCount == 0 {
 		return nil, nil
 	}
 	usage := state.usage
 	return &usage, nil
+}
+
+func observeClaudeCurrentContextWindow(configuredModel, observedModel string) ClaudeContextWindowObservation {
+	window := ObserveClaudeConfiguredContextWindow(configuredModel)
+	configuredBase := claudeModelBase(configuredModel)
+	observedBase := claudeModelBase(observedModel)
+	if window.Window > 0 && configuredBase != "" && observedBase != "" && configuredBase != observedBase {
+		return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: observedModel}
+	}
+	return window
+}
+
+func claudeModelBase(model string) string {
+	model = strings.TrimSpace(model)
+	if index := strings.IndexByte(model, '['); index >= 0 {
+		model = model[:index]
+	}
+	return strings.TrimSpace(model)
 }
 
 func compactBoundaryKey(record claudeContextRecord) string {
@@ -182,11 +206,4 @@ func (s *claudeContextState) rememberCommandCompletion(at time.Time) {
 
 func compactCommandIsNewer(commandAt, boundaryAt time.Time) bool {
 	return boundaryAt.IsZero() || (!commandAt.IsZero() && commandAt.After(boundaryAt))
-}
-
-func claudeContextWindow(model string) int64 {
-	if strings.Contains(strings.ToLower(model), "[1m]") {
-		return 1_000_000
-	}
-	return 200_000
 }

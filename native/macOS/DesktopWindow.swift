@@ -790,7 +790,7 @@ struct TranscriptBlock: Identifiable, Equatable {
         case tools([TimelineItem])
         case annotation(String)
         case notice(String)
-        case image(TimelineAttachment)
+        case image(SessionAttachment)
     }
 
     let id: String
@@ -896,7 +896,7 @@ struct TranscriptBlockView: View {
 struct AttachmentImageView: View {
     @EnvironmentObject private var model: AgenthailModel
     @EnvironmentObject private var pane: SessionPane
-    let attachment: TimelineAttachment
+    let attachment: SessionAttachment
     @State private var image: NSImage?
     @State private var failed = false
 
@@ -1414,21 +1414,15 @@ struct SessionInspector: View {
 }
 
 extension ContextState {
-    var knownRatio: Double? {
-        guard contextWindow > 0 else { return nil }
-        let ratio = Double(usedTokens) / Double(contextWindow)
-        return windowEstimated == true && ratio > 1 ? nil : ratio
-    }
-
     var headerLabel: String? {
         guard usedTokens > 0 else { return nil }
-        if let ratio = knownRatio { return "\(ratio.formatted(.percent.precision(.fractionLength(0)))) context" }
+        if let ratio = fraction { return "\(ratio.formatted(.percent.precision(.fractionLength(0)))) context" }
         return "\(usedTokens.formatted(.number.notation(.compactName))) tokens"
     }
 
     var usageLabel: String? {
         guard usedTokens > 0 else { return nil }
-        if let ratio = knownRatio { return ratio.formatted(.percent.precision(.fractionLength(0))) }
+        if let ratio = fraction { return ratio.formatted(.percent.precision(.fractionLength(0))) }
         return "\(usedTokens.formatted(.number.notation(.compactName))) tokens used"
     }
 }
@@ -1447,7 +1441,7 @@ struct DetailsTab: View {
                         Spacer()
                         Text(usage)
                     }
-                    if let ratio = context.knownRatio {
+                    if let ratio = context.fraction {
                         ProgressView(value: min(ratio, 1))
                             .tint(DesktopPalette.accent)
                     }

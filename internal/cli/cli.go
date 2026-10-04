@@ -33,14 +33,16 @@ type SurfaceEntry struct {
 }
 
 type App struct {
-	Registry            *registry.Registry
-	Surfaces            []SurfaceEntry
-	DefaultTimeout      time.Duration
-	Version             string
-	Revision            string
-	BuiltAt             string
-	daemonServiceLoaded func() bool
-	update              *updateDeps
+	Registry                *registry.Registry
+	Surfaces                []SurfaceEntry
+	DefaultTimeout          time.Duration
+	Version                 string
+	Revision                string
+	BuiltAt                 string
+	catalogDaemonRunning    func() bool
+	daemonServiceLoaded     func() bool
+	update                  *updateDeps
+	daemonSessionPageReader func() (sessionPageReader, error)
 }
 
 func (a *App) Run(args []string) error {
@@ -53,6 +55,9 @@ func (a *App) Run(args []string) error {
 	if cmd == "codex" {
 		return a.cmdCodex(rest)
 	}
+	if cmd == "launcher-exec" {
+		return a.cmdLauncherExec(rest)
+	}
 	if err := validateCommandFlags(cmd, rest); err != nil {
 		return err
 	}
@@ -60,6 +65,8 @@ func (a *App) Run(args []string) error {
 	switch cmd {
 	case "list", "ls":
 		return a.cmdList(rest)
+	case "runs":
+		return a.cmdClaudeRuns(rest)
 	case "whoami":
 		return a.cmdWhoami(rest)
 	case "search":
@@ -131,13 +138,15 @@ Session commands:
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
   list [--all] [--cwd <path>] [--wide]
                                  List sessions; --cwd includes that workspace and descendants
+  runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Show the caller session bound to this process
   search codex <query>           Search older Codex conversation history on demand
   send <target> "msg"|-       Send now when idle; queue when busy (use --no-queue to refuse delay)
   stream <target>               Tail live activity
   reply <target> [--before cursor] [--json] [--timeout 30s]  Fetch last assistant reply
   last <target> [count] [--before cursor] [--full] [--json] [--timeout 30s]  Show a bounded exchange page
-  goal <target> [text|clear]    Set or clear a goal
+  goal <target> [set|edit|pause|resume|budget|clear] [value] [--json]
+                                 Read goal usage or control its objective, status and budget
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
   model <target> [name]         Get or set model
   interrupt <target>            Stop current turn
@@ -366,7 +375,7 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
@@ -426,6 +435,35 @@ func validateCommandFlags(command string, args []string) error {
 	return nil
 }
 
+func (a *App) cmdClaudeRuns(args []string) error {
+	if len(stripFlags(args)) != 0 {
+		return fmt.Errorf("usage: agenthail runs [--json]")
+	}
+	adapter := a.surfaceByKind(surface.KindClaude)
+	observer, ok := adapter.(surface.ClaudeRunObserver)
+	if !ok {
+		return fmt.Errorf("Claude run observation is unavailable")
+	}
+	runs, err := observer.ObserveClaudeRuns(context.Background())
+	if err != nil {
+		return fmt.Errorf("read Claude job records: %w", err)
+	}
+	links, err := observer.ObserveClaudeSubagentLinks(context.Background())
+	if err != nil {
+		return fmt.Errorf("read Claude subagent records: %w", err)
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"runs": runs, "subagents": links})
+	}
+	for _, run := range runs {
+		fmt.Printf("%s\t%s\t%s\t%s\n", run.JobID, run.ProviderState, run.SessionID, run.RunType)
+	}
+	for _, link := range links {
+		fmt.Printf("subagent\t%s\t%s\t%s\n", link.ParentSessionID, link.AgentID, link.TranscriptPath)
+	}
+	return nil
+}
+
 func (a *App) cmdList(args []string) error {
 	if len(stripFlags(args)) != 0 {
 		return fmt.Errorf("usage: agenthail list [--all] [--cwd <path>] [--wide] [--json]")
@@ -443,28 +481,58 @@ func (a *App) cmdList(args []string) error {
 
 	allSessions := make([]surface.Session, 0)
 	surfaceErrors := map[string]string{}
-	successfulSurfaces := 0
-	for _, s := range a.allSurfaces() {
-		sessions, err := s.List(ctx)
-		if err != nil {
-			surfaceErrors[string(s.Name())] = err.Error()
-			continue
+	catalog, catalogBacked, catalogErr := a.listCatalogSnapshot()
+	if catalogErr != nil {
+		if jsonOut {
+			if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"sessions": allSessions, "errors": map[string]string{"catalog": catalogErr.Error()}}); err != nil {
+				return err
+			}
 		}
-		successfulSurfaces++
-		for _, sess := range sessions {
-			var normalizeErr error
-			sess, normalizeErr = normalizeSessionCwd(sess)
-			if normalizeErr != nil {
-				surfaceErrors[string(s.Name())] = fmt.Sprintf("normalize session workspace: %s", normalizeErr)
+		return catalogErr
+	}
+	successfulSurfaces := 0
+	if catalogBacked {
+		successfulSurfaces = 1
+		for _, record := range catalog.Sessions {
+			session, err := normalizeSessionCwd(record.Session)
+			if err != nil {
+				surfaceErrors[string(record.Session.Surface)] = fmt.Sprintf("normalize session workspace: %s", err)
 				continue
 			}
-			if a.Registry != nil {
-				if err := a.Registry.RegisterSession(sess); err != nil {
-					surfaceErrors[string(s.Name())] = fmt.Sprintf("register session: %s", err)
+			allSessions = append(allSessions, session)
+		}
+		for _, record := range catalog.Surfaces {
+			if record.Health != "healthy" {
+				detail := record.Detail
+				if detail == "" {
+					detail = "catalog health is " + record.Health
+				}
+				surfaceErrors[string(record.Surface)] = detail
+			}
+		}
+	} else {
+		for _, s := range a.allSurfaces() {
+			sessions, err := s.List(ctx)
+			if err != nil {
+				surfaceErrors[string(s.Name())] = err.Error()
+				continue
+			}
+			successfulSurfaces++
+			for _, sess := range sessions {
+				var normalizeErr error
+				sess, normalizeErr = normalizeSessionCwd(sess)
+				if normalizeErr != nil {
+					surfaceErrors[string(s.Name())] = fmt.Sprintf("normalize session workspace: %s", normalizeErr)
 					continue
 				}
+				if a.Registry != nil {
+					if err := a.Registry.RegisterSession(sess); err != nil {
+						surfaceErrors[string(s.Name())] = fmt.Sprintf("register session: %s", err)
+						continue
+					}
+				}
+				allSessions = append(allSessions, sess)
 			}
-			allSessions = append(allSessions, sess)
 		}
 	}
 
@@ -539,7 +607,11 @@ func (a *App) cmdList(args []string) error {
 		allSessions = allSessions[:max]
 	}
 	if jsonOut {
-		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"sessions": allSessions, "errors": surfaceErrors}); err != nil {
+		document := map[string]any{"sessions": allSessions, "errors": surfaceErrors}
+		if catalogBacked {
+			document["catalog"] = listCatalogMetadata(catalog)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(document); err != nil {
 			return err
 		}
 		if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
@@ -548,7 +620,11 @@ func (a *App) cmdList(args []string) error {
 		return nil
 	}
 	for name, message := range surfaceErrors {
-		fmt.Fprintf(os.Stderr, "warning: %s discovery failed: %s\n", name, message)
+		if catalogBacked {
+			fmt.Fprintf(os.Stderr, "warning: %s catalog health: %s\n", name, message)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: %s discovery failed: %s\n", name, message)
+		}
 	}
 	if len(allSessions) == 0 {
 		fmt.Println("no sessions found")
@@ -591,6 +667,62 @@ func (a *App) cmdList(args []string) error {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
 	}
 	return nil
+}
+
+type listCatalogSurface struct {
+	Surface    string    `json:"surface"`
+	Health     string    `json:"health"`
+	Detail     string    `json:"detail,omitempty"`
+	ObservedAt time.Time `json:"observedAt"`
+}
+
+type listCatalogMetadataView struct {
+	Source     string                          `json:"source"`
+	HostEpoch  string                          `json:"hostEpoch"`
+	CatalogSeq uint64                          `json:"catalogSeq"`
+	Surfaces   []listCatalogSurface            `json:"surfaces"`
+	Freshness  map[string]listCatalogFreshness `json:"freshness"`
+}
+
+type listCatalogFreshness struct {
+	ObservedAt        time.Time `json:"observedAt"`
+	UnavailableReason string    `json:"unavailableReason,omitempty"`
+}
+
+func (a *App) listCatalogSnapshot() (registry.CatalogSnapshot, bool, error) {
+	if a.Registry == nil || !a.daemonIsRunning() {
+		return registry.CatalogSnapshot{}, false, nil
+	}
+	snapshot, err := a.Registry.CatalogSnapshot()
+	if err != nil {
+		return registry.CatalogSnapshot{}, true, fmt.Errorf("read daemon catalog: %w", err)
+	}
+	return snapshot, true, nil
+}
+
+func (a *App) daemonIsRunning() bool {
+	if a.catalogDaemonRunning != nil {
+		return a.catalogDaemonRunning()
+	}
+	_, running := daemon.IsRunning()
+	return running
+}
+
+func listCatalogMetadata(snapshot registry.CatalogSnapshot) listCatalogMetadataView {
+	metadata := listCatalogMetadataView{
+		Source:     "daemon",
+		HostEpoch:  snapshot.HostEpoch,
+		CatalogSeq: snapshot.CatalogSeq,
+		Surfaces:   make([]listCatalogSurface, 0, len(snapshot.Surfaces)),
+		Freshness:  make(map[string]listCatalogFreshness, len(snapshot.Sessions)),
+	}
+	for _, record := range snapshot.Surfaces {
+		metadata.Surfaces = append(metadata.Surfaces, listCatalogSurface{Surface: string(record.Surface), Health: record.Health, Detail: record.Detail, ObservedAt: record.ObservedAt})
+	}
+	for _, record := range snapshot.Sessions {
+		metadata.Freshness[record.Session.ID] = listCatalogFreshness{ObservedAt: record.ObservedAt, UnavailableReason: record.UnavailableReason}
+	}
+	return metadata
 }
 
 func normalizeSessionCwd(session surface.Session) (surface.Session, error) {
@@ -760,6 +892,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
 		}
+		if err := surface.ValidateRuntimeTransport(session); err != nil {
+			return nil, nil, err
+		}
 		return session, adapter, nil
 	}
 	target = strings.TrimPrefix(target, "@")
@@ -778,6 +913,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				}
 				if err := a.Registry.RegisterSession(*session); err != nil {
 					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+				}
+				if err := surface.ValidateRuntimeTransport(session); err != nil {
+					return nil, nil, err
 				}
 				return session, adapter, nil
 			}
@@ -816,6 +954,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 			if err := a.Registry.RegisterSession(*candidate.session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", candidate.adapter.Name(), err)
 			}
+		}
+		if err := surface.ValidateRuntimeTransport(candidate.session); err != nil {
+			return nil, nil, err
 		}
 		return candidate.session, candidate.adapter, nil
 	}
@@ -1103,7 +1244,7 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
+	read, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
 	if err != nil {
 		return err
 	}
@@ -1118,7 +1259,7 @@ func (a *App) cmdReply(args []string) error {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
 	} else {
 		printSessionReadWarning(read)
 		if read.Source != "" {
@@ -1159,7 +1300,7 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: n, Before: before})
+	read, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: n, Before: before})
 	if err != nil {
 		return err
 	}
@@ -1171,7 +1312,7 @@ func (a *App) cmdLast(args []string) error {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
 	}
 	printSessionReadWarning(read)
 	if len(exchanges) == 0 {
@@ -1236,6 +1377,40 @@ func readSessionWithContext(ctx context.Context, adapter surface.Surface, sessio
 	}
 }
 
+func (a *App) readSessionPage(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	if a.daemonIsRunning() {
+		var reader sessionPageReader
+		var err error
+		if a.daemonSessionPageReader != nil {
+			reader, err = a.daemonSessionPageReader()
+		} else {
+			reader, err = newDaemonSessionPageClient()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read active daemon session page: %w", err)
+		}
+		if reader == nil {
+			return nil, errors.New("read active daemon session page: reader is unavailable")
+		}
+		read, err := reader.ReadSession(ctx, session, request)
+		if err != nil {
+			return nil, err
+		}
+		if read == nil {
+			return nil, errors.New("read active daemon session page: empty response")
+		}
+		return surface.BoundSessionRead(session, read), nil
+	}
+	read, err := readSessionWithContext(ctx, adapter, session, request)
+	if err != nil {
+		return nil, err
+	}
+	if read != nil && read.Source == "" {
+		read.Source = string(adapter.Name()) + "-offline-provider"
+	}
+	return read, nil
+}
+
 func (a *App) cmdStream(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
@@ -1263,46 +1438,6 @@ func (a *App) cmdStream(args []string) error {
 			fmt.Println()
 		}
 	}, timeout)
-}
-
-func (a *App) cmdGoal(args []string) error {
-	positional := stripFlags(args)
-	if len(positional) < 1 {
-		return fmt.Errorf("usage: agenthail goal <target> [text|clear]")
-	}
-	ctx := context.Background()
-	target := positional[0]
-	sess, surf, err := a.resolveTarget(ctx, target)
-	if err != nil {
-		return err
-	}
-	if !surf.Capabilities().Goal {
-		return fmt.Errorf("%s does not support goal management", surf.Name())
-	}
-	if len(positional) == 1 {
-		goal, getErr := surf.GoalGet(ctx, sess)
-		if getErr != nil {
-			return getErr
-		}
-		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "goal": goal})
-		}
-		if goal == nil || goal.Objective == "" {
-			fmt.Println("(no active goal)")
-			return nil
-		}
-		fmt.Printf("%s [%s]\n", goal.Objective, goal.Status)
-		return nil
-	}
-	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
-		return err
-	}
-	action := positional[1]
-	if action == "clear" {
-		return surf.GoalClear(ctx, sess)
-	}
-	text := strings.Join(positional[1:], " ")
-	return surf.GoalSet(ctx, sess, text)
 }
 
 func (a *App) cmdCompact(args []string) error {
@@ -1356,6 +1491,11 @@ func (a *App) cmdModel(args []string) error {
 	current, err := surf.Model(ctx, sess, name)
 	if err != nil {
 		return err
+	}
+	if name != "" && sess.Surface == surface.KindClaude && a.Registry != nil {
+		if err := a.Registry.RegisterSession(*sess); err != nil {
+			return fmt.Errorf("persist Claude model state: %w", err)
+		}
 	}
 	if current != "" {
 		fmt.Println(current)

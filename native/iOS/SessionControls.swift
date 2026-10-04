@@ -4,40 +4,60 @@ struct SessionEditingControls: View {
     @ObservedObject var model: AgenthailIOSModel
     let detail: SessionDetail
     @State private var editingGoal = false
+    @State private var editingBudget = false
     @State private var editingName = false
     @State private var text = ""
+    @State private var budgetText = ""
     @State private var error: String?
     var body: some View {
         Section("Organize conversation") {
             Button("Name conversation", systemImage: "pencil") { text = detail.alias ?? ""; editingName = true }
             if !detail.readOnly && detail.capabilities.goal {
                 Button(detail.goal?.objective.isEmpty == false ? "Edit goal" : "Set goal", systemImage: "target") { text = detail.goal?.objective ?? ""; editingGoal = true }
-                if detail.goal?.objective.isEmpty == false {
-                    Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } }
+                if detail.goal?.objective.isEmpty == false { Button("Clear goal", role: .destructive) { Task { await save("goal-clear") } } }
+                if let goal = detail.goal {
+                    if goal.status == "active" {
+                        Button("Pause goal", systemImage: "pause.fill") { Task { await save("goal-pause") } }
+                    } else if goal.status == "paused" {
+                        Button("Resume goal", systemImage: "play.fill") { Task { await save("goal-resume") } }
+                    }
+                    Button(goal.tokenBudget == nil ? "Set token budget" : "Edit token budget", systemImage: "gauge.with.dots.needle.67percent") {
+                        budgetText = goal.tokenBudget.map(String.init) ?? ""
+                        editingBudget = true
+                    }
+                    if goal.tokenBudget != nil {
+                        Button("Clear token budget", role: .destructive) { Task { await save("goal-budget", text: "") } }
+                    }
                 }
             }
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
         }
         .disabled(model.pendingControls.contains(detail.session.id))
-        .sheet(isPresented: Binding(get: { editingGoal || editingName }, set: { if !$0 { editingGoal = false; editingName = false } })) {
+        .sheet(isPresented: Binding(get: { editingGoal || editingName || editingBudget }, set: { if !$0 { editingGoal = false; editingName = false; editingBudget = false } })) {
             NavigationStack {
                 Form {
-                    TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
-                        .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
+                    if editingBudget {
+                        TextField("Token budget", text: $budgetText).keyboardType(.numberPad)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Text("Use Clear token budget to remove the current limit.").font(.footnote)
+                    } else {
+                        TextField(editingName ? "Name" : "Objective", text: $text, axis: .vertical).lineLimit(2...8)
+                            .textInputAutocapitalization(editingName ? .never : .sentences).autocorrectionDisabled(editingName)
+                    }
                     if editingName { Text("Use 1–80 characters without spaces, /, or #.").font(.footnote) }
                     if let error { Text(error).foregroundStyle(.red) }
                 }
-                .navigationTitle(editingName ? "Name conversation" : "Edit goal")
+                .navigationTitle(editingBudget ? "Token budget" : editingName ? "Name conversation" : "Edit goal")
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false }.disabled(model.pendingControls.contains(detail.session.id)) }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingName ? "alias" : "goal-set") } }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingName = false; editingGoal = false; editingBudget = false }.disabled(model.pendingControls.contains(detail.session.id)) }
+                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(editingBudget ? "goal-budget" : editingName ? "alias" : editingGoal && detail.goal?.objective.isEmpty == false ? "goal-edit" : "goal-set", text: editingBudget ? budgetText : text) } }.disabled((editingBudget ? budgetText : text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pendingControls.contains(detail.session.id)) }
                 }.interactiveDismissDisabled(model.pendingControls.contains(detail.session.id))
             }
         }
     }
-    private func save(_ action: String) async {
+    private func save(_ action: String, text: String? = nil) async {
         error = nil
-        do { try await model.editSession(id: detail.session.id, action: action, text: text); editingName = false; editingGoal = false }
+        do { try await model.editSession(id: detail.session.id, action: action, text: text ?? self.text); editingName = false; editingGoal = false; editingBudget = false }
         catch { self.error = error.localizedDescription }
     }
 }
@@ -66,6 +86,14 @@ struct QueueListView: View {
             }.pickerStyle(.segmented).listRowSeparator(.hidden)
             if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote) }
             if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.secondary).font(.footnote) }
+            let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
+            if !problems.isEmpty {
+                Section("Delivery problems") {
+                    ForEach(problems) { problem in
+                        deliveryProblemRow(problem)
+                    }
+                }
+            }
             if loading && items.isEmpty { ProgressView("Loading deliveries") }
             if !showHistory {
                 let review = current.filter { $0.status == "dead" }
@@ -147,6 +175,29 @@ struct QueueListView: View {
             .controlSize(.large)
             .disabled(model.pendingControls.contains("queue:\(item.id)"))
         }.padding(.vertical, 6)
+    }
+
+    private func deliveryProblemRow(_ problem: DeliveryProblem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(problem.status?.capitalized ?? "Delivery problem")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(problem.at).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Text(problem.message).font(.body).textSelection(.enabled)
+            Text(problem.reason).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+            Button("Dismiss", role: .destructive) {
+                Task {
+                    error = nil
+                    do { try await model.dismissDeliveryProblem(problem) }
+                    catch { self.error = error.localizedDescription }
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.pendingControls.contains("delivery:\(problem.deliveryId)"))
+        }
+        .padding(.vertical, 6)
     }
 
     private func update(_ item: QueueState, retry: Bool) {

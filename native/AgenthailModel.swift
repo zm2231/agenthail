@@ -62,6 +62,12 @@ final class AgenthailModel: ObservableObject {
         cache.countLimit = 100
         return cache
     }()
+    private struct PendingSendRequest {
+        let action: String
+        let message: String
+        let idempotencyKey: String
+    }
+    private var pendingSendRequests: [String: PendingSendRequest] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -242,7 +248,7 @@ final class AgenthailModel: ObservableObject {
     func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> String? {
         guard let api else { return "Agenthail isn't connected." }
         do {
-            let receipt = try await api.launchSession(launcher: launcher, surface: agent, message: message, cwd: folder)
+            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher)
             if receipt.unknown == true {
                 if let id = receipt.id { await openCreatedSession(id) }
                 return "Agenthail couldn't confirm the session started. Check the sidebar before trying again."
@@ -264,11 +270,11 @@ final class AgenthailModel: ObservableObject {
         if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { mainPane.select(session.id) }
     }
 
-    func attachmentData(sessionID: String, attachment: TimelineAttachment) async throws -> Data {
+    func attachmentData(sessionID: String, attachment: SessionAttachment) async throws -> Data {
         let key = "\(sessionID)/\(attachment.id)" as NSString
         if let cached = attachmentCache.object(forKey: key) { return cached as Data }
         guard let api else { throw AgenthailAPIError.invalidResponse }
-        let data = try await api.attachmentData(sessionID: sessionID, attachmentID: attachment.id)
+        let data = try await api.sessionAttachment(sessionID: sessionID, id: attachment.id)
         attachmentCache.setObject(data as NSData, forKey: key, cost: data.count)
         return data
     }
@@ -460,11 +466,20 @@ final class AgenthailModel: ObservableObject {
     func send(_ message: String, to sessionID: String, steer: Bool) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let api else { return }
+        let action = steer ? "steer" : "send"
+        let idempotencyKey: String
+        if let retry = pendingSendRequests[sessionID], retry.action == action, retry.message == text {
+            idempotencyKey = retry.idempotencyKey
+        } else {
+            idempotencyKey = UUID().uuidString
+            pendingSendRequests[sessionID] = PendingSendRequest(action: action, message: text, idempotencyKey: idempotencyKey)
+        }
         let pending = LocalSend(text: text, sentAt: Date(), status: nil)
         localSends[sessionID, default: []].append(pending)
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: steer ? "steer" : "send", sessionID: sessionID, message: text)
+                let receipt = try await api.sendInstruction(action: action, sessionID: sessionID, message: text, idempotencyKey: idempotencyKey)
+                if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
                 updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
                 operationError = nil
             } catch {
@@ -588,7 +603,7 @@ final class AgenthailModel: ObservableObject {
             current.sessions.removeAll { $0.id == id }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
-            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", at: event.data.at)
+            let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
             var problems = current.deliveryProblems ?? []
             problems.removeAll { $0.deliveryId == deliveryID }
             problems.insert(problem, at: 0)

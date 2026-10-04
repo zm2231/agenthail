@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -47,6 +48,7 @@ type Config struct {
 	Generation   string
 	ProcessToken string
 	ReplyRelay   bool
+	BusyDelivery string
 }
 
 type Ready struct {
@@ -969,7 +971,21 @@ func queueFrame(reg *registry.Registry, c Config, f frame, ownSocket string) err
 		return surface.DeliveryTerminal(errors.New(reason), surface.DeliveryAccessDenied)
 	}
 	key := "peer:" + target.ID + ":" + f.From + ":" + f.MsgID
-	queueID, err := reg.QueueMessageWithOptions(target.ID, "[Claude peer message from "+f.From+"]\n"+body.Content, key, surface.SendOptions{})
+	mode := c.BusyDelivery
+	if mode == "" {
+		var modeErr error
+		loadedMode, loadErr := deliverypolicy.LoadFromPath(filepath.Join(c.Home, ".agenthail", "dashboard.json"))
+		modeErr = loadErr
+		mode = string(loadedMode)
+		if modeErr != nil {
+			return modeErr
+		}
+	}
+	normalizedMode, modeErr := deliverypolicy.Normalize(mode)
+	if modeErr != nil {
+		return modeErr
+	}
+	queueID, err := reg.QueueMessageWithOptions(target.ID, "[Claude peer message from "+f.From+"]\n"+body.Content, key, surface.SendOptions{BusyDelivery: string(normalizedMode)})
 	if err != nil {
 		return err
 	}

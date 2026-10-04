@@ -26,17 +26,19 @@ const (
 )
 
 type Session struct {
-	ID         string        `json:"id"`
-	Surface    SurfaceKind   `json:"surface"`
-	Name       string        `json:"name"`
-	Cwd        string        `json:"cwd"`
-	PID        int           `json:"pid"`
-	Status     SessionStatus `json:"status"`
-	Transcript string        `json:"transcript"`
-	HasLocal   bool          `json:"hasLocal"`
-	Source     string        `json:"source,omitempty"`
-	Transport  string        `json:"transport,omitempty"`
-	LastActive time.Time     `json:"lastActive"`
+	ID              string          `json:"id"`
+	Surface         SurfaceKind     `json:"surface"`
+	Name            string          `json:"name"`
+	Cwd             string          `json:"cwd"`
+	PID             int             `json:"pid"`
+	Status          SessionStatus   `json:"status"`
+	Transcript      string          `json:"transcript"`
+	HasLocal        bool            `json:"hasLocal"`
+	Source          string          `json:"source,omitempty"`
+	Transport       string          `json:"transport,omitempty"`
+	ConfiguredModel string          `json:"configuredModel,omitempty"`
+	LastActive      time.Time       `json:"lastActive"`
+	Runtime         *Runtime `json:"runtime,omitempty"`
 }
 
 type SessionSearchResult struct {
@@ -205,6 +207,7 @@ type SendOptions struct {
 	TurnOptions
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	BusyDelivery    string `json:"busyDelivery,omitempty"`
 }
 
 type sourceSessionIDContextKey struct{}
@@ -247,6 +250,9 @@ type SessionAccessChecker interface {
 }
 
 func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) error {
+	if err := ValidateRuntimeTransport(sess); err != nil {
+		return err
+	}
 	if checker, ok := adapter.(SessionAccessChecker); ok {
 		if err := checker.EnsureWritable(ctx, sess); err != nil {
 			return err
@@ -318,12 +324,13 @@ type Exchange struct {
 	Source    string    `json:"source,omitempty"`
 }
 
-type GoalState struct {
-	Objective string `json:"objective"`
-	Status    string `json:"status"` // "active", "complete", ""
-}
-
 type StreamEvent struct {
+	Role        string        `json:"role,omitempty"`
+	Title       string        `json:"title,omitempty"`
+	Status      string        `json:"status,omitempty"`
+	CallID      string        `json:"callId,omitempty"`
+	Attachment  *Attachment   `json:"attachment,omitempty"`
+	Truncated   bool          `json:"truncated,omitempty"`
 	ID          string        `json:"id,omitempty"`
 	ProviderKey string        `json:"providerKey,omitempty"`
 	Version     uint64        `json:"version,omitempty"`
@@ -334,6 +341,7 @@ type StreamEvent struct {
 	Kind        string        `json:"kind"`
 	Text        string        `json:"text"`
 	Context     *ContextUsage `json:"context,omitempty"`
+	Goal        *GoalState    `json:"goal,omitempty"`
 }
 
 type ContextUsage struct {
@@ -351,11 +359,26 @@ type ContextUsage struct {
 	PostCompactTokens     int64     `json:"postCompactTokens,omitempty"`
 	ReclaimedTokens       int64     `json:"reclaimedTokens,omitempty"`
 	WindowEstimated       bool      `json:"windowEstimated,omitempty"`
+	ContextWindowSource   string    `json:"contextWindowSource,omitempty"`
 	UpdatedAt             time.Time `json:"updatedAt,omitempty"`
 }
 
 type ContextUsageProvider interface {
 	ContextUsage(ctx context.Context, sess *Session) (*ContextUsage, error)
+}
+
+// GoalUpdate is the typed control payload supported by Codex thread/goal/set.
+// A nil field is omitted, except ClearTokenBudget, which explicitly sends a
+// JSON null token budget.
+type GoalUpdate struct {
+	Objective        *string `json:"objective,omitempty"`
+	Status           *string `json:"status,omitempty"`
+	TokenBudget      *int64  `json:"tokenBudget,omitempty"`
+	ClearTokenBudget bool    `json:"-"`
+}
+
+type GoalController interface {
+	UpdateGoal(context.Context, *Session, GoalUpdate) error
 }
 
 type Capabilities struct {
@@ -377,7 +400,7 @@ type SessionCapabilities struct {
 
 func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
 	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
-		capabilities.Stream = false
+		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
 		if !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_") {
 			capabilities.Steer = false
 			capabilities.Compact = false

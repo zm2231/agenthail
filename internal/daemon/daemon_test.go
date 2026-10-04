@@ -27,6 +27,7 @@ type daemonSurface struct {
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
 	sent           []string
+	steered        []string
 	models         []string
 	modelOptions   []surface.ModelOption
 	listCalls      atomic.Int32
@@ -265,9 +266,12 @@ func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, 
 func (f *daemonSurface) Models(context.Context) ([]surface.ModelOption, error) {
 	return f.modelOptions, nil
 }
-func (*daemonSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
-func (*daemonSurface) Steer(context.Context, *surface.Session, string) error { return nil }
-func (f *daemonSurface) Capabilities() surface.Capabilities                  { return f.caps }
+func (*daemonSurface) Interrupt(context.Context, *surface.Session) error { return nil }
+func (f *daemonSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
+	f.steered = append(f.steered, message)
+	return nil
+}
+func (f *daemonSurface) Capabilities() surface.Capabilities { return f.caps }
 func (f *daemonSurface) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
 	return f.contextUsage, nil
 }
@@ -333,6 +337,55 @@ func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {
 	daemon.observeSession(context.Background(), fake, &from)
 	if len(fake.sent) != 0 || r.QueueCount("to") != 1 {
 		t.Fatalf("duplicate: sent=%v pending=%d", fake.sent, r.QueueCount("to"))
+	}
+}
+
+func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	d, r, fake, from, to := daemonFixture(t)
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	d.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	if len(fake.steered) != 0 {
+		t.Fatalf("relay steered before outbox: %v", fake.steered)
+	}
+	item, err := r.QueueItem(1)
+	if err != nil || item.BusyDelivery != "steer" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	d.drainSteerMessageQueue(context.Background(), fake, &to)
+	if len(fake.steered) != 1 || r.QueueCount(to.ID) != 0 {
+		t.Fatalf("steered=%v queued=%d", fake.steered, r.QueueCount(to.ID))
+	}
+}
+
+func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	queueID, err := r.QueueRelayMessageWithOptions(to.ID, "relay with options", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.QueueItem(queueID)
+	if err != nil || item.BusyDelivery != "queue" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	d.drainMessageQueue(context.Background(), fake, &to)
+	if len(fake.steered) != 0 || len(fake.models) != 1 || fake.models[0] != "model-a" || r.QueueCount(to.ID) != 0 {
+		t.Fatalf("steered=%v models=%v queued=%d", fake.steered, fake.models, r.QueueCount(to.ID))
 	}
 }
 

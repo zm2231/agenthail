@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"syscall"
 
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -59,7 +60,12 @@ func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int
 		}
 		payload := fmt.Sprintf("[agenthail relay hops=%d id=%d source=%s turn=%s] %s", hops+1, route.ID, d.resolveDisplay(from.ID), completionID, payloadText)
 		key := fmt.Sprintf("relay:%d:%s", route.ID, completionID)
-		queueID, err := d.Registry.QueueRelayMessageWithOptions(route.ToSession, payload, key, hops+1, surface.SendOptions{SourceSessionID: from.ID})
+		busyDelivery, policyErr := deliverypolicy.Load()
+		if policyErr != nil {
+			d.log.Printf("load busy delivery policy for relay %d: %s", route.ID, policyErr)
+			continue
+		}
+		queueID, err := d.Registry.QueueRelayMessageWithOptions(route.ToSession, payload, key, hops+1, surface.SendOptions{SourceSessionID: from.ID, BusyDelivery: string(busyDelivery)})
 		if err != nil {
 			d.log.Printf("queue relay %d: %s", route.ID, err)
 			continue
