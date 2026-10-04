@@ -292,7 +292,7 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second}, r
+	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }}, r
 }
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -910,6 +910,76 @@ func TestListCwdFiltersByCanonicalAncestryInTextAndJSON(t *testing.T) {
 		if session.ID == "root" && session.Cwd != canonicalProject {
 			t.Fatalf("root cwd=%q want=%q", session.Cwd, canonicalProject)
 		}
+	}
+}
+
+func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	other := filepath.Join(t.TempDir(), "other")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex}}}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	if err := store.EnsureCatalogState(); err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	for _, item := range []surface.Session{
+		{ID: "catalog-root", Surface: surface.KindCodex, Name: "root", Cwd: root, LastActive: observedAt},
+		{ID: "catalog-nested", Surface: surface.KindCodex, Name: "nested", Cwd: nested, LastActive: observedAt.Add(-time.Minute)},
+		{ID: "catalog-other", Surface: surface.KindCodex, Name: "other", Cwd: other, LastActive: observedAt.Add(-2 * time.Minute)},
+	} {
+		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
+			Session:               item,
+			HostProject:           json.RawMessage(`{}`),
+			Checkout:              json.RawMessage(`{}`),
+			ObservedAt:            observedAt,
+			ProjectionFingerprint: item.ID,
+		}, registry.CatalogEvent{DedupeKey: "session:" + item.ID, Type: "session.upserted", EntityID: item.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := store.RecordCatalogSurface(registry.CatalogSurfaceState{Surface: surface.KindCodex, Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface:codex:healthy", Type: "surface.health", EntityID: string(surface.KindCodex), Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", root, "--wide", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.listCalls != 0 {
+		t.Fatalf("provider list calls=%d, want zero while daemon catalog is authoritative", fake.listCalls)
+	}
+	var document struct {
+		Sessions []surface.Session `json:"sessions"`
+		Catalog  struct {
+			Source     string `json:"source"`
+			CatalogSeq uint64 `json:"catalogSeq"`
+			Surfaces   []struct {
+				Health string `json:"health"`
+			} `json:"surfaces"`
+			Freshness map[string]struct {
+				ObservedAt time.Time `json:"observedAt"`
+			} `json:"freshness"`
+		} `json:"catalog"`
+	}
+	if err := json.Unmarshal([]byte(output), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Catalog.Source != "daemon" || document.Catalog.CatalogSeq == 0 || len(document.Catalog.Surfaces) != 1 || document.Catalog.Surfaces[0].Health != "healthy" {
+		t.Fatalf("catalog metadata=%+v", document.Catalog)
+	}
+	if len(document.Sessions) != 2 || document.Sessions[0].ID == "catalog-other" || document.Sessions[1].ID == "catalog-other" {
+		t.Fatalf("sessions=%+v", document.Sessions)
+	}
+	if got := document.Catalog.Freshness["catalog-root"].ObservedAt; !got.Equal(observedAt) {
+		t.Fatalf("root freshness=%s want=%s", got, observedAt)
 	}
 }
 
