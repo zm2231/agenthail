@@ -64,6 +64,22 @@ func defaultLauncherForSurface(kind surface.SurfaceKind) string {
 	}
 }
 
+func locationMatches(expected, actual surface.Location) bool {
+	if expected.Workspace != "" && expected.Workspace != actual.Workspace {
+		return false
+	}
+	if expected.Surface != "" && expected.Surface != actual.Surface {
+		return false
+	}
+	if expected.Session != "" && expected.Session != actual.Session {
+		return false
+	}
+	if expected.Pane != "" && expected.Pane != actual.Pane {
+		return false
+	}
+	return true
+}
+
 func locateLaunchedSession(ctx context.Context, launcher surface.Launcher, adapter surface.Surface, result surface.LaunchResult) (*surface.Session, *surface.Location, error) {
 	if result.Session != nil {
 		return result.Session, result.Location, nil
@@ -80,7 +96,7 @@ func locateLaunchedSession(ctx context.Context, launcher surface.Launcher, adapt
 	if id == "" && result.Location != nil {
 		candidates := []string{}
 		for candidateID, location := range locations {
-			if location == *result.Location {
+			if locationMatches(*result.Location, location) {
 				candidates = append(candidates, candidateID)
 			}
 		}
@@ -110,5 +126,5 @@ func locateLaunchedSession(ctx context.Context, launcher surface.Launcher, adapt
 			return &sessions[index], &location, nil
 		}
 	}
-	return &surface.Session{ID: id, Surface: surface.SurfaceKind(""), Status: surface.StatusUnknown}, result.Location, nil
+	return nil, nil, fmt.Errorf("launcher %q did not discover session %q", launcher.ID(), id)
 }

@@ -28,8 +28,10 @@ the stored argv directly.
 The cmux command names and JSON envelope follow the cmux CLI contract at
 `https://github.com/manaflow-ai/cmux/blob/main/docs/cli-contract.md`: use
 `new-workspace`, `sessions list --json`, `select-workspace`, and
-`focus-panel`. `sessions` records use snake_case identity fields and a
-top-level `sessions` array. Availability probes each required `--help`
+`focus-panel`. `new-workspace --json` returns a workspace reference/id;
+`sessions` records use the actual snake_case `session_id`, `workspace_id`,
+`surface_id`, and `pid` fields in a top-level `sessions` array. Availability
+probes each required `--help`
 command and does not infer support from English text such as the word
 “run”.
 
@@ -52,7 +54,8 @@ new session. A tmux `Location.Session` is a generated tmux server session
 name, not an Agenthail/provider session ID. tmux correlation requires a live
 registered session PID, matching cwd, a live pane PID, and proof that the
 registered PID descends from that pane PID. cmux correlation requires a live
-recorded PID from `cmux sessions list --json`.
+recorded PID from `cmux sessions list --json`; its location contains only the
+workspace and surface handles.
 
 `Focuser` is implemented by cmux and tmux. Focus is an explicit caller action,
 not a side effect of `Launch`.
