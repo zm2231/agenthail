@@ -279,7 +279,7 @@ func (s *sessionSource) run() {
 		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
-		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && current.TranscriptIdentity == s.session.TranscriptIdentity && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
+		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && (current.TranscriptIdentity == s.session.TranscriptIdentity || !s.session.TranscriptOffsetSet) && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
 			s.session.TranscriptOffset = current.TranscriptOffset
 			s.session.TranscriptOffsetSet = true
 			s.session.TranscriptIdentity = current.TranscriptIdentity
