@@ -70,18 +70,18 @@ func TestDispatcherAcceptedAndQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	session := &surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := &surface.Session{ID: "s", Surface: surface.KindCodex, Name: "Build agent"}
 	if err := r.RegisterSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	dispatcher := Dispatcher{Registry: r}
 
 	receipt, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{UUID: "turn", Accepted: true}}, session, "one", "")
-	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != "turn" {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.TurnID != "turn" || receipt.Detail != "Sent to Build agent." {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt, err = dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
-	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 || r.QueueCount("s") != 1 {
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || receipt.QueueID == 0 || receipt.Detail != "Queued for Build agent; sends when current turn ends." || r.QueueCount("s") != 1 {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	receipt2, err := dispatcher.Deliver(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "two", "key")
@@ -101,12 +101,12 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 			t.Fatal(err)
 		}
 	}
-	session := &surface.Session{ID: "target", Surface: surface.KindClaude}
+	session := &surface.Session{ID: "target", Surface: surface.KindClaude, Name: "Claude target"}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "do not duplicate", "", surface.SendOptions{SourceSessionID: "sender"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Evidence != surface.EvidenceSubmitted || receipt.DeliveryID == 0 {
+	if receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Evidence != surface.EvidenceSubmitted || receipt.DeliveryID == 0 || receipt.Detail != "Submitted to Claude target." {
 		t.Fatalf("receipt=%+v", receipt)
 	}
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
@@ -121,12 +121,12 @@ func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t 
 		t.Fatal(err)
 	}
 	defer r.Close()
-	session := &surface.Session{ID: "target", Surface: surface.KindClaude}
+	session := &surface.Session{ID: "target", Surface: surface.KindClaude, Name: "Claude target"}
 	if err := r.RegisterSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "maybe", "")
-	if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Status != string(registry.DeliveryIntentSubmitted) {
+	if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.Detail != "Submitted to Claude target." {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
@@ -146,9 +146,9 @@ func TestDispatcherQueuedReceiptBindsDeliveryIntentToQueue(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	session := &surface.Session{ID: "target", Surface: surface.KindCodex}
+	session := &surface.Session{ID: "target", Surface: surface.KindCodex, Name: "Codex target"}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), &fakeSurface{result: &surface.SendResult{Accepted: false}}, session, "later", "", surface.SendOptions{SourceSessionID: "sender"})
-	if err != nil || receipt.Status != string(registry.DeliveryIntentQueued) || receipt.DeliveryID == 0 {
+	if err != nil || receipt.Status != string(registry.DeliveryIntentQueued) || receipt.DeliveryID == 0 || receipt.Detail != "Queued for Codex target; sends when current turn ends." {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
@@ -168,13 +168,13 @@ func TestDispatcherReportsTransportAcceptanceAsSentNotDelivered(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	session := &surface.Session{ID: "target", Surface: surface.KindClaude, Transport: "uds"}
+	session := &surface.Session{ID: "target", Surface: surface.KindClaude, Name: "Claude target", Transport: "uds"}
 	adapter := &sourceCheckingSurface{fakeSurface: fakeSurface{kind: surface.KindClaude, result: &surface.SendResult{UUID: "peer-envelope", Accepted: true}}}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "accepted", "", surface.SendOptions{SourceSessionID: "sender"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Status != string(registry.DeliveryIntentSent) || receipt.Evidence != surface.EvidenceTransportAccepted || receipt.DeliveryID == 0 {
+	if receipt.Status != string(registry.DeliveryIntentSent) || receipt.Evidence != surface.EvidenceTransportAccepted || receipt.DeliveryID == 0 || receipt.Detail != "Sent to Claude target." {
 		t.Fatalf("receipt=%+v", receipt)
 	}
 }
