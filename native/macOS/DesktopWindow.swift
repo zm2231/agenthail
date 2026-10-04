@@ -957,7 +957,15 @@ struct ComposerView: View {
     @FocusState private var focused: Bool
 
     private var followUp: FollowUpAction { FollowUpAction(rawValue: followUpDefault) ?? .queue }
-    private var hasText: Bool { !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    @ObservedObject private var draft: ComposerDraft
+
+    init(model: AgenthailModel, session: SessionState) {
+        self.model = model
+        self.session = session
+        self.draft = model.composerDraft
+    }
+
+    private var hasText: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var canSteer: Bool { session.capabilities.steer }
 
     var body: some View {
@@ -982,7 +990,7 @@ struct ComposerView: View {
                         .padding(.horizontal, 10)
                 }
                 VStack(spacing: 0) {
-                    TextField("Message \(session.title)", text: $model.composer, axis: .vertical)
+                    TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
                         .lineLimit(2...10)

@@ -30,7 +30,11 @@ final class AgenthailModel: ObservableObject {
     @Published var reconnecting = false
     @Published var operationError: String?
     @Published var loading = false
-    @Published var composer = ""
+    let composerDraft = ComposerDraft()
+    var composer: String {
+        get { composerDraft.text }
+        set { composerDraft.text = newValue }
+    }
     @Published private(set) var olderItems: [TimelineItem] = []
     @Published private(set) var olderCursor: Int64?
     @Published private(set) var loadingOlder = false
@@ -774,4 +778,9 @@ extension Error {
     var isCancellation: Bool {
         self is CancellationError || (self as? URLError)?.code == .cancelled
     }
+}
+
+@MainActor
+final class ComposerDraft: ObservableObject {
+    @Published var text = ""
 }
