@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 )
@@ -87,5 +88,60 @@ func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	window, err := r.SessionJournalAfter("session", 0, 10)
 	if err != nil || len(window.Entries) != 1 || window.Entries[0].ProviderKey != "second" || window.Entries[0].Bytes != 6 {
 		t.Fatalf("window=%+v err=%v", window, err)
+	}
+}
+
+func TestSessionJournalRetentionCountsFullBodyBytes(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 4, Bytes: 32}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("preview"), BodyRef: "body-ref", FullBody: []byte("0123456789")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	var retained int
+	if err := r.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
+		t.Fatal(err)
+	}
+	if retained != len("preview")+len("0123456789") {
+		t.Fatalf("retained bytes=%d, want %d", retained, len("preview")+len("0123456789"))
+	}
+}
+
+func TestSessionJournalRejectsSingleBodyBeyondRetention(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	_, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "too-large", Payload: []byte("preview"), BodyRef: "body-ref", FullBody: []byte("0123456789")}, SessionJournalRetention{Count: 4, Bytes: 8})
+	if err == nil {
+		t.Fatal("oversized full body was accepted")
+	}
+	var entries int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM session_journal WHERE session_id=?`, "session").Scan(&entries); err != nil {
+		t.Fatal(err)
+	}
+	if entries != 0 {
+		t.Fatalf("journal entries=%d, want 0 after rejected body", entries)
+	}
+}
+
+func TestSessionJournalPageReportsGapAfterRetentionPrunesHistory(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 2, Bytes: 1024}
+	for _, key := range []string{"one", "two", "three"} {
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: key, Payload: []byte(key)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := r.ReadSessionJournalPage("session", 0, 1)
+	if err != nil || page.NextBefore == 0 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var gap *SessionJournalHistoryGapError
+	_, err = r.ReadSessionJournalPage("session", page.NextBefore, 1)
+	if !errors.As(err, &gap) {
+		t.Fatalf("err=%v, want SessionJournalHistoryGapError", err)
+	}
+	if gap.EarliestSeq != 2 || gap.LatestSeq != 3 {
+		t.Fatalf("gap=%+v, want earliest=2 latest=3", gap)
 	}
 }

@@ -3,7 +3,9 @@
 `GET /api/v1/session?id=<session>&timeline=1&limit=40` returns the recent
 session journal page. `limit` is between 4 and 40; `timelineBefore` requests
 items strictly before the returned `timeline.nextBefore` cursor. Items retain
-their identity, role, title, status and retained body reference.
+their identity, role, title, status and retained body reference. If retention
+has pruned history needed by `timelineBefore`, the endpoint returns `409` with
+`error.code` set to `history_gap` and the retained `earliestSeq`/`latestSeq`.
 
 `journalSeq` is the session watermark captured in the same SQLite read
 transaction as the page. Open `/api/v1/session-stream?id=<session>&after=<journalSeq>`
@@ -15,7 +17,10 @@ seconds of waiting for the initial page. The page never calls a provider's
 metadata methods. Saved, non-streaming sessions can still initialize their
 journal through that source. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and
-bound inline bodies; retained body fetches remain session-scoped.
+bound inline bodies; retained body fetches remain session-scoped. Full body
+references count toward the journal byte budget. If a full body cannot fit,
+the bounded inline preview remains with `truncated: true` and no body
+reference is emitted.
 
 The initial-page source has a five-second handoff lease so opening its stream
 reuses the same reader instead of fetching and journaling the history twice.
