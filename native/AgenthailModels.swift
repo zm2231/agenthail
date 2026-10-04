@@ -150,6 +150,18 @@ struct AttentionState: Decodable, Identifiable, Equatable {
     let createdAt: String
 }
 
+struct DeliveryProblem: Decodable, Identifiable, Equatable {
+    let deliveryId: Int64
+    let sessionId: String
+    let sourceSessionId: String?
+    let message: String
+    let reason: String
+    let status: String?
+    let at: String
+
+    var id: Int64 { deliveryId }
+}
+
 struct ChannelState: Decodable, Identifiable, Equatable {
     var id: String { name }
     let name: String
@@ -204,6 +216,7 @@ struct DashboardSnapshot: Decodable {
     let relays: [RelayState]
     let history: [HistoryState]
     let attention: [AttentionState]
+    var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
     let busyDelivery: String?
 
@@ -217,6 +230,7 @@ struct DashboardSnapshot: Decodable {
             relays == other.relays &&
             history == other.history &&
             attention == other.attention &&
+			deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery
     }
@@ -447,6 +461,11 @@ struct SessionStreamBody: Decodable {
     let truncated: Bool
 }
 
+struct RetainedBodyResult {
+    let text: String
+    let error: String?
+}
+
 struct SessionStreamEvent: Decodable {
     let stream: String
     let sessionId: String
@@ -468,6 +487,12 @@ struct CatalogStreamData: Decodable {
     let surface: String?
     let health: String?
     let detail: String?
+    let deliveryId: Int64?
+    let sourceSessionId: String?
+    let message: String?
+    let reason: String?
+    let status: String?
+    let at: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {

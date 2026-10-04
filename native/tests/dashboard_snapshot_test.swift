@@ -17,6 +17,7 @@ struct DashboardSnapshotTest {
             relays: [],
             history: [],
             attention: [],
+            deliveryProblems: nil,
             codexRecentHours: 5,
             busyDelivery: "queue"
         )
