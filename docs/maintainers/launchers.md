@@ -27,13 +27,14 @@ the stored argv directly.
 
 The cmux command names and JSON envelope follow the cmux CLI contract at
 `https://github.com/manaflow-ai/cmux/blob/main/docs/cli-contract.md`: use
-`new-workspace`, `sessions list --json`, `select-workspace`, and
-`focus-panel`. `new-workspace --json` returns a workspace reference/id;
-`sessions` records use the actual snake_case `session_id`, `workspace_id`,
-`surface_id`, and `pid` fields in a top-level `sessions` array. Availability
-probes each required `--help`
-command and does not infer support from English text such as the word
-“run”.
+`new-workspace`, `sessions list --json`, `--json --id-format both tree --workspace <id>`,
+`select-workspace`, and `focus-panel`. `new-workspace --json` returns a
+workspace reference/id; `sessions` records use the actual snake_case
+`session_id`, `workspace_id`, `surface_id`, and `pid` fields in a top-level
+`sessions` array. A Codex launch does not advertise correlation based on
+hook/config presence. Agenthail injects its own launch receipt and validates
+the protected CMUX workspace/surface against the live tree; existing hooked
+external sessions may still be discovered through `sessions list`.
 
 tmux receives the target program and each argument as separate
 `exec.Command` arguments through `new-session -d -P -F`; no command string is
@@ -58,9 +59,11 @@ Codex launches use a launch-owned receipt: the wrapper creates the provider
 thread through managed `thread/start`, resumes that provider ID, and binds it
 to the generated tmux session and pane in a 0600 receipt. Discovery requires
 that receipt, the live pane, the exact provider ID, session, pane, and cwd all
-agree; it never derives identity from cwd or a title. cmux correlation requires
-a live recorded PID from `cmux sessions list --json`; its location contains
-only the workspace and surface handles.
+agree; it never derives identity from cwd or a title. cmux correlation first
+accepts a verified Agenthail Codex receipt whose provider thread ID and
+protected workspace/surface are present in the live `tree` inventory. Existing
+external records may use a live recorded PID from `cmux sessions list --json`;
+their location contains only the workspace and surface handles.
 
 `Focuser` is implemented by cmux and tmux. Focus is an explicit caller action,
 not a side effect of `Launch`.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1269,5 +1270,51 @@ func TestSelectCodexPIDValidatesExecutableAndMultipleResults(t *testing.T) {
 `, []string{"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", "/Applications/Codex.app/Contents/MacOS/ChatGPT"})
 	if pid != 34 {
 		t.Fatalf("pid=%d", pid)
+	}
+}
+
+func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
+	receiptPath := filepath.Join(t.TempDir(), "launch.json")
+	var prepared struct {
+		cwd   string
+		model string
+	}
+	var executed struct {
+		path string
+		argv []string
+	}
+	var receiptAtExec surface.ManagedCodexLaunchReceipt
+	errExec := errors.New("provider process exited after dispatch")
+	err := runManagedCodexLaunch(
+		context.Background(),
+		[]string{"--model", "o4-mini", "--", "hello"},
+		"/work/project", "agenthail-launch", receiptPath,
+		managedCodexLaunchBinding{Workspace: "workspace:7", Surface: "surface:9"},
+		func(_ context.Context, cwd, model string) (*surface.Session, error) {
+			prepared.cwd, prepared.model = cwd, model
+			return &surface.Session{ID: "provider-thread"}, nil
+		},
+		func(path string, argv, _ []string) error {
+			executed.path, executed.argv = path, append([]string(nil), argv...)
+			var readErr error
+			receiptAtExec, readErr = surface.ReadManagedCodexLaunchReceipt(receiptPath)
+			if readErr != nil {
+				t.Fatalf("receipt was not durable before exec: %v", readErr)
+			}
+			return errExec
+		},
+		"/usr/local/bin/codex",
+	)
+	if !errors.Is(err, errExec) {
+		t.Fatalf("err=%v, want provider exec error", err)
+	}
+	if prepared.cwd != "/work/project" || prepared.model != "o4-mini" {
+		t.Fatalf("prepared=%+v", prepared)
+	}
+	if executed.path != "/usr/local/bin/codex" || !reflect.DeepEqual(executed.argv, []string{"codex", "resume", "provider-thread", "--remote", "unix://", "--", "hello"}) {
+		t.Fatalf("executed=%+v", executed)
+	}
+	if receiptAtExec.LaunchID != "agenthail-launch" || receiptAtExec.ThreadID != "provider-thread" || receiptAtExec.Workspace != "workspace:7" || receiptAtExec.Surface != "surface:9" || receiptAtExec.TmuxPane != "" {
+		t.Fatalf("receipt=%+v", receiptAtExec)
 	}
 }
