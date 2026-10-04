@@ -16,6 +16,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var loadingOlder = false
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
+    @Published var renamingSession: SessionState?
     @Published private(set) var composerDraft = ComposerDraft()
     var composer: String {
         get { composerDraft.text }

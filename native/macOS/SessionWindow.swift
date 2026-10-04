@@ -20,6 +20,7 @@ struct SessionWindow: View {
                     .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
             }
             .background(DesktopPalette.window)
+            .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
             .environmentObject(model)
             .navigationTitle(pane.displayedSession?.title ?? "Session")
             .onAppear {

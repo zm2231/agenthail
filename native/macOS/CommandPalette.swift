@@ -63,6 +63,7 @@ struct CommandPalette: View {
                 actions.append(Entry(id: "stop", icon: "stop.circle", title: "Stop \(session.title)", detail: "") { pane.interrupt() })
             }
             actions.append(Entry(id: "window", icon: "macwindow.badge.plus", title: "Open \(session.title) in new window", detail: "") { openWindow(id: "session", value: session.id) })
+            actions.append(Entry(id: "rename", icon: "pencil", title: "Rename \(session.title)", detail: "") { pane.renamingSession = session })
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 actions.append(Entry(id: "focus", icon: "terminal", title: "Open in \(host)", detail: session.title) { model.focusInTerminal(session) })
             }

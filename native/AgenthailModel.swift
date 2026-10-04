@@ -553,6 +553,17 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func rename(_ sessionID: String, to alias: String) async -> String? {
+        guard let api else { return "Agenthail isn't connected." }
+        do {
+            try await api.nameSession(id: sessionID, alias: alias)
+        } catch {
+            return error.localizedDescription
+        }
+        _ = await refresh(fresh: true)
+        return nil
+    }
+
     var busyDelivery: FollowUpAction { FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue }
 
     func setBusyDelivery(_ mode: FollowUpAction) {

@@ -29,6 +29,7 @@ struct DesktopWindow: View {
         .background(DesktopPalette.window)
         .toolbar(removing: .sidebarToggle)
         .environmentObject(model)
+        .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
         .sheet(isPresented: $model.newSessionVisible, onDismiss: {
             if model.newSessionMessage != nil { model.newSessionVisible = true }
         }) {
@@ -321,6 +322,7 @@ extension SessionSidebar {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
+            Button("Rename…") { pane.renamingSession = session }
         }
     }
 }
@@ -1452,7 +1454,16 @@ struct DetailsTab: View {
                 }
             }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {
-                detailRow("Agent", session.alias.map { "@\($0)" } ?? session.name)
+                GridRow {
+                    Text("Agent").foregroundStyle(DesktopPalette.text2)
+                    HStack(spacing: 6) {
+                        Text(session.alias.map { "@\($0)" } ?? session.name)
+                            .textSelection(.enabled)
+                        Button("Rename") { pane.renamingSession = session }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DesktopPalette.accentText)
+                    }
+                }
                 detailRow("Surface", session.surface.capitalized)
                 if let modelName = pane.detail?.model { detailRow("Model", modelName) }
                 if let project = session.hostProject?.displayName { detailRow("Project", project) }
