@@ -33,15 +33,16 @@ type SurfaceEntry struct {
 }
 
 type App struct {
-	Registry             *registry.Registry
-	Surfaces             []SurfaceEntry
-	DefaultTimeout       time.Duration
-	Version              string
-	Revision             string
-	BuiltAt              string
-	catalogDaemonRunning func() bool
-	daemonServiceLoaded  func() bool
-	update               *updateDeps
+	Registry                *registry.Registry
+	Surfaces                []SurfaceEntry
+	DefaultTimeout          time.Duration
+	Version                 string
+	Revision                string
+	BuiltAt                 string
+	catalogDaemonRunning    func() bool
+	daemonServiceLoaded     func() bool
+	update                  *updateDeps
+	daemonSessionPageReader func() (sessionPageReader, error)
 }
 
 func (a *App) Run(args []string) error {
@@ -1243,7 +1244,7 @@ func (a *App) cmdReply(args []string) error {
 	if err != nil {
 		return err
 	}
-	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
+	read, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: 50, Before: before})
 	if err != nil {
 		return err
 	}
@@ -1258,7 +1259,7 @@ func (a *App) cmdReply(args []string) error {
 		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
 	} else {
 		printSessionReadWarning(read)
 		if read.Source != "" {
@@ -1299,7 +1300,7 @@ func (a *App) cmdLast(args []string) error {
 	if err != nil {
 		return err
 	}
-	read, err := readSessionWithContext(ctx, surf, sess, surface.SessionReadRequest{Limit: n, Before: before})
+	read, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: n, Before: before})
 	if err != nil {
 		return err
 	}
@@ -1311,7 +1312,7 @@ func (a *App) cmdLast(args []string) error {
 		return fmt.Errorf("session read unavailable from %s: %s", read.Source, read.UnavailableReason)
 	}
 	if hasFlag(args, "--json") {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning, "exchanges": exchanges})
 	}
 	printSessionReadWarning(read)
 	if len(exchanges) == 0 {
@@ -1374,6 +1375,40 @@ func readSessionWithContext(ctx context.Context, adapter surface.Surface, sessio
 	case outcome := <-completed:
 		return outcome.read, outcome.err
 	}
+}
+
+func (a *App) readSessionPage(ctx context.Context, adapter surface.Surface, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	if a.daemonIsRunning() {
+		var reader sessionPageReader
+		var err error
+		if a.daemonSessionPageReader != nil {
+			reader, err = a.daemonSessionPageReader()
+		} else {
+			reader, err = newDaemonSessionPageClient()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read active daemon session page: %w", err)
+		}
+		if reader == nil {
+			return nil, errors.New("read active daemon session page: reader is unavailable")
+		}
+		read, err := reader.ReadSession(ctx, session, request)
+		if err != nil {
+			return nil, err
+		}
+		if read == nil {
+			return nil, errors.New("read active daemon session page: empty response")
+		}
+		return surface.BoundSessionRead(session, read), nil
+	}
+	read, err := readSessionWithContext(ctx, adapter, session, request)
+	if err != nil {
+		return nil, err
+	}
+	if read != nil && read.Source == "" {
+		read.Source = string(adapter.Name()) + "-offline-provider"
+	}
+	return read, nil
 }
 
 func (a *App) cmdStream(args []string) error {
