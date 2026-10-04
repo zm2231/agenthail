@@ -818,8 +818,10 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 }
 
 func (r *Registry) expireMessages(now time.Time) error {
-	_, err := r.ExpireMessages(now)
-	return err
+	if _, err := r.ExpireMessages(now); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) ExpireMessages(now time.Time) (int, error) {
@@ -1120,9 +1122,6 @@ const uncertainDeliveryError = "delivery outcome is unknown after daemon interru
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	now := time.Now()
-	if err := r.expireMessages(now); err != nil {
-		return nil, err
-	}
 	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
@@ -1153,9 +1152,6 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 
 func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	now := time.Now()
-	if err := r.expireMessages(now); err != nil {
-		return nil, err
-	}
 	var row QueueRow
 	var evidence string
 	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation)
@@ -1198,13 +1194,33 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 }
 
 func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, error) {
-	now := time.Now()
-	if err := r.expireMessages(now); err != nil {
-		return nil, err
+	query := `SELECT id,session_id,queue_id,reason,requested_action,created_at,resolved_at,resolution FROM attention_items`
+	if !includeResolved {
+		query += ` WHERE resolved_at=''`
 	}
-	tx, err := r.db.Begin()
+	query += ` ORDER BY created_at DESC,id DESC`
+	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
+	}
+	defer rows.Close()
+	items := make([]AttentionItem, 0)
+	for rows.Next() {
+		var item AttentionItem
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// ReconcileAttentionItems materializes attention rows from queue state. It is
+// called by queue state writers and the background scan, never by snapshot reads.
+func (r *Registry) ReconcileAttentionItems(now time.Time) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
 	}
 	defer tx.Rollback()
 	_, err = tx.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action)
@@ -1238,40 +1254,19 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 			requested_action=excluded.requested_action
 		WHERE attention_items.resolved_at=''`, now.UnixMilli())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	_, err = tx.Exec(`UPDATE attention_items SET
 		resolved_at=datetime('now'),
 		resolution=COALESCE((SELECT CASE WHEN status='dead' AND expires_at_ms>0 AND expires_at_ms<=? THEN 'expired' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
 		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead' AND (expires_at_ms=0 OR expires_at_ms>?))`, now.UnixMilli(), now.UnixMilli())
 	if err != nil {
-		return nil, err
-	}
-	query := `SELECT id,session_id,queue_id,reason,requested_action,created_at,resolved_at,resolution FROM attention_items`
-	if !includeResolved {
-		query += ` WHERE resolved_at=''`
-	}
-	query += ` ORDER BY created_at DESC,id DESC`
-	rows, err := tx.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]AttentionItem, 0)
-	for rows.Next() {
-		var item AttentionItem
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.QueueID, &item.Reason, &item.RequestedAction, &item.CreatedAt, &item.ResolvedAt, &item.Resolution); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return err
 	}
-	return items, nil
+	return nil
 }
 
 func (r *Registry) RetryMessage(id int64) error {
@@ -1285,7 +1280,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not dead-lettered or expired", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
-	return nil
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) CancelMessage(id int64) error {
@@ -1299,7 +1294,7 @@ func (r *Registry) CancelMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not pending or dead-lettered", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from delivery queue"})
-	return nil
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
@@ -1335,7 +1330,14 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	for _, entry := range pending {
 		_ = r.RecordHistory(entry)
 	}
-	return res.RowsAffected()
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+		return count, err
+	}
+	return count, nil
 }
 
 func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMessage, error) {
@@ -1369,7 +1371,10 @@ func (r *Registry) ClaimNextMessage(sessionID string, now time.Time) (*QueuedMes
 		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
-		return nil, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, r.ReconcileAttentionItems(now)
 	}
 	if status != "pending" || availableAt > now.UnixMilli() {
 		return nil, nil
@@ -1396,7 +1401,7 @@ func (r *Registry) AckMessage(id int64) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not inflight", id)
 	}
-	return nil
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) AckMessageWithRelayHops(id int64, sessionID string, relayHops int) error {
@@ -1425,7 +1430,10 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,relay_hops,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET relay_hops=excluded.relay_hops,updated_at=datetime('now')`, sessionID, relayHops); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts int) error {
@@ -1465,7 +1473,10 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
@@ -1485,7 +1496,10 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
 		message = cause.Error()
 	}
 	_, err := r.db.Exec(`UPDATE message_queue SET status='pending',last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), id)
-	return err
+	if err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(now)
 }
 
 func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
@@ -1504,7 +1518,10 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 	if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return r.ReconcileAttentionItems(time.Now())
 }
 
 func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
@@ -1524,7 +1541,13 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return notified, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+		return notified, err
+	}
+	return notified, nil
 }
 
 func deadLetterInflight(tx *sql.Tx, id int64, message string) error {
@@ -1555,7 +1578,15 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return n, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		if err := r.ReconcileAttentionItems(before); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 type RuntimeState struct {
@@ -1624,9 +1655,6 @@ type WatchedSession struct {
 }
 
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
-	if err := r.expireMessages(time.Now()); err != nil {
-		return nil, err
-	}
 	rows, err := r.db.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
