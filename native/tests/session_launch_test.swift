@@ -22,11 +22,11 @@ struct SessionLaunchTest {
         check(!unknown.settlesRetry, "an unknown outcome keeps the retry key")
 
         let storage = try decide(#"{"ok":false,"status":"storage_failed","retryable":false,"session":{"id":"s3","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"session was created, but local registration failed: disk full; do not retry automatically"}"#)
-        check(storage == .halted("session was created, but local registration failed: disk full; do not retry automatically", sessionID: "s3"), "a created session with a storage failure halts with the daemon message and its session")
+        check(storage == .halted("session was created, but local registration failed: disk full; do not retry automatically"), "a created session with a storage failure halts with the daemon message")
         check(!storage.settlesRetry, "a halted creation keeps the retry key")
 
         let ambiguous = try decide(#"{"ok":false,"status":"failed","retryable":false,"error":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"}"#)
-        check(ambiguous == .halted("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout", sessionID: nil), "an ambiguous outcome without a session halts")
+        check(ambiguous == .halted("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"), "an ambiguous outcome without a session halts")
 
         let failed = try decide(#"{"ok":false,"error":"no such folder"}"#)
         check(failed == .failed("no such folder"), "a failure shows the daemon's error")

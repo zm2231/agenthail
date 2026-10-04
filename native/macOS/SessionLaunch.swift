@@ -11,7 +11,7 @@ enum SessionLaunchDecision: Equatable {
     case open(String)
     case submitted(String)
     case unconfirmed(String?)
-    case halted(String, sessionID: String?)
+    case halted(String)
     case failed(String)
 
     init(_ receipt: SessionCreationReceipt, launcher: String?, agent: String) {
@@ -21,7 +21,7 @@ enum SessionLaunchDecision: Equatable {
         }
         guard receipt.ok || receipt.accepted == true else {
             if receipt.retryable == false {
-                self = .halted(receipt.error ?? "The session didn't start.", sessionID: receipt.id)
+                self = .halted(receipt.error ?? "The session didn't start.")
             } else {
                 self = .failed(receipt.error ?? "The session didn't start.")
             }
