@@ -23,6 +23,7 @@ struct SessionWindow: View {
             .sheet(item: $pane.renamingSession) { RenameSessionSheet(model: model, session: $0) }
             .environmentObject(model)
             .navigationTitle(pane.displayedSession?.title ?? "Session")
+            .focusedSceneObject(pane)
             .onAppear {
                 pane.inspectorVisible = false
                 pane.select(sessionID)

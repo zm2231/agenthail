@@ -46,11 +46,7 @@ struct DesktopWindow: View {
                 }
             }
         }
-        .background {
-            Button("") { model.paletteVisible.toggle() }
-                .keyboardShortcut("k", modifiers: .command)
-                .hidden()
-        }
+        .focusedSceneObject(pane)
         .onAppear { model.windowAppeared() }
         .onDisappear { model.windowDisappeared() }
     }
@@ -84,7 +80,7 @@ struct SessionSidebar: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
-                    .keyboardShortcut(KeyEquivalent(Character("\(filter.shortcut)")), modifiers: .command)
+                    .help("\(filter.rawValue) ⌘\(filter.shortcut)")
                 }
                 Spacer()
                 Button {
@@ -94,7 +90,6 @@ struct SessionSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(DesktopPalette.text2)
-                .keyboardShortcut("n", modifiers: .command)
                 .help("New session ⌘N")
                 .accessibilityLabel("New session")
             }
@@ -337,16 +332,6 @@ struct SidebarCaption: View {
             .foregroundStyle(DesktopPalette.text2)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-    }
-}
-
-private extension SessionFilter {
-    var shortcut: Int {
-        switch self {
-        case .running: return 1
-        case .recent: return 2
-        case .all: return 3
-        }
     }
 }
 
@@ -623,7 +608,6 @@ struct ConversationHeader: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.text2)
-            .keyboardShortcut("i", modifiers: [.command, .option])
             .help("Inspector ⌥⌘I")
             .accessibilityLabel("Toggle inspector")
             .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
@@ -1207,10 +1191,6 @@ struct ComposerView: View {
                         .keyboardShortcut(.return, modifiers: .command)
                         Button("") { submit(alternate: true) }
                             .keyboardShortcut(.return, modifiers: [.command, .option])
-                            .hidden()
-                            .frame(width: 0, height: 0)
-                        Button("") { pane.interrupt() }
-                            .keyboardShortcut(".", modifiers: .command)
                             .hidden()
                             .frame(width: 0, height: 0)
                     }
