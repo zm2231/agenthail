@@ -21,6 +21,7 @@ const app = {
   mobileChatOpen: false,
   slashCommands: [],
   drafts: new Map(),
+  pendingIdempotency: new Map(),
   expandedTurns: new Set(),
   transcriptSignature: null,
   pendingEntryScroll: false,
@@ -1150,6 +1151,35 @@ function renderContextUsage(context) {
     details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);
   indicator.title = details.join(". ");
 }
+function isNetworkFailure(error) {
+  return error?.networkFailure === true || error?.name === "TypeError";
+}
+function logicalRequestKey(scope, actionName, payload) {
+  const fingerprint = JSON.stringify({ action: actionName, sessionId: app.selected?.id || "", payload });
+  const current = app.pendingIdempotency.get(scope);
+  if (current?.fingerprint === fingerprint) return current.key;
+  const next = { fingerprint, key: crypto.randomUUID() };
+  app.pendingIdempotency.set(scope, next);
+  return next.key;
+}
+function clearLogicalRequest(scope) {
+  app.pendingIdempotency.delete(scope);
+}
+function sessionTarget(session) {
+  if (session?.alias) return `@${session.alias}`;
+  return `${session?.surface || "session"}:${session?.id || "unknown"}`;
+}
+async function logicalAction(scope, actionName, payload) {
+  const key = logicalRequestKey(scope, actionName, payload);
+  try {
+    const result = await action(actionName, payload, key);
+    clearLogicalRequest(scope);
+    return result;
+  } catch (error) {
+    if (!isNetworkFailure(error)) clearLogicalRequest(scope);
+    throw error;
+  }
+}
 async function action(action, extra = {}, idempotencyKey = crypto.randomUUID()) {
   const networkAction =
     action.startsWith("channel-") ||
@@ -1161,11 +1191,17 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID()) 
     action === "queue-cancel";
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
-  const response = await fetch("/api/action", {
-    method: "POST",
-    headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ action, sessionId: app.selected?.id, ...extra }),
-  });
+  let response;
+  try {
+    response = await fetch("/api/action", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ action, sessionId: app.selected?.id, ...extra }),
+    });
+  } catch (error) {
+    error.networkFailure = true;
+    throw error;
+  }
   if (!response.ok) throw Error(await response.text());
   return response.json();
 }
@@ -1320,27 +1356,25 @@ async function send(requestedAction = "send") {
     const commandAction = commandActions[command.toLowerCase()];
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
+    const sendPayload = { message, ...selectedTurnOptions() };
     const result = composerAction === "steer"
       ? await action("steer", { message })
       : commandAction
       ? await action(commandAction[0], commandAction[1])
-      : await action("send", { message, ...selectedTurnOptions() });
+      : await logicalAction("send", "send", sendPayload);
     $("#message").value = "";
     app.drafts.delete(app.selected.id);
     resizeComposer();
     renderSlashMenu();
     const evidence = result?.result?.evidence;
-    const queued = evidence === "queued";
+    const status = evidence === "queued" ? "Queued" : evidence === "transport_accepted" || evidence === "submitted" ? "Submitted" : "Sent";
+    const target = sessionTarget(app.selected);
     toast(
       composerAction === "steer"
         ? "Current turn redirected."
         : commandAction
         ? `${command} requested.`
-        : queued
-        ? "This agent is busy, so your message is safely queued."
-        : evidence === "transport_accepted"
-        ? "Accepted by Claude's socket. Receiver policy and completion are pending."
-        : "Message sent.",
+        : `${status} to ${target}.`,
     );
     await load();
     await selectSession(app.selected.id);
@@ -1672,7 +1706,11 @@ async function loadStartModels() {
 function toggleNewConversationForm(show) {
   const form = $("#new-conversation-form");
   form.hidden = !show;
-  if (!show) return;
+  if (!show) {
+    clearLogicalRequest("session-create");
+    return;
+  }
+  clearLogicalRequest("session-create");
   renderStartSurfaceOptions();
   loadStartModels().catch((error) => toast(friendlyError(error)));
   loadStartLaunchers().catch((error) => toast(friendlyError(error)));
@@ -1693,11 +1731,15 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
   button.disabled = true;
   try {
     if (values.outputSchema?.trim()) values.outputSchema = JSON.parse(values.outputSchema); else delete values.outputSchema;
-    const response = await action(values.surface === "notion" ? "notion-create" : "session-create", values);
+    const createAction = values.surface === "notion" ? "notion-create" : "session-create";
+    const response = createAction === "session-create"
+      ? await logicalAction("session-create", createAction, values)
+      : await action(createAction, values);
     form.reset();
     toggleNewConversationForm(false);
     await load(true);
-    toast(response.accepted ? (response.warning || "Launch submitted; location is still being resolved.") : response.unknown ? "Conversation created. Delivery could not be confirmed. Check it before retrying." : "Conversation started.");
+    const target = sessionTarget(response.session || { surface: values.surface, id: response.sessionId, alias: values.alias });
+    toast(response.detail || `${response.status === "submitted" ? "Submitted" : "Sent"} to ${target}.`);
     const sessionID = response.sessionId || response.session?.id;
     if (sessionID) await selectSession(sessionID, true);
   } catch (error) {

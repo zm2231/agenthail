@@ -937,6 +937,33 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 	}
 }
 
+func TestDashboardUsesNeutralDeliveryDetailsAndLogicalIdempotency(t *testing.T) {
+	source := string(dashboardJS)
+	for _, fragment := range []string{
+		`pendingIdempotency: new Map()`,
+		`logicalAction("send", "send", sendPayload)`,
+		`logicalAction("session-create", createAction, values)`,
+		`headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey }`,
+		`${status} to ${target}.`,
+		`response.status === "submitted" ? "Submitted" : "Sent"`,
+		`clearLogicalRequest("session-create")`,
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("dashboard is missing %q", fragment)
+		}
+	}
+	for _, stale := range []string{
+		"Accepted by Claude's socket",
+		"Launch submitted; location is still being resolved.",
+		"Conversation created. Delivery could not be confirmed. Check it before retrying.",
+		"response.accepted ?",
+	} {
+		if strings.Contains(source, stale) {
+			t.Fatalf("dashboard retains stale delivery copy %q", stale)
+		}
+	}
+}
+
 func TestDashboardExposesNewConversationFormForCodexAndNotion(t *testing.T) {
 	for _, fragment := range []string{
 		`id="new-conversation-form"`,
