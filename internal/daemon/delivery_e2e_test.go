@@ -176,7 +176,8 @@ func (a *scriptedAgent) Send(ctx context.Context, session *surface.Session, mess
 	return a.accept(session.ID, message, surface.SendOptions{SourceSessionID: surface.SourceSessionID(ctx)}, false)
 }
 
-func (a *scriptedAgent) SendWithOptions(_ context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+func (a *scriptedAgent) SendWithOptions(ctx context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	options.SourceSessionID = surface.SourceSessionID(ctx)
 	return a.accept(session.ID, message, options, false)
 }
 

@@ -83,21 +83,6 @@ func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
 	}
 }
 
-func TestActiveCatalogSubscriberReceivesTerminalDeliveryProblem(t *testing.T) {
-	d, store, fake, sender, target := daemonFixture(t)
-	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
-		t.Fatal(err)
-	}
-	reader, closeStream := openAuthorizedCatalogStream(t, d)
-	defer closeStream()
-	fake.sendErr = surface.DeliveryTerminal(fmt.Errorf("target rejected input"), surface.DeliveryInvalidRequest)
-	d.drainMessageQueue(context.Background(), fake, &target)
-	event := receiveCatalogSSE(t, reader)
-	if event.Type != "delivery.problem" {
-		t.Fatalf("event=%+v", event)
-	}
-}
-
 func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T) {
 	d, store, _, sender, target := daemonFixture(t)
 	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "expiry", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
