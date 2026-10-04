@@ -52,7 +52,7 @@ struct TranscriptBlock: Identifiable, Equatable {
                 let title = [item.title, item.status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(title) : .notice("\(title): \(text)")))
-            case "context", "done", "phase":
+            case "context", "goal", "done", "phase":
                 continue
             default:
                 tools.append(item)

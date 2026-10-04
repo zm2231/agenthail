@@ -16,6 +16,7 @@ struct TranscriptBlockTest {
             item("event", "Codex Voice started"),
             item("event", "Turn duration", text: "12s"),
             item("context", "context"),
+            item("goal", "goal", text: "{}"),
             item("message", "assistant", text: "Done", role: "assistant"),
         ])
         let kinds = blocks.map(\.kind)
@@ -30,7 +31,7 @@ struct TranscriptBlockTest {
         check(kinds[3] == .annotation("Codex Voice ended · completed"), "an event status follows its title")
         check(kinds[4] == .annotation("Codex Voice started"), "an event without text is an annotation")
         check(kinds[5] == .annotation("Worked for 12s"), "turn duration")
-        check(kinds[6] == .assistant("Done"), "context records are not shown")
+        check(kinds[6] == .assistant("Done"), "context and goal records are not shown")
     }
 
     static func check(_ condition: Bool, _ message: String) {
