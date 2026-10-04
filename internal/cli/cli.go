@@ -687,7 +687,9 @@ type listCatalogMetadataView struct {
 }
 
 type listCatalogFreshness struct {
+	Generation        uint64    `json:"generation"`
 	ObservedAt        time.Time `json:"observedAt"`
+	Stale             bool      `json:"stale"`
 	UnavailableReason string    `json:"unavailableReason,omitempty"`
 }
 
@@ -722,7 +724,7 @@ func listCatalogMetadata(snapshot registry.CatalogSnapshot) listCatalogMetadataV
 		metadata.Surfaces = append(metadata.Surfaces, listCatalogSurface{Surface: string(record.Surface), Health: record.Health, Detail: record.Detail, ObservedAt: record.ObservedAt})
 	}
 	for _, record := range snapshot.Sessions {
-		metadata.Freshness[record.Session.ID] = listCatalogFreshness{ObservedAt: record.ObservedAt, UnavailableReason: record.UnavailableReason}
+		metadata.Freshness[record.Session.ID] = listCatalogFreshness{Generation: record.Freshness.Generation, ObservedAt: record.Freshness.ObservedAt, Stale: record.Freshness.Stale, UnavailableReason: record.UnavailableReason}
 	}
 	return metadata
 }

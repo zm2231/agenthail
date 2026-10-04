@@ -77,6 +77,40 @@ func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.
 	}
 }
 
+func TestDashboardCatalogPageUsesBoundedCatalogAndDoesNotPoisonFullCache(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	pageRequest := httptest.NewRequest(http.MethodGet, "/api/state?limit=1", nil)
+	pageRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	pageResponse := httptest.NewRecorder()
+	handler.ServeHTTP(pageResponse, pageRequest)
+	if pageResponse.Code != http.StatusOK {
+		t.Fatalf("page status=%d body=%s", pageResponse.Code, pageResponse.Body.String())
+	}
+	var page dashboardState
+	if err := json.Unmarshal(pageResponse.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Sessions) != 1 || page.TotalSessions != 2 || page.NextCursor == "" {
+		t.Fatalf("page=%+v", page)
+	}
+	fullRequest := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	fullRequest.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	fullResponse := httptest.NewRecorder()
+	handler.ServeHTTP(fullResponse, fullRequest)
+	if fullResponse.Code != http.StatusOK {
+		t.Fatalf("full status=%d body=%s", fullResponse.Code, fullResponse.Body.String())
+	}
+	var full dashboardState
+	if err := json.Unmarshal(fullResponse.Body.Bytes(), &full); err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Sessions) != 2 || full.TotalSessions != 2 {
+		t.Fatalf("full state was page-contaminated: %+v", full)
+	}
+}
+
 func contains(value, needle string) bool {
 	return strings.Contains(value, needle)
 }
