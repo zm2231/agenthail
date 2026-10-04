@@ -79,8 +79,11 @@ Each session event has `itemId`, optional `providerKey`, mutation `version`,
 operation (`append`, `upsert`, `remove`, or `phase`), `kind`, optional `turnId`
 and `ts`, bounded `body`, `truncated`, optional `truncationReason`, and optional `bodyRef`. A body
 reference is opaque, bound to the authenticated session, range-limited and
-expires with journal retention; it never names a host path. A source rebuild is
-a typed `source-error` reset with a bounded `reason`, not a removal. A provider absence or partial read never deletes
+expires with journal retention; it never names a host path. A source failure
+(provider stream or seed error, or a rejected journal write) is a typed
+`source-error` reset with a bounded `reason`, not a removal. A rejected write
+does not advance that item's provider cursor or body state, so a replay of the
+same provider cursor is persisted. A provider absence or partial read never deletes
 historical journal content.
 
 Body range reads use byte offsets with UTF-8 boundaries: `start` must begin at
