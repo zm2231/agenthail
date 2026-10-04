@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
@@ -368,6 +372,49 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 			handler.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
 			assertAPIV1Error(t, response, http.StatusUnauthorized, "unauthorized")
 		})
+	}
+}
+
+func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "from", TargetSessionID: "to", Message: "delivery body", Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, "delivery failed"); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil))
+	assertAPIV1Error(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+	for _, deliveryID := range []int64{0, -1} {
+		badID := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(fmt.Sprintf(`{"action":"delivery-dismiss","deliveryId":%d}`, deliveryID)))
+		badID.Header.Set("Authorization", "Bearer secret")
+		badResponse := httptest.NewRecorder()
+		handler.ServeHTTP(badResponse, badID)
+		assertAPIV1Error(t, badResponse, http.StatusBadRequest, "invalid_request")
+	}
+	snapshotRequest := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
+	snapshotRequest.Header.Set("Authorization", "Bearer secret")
+	snapshotResponse := httptest.NewRecorder()
+	handler.ServeHTTP(snapshotResponse, snapshotRequest)
+	if snapshotResponse.Code != http.StatusOK || !strings.Contains(snapshotResponse.Body.String(), `"deliveryProblems"`) || !strings.Contains(snapshotResponse.Body.String(), `"deliveryId":`+fmt.Sprint(intent.ID)) {
+		t.Fatalf("snapshot status=%d body=%s", snapshotResponse.Code, snapshotResponse.Body.String())
+	}
+	dismissRequest := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(fmt.Sprintf(`{"action":"delivery-dismiss","deliveryId":%d}`, intent.ID)))
+	dismissRequest.Header.Set("Authorization", "Bearer secret")
+	dismissResponse := httptest.NewRecorder()
+	handler.ServeHTTP(dismissResponse, dismissRequest)
+	if dismissResponse.Code != http.StatusOK || !strings.Contains(dismissResponse.Body.String(), `"dismissed":true`) {
+		t.Fatalf("dismiss status=%d body=%s", dismissResponse.Code, dismissResponse.Body.String())
+	}
+	repeatRequest := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(fmt.Sprintf(`{"action":"delivery-dismiss","deliveryId":%d}`, intent.ID)))
+	repeatRequest.Header.Set("Authorization", "Bearer secret")
+	repeatResponse := httptest.NewRecorder()
+	handler.ServeHTTP(repeatResponse, repeatRequest)
+	if repeatResponse.Code != http.StatusOK || !strings.Contains(repeatResponse.Body.String(), `"dismissed":false`) {
+		t.Fatalf("repeat status=%d body=%s", repeatResponse.Code, repeatResponse.Body.String())
 	}
 }
 

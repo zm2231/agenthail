@@ -1,10 +1,12 @@
 package registry
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +36,106 @@ func TestDeliveryIntentReconcilesOnlyByBoundProviderKey(t *testing.T) {
 	}
 	if _, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "other", TargetSessionID: "target", ProviderKey: "provider-request-1", Status: DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted}); err == nil {
 		t.Fatal("provider key was rebound to another sender")
+	}
+}
+
+func TestDeliveryProblemsReopenOrderAndBound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, first, "sender", "target")
+	for i := 0; i < 55; i++ {
+		intent, recordErr := first.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Message: strings.Repeat("m", 20<<10), Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+		if recordErr != nil {
+			first.Close()
+			t.Fatal(recordErr)
+		}
+		status := DeliveryIntentFailed
+		if i%2 == 0 {
+			status = DeliveryIntentExpired
+		}
+		if changed, failErr := first.FailDeliveryIntent(intent.ID, status, fmt.Sprintf("reason-%d", i)); failErr != nil || !changed {
+			first.Close()
+			t.Fatalf("i=%d changed=%v err=%v", i, changed, failErr)
+		}
+		if _, err := first.db.Exec(`UPDATE delivery_intents SET updated_at=? WHERE id=?`, fmt.Sprintf("2026-01-%02d 00:00:00", (i%28)+1), intent.ID); err != nil {
+			first.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	problems, err := second.ListDeliveryProblems()
+	if err != nil || len(problems) != 50 {
+		t.Fatalf("problems=%d err=%v", len(problems), err)
+	}
+	for i := 1; i < len(problems); i++ {
+		if problems[i-1].At.Before(problems[i].At) {
+			t.Fatalf("problems not newest first: %v before %v", problems[i-1].At, problems[i].At)
+		}
+	}
+	if len(problems[0].Message) != 16<<10 || problems[0].Status != DeliveryIntentExpired && problems[0].Status != DeliveryIntentFailed {
+		t.Fatalf("problem=%+v", problems[0])
+	}
+}
+
+func TestDismissDeliveryProblemIsIdempotentAndAtomic(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.FailDeliveryIntent(intent.ID, DeliveryIntentFailed, "transport failed"); err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if _, err := r.db.Exec(`CREATE TRIGGER reject_delivery_dismissed BEFORE INSERT ON catalog_events WHEN NEW.type='delivery.dismissed' BEGIN SELECT RAISE(ABORT, 'reject dismissal'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.DismissDeliveryProblem(intent.ID); err == nil || changed {
+		t.Fatalf("atomic dismissal changed=%v err=%v", changed, err)
+	}
+	var dismissed sql.NullString
+	if err := r.db.QueryRow(`SELECT dismissed_at FROM delivery_intents WHERE id=?`, intent.ID).Scan(&dismissed); err != nil || dismissed.Valid {
+		t.Fatalf("rollback dismissed_at=%q err=%v", dismissed.String, err)
+	}
+	if _, err := r.db.Exec(`DROP TRIGGER reject_delivery_dismissed`); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.DismissDeliveryProblem(intent.ID); err != nil || !changed {
+		t.Fatalf("dismiss changed=%v err=%v", changed, err)
+	}
+	if changed, err := r.DismissDeliveryProblem(intent.ID); err != nil || changed {
+		t.Fatalf("repeat dismissal changed=%v err=%v", changed, err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("visible problems=%+v err=%v", problems, err)
+	}
+	var events, queued int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM catalog_events WHERE type='delivery.dismissed' AND dedupe_key=?`, fmt.Sprintf("delivery.dismissed:%d", intent.ID)).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue`).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || queued != 0 {
+		t.Fatalf("events=%d queued=%d", events, queued)
+	}
+	sent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.DismissDeliveryProblem(sent.ID); err == nil || changed {
+		t.Fatalf("sent dismissal changed=%v err=%v", changed, err)
 	}
 }
 
