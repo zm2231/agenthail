@@ -208,6 +208,14 @@ struct ConversationDetailView: View {
 struct ConversationHeader: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
+    @State private var goalEditor = GoalEditorState()
+    @State private var goalText = ""
+    @State private var budgetText = ""
+
+    private var currentDetail: SessionDetail? {
+        guard model.detail?.session.id == session.id else { return nil }
+        return model.detail
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -226,21 +234,142 @@ struct ConversationHeader: View {
                     Button("Compact") { model.perform(action: "compact", sessionID: session.id) }
                 }
             }
-            if let context = model.detail?.context, context.contextWindow > 0 {
-                HStack(spacing: 10) {
-                    ProgressView(value: context.fraction).tint(context.fraction > 0.85 ? agenthailOrange : .accentColor)
-                    Text(context.compacting ? "Compacting context" : "\(Int(context.fraction * 100))% · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted())")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(24)
+			if let context = currentDetail?.context {
+				if let fraction = context.fraction {
+					HStack(spacing: 10) {
+						ProgressView(value: fraction).tint(fraction > 0.85 ? agenthailOrange : .accentColor)
+						Text(context.compacting ? "Compacting context" : "\(Int(fraction * 100))% · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted())")
+							.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+					}
+				} else {
+					Text(context.compacting ? "Compacting context" : "\(context.usedTokens.formatted()) tokens · context window unavailable")
+						.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+				}
+			}
+			if let goal = currentDetail?.goal {
+				VStack(alignment: .leading, spacing: 7) {
+					HStack(spacing: 8) {
+						Label("Goal", systemImage: goal.needsAttention ? "exclamationmark.triangle.fill" : "target")
+						.font(.caption.weight(.semibold))
+						.foregroundStyle(goal.needsAttention ? agenthailOrange : .secondary)
+						Text(goal.displayStatus).font(.caption.weight(.semibold)).foregroundStyle(goal.needsAttention ? agenthailOrange : .secondary)
+					}
+					if !goal.objective.isEmpty { Text(goal.objective).font(.callout).lineLimit(2) }
+					HStack(spacing: 12) {
+					if let elapsed = goal.timeUsedSeconds { Text("\(macGoalDuration(elapsed)) elapsed") }
+						if let tokens = goal.tokensUsed { Text("\(tokens.formatted()) tokens") }
+						if let budget = goal.tokenBudget { Text("\(budget.formatted()) budget") }
+						if let created = goal.createdAt { Text("Created \(created)") }
+						if let updated = goal.updatedAt { Text("Updated \(updated)") }
+					}
+					.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+					if !session.isReadOnly && session.capabilities.goal {
+						HStack(spacing: 10) {
+							Button("Edit goal") { goalText = goal.objective; goalEditor.begin(.editGoal, sessionID: session.id) }
+							if goal.status == "active" { Button("Pause") { model.perform(action: "goal-pause", sessionID: session.id) } }
+							if goal.status == "paused" { Button("Resume") { model.perform(action: "goal-resume", sessionID: session.id) } }
+							Button(goal.tokenBudget == nil ? "Set budget" : "Edit budget") { budgetText = goal.tokenBudget.map(String.init) ?? ""; goalEditor.begin(.budget, sessionID: session.id) }
+							if !goal.objective.isEmpty { Button("Clear", role: .destructive) { model.perform(action: "goal-clear", sessionID: session.id) } }
+						}
+						.controlSize(.small)
+					}
+				}
+				.padding(.top, 2)
+			} else if !session.isReadOnly && session.capabilities.goal {
+					Button("Set goal") { goalText = ""; goalEditor.begin(.newGoal, sessionID: session.id) }
+				}
+			if let runs = currentDetail?.claudeRuns, !runs.isEmpty {
+				VStack(alignment: .leading, spacing: 5) {
+					Text("Claude runs").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+					ForEach(runs) { run in
+						VStack(alignment: .leading, spacing: 2) {
+							Text(run.jobId).font(.callout.weight(.medium))
+							if let state = run.providerState, !state.isEmpty { Text(state).font(.caption).foregroundStyle(.secondary) }
+							if let type = run.runType, !type.isEmpty { Text(type).font(.caption).foregroundStyle(.secondary) }
+							if let updated = run.updatedAt, !updated.isEmpty { Text("Updated \(updated)").font(.caption).foregroundStyle(.secondary) }
+						}
+					}
+				}
+			}
+			if let links = currentDetail?.claudeSubagents, !links.isEmpty {
+				VStack(alignment: .leading, spacing: 5) {
+					Text("Claude subagents").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+					ForEach(links) { link in
+						VStack(alignment: .leading, spacing: 2) {
+							Text(link.agentId).font(.callout.weight(.medium))
+							if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1) }
+						}
+					}
+				}
+			}
+			if let errors = currentDetail?.metadataErrors, !errors.isEmpty {
+				VStack(alignment: .leading, spacing: 4) {
+					Text("Metadata warnings").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+					ForEach(errors.keys.sorted(), id: \.self) { key in
+						if let message = errors[key] { Text("\(key): \(message)").font(.caption).foregroundStyle(.secondary) }
+					}
+				}
+			}
+		}
+		.padding(24)
+		.sheet(isPresented: Binding(get: { goalEditor.mode != nil }, set: { if !$0 { resetGoalEditor() } })) {
+				VStack(alignment: .leading, spacing: 16) {
+					Text(goalEditor.mode == .budget ? "Token budget" : "Goal objective").font(.headline)
+					if goalEditor.mode == .budget {
+						TextField("Token budget", text: $budgetText)
+							.textFieldStyle(.roundedBorder)
+					} else {
+						TextEditor(text: $goalText)
+							.frame(minHeight: 90)
+							.border(Color(nsColor: .separatorColor))
+					}
+					HStack {
+						Button("Cancel") { resetGoalEditor() }
+						Spacer()
+						Button("Save") {
+							guard goalEditor.canCommit(currentSessionID: model.selectedSessionID) else { resetGoalEditor(); return }
+							let action: String
+							switch goalEditor.mode {
+							case .newGoal: action = "goal-set"
+							case .editGoal: action = "goal-edit"
+							case .budget: action = "goal-budget"
+							case nil: return
+							}
+							model.perform(action: action, sessionID: session.id, message: goalEditor.mode == .budget ? budgetText : goalText)
+							resetGoalEditor()
+						}
+						.disabled((goalEditor.mode == .budget ? budgetText : goalText).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+					}
+				}
+				.padding(24)
+				.frame(minWidth: 360)
+		}
+		.onChange(of: session.id) { newID in
+			goalEditor.select(sessionID: newID)
+			if goalEditor.mode == nil { goalText = ""; budgetText = "" }
+		}
+		.onChange(of: model.selectedSessionID) { selectedID in
+			if selectedID != session.id { resetGoalEditor() }
+		}
+    }
+
+    private func resetGoalEditor() {
+        goalEditor.reset()
+        goalText = ""
+        budgetText = ""
     }
 
     private var statusLine: String {
         let state = session.isWorking ? "Working" : session.open ? "Open" : "Ready"
         return "\(state) · \(session.queueCount) queued"
     }
+}
+
+private func macGoalDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "\(seconds)s" }
+    let minutes = seconds / 60
+    if minutes < 60 { return "\(minutes)m \(seconds % 60)s" }
+    return "\(minutes / 60)h \(minutes % 60)m"
 }
 
 struct TranscriptView: View {

@@ -69,7 +69,7 @@ final class SessionExperienceTests: XCTestCase {
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls.first?["action"] as? String, "send")
         XCTAssertEqual(calls.first?["message"] as? String, "Only for A")
-        XCTAssertEqual(model.deliveryStatus["A"], "Queued for the agent")
+        XCTAssertEqual(model.deliveryStatus["A"], "Queued for A; sends when current turn ends.")
         await model.loadSession("B")
         XCTAssertEqual(model.composer, "Only for B")
         model.send(to: session(id: "B", busy: false))
@@ -94,6 +94,70 @@ final class SessionExperienceTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionMetadataLoadsAfterJournalWithoutBlockingThePage() async throws {
+        SessionExperienceProtocol.state.reset()
+        let model = makeModel()
+        await model.loadSession("metadata")
+        XCTAssertFalse(model.loadingSession)
+        XCTAssertEqual(model.selectedDetail?.session.id, "metadata")
+        for _ in 0..<100 where model.selectedDetail?.model != "Metadata model" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.selectedDetail?.model, "Metadata model")
+        XCTAssertEqual(model.selectedDetail?.goal?.status, "active")
+        XCTAssertEqual(model.selectedDetail?.models?.first?.id, "metadata-model")
+        XCTAssertEqual(model.selectedDetail?.claudeRuns?.first?.jobId, "job-1")
+        XCTAssertEqual(model.selectedDetail?.claudeRuns?.first?.providerState, "working")
+        XCTAssertEqual(model.selectedDetail?.claudeSubagents?.first?.agentId, "agent-1")
+        XCTAssertEqual(model.selectedDetail?.claudeSubagents?.first?.transcriptPath, "/tmp/agent-1.jsonl")
+        XCTAssertEqual(model.selectedDetail?.metadataErrors?["context"], "fixture warning")
+    }
+
+    @MainActor
+    func testSessionMetadataFailureDoesNotHideJournal() async throws {
+        let model = makeModel()
+        await model.loadSession("metadata-fails")
+        XCTAssertFalse(model.loadingSession)
+        XCTAssertEqual(model.selectedDetail?.session.id, "metadata-fails")
+        XCTAssertNil(model.sessionError)
+    }
+
+    @MainActor
+    func testSessionMetadataErrorClearsPreviouslyAppliedClaudeEvidence() async throws {
+        SessionExperienceProtocol.state.reset()
+        let model = makeModel()
+        await model.loadSession("metadata")
+        try await waitUntil { model.selectedDetail?.claudeRuns?.isEmpty == false }
+        SessionExperienceProtocol.state.failNextMetadata()
+        await model.loadSession("metadata")
+        try await waitUntil { SessionExperienceProtocol.state.metadataRequests.count >= 2 }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(model.selectedDetail?.claudeRuns)
+        XCTAssertNil(model.selectedDetail?.claudeSubagents)
+        XCTAssertNil(model.selectedDetail?.metadataErrors)
+        XCTAssertEqual(model.selectedDetail?.session.id, "metadata")
+    }
+
+    @MainActor
+    func testSessionMetadataClearsOmittedClaudeEvidenceAndRejectsLatePreviousSession() async throws {
+        SessionExperienceProtocol.state.reset()
+        let model = makeModel()
+        await model.loadSession("metadata")
+        try await waitUntil { model.selectedDetail?.claudeRuns?.isEmpty == false }
+
+        await model.loadSession("metadata-slow")
+        try await waitUntil { SessionExperienceProtocol.state.metadataRequests.contains("metadata-slow") }
+        await model.loadSession("metadata-empty")
+        try await waitUntil { model.selectedDetail?.session.id == "metadata-empty" && SessionExperienceProtocol.state.metadataRequests.contains("metadata-empty") }
+        try await Task.sleep(for: .milliseconds(250))
+
+        XCTAssertEqual(model.selectedDetail?.session.id, "metadata-empty")
+        XCTAssertNil(model.selectedDetail?.claudeRuns)
+        XCTAssertNil(model.selectedDetail?.claudeSubagents)
+        XCTAssertNil(model.selectedDetail?.metadataErrors)
+    }
+
+    @MainActor
     private func makeModel() -> AgenthailIOSModel {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SessionExperienceProtocol.self]
@@ -103,14 +167,27 @@ final class SessionExperienceTests: XCTestCase {
         SessionState(id: id, surface: "claude", name: id, alias: nil, status: busy ? "busy" : "idle", lastActive: nil, queueCount: 0,
                      open: true, current: true, currentReason: nil, capabilities: Capabilities(send: true, steer: true), readOnly: false, readOnlyReason: nil)
     }
+
+    @MainActor
+    private func waitUntil(_ condition: @escaping () -> Bool) async throws {
+        for _ in 0..<100 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(condition(), "Timed out waiting for metadata fixture")
+    }
 }
 
 private final class SessionExperienceState: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [[String: Any]] = []
+    private var metadataIDs: [String] = []
+    private var failNextMetadataRequest = false
     var actions: [[String: Any]] { lock.withLock { values } }
+    var metadataRequests: [String] { lock.withLock { metadataIDs } }
     func append(_ body: [String: Any]) { lock.withLock { values.append(body) } }
-    func reset() { lock.withLock { values = [] } }
+    func recordMetadata(_ id: String) { lock.withLock { metadataIDs.append(id) } }
+    func failNextMetadata() { lock.withLock { failNextMetadataRequest = true } }
+    func consumeMetadataFailure() -> Bool { lock.withLock { defer { failNextMetadataRequest = false }; return failNextMetadataRequest } }
+    func shouldFailMetadata() -> Bool { lock.withLock { failNextMetadataRequest } }
+    func reset() { lock.withLock { values = []; metadataIDs = []; failNextMetadataRequest = false } }
 }
 
 private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable {
@@ -128,7 +205,28 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 var session = object["session"] as! [String: Any]
                 session["id"] = id; session["status"] = "idle"
                 object["session"] = session; object["readOnly"] = id == "B"
+                if id == "metadata" || id == "metadata-fails" || id == "metadata-empty" || id == "metadata-slow" {
+                    object["context"] = NSNull(); object["goal"] = NSNull(); object["model"] = NSNull(); object["models"] = NSNull()
+                }
+                if id == "metadata", Self.state.shouldFailMetadata() {
+                    object["claudeRuns"] = [["recordPath": "/tmp/stale-job.json", "jobId": "stale-job"]]
+                    object["claudeSubagents"] = [["parentSessionId": "metadata", "agentId": "stale-agent", "transcriptPath": "/tmp/stale-agent.jsonl"]]
+                    object["metadataErrors"] = ["context": "stale warning"]
+                }
                 body = String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
+            }
+        } else if request.url!.path == "/api/v1/session-metadata" {
+            let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "id" }!.value!
+            Self.state.recordMetadata(id)
+            if id == "metadata-fails" || (id == "metadata" && Self.state.consumeMetadataFailure()) {
+                status = 503; body = #"{"error":{"message":"Metadata unavailable"}}"#
+            } else if id == "metadata-empty" {
+                body = #"{"sessionId":"metadata-empty"}"#
+            } else if id == "metadata-slow" {
+                Thread.sleep(forTimeInterval: 0.2)
+                body = #"{"sessionId":"metadata-slow","claudeRuns":[{"recordPath":"/tmp/slow-job.json","jobId":"slow-job","sessionId":"metadata-slow","providerState":"working"}],"claudeSubagents":[{"parentSessionId":"metadata-slow","agentId":"slow-agent","transcriptPath":"/tmp/slow-agent.jsonl"}]}"#
+            } else {
+                body = #"{"context":{"usedTokens":10,"contextWindow":100,"compacting":false,"compactionCount":0},"goal":{"objective":"Metadata goal","status":"active"},"model":"Metadata model","models":[{"id":"metadata-model","displayName":"Metadata model"}],"claudeRuns":[{"recordPath":"/tmp/job-1.json","jobId":"job-1","sessionId":"metadata","resumeSessionId":"resume-1","runType":"bg","providerState":"working","createdAt":"2026-10-04T00:00:00Z","updatedAt":"2026-10-04T00:01:00Z"}],"claudeSubagents":[{"parentSessionId":"metadata","agentId":"agent-1","transcriptPath":"/tmp/agent-1.jsonl"}],"errors":{"context":"fixture warning"}}"#
             }
         } else if request.url!.path == "/api/v1/queue" {
             body = #"{"items":[{"id":7,"sessionId":"A","target":"A","message":"Only for A","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"}]}"#
@@ -140,7 +238,7 @@ private final class SessionExperienceProtocol: URLProtocol, @unchecked Sendable 
                 while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; data.append(buffer, count: count) }
             }
             Self.state.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
-            body = #"{"ok":true,"result":{"evidence":"queued","queueId":7}}"#
+            body = #"{"ok":true,"result":{"evidence":"queued","queueId":7,"detail":"Queued for A; sends when current turn ends."}}"#
         } else if request.url!.path == "/api/v1/search" {
             body = #"{"results":[{"session":{"id":"older","surface":"codex","name":"Old build","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":false,"stream":false,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}},"snippet":"Saved"}],"remoteError":""}"#
         }

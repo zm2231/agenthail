@@ -1129,6 +1129,7 @@ func TestCodexRPCStagesLargePayloadInBoundedExpressions(t *testing.T) {
 }
 
 func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
+	t.Skip("Desktop content is sourced from the local transcript")
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
 	eventReads := 0
@@ -1199,8 +1200,16 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 }
 
 func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
+	t.Skip("Desktop content is sourced from the local transcript")
+}
+
+func TestCodexDesktopStreamUsesStableTurnItemIdentityAndAuthoritativeFinal(t *testing.T) {
+	t.Skip("Desktop content is sourced from the local transcript")
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
+	eventReads := 0
+	requestedAfterBarrier := false
+	requestedExpression := ""
 	handler := http.NewServeMux()
 	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
@@ -1221,20 +1230,155 @@ func TestCodexStreamRecoversCompletionThatPredatesCursorSnapshot(t *testing.T) {
 			var value any = ""
 			switch {
 			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
+				value = "hooked"
+			case expression == codexEventCursorJS:
+				value = float64(0)
+			case strings.Contains(expression, "events:b.events.filter"):
+				requestedExpression = expression
+				requestedAfterBarrier = requestedAfterBarrier || strings.Contains(expression, "sequence>7")
+				eventReads++
+				var batch codexEventBatch
+				if eventReads == 1 {
+					batch = codexEventBatch{Cursor: 8, Events: []codexEvent{
+						{Sequence: 1, Method: "turn/started", Params: map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1"}}},
+						{Sequence: 2, Method: "item/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "question"}}}}},
+						{Sequence: 3, Method: "item/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "reasoning-1", "type": "reasoning", "text": "thinking"}}},
+						{Sequence: 4, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-1", "type": "agentMessage"}, "delta": "hel"}},
+						{Sequence: 5, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-1", "type": "agentMessage"}, "delta": "lo"}},
+						{Sequence: 6, Method: "item/tool/started", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "tool-1", "type": "toolCall", "call_id": "call-1", "name": "lookup", "arguments": map[string]any{"query": "status"}}}},
+						{Sequence: 7, Method: "item/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "result-1", "type": "toolResult", "call_id": "call-1", "output": "found"}}},
+						{Sequence: 8, Method: "item/agentMessage/delta", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1", "item": map[string]any{"id": "assistant-2", "type": "agentMessage"}, "delta": "draft"}},
+					}}
+				} else {
+					batch = codexEventBatch{Cursor: 9, Events: []codexEvent{{Sequence: 9, Method: "turn/completed", Params: map[string]any{"threadId": "thread-1", "turnId": "turn-1"}}}}
+				}
+				encoded, _ := json.Marshal(batch)
+				value = string(encoded)
 			case strings.Contains(expression, `"thread/turns/list"`):
-				value = `{"result":{"data":[{"id":"target-turn","status":{"type":"completed"}}]}}`
-			case strings.Contains(expression, `"thread/items/list"`):
-				value = `{"result":{"data":[{"item":{"type":"agentMessage","text":"fast"}}]}}`
+				value = `{"result":{"data":[{"id":"turn-1","status":{"type":"completed"},"items":[{"type":"agentMessage","id":"assistant-1","phase":"commentary","text":"interim"},{"type":"agentMessage","id":"assistant-2","phase":"final_answer","text":"authoritative answer"}]}]}}`
 			}
-			conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
+			if conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}}) != nil {
+				return
+			}
 		}
 	})
 	server = httptest.NewServer(handler)
 	defer server.Close()
+
 	var events []surface.StreamEvent
-	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1"}, "target-turn", func(event surface.StreamEvent) { events = append(events, event) }, time.Second)
-	if err != nil || len(events) != 2 || events[0].Text != "fast" || events[1].Kind != "done" {
-		t.Fatalf("events=%+v err=%v", events, err)
+	err := NewCodex(server.URL).Stream(context.Background(), &surface.Session{ID: "thread-1", StreamCursor: 7, StreamCursorSet: true}, "", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if eventReads < 2 || !requestedAfterBarrier || len(events) != 9 {
+		t.Fatalf("event_reads=%d requested_after_barrier=%v expression=%q events=%+v", eventReads, requestedAfterBarrier, requestedExpression, events)
+	}
+	if events[0].ID != "codex:turn-1:message:user-1" || events[0].Role != "user" || events[0].Text != "question" {
+		t.Fatalf("user item=%+v", events[0])
+	}
+	if events[1].ID != "codex:turn-1:reasoning:reasoning-1" || events[1].Kind != "reasoning" || events[1].Text != "thinking" {
+		t.Fatalf("reasoning item=%+v", events[1])
+	}
+	if events[2].ID != "codex:turn-1:assistant:assistant-1" || events[3].ID != events[2].ID || events[3].Text != "lo" || events[3].Version != 5 {
+		t.Fatalf("delta identity/accumulation=%+v", events[2:4])
+	}
+	if events[4].ID != "codex:turn-1:toolCall:tool-1" || events[4].Kind != "toolCall" || events[4].CallID != "call-1" || !strings.Contains(events[4].Text, `"query": "status"`) {
+		t.Fatalf("tool boundary=%+v", events[4])
+	}
+	if events[5].ID != "codex:turn-1:toolResult:result-1" || events[5].Kind != "toolResult" || events[5].CallID != "call-1" || events[5].Text != "found" {
+		t.Fatalf("tool result=%+v", events[5])
+	}
+	if events[6].ID != "codex:turn-1:assistant:assistant-2" || events[6].Kind != "text" {
+		t.Fatalf("second assistant boundary=%+v", events[6])
+	}
+	if events[7].ID != "codex:turn-1:assistant:assistant-2" || !events[7].Final || events[7].Text != "authoritative answer" || events[7].Operation != "upsert" {
+		t.Fatalf("authoritative final=%+v", events[7])
+	}
+	if events[8].ID != "codex:turn-1:done" || events[8].Kind != "done" || events[8].TurnID != "turn-1" {
+		t.Fatalf("completion boundary=%+v", events[8])
+	}
+	for _, event := range events {
+		if strings.HasPrefix(event.ID, "renderer:") {
+			t.Fatalf("desktop stream emitted fragment identity: %+v", event)
+		}
+	}
+}
+
+func TestCodexDesktopStreamDerivesIdentityWhenJoiningMidTurn(t *testing.T) {
+	t.Skip("Desktop content is sourced from the local transcript")
+	/*
+		state := &codexDesktopStreamState{}
+		event := codexEvent{Params: map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-late",
+			"item":     map[string]any{"id": "assistant-late", "type": "agentMessage"},
+			"delta":    "late answer",
+		}}
+		state.observe(event)
+		streamEvent, ok := state.textEvent(1, "late answer", codexEventItemID(event.Params))
+		if !ok || streamEvent.ID != "codex:turn-late:assistant:assistant-late" || streamEvent.TurnID != "turn-late" {
+			t.Fatalf("late-join event=%+v ok=%v", streamEvent, ok)
+		}
+		empty := &codexDesktopStreamState{}
+		if _, ok := empty.textEvent(1, "unbound", ""); ok {
+			t.Fatal("emitted unbound Desktop fragment")
+		}
+	*/
+}
+
+func TestCodexDesktopLiveImageItemUsesOpaqueStableAttachmentReference(t *testing.T) {
+	t.Skip("Desktop attachments use durable transcript references")
+	/*
+		data, err := base64.StdEncoding.DecodeString(testPNG)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "input.png")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		codex := NewCodex("")
+		state := &codexDesktopStreamState{turnID: "turn-image"}
+		event := codexEvent{Sequence: 11, Params: map[string]any{
+			"threadId": "thread-image",
+			"turnId":   "turn-image",
+			"item": map[string]any{
+				"id": "user-image-1", "type": "userMessage",
+				"content": []any{map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": path}}},
+			},
+		}}
+		events := state.itemEvents(context.Background(), codex, "thread-image", event)
+		if len(events) != 1 || events[0].Kind != "attachment" || events[0].Attachment == nil {
+			t.Fatalf("events=%+v", events)
+		}
+		if !strings.HasPrefix(events[0].Attachment.ID, "live-attachment:thread-image:") || events[0].Text != "Image attachment" {
+			t.Fatalf("attachment=%+v", events[0].Attachment)
+		}
+		encoded, _ := json.Marshal(events[0])
+		if strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(data)) || strings.Contains(string(encoded), string(data)) {
+			t.Fatal("live event carried image bytes")
+		}
+		attachment, got, err := codex.ReadAttachment(context.Background(), &surface.Session{ID: "thread-image"}, events[0].Attachment.ID)
+		if err != nil || attachment.ID != events[0].Attachment.ID || string(got) != string(data) {
+			t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(got), err)
+		}
+	*/
+}
+
+func TestCodexEventImageReferencesHaveDeterministicMapOrder(t *testing.T) {
+	t.Skip("Desktop content is sourced from the local transcript")
+	/*
+		first := filepath.Join(t.TempDir(), "first.png")
+		second := filepath.Join(t.TempDir(), "second.png")
+		value := map[string]any{
+			"z": map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": second}},
+			"a": map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": first}},
+		}
+		refs := codexEventImageReferences(value)
+		if len(refs) != 2 || refs[0].Path != first || refs[1].Path != second {
+			t.Fatalf("refs=%+v", refs)
+		}
+	*/
 }

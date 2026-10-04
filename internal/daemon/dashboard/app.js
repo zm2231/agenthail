@@ -8,6 +8,7 @@ const app = {
     relays: [],
     history: [],
     attention: [],
+    deliveryProblems: [],
   },
   selected: null,
   history: null,
@@ -20,6 +21,7 @@ const app = {
   mobileChatOpen: false,
   slashCommands: [],
   drafts: new Map(),
+  pendingIdempotency: new Map(),
   expandedTurns: new Set(),
   transcriptSignature: null,
   pendingEntryScroll: false,
@@ -31,6 +33,7 @@ const app = {
   remoteQRVisible: false,
   remoteQRHideTimer: null,
   startModels: {},
+  launchers: [],
   codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
   voice: { state: null, attemptId: "", localAudio: false, connection: false, channel: false, script: null, requestedTarget: null, poll: null, appliedSDP: "" },
 };
@@ -245,29 +248,42 @@ function startLiveStream() {
   if (app.liveSource && app.liveSessionID === session.id) return;
   stopLiveStream(true);
   app.liveSessionID = session.id;
-  const source = new EventSource(`/api/stream?id=${encodeURIComponent(session.id)}`);
+  const source = new EventSource(`/api/session-stream?id=${encodeURIComponent(session.id)}&after=${app.history.journalSeq || 0}`);
   app.liveSource = source;
-  source.addEventListener("delta", (event) => {
+  source.addEventListener("item", (event) => {
     if (app.liveSessionID !== session.id || app.selected?.id !== session.id) return;
-    const delta = JSON.parse(event.data);
-    if (delta.kind === "context" && delta.context) {
-      app.history.context = delta.context;
-      renderContextUsage(delta.context);
-      return;
+    const envelope = JSON.parse(event.data);
+    const item = envelope.data;
+    app.history.journalSeq = Math.max(app.history.journalSeq || 0, envelope.seq || 0);
+    if (item.kind === "source-error") { app.history.transcriptWarning = item.reason || "Live updates are unavailable."; renderChat(); return; }
+    if (item.kind === "context" && item.context) { app.history.context = item.context; renderContextUsage(item.context); return; }
+    if (item.kind === "goal") { app.history.goal = item.goal || null; renderChat(); return; }
+    if (!item.itemId || item.op === "reset") return;
+    app.history.transcriptWarning = "";
+    const items = app.history.timeline?.items || [];
+    const index = items.findIndex((value) => value.id === item.itemId);
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId };
+    if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
+    else if (index >= 0) items[index] = projected;
+    else items.push(projected);
+    app.history.timeline = { ...(app.history.timeline || {}), items };
+    const exchanges = [];
+    for (const value of items) {
+      if (!["message", "text", "assistant"].includes(value.kind)) continue;
+      if (value.role === "user") exchanges.push({ user: value.text });
+      else if (value.role === "assistant" || value.kind === "text") {
+        if (!exchanges.length || exchanges.at(-1).assistant) exchanges.push({});
+        exchanges.at(-1).assistant = value.text;
+      }
     }
-    if (delta.kind === "text") app.liveText += delta.text || "";
-    if (delta.kind === "tool_use" && delta.text && !app.liveTools.includes(delta.text)) app.liveTools.push(delta.text);
-    if (delta.kind === "done") {
-      stopLiveStream();
-      load(true).then(() => selectSession(session.id));
-      return;
-    }
-    app.selected.status = "busy";
-    renderLiveTurn();
-    syncComposerAction();
-    $("#chat-subtitle").textContent = conversationMeta(app.selected, app.history?.model);
+    app.history.exchanges = exchanges;
+    renderChat();
   });
-  source.addEventListener("stream-error", () => stopLiveStream());
+  source.addEventListener("error", () => {
+    if (source.readyState !== 2 || app.liveSource !== source || app.selected?.id !== session.id) return;
+    stopLiveStream();
+    selectSession(session.id);
+  });
 }
 function resizeComposer() {
   const input = $("#message");
@@ -478,6 +494,16 @@ function renderOverview() {
         `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`,
     )
     .join("");
+  renderDeliveryProblems();
+}
+function renderDeliveryProblems() {
+  const problems = app.state.deliveryProblems || [];
+  $("#delivery-problems-panel").hidden = problems.length === 0;
+  $("#delivery-problems-list").innerHTML = problems.map(item => {
+    const session = app.state.sessions.find(session => session.id === item.sessionId);
+    const target = session ? displayName(session) : item.sessionId;
+    return `<article class="attention-item"><div><div class="attention-target">${escape(target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.message)}</p><p>${escape(item.status)} · ${timeAgo(item.at)}</p></div><div class="operation-actions"><button class="soft-button" data-delivery-dismiss="${escape(item.deliveryId)}" type="button">Dismiss</button></div></article>`;
+  }).join("");
 }
 function sessionIsCurrent(session) {
   return session.current === true;
@@ -695,6 +721,7 @@ function renderSettings() {
   if (!app.settings) return;
   const { dashboard, remoteAccess } = app.settings;
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
+  $("#settings-busy-delivery").value = String(dashboard.busyDelivery || "queue");
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();
   const remoteQR = app.remoteQRVisible
@@ -845,6 +872,7 @@ async function load(fresh = false) {
       relays: state.relays || [],
       history: state.history || [],
       attention: state.attention || [],
+      deliveryProblems: state.deliveryProblems || [],
     };
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"
@@ -909,11 +937,19 @@ async function selectSession(id, focus = false) {
   $("#chat-actions").innerHTML = "";
   try {
     const response = await fetch(
-      `/api/session?id=${encodeURIComponent(id)}&limit=20`,
+      `/api/session?id=${encodeURIComponent(id)}&limit=20&timeline=1`,
     );
     if (!response.ok) throw Error(await response.text());
-    app.history = await response.json();
+    const detail = await response.json();
+    if (app.selected?.id !== id) return;
+    detail.transcriptWarning = detail.readError || "";
+    app.history = detail;
     renderChat();
+    const metadataSeq = detail.journalSeq;
+    fetch(`/api/session-metadata?id=${encodeURIComponent(id)}`)
+      .then((result) => { if (!result.ok) throw Error("Metadata unavailable"); return result.json(); })
+      .then((metadata) => { if (app.selected?.id === id && app.history === detail) { applySessionMetadata(detail, metadata, metadataSeq); renderChat(); } })
+      .catch(() => {});
     if (focus && mobileConversationView())
       requestAnimationFrame(() => window.scrollTo(0, 0));
   } catch (error) {
@@ -921,10 +957,95 @@ async function selectSession(id, focus = false) {
       `<div class="empty-state"><h2>Could not load this conversation</h2><p>${escape(error.message)}</p></div>`;
   }
 }
+function applySessionMetadata(detail, metadata, initialSeq) {
+  const {goal, context, ...other} = metadata;
+  Object.assign(detail, other);
+  if (detail.journalSeq === initialSeq) {
+    if (Object.hasOwn(metadata, "goal")) detail.goal = goal;
+    if (Object.hasOwn(metadata, "context")) detail.context = context;
+  }
+}
+function renderImageAttachment(item, session) {
+  const attachment = item.attachment;
+  const fallback = escape(item.text || "Image attachment");
+  if (!attachment?.id || !/^image\/(png|jpeg|gif|webp|avif|heic|heif)$/.test(attachment.mediaType || ""))
+    return `<div class="turn"><p>${fallback}</p></div>`;
+  const url = `/api/session-attachment?sessionId=${encodeURIComponent(session.id)}&id=${encodeURIComponent(attachment.id)}`;
+  return `<figure class="turn transcript-image"><img src="${escape(url)}" loading="lazy" decoding="async" alt="${fallback}" referrerpolicy="no-referrer"><figcaption>${fallback}</figcaption></figure>`;
+}
+function timelineKindClass(kind) {
+  return String(kind || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+function timelineItemAttributes(item) {
+  const attributes = [`data-timeline-item="${escape(item.id || "")}"`];
+  if (item.callId) attributes.push(`data-call-id="${escape(item.callId)}"`);
+  if (item.status) attributes.push(`data-status="${escape(item.status)}"`);
+  return attributes.join(" ");
+}
+function renderTimelineMetadata(item) {
+  const fields = [];
+  if (item.title) fields.push(`<span>Title: ${escape(item.title)}</span>`);
+  if (item.callId) fields.push(`<span>Call: ${escape(item.callId)}</span>`);
+  if (item.status) fields.push(`<span>Status: ${escape(item.status)}</span>`);
+  if (item.timestamp) fields.push(`<time datetime="${escape(item.timestamp)}">${escape(item.timestamp)}</time>`);
+  if (item.truncated) {
+    const reason = item.truncationReason ? ` (${escape(item.truncationReason)})` : "";
+    fields.push(`<span>Content truncated${reason}</span>`);
+  }
+  if (item.bodyRef) fields.push(`<span>Body reference: <code>${escape(item.bodyRef)}</code></span>`);
+  return fields.length ? `<div class="timeline-meta">${fields.join(" · ")}</div>` : "";
+}
+function renderTimelineItem(item, session) {
+  const kind = String(item.kind || "unknown");
+  const kindClass = timelineKindClass(kind);
+  const attributes = timelineItemAttributes(item);
+  const metadata = renderTimelineMetadata(item);
+  if (kind === "attachment") {
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderImageAttachment(item, session)}${metadata}</section>`;
+  }
+  if (["text", "message", "assistant"].includes(kind)) {
+    const user = item.role === "user";
+    const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`)}${metadata}</section>`;
+  }
+  if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
+    const title = item.title || kind;
+    const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
+    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div></details>`;
+  }
+  const title = item.title || "Unknown timeline item";
+  const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
+  return `<article class="turn timeline-item timeline-${kindClass} timeline-unknown" ${attributes}><header class="turn-header"><span class="turn-label">${escape(title)}</span><span class="timeline-kind">${escape(kind)}</span></header>${metadata}<div class="turn-content">${body}</div></article>`;
+}
+function renderTimeline(items, session) {
+  return items.map(item => renderTimelineItem(item, session)).join("");
+}
+function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents) {
+  return JSON.stringify([
+    session.id,
+    exchanges,
+    JSON.stringify(goal || null),
+    Boolean(capabilities.goal),
+    transcriptWarning,
+    timeline,
+    claudeRuns,
+    claudeSubagents,
+  ]);
+}
+function renderClaudeMetadata(claudeRuns, claudeSubagents) {
+  if (!Array.isArray(claudeRuns) && !Array.isArray(claudeSubagents)) return "";
+  const runs = Array.isArray(claudeRuns) ? claudeRuns : [];
+  const links = Array.isArray(claudeSubagents) ? claudeSubagents : [];
+  const runRows = runs.map((run) => `<li>${run.jobId ? `<span>Job: ${escape(run.jobId)}</span>` : ""}${run.runType ? ` · <span>Type: ${escape(run.runType)}</span>` : ""}${run.providerState ? ` · <span>Provider state: ${escape(run.providerState)}</span>` : ""}${run.sessionId ? ` · <span>Session: ${escape(run.sessionId)}</span>` : ""}${run.resumeSessionId ? ` · <span>Resume session: ${escape(run.resumeSessionId)}</span>` : ""}${run.createdAt ? ` · <time datetime="${escape(run.createdAt)}">Created ${escape(run.createdAt)}</time>` : ""}${run.updatedAt ? ` · <time datetime="${escape(run.updatedAt)}">Updated ${escape(run.updatedAt)}</time>` : ""}${run.recordPath ? ` · <span>Record: ${escape(run.recordPath)}</span>` : ""}</li>`).join("");
+  const subagentRows = links.map((link) => `<li>${link.agentId ? `<span>Agent: ${escape(link.agentId)}</span>` : ""}${link.parentSessionId ? ` · <span>Parent: ${escape(link.parentSessionId)}</span>` : ""}${link.transcriptPath ? ` · <span>Transcript: ${escape(link.transcriptPath)}</span>` : ""}</li>`).join("");
+  return `<details class="session-details"><summary>Observed Claude runs</summary>${runRows ? `<ul>${runRows}</ul>` : "<p>No observed Claude runs.</p>"}</details><details class="session-details"><summary>Observed Claude subagents</summary>${subagentRows ? `<ul>${subagentRows}</ul>` : "<p>No observed Claude subagents.</p>"}</details>`;
+}
 function renderChat() {
-  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents } = app.history || {};
   const session = app.selected;
   const controls = [];
+  if (session.runtime?.focusable)
+    controls.push('<button data-action="session-focus" type="button">Open session</button>');
   if (session.status === "busy" && capabilities.steer)
     controls.push('<button data-action="steer" type="button">Steer</button>');
   if (session.status === "busy" && capabilities.interrupt)
@@ -960,25 +1081,31 @@ function renderChat() {
   renderContextUsage(context);
   startLiveStream();
   const settings = [`<form class="session-tools" data-tool="alias"><label><span>Conversation name</span><input name="alias" value="${escape(session.alias || "")}" maxlength="80" placeholder="research"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save name</button></div></form>`];
-  if (capabilities.goal)
-    settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save goal</button>${goal?.objective ? '<button class="soft-button" data-action="goal-clear" type="button">Clear</button>' : ""}</div></form>`);
+  if (capabilities.goal) {
+    const goalActions = [];
+    if (goal?.status === "active") goalActions.push('<button class="soft-button" data-action="goal-pause" type="button">Pause</button>');
+    if (goal?.status === "paused") goalActions.push('<button class="soft-button" data-action="goal-resume" type="button">Resume</button>');
+    if (goal?.objective) goalActions.push('<button class="soft-button" data-action="goal-clear" type="button">Clear</button>');
+    if (goal?.tokenBudget != null) goalActions.push('<button class="soft-button" data-action="goal-budget" data-goal-budget-clear="true" type="button">Clear budget</button>');
+    const metrics = goal ? `<div class="session-tool-note">Status: ${escape(goalStatusLabel(goal.status))}${goal.timeUsedSeconds != null ? ` · Elapsed: ${escape(formatGoalDuration(goal.timeUsedSeconds))}` : ""}${goal.tokensUsed != null ? ` · Tokens: ${compactTokenCount(goal.tokensUsed)}` : ""}${goal.tokenBudget != null ? ` · Budget: ${compactTokenCount(goal.tokenBudget)}` : ""}${goal.createdAt ? ` · Created: ${escape(goal.createdAt)}` : ""}${goal.updatedAt ? ` · Updated: ${escape(goal.updatedAt)}` : ""}</div>` : "";
+    settings.push(`<form class="session-tools" data-tool="goal"><label><span>Goal</span><input name="goal" value="${escape(goal?.objective || "")}" placeholder="Set a focused goal"></label>${metrics}<div class="session-tool-actions"><button class="soft-button" type="submit">${goal?.objective ? "Edit goal" : "Save goal"}</button>${goalActions.join("")}</div></form>`);
+    settings.push(`<form class="session-tools" data-tool="goal-budget"><label><span>Token budget</span><input name="tokenBudget" type="number" min="0" step="1" value="${goal?.tokenBudget ?? ""}" placeholder="Optional"></label><div class="session-tool-actions"><button class="soft-button" type="submit">Save budget</button></div></form>`);
+  }
   const toolRows = [
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
-  const signature = JSON.stringify([
-    session.id,
-    exchanges,
-    goal?.objective || "",
-    Boolean(capabilities.goal),
-    transcriptWarning,
-  ]);
+  if (session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
+  const timeline = app.history?.timeline?.items || [];
+  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;
   const wasPinned =
     chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24;
-  const messages = exchanges
+  const messages = timeline.length
+    ? renderTimeline(timeline, session)
+    : exchanges
     .flatMap((exchange, index) => {
       const user = handoffMessage(exchange.user);
       const assistant = String(exchange.assistant || "");
@@ -1003,7 +1130,7 @@ function renderChat() {
     })
     .join("");
   chatBody.innerHTML =
-    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
+    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${renderGoalAttention(goal)}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
   renderLiveTurn();
   app.transcriptSignature = signature;
   if (app.pendingEntryScroll) {
@@ -1026,16 +1153,32 @@ function compactTokenCount(value) {
   if (count >= 1000) return `${Math.round(count / 1000)}k`;
   return String(count);
 }
+function goalStatusLabel(status) {
+  return ({ active: "Active", paused: "Paused", blocked: "Blocked", usageLimited: "Usage limited", budgetLimited: "Budget limited", complete: "Complete" })[status] || status || "Unknown";
+}
+function renderGoalAttention(goal) {
+  if (!goal || !["blocked", "usageLimited", "budgetLimited"].includes(goal.status)) return "";
+  return `<p class="goal-attention" role="status">Needs you: ${escape(goalStatusLabel(goal.status))}. Review the goal in Conversation settings.</p>`;
+}
+function formatGoalDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return "Unknown";
+  if (value < 60) return `${value}s`;
+  const minutes = Math.floor(value / 60);
+  if (minutes < 60) return `${minutes}m ${value % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
 function renderContextUsage(context) {
   const indicator = $("#context-usage");
-  if (!context || (!context.contextWindow && !context.compactionCount)) {
+  if (!context || (!context.contextWindow && !context.compactionCount && !context.usedTokens)) {
     indicator.hidden = true;
     indicator.textContent = "";
     indicator.className = "";
     return;
   }
-  const percent = context.contextWindow
-    ? Math.min(999, Math.round((context.usedTokens / context.contextWindow) * 100))
+  const hasWindow = context.contextWindow > 0 && context.usedTokens <= context.contextWindow;
+  const percent = hasWindow
+    ? Math.round((context.usedTokens / context.contextWindow) * 100)
     : 0;
   indicator.hidden = false;
   indicator.className = context.compacting
@@ -1047,33 +1190,92 @@ function renderContextUsage(context) {
         : "context-usage";
   indicator.textContent = context.compacting
     ? "Compacting context"
-    : context.contextWindow
+    : hasWindow
       ? `Context ${compactTokenCount(context.usedTokens)} / ${compactTokenCount(context.contextWindow)} · ${percent}%`
-      : `${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`;
+      : context.usedTokens
+        ? `Context ${compactTokenCount(context.usedTokens)} tokens`
+        : `${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`;
   const details = [];
-  if (context.windowEstimated) details.push("Claude context window is estimated from the active model");
+  if (context.windowEstimated) details.push("Claude context window is estimated");
+  if (context.contextWindowSource === "unknown") details.push("Claude did not report a configured context window");
   if (context.compactionCount) details.push(`${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`);
   if (context.preCompactTokens && context.postCompactTokens)
     details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);
   indicator.title = details.join(". ");
 }
-async function action(action, extra = {}) {
+function isNetworkFailure(error) {
+  return error?.networkFailure === true || error?.name === "TypeError";
+}
+function logicalRequest(scope, actionName, payload) {
+  const sessionId = app.selected?.id || "";
+  const serializedPayload = JSON.stringify({ action: actionName, sessionId, ...payload });
+  const current = app.pendingIdempotency.get(scope);
+  if (current?.fingerprint === serializedPayload) return current;
+  const next = { fingerprint: serializedPayload, key: crypto.randomUUID(), sessionId };
+  app.pendingIdempotency.set(scope, next);
+  return next;
+}
+function clearLogicalRequest(scope) {
+  app.pendingIdempotency.delete(scope);
+}
+function sessionTarget(session) {
+  if (session?.alias) return `@${session.alias}`;
+  return `${session?.surface || "session"}:${session?.id || "unknown"}`;
+}
+async function logicalAction(scope, actionName, payload) {
+  const request = logicalRequest(scope, actionName, payload);
+  try {
+    const result = await action(actionName, payload, request.key, request.sessionId);
+    clearLogicalRequest(scope);
+    return result;
+  } catch (error) {
+    if (!isNetworkFailure(error)) clearLogicalRequest(scope);
+    throw error;
+  }
+}
+async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), sessionID = app.selected?.id) {
   const networkAction =
     action.startsWith("channel-") ||
     action.startsWith("relay-") ||
     action === "notion-create" ||
     action === "session-create" ||
     action === "queue-retry" ||
+    action === "delivery-dismiss" ||
     action === "queue-cancel";
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
-  const response = await fetch("/api/action", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, sessionId: app.selected?.id, ...extra }),
-  });
-  if (!response.ok) throw Error(await response.text());
-  return response.json();
+  let response;
+  try {
+    response = await fetch("/api/action", {
+      method: "POST",
+      headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ action, sessionId: sessionID, ...extra }),
+    });
+  } catch (error) {
+    error.networkFailure = true;
+    throw error;
+  }
+  if (!response.ok) {
+    let detail;
+    try {
+      detail = await response.text();
+    } catch (error) {
+      const typed = Error(`HTTP ${response.status || 500}`);
+      typed.httpFailure = true;
+      throw typed;
+    }
+    throw Error(detail);
+  }
+  try {
+    return await response.json();
+  } catch (error) {
+    error.networkFailure = true;
+    throw error;
+  }
+}
+function deliveryStatusLabel(result) {
+  const status = result?.result?.evidence || result?.status;
+  return status === "queued" ? "Queued" : status === "submitted" ? "Submitted" : "Sent";
 }
 async function voiceRequest(action, extra = {}) {
   const response = await fetch("/api/voice", {
@@ -1226,27 +1428,24 @@ async function send(requestedAction = "send") {
     const commandAction = commandActions[command.toLowerCase()];
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
+    const sendPayload = { message, ...selectedTurnOptions() };
     const result = composerAction === "steer"
       ? await action("steer", { message })
       : commandAction
       ? await action(commandAction[0], commandAction[1])
-      : await action("send", { message, ...selectedTurnOptions() });
+      : await logicalAction("send", "send", sendPayload);
     $("#message").value = "";
     app.drafts.delete(app.selected.id);
     resizeComposer();
     renderSlashMenu();
-    const evidence = result?.result?.evidence;
-    const queued = evidence === "queued";
+    const status = deliveryStatusLabel(result);
+    const target = sessionTarget(app.selected);
     toast(
       composerAction === "steer"
         ? "Current turn redirected."
         : commandAction
         ? `${command} requested.`
-        : queued
-        ? "This agent is busy, so your message is safely queued."
-        : evidence === "transport_accepted"
-        ? "Accepted by Claude's socket. Receiver policy and completion are pending."
-        : "Message sent.",
+        : `${status} to ${target}.`,
     );
     await load();
     await selectSession(app.selected.id);
@@ -1345,6 +1544,20 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-open-operations]"))
     return showView("operations");
   const retry = event.target.closest("[data-retry]");
+  const deliveryDismiss = event.target.closest("[data-delivery-dismiss]");
+  if (deliveryDismiss) {
+    deliveryDismiss.disabled = true;
+    try {
+      const deliveryId = Number(deliveryDismiss.dataset.deliveryDismiss);
+      await action("delivery-dismiss", { deliveryId });
+      app.state.deliveryProblems = app.state.deliveryProblems.filter(item => item.deliveryId !== deliveryId);
+      renderDeliveryProblems();
+    } catch (error) {
+      deliveryDismiss.disabled = false;
+      toast(friendlyError(error));
+    }
+    return;
+  }
   if (retry) {
     retry.disabled = true;
     try {
@@ -1373,7 +1586,7 @@ document.addEventListener("click", async (event) => {
   control.disabled = true;
   try {
     const result = await action(control.dataset.action, {
-      message: $("#message").value.trim(),
+      message: control.dataset.goalBudgetClear === "true" ? "" : $("#message").value.trim(),
     });
     const queued = result?.result?.evidence === "queued";
     if (control.dataset.action === "compact" && app.history?.context) {
@@ -1410,8 +1623,12 @@ document.addEventListener("submit", async (event) => {
       await action("alias", { alias: input.value.trim() });
       toast("Conversation name saved.");
       await load();
+    } else if (tool === "goal-budget") {
+      const value = input.value.trim();
+      await action("goal-budget", { message: value });
+      toast(value ? "Token budget saved." : "Token budget cleared.");
     } else {
-      await action("goal-set", { message: input.value.trim() });
+      await action(app.history?.goal?.objective ? "goal-edit" : "goal-set", { message: input.value.trim() });
       toast("Goal saved.");
     }
     await selectSession(app.selected.id);
@@ -1517,6 +1734,26 @@ function syncStartForm() {
       input.disabled = !isCodex;
     });
   });
+  renderStartLaunchers();
+}
+function renderStartLaunchers() {
+  const select = $("#new-conversation-launcher");
+  const current = select.value;
+  const agent = $("#new-conversation-surface").value;
+  const options = app.launchers.filter(item => item.agents.includes(agent));
+  select.innerHTML = '<option value="">Use default</option>' + options.map(item =>
+    `<option value="${escape(item.id)}"${item.available ? "" : " disabled"}>${escape(item.label)}${item.available ? "" : " (unavailable)"}</option>`,
+  ).join("");
+  select.value = options.some(item => item.id === current && item.available) ? current : "";
+  const launcher = options.find(item => item.id === select.value);
+  $("#new-conversation-launcher-detail").textContent = launcher?.detail || "";
+}
+async function loadStartLaunchers() {
+  const response = await fetch("/api/v1/session-options");
+  if (!response.ok) throw Error(await response.text());
+  const options = await response.json();
+  app.launchers = options.launchers || [];
+  renderStartLaunchers();
 }
 async function loadStartModels() {
   const surfaceName = $("#new-conversation-surface").value;
@@ -1540,9 +1777,14 @@ async function loadStartModels() {
 function toggleNewConversationForm(show) {
   const form = $("#new-conversation-form");
   form.hidden = !show;
-  if (!show) return;
+  if (!show) {
+    clearLogicalRequest("session-create");
+    return;
+  }
+  clearLogicalRequest("session-create");
   renderStartSurfaceOptions();
   loadStartModels().catch((error) => toast(friendlyError(error)));
+  loadStartLaunchers().catch((error) => toast(friendlyError(error)));
   form.querySelector('input[name="alias"]').focus();
 }
 $("#new-conversation-toggle").addEventListener("click", () => toggleNewConversationForm(true));
@@ -1551,6 +1793,7 @@ $("#new-conversation-surface").addEventListener("change", () => {
   syncStartForm();
   loadStartModels().catch((error) => toast(friendlyError(error)));
 });
+$("#new-conversation-launcher").addEventListener("change", renderStartLaunchers);
 $("#new-conversation-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -1559,11 +1802,15 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
   button.disabled = true;
   try {
     if (values.outputSchema?.trim()) values.outputSchema = JSON.parse(values.outputSchema); else delete values.outputSchema;
-    const response = await action(values.surface === "notion" ? "notion-create" : "session-create", values);
+    const createAction = values.surface === "notion" ? "notion-create" : "session-create";
+    const response = createAction === "session-create"
+      ? await logicalAction("session-create", createAction, values)
+      : await action(createAction, values);
     form.reset();
     toggleNewConversationForm(false);
     await load(true);
-    toast(response.unknown ? "Conversation created. Delivery could not be confirmed. Check it before retrying." : "Conversation started.");
+    const target = sessionTarget(response.session || { surface: values.surface, id: response.sessionId, alias: values.alias });
+    toast(response.detail || `${response.status === "submitted" ? "Submitted" : "Sent"} to ${target}.`);
     const sessionID = response.sessionId || response.session?.id;
     if (sessionID) await selectSession(sessionID, true);
   } catch (error) {
@@ -1657,7 +1904,7 @@ document.addEventListener("visibilitychange", () => {
 $("#dashboard-settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value) });
+    await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value), busyDelivery: $("#settings-busy-delivery").value });
     await load(true);
     toast("Settings saved.");
   } catch (error) {

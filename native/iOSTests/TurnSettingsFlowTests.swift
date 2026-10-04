@@ -4,7 +4,7 @@ import XCTest
 
 final class TurnSettingsFlowTests: XCTestCase {
     @MainActor
-    func testSteerExcludesTurnOptionsAndPreservesDraft() async throws {
+    func testBusyDefaultSendCarriesTurnOptionsAndClearsDraft() async throws {
         let fixture = try makeFixture(status: "busy")
         TurnSettingsFlowProtocol.state.reset()
         let model = makeModel()
@@ -16,10 +16,72 @@ final class TurnSettingsFlowTests: XCTestCase {
         model.send(to: fixture.session)
         try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
 
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "send")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["effort"] as? String, "high")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["mode"] as? String, "plan")
+        XCTAssertEqual(model.turnSettings(for: fixture.session.id), TurnSettings())
+    }
+
+    @MainActor
+    func testBusyDefaultSendsNormalInstruction() async throws {
+        let fixture = try makeFixture(status: "busy")
+        TurnSettingsFlowProtocol.state.reset()
+        let model = makeModel()
+        model.selectedSessionID = fixture.session.id
+        model.selectedDetail = fixture.detail
+        model.composer = "Queue this instruction"
+
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "send")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["message"] as? String, "Queue this instruction")
+    }
+
+    func testExplicitSteerAPIPathOmitsTurnOptions() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", turnSettings: TurnSettings(effort: "high", mode: .plan), idempotencyKey: "stable-steer-key")
+        _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", turnSettings: TurnSettings(effort: "high", mode: .plan), idempotencyKey: "stable-steer-key")
+
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "steer")
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["effort"])
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["mode"])
-        XCTAssertEqual(model.turnSettings(for: fixture.session.id), TurnSettings(effort: "high", mode: .plan))
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys, ["stable-steer-key", "stable-steer-key"])
+    }
+
+    func testActionCanReplayStableLogicalKey() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        try await api.action("send", sessionID: "codex-flow", message: "Retry this normally", idempotencyKey: "stable-send-key")
+        try await api.action("send", sessionID: "codex-flow", message: "Retry this normally", idempotencyKey: "stable-send-key")
+
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys, ["stable-send-key", "stable-send-key"])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["sessionId"] as? String }, ["codex-flow", "codex-flow"])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["message"] as? String }, ["Retry this normally", "Retry this normally"])
+    }
+
+    func testActionGetsGeneratedKeyButReadsDoNot() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Send once")
+        try await api.action("goal-set", sessionID: "codex-flow", message: "Set a goal")
+        _ = try await api.queuedInstructions()
+
+        let generated = try XCTUnwrap(TurnSettingsFlowProtocol.state.actionIdempotencyKeys.compactMap { $0 }.first)
+        XCTAssertNotNil(UUID(uuidString: generated))
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys.count, 2)
+        XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.nonActionIdempotencyKeys, [nil])
     }
 
     @MainActor
@@ -38,6 +100,21 @@ final class TurnSettingsFlowTests: XCTestCase {
 
         XCTAssertEqual(model.turnSettings(for: fixture.session.id), settings)
         XCTAssertTrue(model.composer.contains("Retry this normally"))
+
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 2 }
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1])
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Couldn’t complete request. Draft kept.")
+
+        model.composer = "Edited retry"
+        let edited = TurnSettings(effort: "high", mode: .plan)
+        model.setTurnSettings(edited, for: fixture.session.id)
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 3 }
+        XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[2])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["message"] as? String, "Edited retry")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["effort"] as? String, "high")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[2]["mode"] as? String, "plan")
     }
 
     @MainActor
@@ -104,6 +181,8 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
         private var blockSessionRefresh = false
         private var refreshStarted = false
         private var sessionRefreshReleased = false
+        private var actionKeys: [String?] = []
+        private var nonActionKeys: [String?] = []
 
         var actions: [[String: Any]] {
             condition.lock(); defer { condition.unlock() }
@@ -113,18 +192,29 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
             condition.lock(); defer { condition.unlock() }
             return refreshStarted
         }
+        var actionIdempotencyKeys: [String?] {
+            condition.lock(); defer { condition.unlock() }
+            return actionKeys
+        }
+        var nonActionIdempotencyKeys: [String?] {
+            condition.lock(); defer { condition.unlock() }
+            return nonActionKeys
+        }
 
         func reset(failActions: Bool = false, blockSessionRefresh: Bool = false) {
             condition.lock()
-            records = []; self.failActions = failActions; self.blockSessionRefresh = blockSessionRefresh
+            records = []; actionKeys = []; nonActionKeys = []; self.failActions = failActions; self.blockSessionRefresh = blockSessionRefresh
             refreshStarted = false; sessionRefreshReleased = false
             condition.broadcast(); condition.unlock()
         }
 
-        func record(_ body: [String: Any]) -> (Int, String) {
-            condition.lock(); records.append(body); condition.broadcast(); condition.unlock()
+        func record(_ body: [String: Any], idempotencyKey: String?) -> (Int, String) {
+            condition.lock(); records.append(body); actionKeys.append(idempotencyKey); condition.broadcast(); condition.unlock()
             if failActions { return (502, #"{"error":{"message":"unavailable"}}"#) }
             return (200, #"{"ok":true}"#)
+        }
+        func recordNonAction(idempotencyKey: String?) {
+            condition.lock(); nonActionKeys.append(idempotencyKey); condition.unlock()
         }
 
         func beginSessionRefresh() {
@@ -158,7 +248,10 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
                 }
             }
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            (status, body) = Self.state.record(object)
+            (status, body) = Self.state.record(object, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
+        } else if request.url?.path == "/api/v1/queue" {
+            Self.state.recordNonAction(idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
+            body = #"{"items":[]}"#
         } else if request.url?.path == "/api/v1/session" {
             Self.state.beginSessionRefresh()
             status = 200

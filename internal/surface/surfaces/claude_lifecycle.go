@@ -24,7 +24,7 @@ type claudeBackground struct {
 }
 
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
-	binary, err := claudeBinary(c.home)
+	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 		if listErr == nil {
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
-					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", LastActive: time.Now()}
+					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 					return session, nil, nil
 				}
 			}

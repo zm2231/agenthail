@@ -42,6 +42,10 @@ func NewCodex(remoteURL string) *Codex {
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
 
+func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
+	return session != nil && !c.managed && session.Transport != codexTransportManaged
+}
+
 func (c *Codex) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: true, Reply: true, Goal: true,
@@ -703,6 +707,52 @@ func (c *Codex) startSession(ctx context.Context, client codexClient, options su
 	return c.startSessionOnTransport(ctx, client, options, codexTransportManaged)
 }
 
+// PrepareManagedTerminalSession creates the provider-owned thread that the
+// interactive terminal will resume. It does not start a model turn.
+func (c *Codex) PrepareManagedTerminalSession(ctx context.Context, cwd, model string) (*surface.Session, error) {
+	if !c.managed {
+		return nil, errors.New("managed Codex terminal preparation requires the managed runtime")
+	}
+	client, err := c.openExistingManaged(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	return prepareManagedTerminalSession(ctx, client, cwd, model)
+}
+
+func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd, model string) (*surface.Session, error) {
+	params := map[string]any{"threadSource": "agenthail-terminal", "serviceName": "agenthail"}
+	if cwd != "" {
+		params["cwd"] = cwd
+	}
+	if model != "" {
+		params["model"] = model
+	}
+	response, err := client.Request(ctx, "thread/start", params, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("thread/start managed terminal: %w", err)
+	}
+	result, _ := response["result"].(map[string]any)
+	thread, _ := result["thread"].(map[string]any)
+	threadID := str(thread, "id")
+	if threadID == "" {
+		return nil, errors.New("thread/start managed terminal returned no thread id")
+	}
+	session := codexSession(thread, true, false)
+	session.ID = threadID
+	session.Surface = surface.KindCodex
+	session.Transport = codexTransportManaged
+	session.Source = "agenthail"
+	if session.Cwd == "" {
+		session.Cwd = str(result, "cwd")
+	}
+	if session.Cwd == "" {
+		session.Cwd = cwd
+	}
+	return &session, nil
+}
+
 func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient, options surface.SessionStartOptions, transport string) (*surface.Session, *surface.SendResult, error) {
 	if err := options.TurnOptions.Validate(surface.KindCodex); err != nil {
 		return nil, nil, err
@@ -861,110 +911,46 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 	if sess.Transport == codexTransportManaged {
 		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
 	}
-	client, err := c.openDesktop(ctx)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-	if uuid != "" {
-		thread, readErr := c.readObservationThread(ctx, client, sess.ID)
-		if readErr != nil {
-			return readErr
-		}
-		if turn := codexTurnByID(thread, uuid); turn != nil && turn.Done {
-			if turn.Error != "" {
-				return fmt.Errorf("Codex turn %s did not complete successfully: %s", uuid, turn.Error)
-			}
-			if assistant, ok := turn.authoritativeAssistant(); ok {
-				onEvent(codexAuthoritativeStreamEvent(turn.ID, assistant))
-			}
-			onEvent(surface.StreamEvent{ID: "codex:" + turn.ID + ":done", ProviderKey: "codex:" + turn.ID + ":done", Operation: "phase", TurnID: turn.ID, Kind: "done"})
-			return nil
-		}
-	}
-	desktop, ok := client.(*desktopCodexClient)
-	if !ok {
-		return fmt.Errorf("Codex Desktop stream requires the Desktop transport")
-	}
-	cursorValue, err := desktop.conn.evaluate(ctx, codexEventCursorJS, 2*time.Second)
-	if err != nil {
-		return err
-	}
-	cursor, _ := cursorValue.(float64)
-	if uuid != "" {
-		cursor = 0
-	}
-	emittedText := ""
-	var lastContext surface.ContextUsage
-	var nextContextPoll time.Time
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		v, err := desktop.conn.evaluate(ctx, codexEventsJS(int64(cursor)), 2*time.Second)
+	if !sess.TranscriptOffsetSet {
+		read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: timelineItemLimit})
 		if err != nil {
 			return err
 		}
-		raw, _ := v.(string)
-		var batch codexEventBatch
-		if err := json.Unmarshal([]byte(raw), &batch); err != nil {
-			return fmt.Errorf("parse Codex events: %w", err)
+		if read == nil || !read.TranscriptOffsetSet {
+			return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
 		}
-		cursor = float64(batch.Cursor)
-		for _, event := range batch.Events {
-			if !codexContainsID(event.Params, sess.ID) {
-				continue
-			}
-			if usage, ok := c.applyContextEvent(sess, event, lastContext); ok {
-				lastContext = *usage
-				onEvent(codexStreamEvent(event.Sequence, "context", "", usage, uuid))
-				continue
-			}
-			if uuid != "" && !codexContainsID(event.Params, uuid) {
-				continue
-			}
-			method := event.Method
-			switch {
-			case strings.Contains(strings.ToLower(method), "agentmessage"):
-				if txt := codexEventText(event.Params); txt != "" {
-					emittedText += txt
-					onEvent(codexStreamEvent(event.Sequence, "text", txt, nil, uuid))
-				}
-			case strings.Contains(strings.ToLower(method), "tool"):
-				if name := codexEventTool(event.Params); name != "" {
-					onEvent(codexStreamEvent(event.Sequence, "tool_use", name, nil, uuid))
-				}
-			case codexCompletionMethod(method):
-				thread, readErr := c.readObservationThread(ctx, client, sess.ID)
-				if readErr != nil {
-					return readErr
-				}
-				turn := codexTurnByID(thread, uuid)
-				if turn != nil && turn.Error != "" {
-					return fmt.Errorf("Codex turn %s did not complete successfully: %s", uuid, turn.Error)
-				}
-				if turn != nil {
-					for _, streamEvent := range codexCompletionStreamEvents(event.Sequence, uuid, turn, emittedText) {
-						onEvent(streamEvent)
-					}
-				}
-				onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
-				return nil
-			}
-		}
-		if !time.Now().Before(nextContextPoll) {
-			nextContextPoll = time.Now().Add(time.Second)
-			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
-				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
-			}
-		}
-		time.Sleep(300 * time.Millisecond)
+		sess.TranscriptOffset = read.TranscriptOffset
+		sess.TranscriptOffsetSet = true
+		sess.CodexPendingEventUser = read.CodexPendingEventUser
+		sess.CodexPendingEventTurn = read.CodexPendingEventTurn
+		sess.CodexCurrentTurnID = read.CodexCurrentTurnID
 	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return c.streamTranscript(ctx, sess, uuid, onEvent, timeout)
+}
+
+func codexDesktopStreamKey(turnID, kind, itemID string) string {
+	kind = codexDesktopKeyKind(kind)
+	if turnID == "" {
+		return "renderer:" + kind + ":" + itemID
+	}
+	key := "codex:" + turnID + ":" + kind
+	if itemID != "" {
+		key += ":" + itemID
+	}
+	return key
+}
+
+func codexDesktopKeyKind(kind string) string {
+	switch kind {
+	case "text", "assistant":
+		return "assistant"
+	case "tool_use", "toolCall":
+		return "toolCall"
+	case "tool_result", "toolResult":
+		return "toolResult"
+	default:
+		return kind
+	}
 }
 
 func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -982,7 +968,7 @@ func codexStreamEvent(sequence int64, kind, text string, contextUsage *surface.C
 	if kind == "context" || kind == "done" {
 		operation = "upsert"
 	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(sequence), Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
 }
 
 func codexAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
@@ -1046,6 +1032,10 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				if !codexContainsID(event.Params, sess.ID) {
 					continue
 				}
+				if goalEvent, ok := codexGoalStreamEvent(event); ok {
+					onEvent(goalEvent)
+					continue
+				}
 				if usage, matched := c.applyContextEvent(sess, event, lastContext); matched {
 					lastContext = *usage
 					onEvent(surface.StreamEvent{Kind: "context", Context: usage})
@@ -1078,13 +1068,10 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 					finalEmitted = true
 				}
 				emitted = assistant.Text
-			} else if hasAssistant && strings.HasPrefix(assistant.Text, emitted) {
-				delta := strings.TrimPrefix(assistant.Text, emitted)
-				if delta != "" {
-					emitted = assistant.Text
-					key := "managed:" + turn.ID
-					onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(assistant.Text)), Operation: "append", TurnID: turn.ID, Kind: "text", Text: delta})
-				}
+			} else if hasAssistant && assistant.Text != emitted {
+				emitted = assistant.Text
+				key := "managed:" + turn.ID
+				onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(assistant.Text)), Operation: "upsert", TurnID: turn.ID, Kind: "text", Text: assistant.Text})
 			}
 			if turn.Done {
 				key := "managed:" + turn.ID
@@ -1102,7 +1089,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
 }
 
 func codexTurnByID(thread *codexThread, turnID string) *codexTurn {
@@ -1117,38 +1104,11 @@ func codexTurnByID(thread *codexThread, turnID string) *codexTurn {
 	return nil
 }
 
-func (c *Codex) GoalSet(ctx context.Context, sess *surface.Session, text string) error {
-	_, err := c.requestSession(ctx, sess, true, "thread/goal/set", map[string]any{
-		"threadId":  sess.ID,
-		"objective": text,
-		"status":    "active",
-	}, 5*time.Second)
-	return err
-}
-
 func (c *Codex) GoalClear(ctx context.Context, sess *surface.Session) error {
 	_, err := c.requestSession(ctx, sess, true, "thread/goal/clear", map[string]any{
 		"threadId": sess.ID,
 	}, 5*time.Second)
 	return err
-}
-
-func (c *Codex) GoalGet(ctx context.Context, sess *surface.Session) (*surface.GoalState, error) {
-	resp, err := c.requestSession(ctx, sess, false, "thread/goal/get", map[string]any{
-		"threadId": sess.ID,
-	}, 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	result, _ := resp["result"].(map[string]any)
-	goal, _ := result["goal"].(map[string]any)
-	if goal == nil {
-		return nil, nil
-	}
-	return &surface.GoalState{
-		Objective: str(goal, "objective"),
-		Status:    str(goal, "status"),
-	}, nil
 }
 
 func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
@@ -1159,6 +1119,22 @@ func (c *Codex) Compact(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Codex) Model(ctx context.Context, sess *surface.Session, name string) (string, error) {
+	if name == "" {
+		response, err := c.requestSession(ctx, sess, false, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 2*time.Second)
+		if err != nil {
+			return "", err
+		}
+		result, _ := response["result"].(map[string]any)
+		thread, _ := result["thread"].(map[string]any)
+		model := str(thread, "model")
+		if model == "" {
+			model = str(result, "model")
+		}
+		if model == "" {
+			return "", fmt.Errorf("session metadata does not include the active model")
+		}
+		return model, nil
+	}
 	params := map[string]any{"threadId": sess.ID}
 	if name != "" {
 		params["model"] = name
@@ -1321,7 +1297,7 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
-		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+		return surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
 	}
 	_, err = conn.Request(ctx, "turn/steer", map[string]any{
 		"threadId":       sess.ID,

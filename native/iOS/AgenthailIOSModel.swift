@@ -4,6 +4,10 @@ import UserNotifications
 
 @MainActor
 final class AgenthailIOSModel: ObservableObject {
+    static func shouldRefreshSnapshot(for eventType: String) -> Bool {
+        eventType == "stream.reset" || eventType == "state.changed" || eventType == "settings.updated" || eventType.hasPrefix("device.")
+    }
+
     @Published var snapshot: DashboardSnapshot?
     @Published var selectedDetail: SessionDetail?
     @Published var selectedSessionID: String?
@@ -15,7 +19,11 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var sessionError: String?
     @Published var loadingSession = false
     @Published var sendingSessionIDs: Set<String> = []
+    private var attachmentCache: [String: Data] = [:]
+    private var attachmentCacheBytes = 0
+    private let attachmentCacheLimit = 20 * 1024 * 1024
     @Published var deliveryStatus: [String: String] = [:]
+    @Published var deliveryIDs: [String: Int64] = [:]
     private var deliveryQueueIDs: [String: Int64] = [:]
     private var refreshingDeliveries = false
     @Published var olderActivity: [TimelineItem] = []
@@ -28,6 +36,23 @@ final class AgenthailIOSModel: ObservableObject {
     private var searchQuery = ""
     private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:]
+    private struct PendingSendRequest {
+        let message: String
+        let turnSettings: TurnSettings
+        let idempotencyKey: String
+    }
+    private struct CreationRequestIdentity: Equatable {
+        let surface: String
+        let message: String
+        let cwd: String
+        let model: String
+        let turnSettings: TurnSettings
+        let claudeFields: [String: String]
+        let launcher: String?
+    }
+    private var pendingSendRequests: [String: PendingSendRequest] = [:]
+    private var creationRequestIdentity: CreationRequestIdentity?
+    private var creationRequestKey: String?
     @Published var notificationStatus = "Not enabled"
     @Published var requestedSessionID: String?
     @Published var showForgetMacConfirmation = false
@@ -36,18 +61,34 @@ final class AgenthailIOSModel: ObservableObject {
     private var api: AgenthailAPI?
     @Published var creatingSession = false
     @Published var creationError: String?
+    @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
 
-    private func deliveryLabel(_ evidence: String?) -> String {
+    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+
+    func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        let key = "delivery:\(problem.deliveryId)"
+        guard !pendingControls.contains(key) else { return }
+        pendingControls.insert(key)
+        defer { pendingControls.remove(key) }
+        try await api.action("delivery-dismiss", deliveryID: problem.deliveryId)
+        guard var current = snapshot else { return }
+        current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != problem.deliveryId }
+        snapshot = current
+    }
+
+    private func deliveryLabel(_ evidence: String?, detail: String?) -> String {
         switch evidence {
-        case "queued": return "Queued for the agent"
-        case "transport_accepted": return "Accepted by the transport; receiver policy and completion are pending"
-        case "delivered": return "Instruction delivered"
-        case "reply_observed": return "Reply observed"
-        case "held": return "Held by the receiving agent"
+        case "submitted": return detail ?? "Submitted"
+        case "queued": return detail ?? "Queued"
+        case "transport_accepted", "delivered": return detail ?? "Sent"
         case "failed": return "Delivery failed"
-        case "unknown", nil: return "Delivery outcome unconfirmed. Check activity before retrying."
+        case "unknown", nil: return "Submitted"
+        case "held": return "Delivery held. Review it in Inbox before retrying."
+        case "expired": return "Instruction expired. Review it in Inbox history."
+        case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
     }
@@ -75,7 +116,7 @@ final class AgenthailIOSModel: ObservableObject {
         guard !pendingControls.contains(id) else { throw AgenthailAPIError.unavailable("An update is already in progress.") }
         if action != "alias" {
             guard let detail = selectedDetail, detail.session.id == id, !detail.readOnly, detail.capabilities.goal,
-                  action == "goal-set" || action == "goal-clear" else { throw AgenthailAPIError.unavailable("This session cannot change goals.") }
+                  ["goal-set", "goal-edit", "goal-clear", "goal-pause", "goal-resume", "goal-budget"].contains(action) else { throw AgenthailAPIError.unavailable("This session cannot change goals.") }
         }
         pendingControls.insert(id)
         defer { pendingControls.remove(id) }
@@ -103,33 +144,88 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
         return try await api.creationModels(surface: surface)
     }
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async -> Bool {
+    func prepareNewSessionForm() {
+        creationError = nil
+        creationWarning = nil
+        creationRequestIdentity = nil
+        creationRequestKey = nil
+    }
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) async -> Bool {
         guard !creatingSession, let api, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        creatingSession = true; creationError = nil
+        creatingSession = true; creationError = nil; creationWarning = nil
         defer { creatingSession = false }
+        let identity = CreationRequestIdentity(surface: surface, message: message, cwd: cwd, model: model,
+                                               turnSettings: surface == "codex" ? turnSettings : .init(),
+                                               claudeFields: claude.fields, launcher: launcher)
+        if creationRequestIdentity != identity || creationRequestKey == nil {
+            creationRequestIdentity = identity
+            creationRequestKey = UUID().uuidString
+        }
         do {
-            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude)
-            if receipt.unknown == true && receipt.id == nil {
-                creationError = "\(surface.capitalized) may have started without a confirmed session ID. Check the agent catalog on your Mac before retrying. \(receipt.error ?? "")"
+            let receipt = try await api.createSession(surface: surface, message: message, cwd: cwd, model: model, turnSettings: surface == "codex" ? turnSettings : .init(), claude: claude, launcher: launcher, idempotencyKey: creationRequestKey)
+            guard receipt.ok || receipt.unknown == true || receipt.accepted == true else { throw AgenthailAPIError.invalidResponse }
+            if receipt.status == "submitted" && receipt.id == nil {
+                creationWarning = "Submitted to \(receipt.launcher ?? launcher ?? surface)."
                 return false
             }
-            guard let id = receipt.id, !id.isEmpty, receipt.ok || receipt.unknown == true else { throw AgenthailAPIError.invalidResponse }
-            deliveryStatus[id] = receipt.unknown == true ? "First instruction unconfirmed. Check activity before retrying." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
-            requestedSessionID = id
+            creationWarning = receipt.warning
+            if let id = receipt.id, !id.isEmpty {
+                let target = receipt.launcher ?? launcher ?? surface
+                deliveryStatus[id] = receipt.status == "submitted" || receipt.unknown == true ? "Submitted to \(target)." : (surface == "claude" ? "Background session registered. Waiting for activity." : "Conversation started")
+                requestedSessionID = id
+            }
+            if receipt.id != nil { creationRequestIdentity = nil; creationRequestKey = nil }
             return true
         } catch {
-            creationError = "Creation unconfirmed. Check All sessions before retrying to avoid starting twice. \(error.localizedDescription)"
+            if case AgenthailAPIError.unavailable(let detail) = error, detail == "Terminal sessions do not support advanced launch settings." {
+                creationError = detail
+            } else {
+                creationError = "Couldn’t complete request. Your session form is still ready."
+            }
             return false
         }
     }
+
+    func focusSession(_ session: SessionState) {
+        guard let api, session.runtime?.focusable == true else { return }
+        Task {
+            do { try await api.action("session-focus", sessionID: session.id) }
+            catch { operationError = error.localizedDescription }
+        }
+    }
+
+    func sessionAttachment(for item: TimelineItem, sessionID: String) async -> Data? {
+        guard let api, let attachment = item.attachment, selectedSessionID == sessionID else { return nil }
+        let cacheKey = "\(sessionID):\(attachment.id)"
+        if let cached = attachmentCache[cacheKey] { return cached }
+        do {
+            let data = try await api.sessionAttachment(sessionID: sessionID, id: attachment.id)
+            guard !Task.isCancelled, selectedSessionID == sessionID else { return nil }
+            if data.count <= attachmentCacheLimit {
+                if attachmentCacheBytes + data.count > attachmentCacheLimit {
+                    attachmentCache.removeAll()
+                    attachmentCacheBytes = 0
+                }
+                attachmentCache[cacheKey] = data
+                attachmentCacheBytes += data.count
+            }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
     private var endpoint: URL?
     private var token: String?
     private var eventTask: Task<Void, Never>?
     private var eventRefreshTask: Task<Void, Never>?
     private var catalogStreamTask: Task<Void, Never>?
-    private var catalogStreamCursor: UInt64 = 0
+    private(set) var catalogStreamCursor: UInt64 = 0
+    private var catalogHostEpoch: String?
     private var sessionStreamTask: Task<Void, Never>?
-    private var sessionStreamCursor: UInt64 = 0
+    private var sessionMetadataTask: Task<Void, Never>?
+    private(set) var sessionStreamCursor: UInt64 = 0
+    private var sessionStreamMetadataFields: Set<String> = []
     private var connectionTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
     private var pushRelayURL: URL?
@@ -223,6 +319,8 @@ final class AgenthailIOSModel: ObservableObject {
                 self.endpoint = pendingPairing.endpoint
                 token = response.token
                 api = pairedAPI
+                attachmentCache.removeAll()
+                attachmentCacheBytes = 0
                 pairing = false
                 operationError = nil
                 if automaticallyConnect {
@@ -296,7 +394,12 @@ final class AgenthailIOSModel: ObservableObject {
             let loaded = try await api.snapshot(fresh: fresh)
             snapshot = loaded
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
+            if catalogHostEpoch != loaded.hostEpoch {
+                catalogHostEpoch = loaded.hostEpoch
+                catalogStreamCursor = loaded.catalogSeq ?? 0
+            } else {
+                catalogStreamCursor = max(catalogStreamCursor, loaded.catalogSeq ?? catalogStreamCursor)
+            }
             connectionError = loaded.daemon.stale == true ? (loaded.daemon.refreshError ?? "Showing saved state. The Mac could not refresh its agents.") : nil
             await refreshDeliveries()
             return true
@@ -310,7 +413,9 @@ final class AgenthailIOSModel: ObservableObject {
         if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
+            sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
+            sessionStreamMetadataFields.removeAll()
             composer = drafts[id] ?? ""
             selectedDetail = nil
             olderActivity = []
@@ -321,7 +426,10 @@ final class AgenthailIOSModel: ObservableObject {
         sessionError = nil
         loadingSession = selectedDetail == nil
         await refreshSession(id)
-        if selectedSessionID == id { startSessionStream(id) }
+        if selectedSessionID == id {
+            startSessionStream(id)
+            startSessionMetadata(id, requestID: sessionRequestID)
+        }
         if selectedSessionID == id { loadingSession = false }
     }
 
@@ -337,6 +445,9 @@ final class AgenthailIOSModel: ObservableObject {
                 olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
             selectedDetail = detail
+            if let journalSeq = detail.journalSeq {
+                sessionStreamCursor = journalSeq
+            }
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
         } catch {
@@ -355,28 +466,61 @@ final class AgenthailIOSModel: ObservableObject {
             let items = try await api.queuedInstructions()
             for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
                 guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
-                    deliveryStatus[sessionID] = "Delivery is no longer in recent history. Check the session before retrying."
                     continue
                 }
                 switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
-                case "queued": deliveryStatus[sessionID] = item.status == "inflight" ? "Sending to the agent" : "Queued for the agent"
-                case "unknown": deliveryStatus[sessionID] = "Delivery needs review in Inbox. Check the session before sending again."
+                case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
+                case "queued": deliveryStatus[sessionID] = "Queued for \(item.target); sends when current turn ends."
+                case "unknown": deliveryStatus[sessionID] = "Submitted to \(item.target)."
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
-                case "unknown-expired": deliveryStatus[sessionID] = "Delivery outcome was never confirmed and later expired. Review it in Inbox history before sending again."
+                case "unknown-expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
                 case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
                 case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
-                case "transport_accepted": deliveryStatus[sessionID] = "Accepted by the transport; receiver policy and completion are pending"
-                case "delivered": deliveryStatus[sessionID] = "Instruction delivered"
-                case "canceled": deliveryStatus[sessionID] = "Instruction canceled"
-                default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
+                case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
+                case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
+                case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
+                default: continue
                 }
                 if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
             }
-        } catch {
-            for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
-                deliveryStatus[sessionID] = "Delivery status could not be refreshed. Check Inbox before retrying."
+        } catch {}
+    }
+
+    private func startSessionMetadata(_ id: String, requestID: UUID) {
+        sessionMetadataTask?.cancel()
+        guard let api, sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+        sessionMetadataTask = Task { [weak self, api] in
+            do {
+                let metadata = try await api.sessionMetadata(id: id)
+                guard !Task.isCancelled else { return }
+                self?.applySessionMetadata(metadata, for: id, requestID: requestID)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.clearSessionMetadata(for: id, requestID: requestID)
             }
         }
+    }
+
+    private func applySessionMetadata(_ metadata: SessionMetadata, for id: String, requestID: UUID) {
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
+              var detail = selectedDetail, detail.session.id == id else { return }
+        if !sessionStreamMetadataFields.contains("context"), let context = metadata.context { detail.context = context }
+        if !sessionStreamMetadataFields.contains("goal"), let goal = metadata.goal { detail.goal = goal }
+        if let model = metadata.model { detail.model = model }
+        if let models = metadata.models { detail.models = models }
+        detail.claudeRuns = metadata.claudeRuns
+        detail.claudeSubagents = metadata.claudeSubagents
+        detail.metadataErrors = metadata.errors
+        selectedDetail = detail
+    }
+
+    private func clearSessionMetadata(for id: String, requestID: UUID) {
+        guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
+              var detail = selectedDetail, detail.session.id == id else { return }
+        detail.claudeRuns = nil
+        detail.claudeSubagents = nil
+        detail.metadataErrors = nil
+        selectedDetail = detail
     }
 
     func loadOlderActivity() async {
@@ -394,7 +538,10 @@ final class AgenthailIOSModel: ObservableObject {
             activityCursor = timeline.nextBefore
             olderActivityError = nil
         } catch {
-            if selectedSessionID == id { olderActivityError = error.localizedDescription }
+            if selectedSessionID == id {
+                if case AgenthailAPIError.historyGap = error { activityCursor = nil }
+                olderActivityError = error.localizedDescription
+            }
         }
     }
 
@@ -427,10 +574,16 @@ final class AgenthailIOSModel: ObservableObject {
         guard !message.isEmpty, let api,
               let detail = selectedDetail, detail.session.id == session.id,
               !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
-        let working = detail.session.status == "busy"
-        let action = working && detail.capabilities.steer ? "steer" : "send"
-        guard action == "steer" || detail.capabilities.send else { return }
+        let action = "send"
+        guard detail.capabilities.send else { return }
         let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
+        let idempotencyKey: String
+        if let pending = pendingSendRequests[session.id], pending.message == message, pending.turnSettings == turnSettings {
+            idempotencyKey = pending.idempotencyKey
+        } else {
+            idempotencyKey = UUID().uuidString
+            pendingSendRequests[session.id] = PendingSendRequest(message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+        }
         sendingSessionIDs.insert(session.id)
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
@@ -439,8 +592,9 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings)
-                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+                if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
+                deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
                     deliveryQueueIDs[session.id] = queueID
                 }
@@ -448,9 +602,11 @@ final class AgenthailIOSModel: ObservableObject {
                 if action == "send", turnSettingsDrafts[session.id] == turnSettings {
                     clearTurnSettings(for: session.id)
                 }
+                pendingSendRequests.removeValue(forKey: session.id)
             } catch {
-                deliveryStatus[session.id] = "Delivery unconfirmed. Draft kept; check activity before retrying."
-                operationError = error.localizedDescription
+                deliveryIDs.removeValue(forKey: session.id)
+                deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
+                operationError = "Couldn’t complete request."
                 if selectedSessionID == session.id {
                     composer = composer.isEmpty ? message : message + "\n\n" + composer
                 } else {
@@ -509,7 +665,10 @@ final class AgenthailIOSModel: ObservableObject {
         eventRefreshTask?.cancel()
         catalogStreamTask?.cancel()
         sessionStreamTask?.cancel()
+        sessionMetadataTask?.cancel()
         api = nil
+        attachmentCache.removeAll()
+        attachmentCacheBytes = 0
         endpoint = nil
         token = nil
         pushRelayURL = nil
@@ -518,6 +677,9 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = nil
         composer = ""
         drafts = [:]
+        pendingSendRequests = [:]
+        creationRequestIdentity = nil
+        creationRequestKey = nil
         olderActivity = []
         activityCursor = nil
         searchResults = []
@@ -525,6 +687,7 @@ final class AgenthailIOSModel: ObservableObject {
         deliveryQueueIDs = [:]
         lastEventID = 0
         catalogStreamCursor = 0
+        catalogHostEpoch = nil
         connectionError = nil
         reconnecting = false
     }
@@ -671,19 +834,70 @@ final class AgenthailIOSModel: ObservableObject {
             else { current.sessions.append(changed) }
             current.totalSessions = current.sessions.count
             snapshot = current
+        case "session.queue":
+            guard let id = event.data.sessionId, let count = event.data.queueCount,
+                  let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
+            current.sessions[index] = Self.applyingQueueCount(count, to: current.sessions[index], codexRecentHours: current.codexRecentHours, now: Date())
+            snapshot = current
         case "session.removed":
             guard let id = event.data.sessionId else { _ = await refresh(); return }
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
         case "surface.health":
-            guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
+            guard let name = event.data.surface, let health = event.data.health,
+                  let index = current.surfaces.firstIndex(where: { $0.name == name }) else {
+                _ = await refresh(fresh: true)
+                return
+            }
             let previous = current.surfaces[index]
             current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities)
+            snapshot = current
+        case "delivery.problem":
+            guard let deliveryId = event.data.deliveryId,
+                  let sessionId = event.data.sessionId,
+                  let message = event.data.message,
+                  let reason = event.data.reason,
+                  let at = event.data.at else { return }
+            var problems = current.deliveryProblems ?? []
+            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, message: message, reason: reason, status: event.data.status, at: at)
+            problems.removeAll { $0.deliveryId == deliveryId }
+            problems.insert(problem, at: 0)
+            current.deliveryProblems = Array(problems.prefix(50))
+            snapshot = current
+        case "delivery.dismissed":
+            guard let deliveryId = event.data.deliveryId else { return }
+            current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != deliveryId }
             snapshot = current
         default:
             return
         }
+    }
+
+    static func applyingQueueCount(_ count: Int, to session: SessionState, codexRecentHours: Int, now: Date) -> SessionState {
+        var updated = session
+        updated.queueCount = count
+        func activeWithin(hours: Int) -> Bool {
+            guard let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) else { return false }
+            return now.timeIntervalSince(date) <= TimeInterval(hours) * 3600
+        }
+        switch session.surface {
+        case "claude":
+            if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
+            else if !session.open { (updated.current, updated.currentReason) = (false, nil) }
+            else { (updated.current, updated.currentReason) = (true, session.isWorking ? "working" : "open") }
+        case "codex":
+            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
+            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
+            else if session.status != "notLoaded" && activeWithin(hours: codexRecentHours) { (updated.current, updated.currentReason) = (true, "recent") }
+            else { (updated.current, updated.currentReason) = (false, nil) }
+        default:
+            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
+            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
+            else if activeWithin(hours: 24) { (updated.current, updated.currentReason) = (true, "recent") }
+            else { (updated.current, updated.currentReason) = (false, nil) }
+        }
+        return updated
     }
 
     private func startSessionStream(_ id: String) {
@@ -714,13 +928,21 @@ final class AgenthailIOSModel: ObservableObject {
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
+        if event.data.kind == "context" {
+            detail.context = event.data.context
+            sessionStreamMetadataFields.insert("context")
+        } else if event.data.kind == "goal" {
+            detail.goal = event.data.goal
+            sessionStreamMetadataFields.insert("goal")
+        }
+        selectedDetail = detail
         if event.data.op == "reset", event.data.kind == "source-error" {
             sessionError = event.data.reason ?? "The session source restarted."
             return
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated, bodyRef: event.data.bodyRef)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
@@ -733,18 +955,46 @@ final class AgenthailIOSModel: ObservableObject {
         sessionError = nil
     }
 
-    func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> String? {
+    func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> RetainedBodyResult? {
         guard let api, let id = selectedSessionID, let ref = item.bodyRef else { return nil }
-        return try? await api.sessionStreamBody(id: id, ref: ref, start: start).body
+        let chunkSize = 16 << 10
+        let maximum = 8 << 20
+        var cursor = max(0, start)
+        var total: Int?
+        var chunks: [String] = []
+
+        do {
+            while cursor < (total ?? maximum) {
+                let requestedEnd = min(cursor + chunkSize, maximum)
+                let chunk = try await api.sessionStreamBody(id: id, ref: ref, start: cursor, end: requestedEnd)
+                if total == nil { total = chunk.total }
+                guard chunk.total == total, chunk.start == cursor, chunk.end > cursor, chunk.end <= maximum else {
+                    return RetainedBodyResult(text: chunks.joined(), error: "The retained body returned an invalid range.")
+                }
+                if chunk.end < chunk.total && chunk.body.last == "\u{FFFD}" {
+                    return RetainedBodyResult(text: chunks.joined(), error: "The retained body is not valid UTF-8 at a range boundary.")
+                }
+                chunks.append(chunk.body)
+                cursor = chunk.end
+                if cursor >= chunk.total { return RetainedBodyResult(text: chunks.joined(), error: nil) }
+                if cursor >= maximum {
+                    return RetainedBodyResult(text: chunks.joined(), error: "The retained body exceeds the 8 MiB display limit.")
+                }
+            }
+            return RetainedBodyResult(text: chunks.joined(), error: "The retained body could not be completed.")
+        } catch {
+            return RetainedBodyResult(text: chunks.joined(), error: error.localizedDescription)
+        }
     }
 
     private func receive(_ event: AgenthailEvent) async {
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
+        guard Self.shouldRefreshSnapshot(for: event.type) else { return }
         eventRefreshTask?.cancel()
         eventRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, let self else { return }
-            await self.refresh()
+            await self.refresh(fresh: event.type == "stream.reset")
         }
     }
 

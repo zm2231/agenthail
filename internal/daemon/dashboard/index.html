@@ -68,6 +68,10 @@
           </div>
           <div class="attention-list" id="attention-list"></div>
         </section>
+        <section class="attention-panel" id="delivery-problems-panel" hidden>
+          <div class="section-heading"><div><h2>Delivery problems</h2><p>Messages that could not be sent.</p></div></div>
+          <div class="attention-list" id="delivery-problems-list"></div>
+        </section>
         <section class="overview-grid">
           <section>
             <div class="section-heading">
@@ -119,6 +123,11 @@
               <label>
                 <span>Surface</span>
                 <select name="surface" id="new-conversation-surface"></select>
+              </label>
+              <label data-code-start>
+                <span>Launcher</span>
+                <select name="launcher" id="new-conversation-launcher"><option value="">Use default</option></select>
+                <small id="new-conversation-launcher-detail"></small>
               </label>
               <label>
                 <span>Name <small>optional</small></span>
@@ -477,6 +486,7 @@
               </div>
               <form class="settings-form" id="dashboard-settings-form">
                 <label><span>Codex recent window</span><select id="settings-codex-hours" name="codexRecentHours"><option value="1">1 hour</option><option value="3">3 hours</option><option value="5">5 hours</option><option value="8">8 hours</option><option value="12">12 hours</option><option value="24">24 hours</option></select></label>
+                <label><span>Busy message delivery</span><select id="settings-busy-delivery" name="busyDelivery"><option value="queue">Queue until idle</option><option value="steer">Steer when supported, otherwise queue</option></select></label>
                 <button class="soft-button" type="submit">Save</button>
               </form>
               <div class="setting-row"><div><strong>Local listener</strong><p id="settings-listener">127.0.0.1</p></div><span class="status-pill idle">Private</span></div>

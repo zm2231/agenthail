@@ -1,18 +1,35 @@
 package surface
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrTranscriptUnavailable = errors.New("session transcript unavailable")
 
 // TimelineItem preserves the ordered, user-visible contents of an agent transcript.
 type TimelineItem struct {
+	ID               string      `json:"id"`
+	Kind             string      `json:"kind"`
+	Role             string      `json:"role,omitempty"`
+	Title            string      `json:"title"`
+	Text             string      `json:"text"`
+	Timestamp        string      `json:"timestamp,omitempty"`
+	CallID           string      `json:"callId,omitempty"`
+	TurnID           string      `json:"turnId,omitempty"`
+	Status           string      `json:"status,omitempty"`
+	Truncated        bool        `json:"truncated"`
+	TruncationReason string      `json:"truncationReason,omitempty"`
+	BodyRef          string      `json:"bodyRef,omitempty"`
+	Attachment       *Attachment `json:"attachment,omitempty"`
+}
+
+type Attachment struct {
 	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	Role      string `json:"role,omitempty"`
-	Title     string `json:"title"`
-	Text      string `json:"text"`
-	Timestamp string `json:"timestamp,omitempty"`
-	CallID    string `json:"callId,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Truncated bool   `json:"truncated"`
+	MediaType string `json:"mediaType"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Bytes     int64  `json:"bytes,omitempty"`
 }
 
 type SessionTimeline struct {
@@ -29,21 +46,35 @@ type SessionReadRequest struct {
 }
 
 type SessionReadResult struct {
-	Items             []TimelineItem `json:"items"`
-	Exchanges         []Exchange     `json:"exchanges"`
-	Reply             *ReplyResult   `json:"reply,omitempty"`
-	NextBefore        int64          `json:"nextBefore"`
-	Source            string         `json:"source"`
-	Truncated         bool           `json:"truncated"`
-	UnavailableReason string         `json:"unavailableReason,omitempty"`
-	Warning           string         `json:"warning,omitempty"`
+	JournalSeq            uint64         `json:"journalSeq,omitempty"`
+	TranscriptOffset      int64          `json:"-"`
+	TranscriptOffsetSet   bool           `json:"-"`
+	TranscriptIdentity    string         `json:"-"`
+	CodexPendingEventUser bool           `json:"-"`
+	CodexPendingEventTurn string         `json:"-"`
+	CodexCurrentTurnID    string         `json:"-"`
+	Items                 []TimelineItem `json:"items"`
+	Exchanges             []Exchange     `json:"exchanges"`
+	Reply                 *ReplyResult   `json:"reply,omitempty"`
+	NextBefore            int64          `json:"nextBefore"`
+	Source                string         `json:"source"`
+	Truncated             bool           `json:"truncated"`
+	UnavailableReason     string         `json:"unavailableReason,omitempty"`
+	Warning               string         `json:"warning,omitempty"`
 }
 
 type SessionReader interface {
 	ReadSession(context.Context, *Session, SessionReadRequest) (*SessionReadResult, error)
 }
 
+type AttachmentReader interface {
+	ReadAttachment(context.Context, *Session, string) (*Attachment, []byte, error)
+}
+
 func ReadSession(ctx context.Context, adapter Surface, session *Session, request SessionReadRequest) (*SessionReadResult, error) {
+	if err := ValidateRuntimeTransport(session); err != nil {
+		return nil, err
+	}
 	if request.Limit < 1 {
 		request.Limit = 1
 	}

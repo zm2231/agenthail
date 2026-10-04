@@ -15,15 +15,22 @@ struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
     let surfaces: [Surface]
     let workspaces: [String]
+    let launchers: [LauncherOption]?
 }
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueueResponse: Decodable { let items: [QueueState] }
 struct SessionCreationReceipt: Decodable {
     let ok: Bool
     let unknown: Bool?
+    let status: String?
+    let accepted: Bool?
+    let retryable: Bool?
+    let warning: String?
     let session: RawSession?
     let sessionId: String?
     let error: String?
+    let launcher: String?
+    let location: SessionRuntime.Location?
     var id: String? { session?.id ?? sessionId }
 }
 
@@ -69,14 +76,15 @@ struct SessionState: Codable, Identifiable, Hashable {
     let alias: String?
     let status: String
     let lastActive: String?
-    let queueCount: Int
+    var queueCount: Int
     let open: Bool
-    let current: Bool
-    let currentReason: String?
+    var current: Bool
+    var currentReason: String?
     let capabilities: Capabilities
     let readOnly: Bool?
     let readOnlyReason: String?
     var cwd: String? = nil
+    var runtime: SessionRuntime? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -85,6 +93,55 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isReadOnly: Bool { readOnly == true }
+}
+
+struct SessionRuntime: Codable, Hashable {
+    struct Location: Codable, Hashable {
+        var workspace: String? = nil
+        var surface: String? = nil
+        var session: String? = nil
+        var pane: String? = nil
+    }
+    let launcher: String
+    var location: Location? = nil
+    var focusable: Bool? = nil
+}
+
+struct GoalEditorState: Equatable {
+    enum Mode: Equatable {
+        case newGoal
+        case editGoal
+        case budget
+    }
+
+    private(set) var sessionID: String?
+    private(set) var mode: Mode?
+
+    mutating func begin(_ mode: Mode, sessionID: String) {
+        self.sessionID = sessionID
+        self.mode = mode
+    }
+
+    mutating func select(sessionID: String) {
+        if self.sessionID != sessionID { reset() }
+    }
+
+    mutating func reset() {
+        sessionID = nil
+        mode = nil
+    }
+
+    func canCommit(currentSessionID: String?) -> Bool {
+        mode != nil && sessionID != nil && sessionID == currentSessionID
+    }
+}
+
+struct LauncherOption: Decodable, Identifiable, Hashable {
+    let id: String
+    let label: String
+    let agents: [String]
+    let available: Bool
+    let detail: String?
 }
 
 struct QueueState: Decodable, Identifiable, Equatable {
@@ -150,6 +207,18 @@ struct AttentionState: Decodable, Identifiable, Equatable {
     let createdAt: String
 }
 
+struct DeliveryProblem: Decodable, Identifiable, Equatable {
+    let deliveryId: Int64
+    let sessionId: String
+    let sourceSessionId: String?
+    let message: String
+    let reason: String
+    let status: String?
+    let at: String
+
+    var id: Int64 { deliveryId }
+}
+
 struct ChannelState: Decodable, Identifiable, Equatable {
     var id: String { name }
     let name: String
@@ -204,7 +273,9 @@ struct DashboardSnapshot: Decodable {
     let relays: [RelayState]
     let history: [HistoryState]
     let attention: [AttentionState]
+    var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
+    let busyDelivery: String?
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -216,7 +287,9 @@ struct DashboardSnapshot: Decodable {
             relays == other.relays &&
             history == other.history &&
             attention == other.attention &&
-            codexRecentHours == other.codexRecentHours
+			deliveryProblems == other.deliveryProblems &&
+            codexRecentHours == other.codexRecentHours &&
+            busyDelivery == other.busyDelivery
     }
 }
 
@@ -237,15 +310,19 @@ struct ContextState: Decodable {
     let inputTokens: Int64?
     let cachedInputTokens: Int64?
     let outputTokens: Int64?
-    let reasoningOutputTokens: Int64?
-    let windowEstimated: Bool?
-    let updatedAt: String?
+	let reasoningOutputTokens: Int64?
+	let windowEstimated: Bool?
+	let contextWindowSource: String?
+	let updatedAt: String?
     let lastCompactedAt: String?
 
-    var fraction: Double {
-        guard contextWindow > 0 else { return 0 }
-        return min(1, Double(usedTokens) / Double(contextWindow))
+    var exceedsEstimatedWindow: Bool {
+        windowEstimated == true && contextWindow > 0 && usedTokens > contextWindow
     }
+	var fraction: Double? {
+		guard contextWindow > 0, usedTokens <= contextWindow else { return nil }
+		return Double(usedTokens) / Double(contextWindow)
+	}
 }
 
 struct ModelOption: Decodable, Identifiable {
@@ -258,17 +335,52 @@ struct ModelOption: Decodable, Identifiable {
     let defaultReasoningEffort: String?
 }
 
+struct SessionMetadata: Decodable {
+    let context: ContextState?
+    let goal: GoalState?
+    let model: String?
+    let models: [ModelOption]?
+    let claudeRuns: [ClaudeRunObservation]?
+    let claudeSubagents: [ClaudeSubagentLink]?
+    let errors: [String: String]?
+}
+
+struct ClaudeRunObservation: Decodable, Identifiable, Equatable {
+    let recordPath: String
+    let jobId: String
+    let sessionId: String?
+    let resumeSessionId: String?
+    let runType: String?
+    let providerState: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var id: String { recordPath.isEmpty ? jobId : recordPath }
+}
+
+struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
+    let parentSessionId: String
+    let agentId: String
+    let transcriptPath: String
+
+    var id: String { agentId + transcriptPath }
+}
+
 struct SessionDetail: Decodable {
     let session: RawSession
+    let journalSeq: UInt64?
     let alias: String?
     let exchanges: [ExchangeState]
     let capabilities: Capabilities
     let readOnly: Bool
     let readOnlyReason: String
-    let context: ContextState?
-    let goal: GoalState?
-    let model: String?
-    let models: [ModelOption]?
+    var context: ContextState?
+    var goal: GoalState?
+    var model: String?
+    var models: [ModelOption]?
+    var claudeRuns: [ClaudeRunObservation]?
+    var claudeSubagents: [ClaudeSubagentLink]?
+    var metadataErrors: [String: String]?
     var timeline: SessionTimeline?
     let readSource: String?
     let readError: String?
@@ -287,11 +399,46 @@ struct RawSession: Decodable {
     let source: String?
     let transport: String?
     let cwd: String?
+    let runtime: SessionRuntime?
 }
 
 struct GoalState: Decodable {
     let objective: String
     let status: String
+    let timeUsedSeconds: Int?
+    let tokensUsed: Int?
+    let tokenBudget: Int?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var displayStatus: String {
+        switch status {
+        case "active": return "Active"
+        case "paused": return "Paused"
+        case "blocked", "usageLimited", "budgetLimited": return "Needs you"
+        case "complete": return "Complete"
+        default: return status.capitalized
+        }
+    }
+
+    var needsAttention: Bool {
+        ["blocked", "usageLimited", "budgetLimited"].contains(status)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case objective, status, timeUsedSeconds, tokensUsed, tokenBudget, createdAt, updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        objective = try container.decode(String.self, forKey: .objective)
+        status = try container.decode(String.self, forKey: .status)
+        timeUsedSeconds = try container.decodeIfPresent(Int.self, forKey: .timeUsedSeconds)
+        tokensUsed = try container.decodeIfPresent(Int.self, forKey: .tokensUsed)
+        tokenBudget = try container.decodeIfPresent(Int.self, forKey: .tokenBudget)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
 }
 
 struct DeviceState: Codable, Identifiable {
@@ -384,17 +531,33 @@ struct SessionTimeline: Decodable {
     let unavailableReason: String?
 }
 
+struct SessionAttachment: Decodable, Equatable, Hashable {
+    let id: String
+    let mediaType: String
+    let width: Int?
+    let height: Int?
+    let bytes: Int?
+}
+
 struct SessionStreamItem: Decodable {
     let itemId: String
     let version: UInt64
     let op: String
     let kind: String
     let turnId: String?
+    let callId: String?
     let ts: String
     let body: String?
+    let context: ContextState?
+    let goal: GoalState?
+    let role: String?
+    let title: String?
+    let status: String?
     let truncated: Bool
+    let truncationReason: String?
     let bodyRef: String?
     let reason: String?
+    let attachment: SessionAttachment?
 }
 
 struct SessionStreamBody: Decodable {
@@ -405,6 +568,11 @@ struct SessionStreamBody: Decodable {
     let total: Int
     let body: String
     let truncated: Bool
+}
+
+struct RetainedBodyResult {
+    let text: String
+    let error: String?
 }
 
 struct SessionStreamEvent: Decodable {
@@ -428,6 +596,13 @@ struct CatalogStreamData: Decodable {
     let surface: String?
     let health: String?
     let detail: String?
+    let deliveryId: Int64?
+    let queueCount: Int?
+    let sourceSessionId: String?
+    let message: String?
+    let reason: String?
+    let status: String?
+    let at: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {
@@ -440,7 +615,9 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let callId: String?
     let status: String?
     let truncated: Bool
+    let truncationReason: String?
     let bodyRef: String?
+    let attachment: SessionAttachment?
 }
 
 struct SessionSearchResponse: Decodable {

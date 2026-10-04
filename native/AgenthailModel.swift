@@ -27,7 +27,14 @@ final class AgenthailModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
+    private var sessionMetadataTask: Task<Void, Never>?
+    private var sessionRequestID: UUID?
     private var lastEventID: UInt64 = 0
+    private struct PendingSendRequest {
+        let message: String
+        let idempotencyKey: String
+    }
+    private var pendingSendRequests: [String: PendingSendRequest] = [:]
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -43,6 +50,7 @@ final class AgenthailModel: ObservableObject {
         eventTask?.cancel()
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
+        sessionMetadataTask?.cancel()
     }
 
     func connect() {
@@ -124,13 +132,42 @@ final class AgenthailModel: ObservableObject {
 
     func loadSession(_ id: String) async {
         guard let api else { return }
+        let requestID = UUID()
+        sessionRequestID = requestID
+        sessionMetadataTask?.cancel()
         do {
             let loaded = try await api.sessionDetail(id: id)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
             detail = loaded
             operationError = nil
+            sessionMetadataTask = Task { [weak self, api] in
+                do {
+                    let metadata = try await api.sessionMetadata(id: id)
+                    guard !Task.isCancelled else { return }
+                    guard let self, sessionLoadIsCurrent(id, selectedID: self.selectedSessionID), self.sessionRequestID == requestID,
+                          var detail = self.detail, detail.session.id == id else { return }
+                    if let context = metadata.context { detail.context = context }
+                    if let goal = metadata.goal { detail.goal = goal }
+                    if let model = metadata.model { detail.model = model }
+                    if let models = metadata.models { detail.models = models }
+                    detail.claudeRuns = metadata.claudeRuns
+                    detail.claudeSubagents = metadata.claudeSubagents
+                    detail.metadataErrors = metadata.errors
+                    self.detail = detail
+                } catch {
+                    guard !Task.isCancelled, let self,
+                          sessionLoadIsCurrent(id, selectedID: self.selectedSessionID), self.sessionRequestID == requestID,
+                          var detail = self.detail, detail.session.id == id else { return }
+                    detail.claudeRuns = nil
+                    detail.claudeSubagents = nil
+                    detail.metadataErrors = nil
+                    self.detail = detail
+                }
+            }
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            sessionMetadataTask?.cancel()
+            detail = nil
             operationError = error.localizedDescription
         }
     }
@@ -139,14 +176,24 @@ final class AgenthailModel: ObservableObject {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty, let sessionID = selectedSessionID else { return }
         composer = ""
-        perform(action: selectedSession?.isWorking == true ? "steer" : "send", sessionID: sessionID, message: message)
+        let idempotencyKey: String
+        if let pending = pendingSendRequests[sessionID], pending.message == message {
+            idempotencyKey = pending.idempotencyKey
+        } else {
+            idempotencyKey = UUID().uuidString
+            pendingSendRequests[sessionID] = PendingSendRequest(message: message, idempotencyKey: idempotencyKey)
+        }
+        perform(action: "send", sessionID: sessionID, message: message, idempotencyKey: idempotencyKey)
     }
 
-    func perform(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil) {
+    func perform(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, idempotencyKey: String? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, sessionID: sessionID, message: message, model: model, queueID: queueID)
+                try await api.action(action, sessionID: sessionID, message: message, model: model, queueID: queueID, idempotencyKey: idempotencyKey)
+                if action == "send", let sessionID, let pending = pendingSendRequests[sessionID], pending.idempotencyKey == idempotencyKey {
+                    pendingSendRequests.removeValue(forKey: sessionID)
+                }
                 operationError = nil
                 await refresh(fresh: true)
             } catch {

@@ -76,6 +76,44 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	}
 }
 
+func TestAPISessionStreamRejectsClaudeWithoutLiveStream(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	fake.kind = surface.KindClaude
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-api", Kind: "text", Text: "seeded over API"}},
+	}
+	adapter.caps.Stream = false
+	d = New(reg, []surface.Surface{adapter})
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+	body, _ := io.ReadAll(response.Body)
+	if !strings.Contains(string(body), `"code":"stream_unsupported"`) {
+		t.Fatalf("body=%s", body)
+	}
+}
+
 func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}
@@ -86,7 +124,7 @@ func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T)
 		t.Fatalf("first=%+v inserted=%v err=%v", first, inserted, err)
 	}
 	updated, inserted, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "message-1", Payload: []byte(`{"itemId":"message-1","version":2,"op":"upsert","kind":"text","ts":"2026-10-03T12:00:01Z","body":"latest"}`)}, registry.SessionJournalRetention{Count: 2, Bytes: 1024})
-	if err != nil || inserted || updated.Seq <= first.Seq {
+	if err != nil || !inserted || updated.Seq <= first.Seq {
 		t.Fatalf("updated=%+v inserted=%v err=%v", updated, inserted, err)
 	}
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))

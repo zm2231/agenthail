@@ -2,8 +2,13 @@ package registry
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestSessionJournalReplaysUpsertsAndReportsRetentionGap(t *testing.T) {
@@ -15,7 +20,7 @@ func TestSessionJournalReplaysUpsertsAndReportsRetentionGap(t *testing.T) {
 		t.Fatalf("first=%+v inserted=%v err=%v", first, inserted, err)
 	}
 	updated, inserted, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "item-1", Payload: []byte("one updated"), ObservedAt: time.Unix(2, 0)}, retention)
-	if err != nil || inserted || updated.Seq <= first.Seq || !bytes.Equal(updated.Payload, []byte("one updated")) {
+	if err != nil || !inserted || updated.Seq <= first.Seq || !bytes.Equal(updated.Payload, []byte("one updated")) {
 		t.Fatalf("updated=%+v inserted=%v err=%v", updated, inserted, err)
 	}
 	replayed, err := r.SessionJournalAfter("session", first.Seq, 10)
@@ -37,6 +42,45 @@ func TestSessionJournalReplaysUpsertsAndReportsRetentionGap(t *testing.T) {
 	gap, err := r.SessionJournalAfter("session", 1, 10)
 	if err != nil || !gap.Gap || len(gap.Entries) != 0 {
 		t.Fatalf("gap=%+v err=%v", gap, err)
+	}
+}
+
+func TestSessionJournalIdenticalProviderReplayDoesNotAdvanceWatermark(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 4, Bytes: 1024}
+	payload := []byte(`{"itemId":"item-1","providerKey":"item-1","version":7,"kind":"text","ts":"2026-10-04T00:00:00Z","body":"same","bodyRef":"ref-a"}`)
+	first, changed, err := r.AppendSessionJournalEntry(SessionJournalEntry{
+		SessionID:   "session",
+		Kind:        "text",
+		ProviderKey: "item-1",
+		Payload:     payload,
+		BodyRef:     "ref-a",
+		FullBody:    []byte("same full body"),
+		ObservedAt:  time.Unix(1, 0),
+	}, retention)
+	if err != nil || !changed || first.Seq != 1 {
+		t.Fatalf("first=%+v changed=%v err=%v", first, changed, err)
+	}
+	replayedPayload := []byte(`{"itemId":"item-1","providerKey":"item-1","version":7,"kind":"text","ts":"2026-10-04T00:00:00Z","body":"same","bodyRef":"ref-b"}`)
+	replayed, changed, err := r.AppendSessionJournalEntry(SessionJournalEntry{
+		SessionID:   "session",
+		Kind:        "text",
+		ProviderKey: "item-1",
+		Payload:     replayedPayload,
+		BodyRef:     "ref-b",
+		FullBody:    []byte("same full body"),
+		ObservedAt:  time.Unix(2, 0),
+	}, retention)
+	if err != nil || changed || replayed.Seq != first.Seq || !bytes.Equal(replayed.Payload, first.Payload) || replayed.BodyRef != first.BodyRef {
+		t.Fatalf("replayed=%+v changed=%v err=%v", replayed, changed, err)
+	}
+	window, err := r.SessionJournalAfter("session", 0, 10)
+	if err != nil || window.LatestSeq != first.Seq || len(window.Entries) != 1 || window.Entries[0].BodyRef != "ref-a" {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	if _, _, err := r.SessionJournalBody("session", "ref-b", 0, 1); err == nil {
+		t.Fatal("identical replay stored a new body reference")
 	}
 }
 
@@ -71,6 +115,34 @@ func TestSessionJournalBodyIsSessionBoundAndExpiresWithRetention(t *testing.T) {
 	}
 }
 
+func TestSessionJournalBodyRangesPreserveUTF8AcrossBoundaries(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	body := "A🙂BéC"
+	retention := SessionJournalRetention{Count: 2, Bytes: 1024}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "unicode", Payload: []byte(`{"bodyRef":"unicode"}`), BodyRef: "unicode", FullBody: []byte(body)}, retention); err != nil {
+		t.Fatal(err)
+	}
+	first, total, err := r.SessionJournalBody("session", "unicode", 0, 3)
+	if err != nil || total != len(body) || string(first) != "A" {
+		t.Fatalf("first=%q total=%d err=%v", first, total, err)
+	}
+	second, _, err := r.SessionJournalBody("session", "unicode", len(first), 5)
+	if err != nil || string(second) != "🙂" {
+		t.Fatalf("second=%q err=%v", second, err)
+	}
+	third, _, err := r.SessionJournalBody("session", "unicode", len(first)+len(second), len(body))
+	if err != nil || string(third) != "BéC" {
+		t.Fatalf("third=%q err=%v", third, err)
+	}
+	if joined := string(append(append(first, second...), third...)); joined != body || !utf8.ValidString(joined) {
+		t.Fatalf("joined=%q valid=%v", joined, utf8.ValidString(joined))
+	}
+	if _, _, err := r.SessionJournalBody("session", "unicode", 2, 5); err == nil || !strings.Contains(err.Error(), "inside a UTF-8 code point") {
+		t.Fatalf("interior start err=%v", err)
+	}
+}
+
 func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
@@ -87,5 +159,159 @@ func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	window, err := r.SessionJournalAfter("session", 0, 10)
 	if err != nil || len(window.Entries) != 1 || window.Entries[0].ProviderKey != "second" || window.Entries[0].Bytes != 6 {
 		t.Fatalf("window=%+v err=%v", window, err)
+	}
+}
+
+func TestSessionJournalRetentionCountsFullBodyBytes(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 4, Bytes: 32}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("preview"), BodyRef: "body-ref", FullBody: []byte("0123456789")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	var retained int
+	if err := r.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
+		t.Fatal(err)
+	}
+	if retained != len("preview")+len("0123456789") {
+		t.Fatalf("retained bytes=%d, want %d", retained, len("preview")+len("0123456789"))
+	}
+}
+
+func TestSessionJournalRejectsSingleBodyBeyondRetention(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	_, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "too-large", Payload: []byte("preview"), BodyRef: "body-ref", FullBody: []byte("0123456789")}, SessionJournalRetention{Count: 4, Bytes: 8})
+	if !errors.Is(err, ErrSessionJournalEntryTooLarge) {
+		t.Fatalf("err=%v, want ErrSessionJournalEntryTooLarge", err)
+	}
+	var entries int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM session_journal WHERE session_id=?`, "session").Scan(&entries); err != nil {
+		t.Fatal(err)
+	}
+	if entries != 0 {
+		t.Fatalf("journal entries=%d, want 0 after rejected body", entries)
+	}
+}
+
+func TestSessionJournalPageReportsGapAfterRetentionPrunesHistory(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 10, Bytes: 1024}
+	for index := 1; index <= 11; index++ {
+		key := fmt.Sprintf("item-%d", index)
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: key, Payload: []byte(key)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recent, err := r.ReadSessionJournalPage("session", 0, 4)
+	if err != nil || recent.NextBefore != 8 || len(recent.Entries) != 4 {
+		t.Fatalf("recent=%+v err=%v", recent, err)
+	}
+	older, err := r.ReadSessionJournalPage("session", recent.NextBefore, 4)
+	if err != nil || older.NextBefore != 4 || len(older.Entries) != 4 {
+		t.Fatalf("older=%+v err=%v", older, err)
+	}
+	boundary, err := r.ReadSessionJournalPage("session", older.NextBefore, 4)
+	if err != nil || boundary.NextBefore != 2 || len(boundary.Entries) != 2 {
+		t.Fatalf("boundary=%+v err=%v", boundary, err)
+	}
+	var gap *SessionJournalHistoryGapError
+	_, err = r.ReadSessionJournalPage("session", boundary.NextBefore, 4)
+	if !errors.As(err, &gap) {
+		t.Fatalf("err=%v, want SessionJournalHistoryGapError", err)
+	}
+	if gap.EarliestSeq != 2 || gap.LatestSeq != 11 {
+		t.Fatalf("gap=%+v, want earliest=2 latest=11", gap)
+	}
+}
+
+func TestSessionJournalMigrationNormalizesRetainedBodyBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, old, "session")
+	retention := SessionJournalRetention{Count: 4, Bytes: 10}
+	if _, _, err := old.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("p"), BodyRef: "body-ref", FullBody: []byte("123456789")}, retention); err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec(`UPDATE session_journal SET bytes=length(payload); UPDATE session_journal_state SET retained_bytes=length('p'); PRAGMA user_version=8`); err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	var retained int
+	if err := migrated.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
+		t.Fatal(err)
+	}
+	if retained != 10 {
+		t.Fatalf("retained bytes=%d, want 10", retained)
+	}
+	if _, _, err := migrated.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "next", Payload: []byte("q")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := migrated.SessionJournalBody("session", "body-ref", 0, 1); err == nil {
+		t.Fatal("old body remained after normalized retention pruned it")
+	}
+}
+
+func TestSessionJournalPageExposesProviderHistoryBoundaryUntilPruned(t *testing.T) {
+	reg := openTestRegistry(t)
+	register(t, reg, "s")
+	retention := SessionJournalRetention{Count: 2, Bytes: 4096}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 9); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: "a", Payload: []byte(`{"itemId":"a"}`)}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 3); err != nil {
+		t.Fatal(err)
+	}
+	page, err := reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || page.HistoryBefore != 9 || page.NextBefore != 0 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	for _, key := range []string{"b", "c"} {
+		if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: key, Payload: []byte(`{"itemId":"` + key + `"}`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err = reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || page.HistoryBefore != 0 {
+		t.Fatalf("pruned journal still exposed provider boundary: %+v err=%v", page, err)
+	}
+}
+
+func TestSessionJournalWithoutRecordedBoundaryEndsInHistoryGap(t *testing.T) {
+	reg := openTestRegistry(t)
+	register(t, reg, "s")
+	retention := SessionJournalRetention{Count: 8, Bytes: 4096}
+	for _, key := range []string{"a", "b"} {
+		if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: key, Payload: []byte(`{"itemId":"` + key + `"}`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 5); err != nil {
+		t.Fatal(err)
+	}
+	page, err := reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || len(page.Entries) != 2 || page.HistoryBefore != 0 || page.NextBefore != page.Entries[0].Seq {
+		t.Fatalf("journal with unknown older boundary reported exhaustion: %+v err=%v", page, err)
+	}
+	_, err = reg.ReadSessionJournalPage("s", page.NextBefore, 10)
+	var gap *SessionJournalHistoryGapError
+	if !errors.As(err, &gap) || gap.EarliestSeq != page.Entries[0].Seq {
+		t.Fatalf("older read past unknown boundary err=%v", err)
 	}
 }

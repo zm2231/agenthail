@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import ImageIO
 
 private let orange = SessionStyle.accent
 
@@ -376,6 +378,7 @@ struct SessionScreen: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
     @State private var showingInfo = false
+    @State private var showingVoice = false
     @State private var activityOnly = false
     @State private var followingLatest = true
     @State private var atLatest = true
@@ -427,10 +430,10 @@ struct SessionScreen: View {
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                             if activityOnly {
-                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }).id($0.id) }
+                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }).id($0.id) }
                             } else {
                                 ForEach(TimelineGroup.make(items)) { group in
-                                    CompactActivityGroup(group: group) { followingLatest = false }.id(group.id)
+                                    CompactActivityGroup(group: group, attachmentLoader: { item in await model.sessionAttachment(for: item, sessionID: session.id) }) { followingLatest = false }.id(group.id)
                                 }
                             }
                             if items.isEmpty { ContentUnavailableView("Ready for your instruction", systemImage: "bubble.left", description: Text("Messages and agent activity will appear here.")) }
@@ -533,13 +536,21 @@ struct SessionScreen: View {
                             Text("Chat").tag(false)
                             Text("All events").tag(true)
                         }
+                        Button("Call this session", systemImage: "phone.fill") {
+                            showingVoice = true
+                        }
                     } label: { Image(systemName: "ellipsis") }
                     .accessibilityLabel("Session menu")
                     .disabled(detail == nil)
                 }
             }
             .sheet(isPresented: $showingInfo) {
-                if let detail { SessionInspector(model: model, session: session, detail: detail) }
+                if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
+                    SessionInspector(model: model, session: session, initialDetail: liveDetail)
+                }
+            }
+            .sheet(isPresented: $showingVoice) {
+                AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
             }
             .task(id: session.id) {
                 let startsAtOldest = ProcessInfo.processInfo.arguments.contains("--preview-reading-top")
@@ -580,7 +591,7 @@ struct IOSComposer: View {
     @State private var showingTurnSettings = false
     @State private var loadedModels: [ModelOption]?
 
-    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer }
+    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     private var canSend: Bool {
@@ -746,10 +757,11 @@ struct IOSMessage: View {
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
-	var bodyLoader: ((TimelineItem) async -> String?)? = nil
+	var bodyLoader: ((TimelineItem) async -> RetainedBodyResult?)? = nil
+    var attachmentLoader: ((TimelineItem) async -> Data?)? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
-	@State private var retainedBody: String?
+	@State private var retainedBody: RetainedBodyResult?
 
     var body: some View {
         if compactContext, let title = TranscriptContext.title(for: item) {
@@ -757,6 +769,8 @@ struct IOSTimelineRow: View {
         } else if item.kind == "message" {
             IOSMessage(label: messageLabel, text: item.text, color: .secondary, timestamp: item.timestamp)
             if item.truncated { shortened }
+        } else if item.kind == "attachment" {
+            AttachmentRow(item: item, loader: attachmentLoader.map { loader in { await loader(item) } })
         } else if item.kind == "toolCall" {
             ToolActivityRow(call: item, results: [], standaloneRecord: true)
         } else if item.kind == "event" {
@@ -798,7 +812,12 @@ struct IOSTimelineRow: View {
                 if item.truncated { shortened }
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
 					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
-				} else if let retainedBody { SessionMarkdown(text: retainedBody, readingStyle: item.kind == "reasoning") }
+				} else if let retainedBody {
+                    SessionMarkdown(text: retainedBody.text, readingStyle: item.kind == "reasoning")
+                    if let error = retainedBody.error {
+                        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.vertical, 4)
         }
@@ -817,6 +836,44 @@ struct IOSTimelineRow: View {
     }
     private var shortened: some View {
         Label("Content shortened by the host", systemImage: "text.badge.ellipsis").font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+struct AttachmentRow: View {
+    let item: TimelineItem
+    let loader: (() async -> Data?)?
+    @State private var data: Data?
+    @State private var attempted = false
+    @State private var retryCount = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let data, let image = Self.downsampledImage(data) {
+                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Label(item.text.isEmpty ? "Image attachment" : item.text, systemImage: "photo").foregroundStyle(.secondary)
+                if attempted, loader != nil { Button("Try again") { retryCount += 1 }.font(.caption) }
+            }
+            if let id = item.callId { Text("Call \(id)").font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+            SessionTimestamp(value: item.timestamp)
+        }
+        .padding(.vertical, 4)
+        .task(id: "\(item.id)-\(retryCount)") {
+            guard let loader, data == nil else { return }
+            attempted = true
+            data = await loader()
+        }
+    }
+
+    private static func downsampledImage(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2048
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
     }
 }
 
@@ -857,9 +914,13 @@ struct SessionSummary: View {
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
-    @ViewBuilder private var context: some View {
-        if let context = detail.context, context.contextWindow > 0 {
-            Text("\(context.windowEstimated == true ? "~" : "")\(Int(context.fraction * 100))% context").monospacedDigit()
+	@ViewBuilder private var context: some View {
+		if let context = detail.context {
+			if let fraction = context.fraction {
+				Text("\(context.windowEstimated == true ? "~" : "")\(Int(fraction * 100))% context").monospacedDigit()
+			} else {
+				Text("\(context.usedTokens.formatted()) tokens").monospacedDigit()
+			}
         }
     }
 }
@@ -867,14 +928,17 @@ struct SessionSummary: View {
 struct SessionInspector: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
-    let detail: SessionDetail
+    let initialDetail: SessionDetail
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
-    @State private var showingVoice = false
+    private var detail: SessionDetail {
+        guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
+        return liveDetail
+    }
     var body: some View {
         NavigationStack {
             List {
-                Section("Session") {
+                Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
@@ -884,17 +948,13 @@ struct SessionInspector: View {
                     if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
                     if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
-                }
-                Section("Voice") {
-                    Button("Call this session", systemImage: "phone.fill") { showingVoice = true }
-                    Text("Starts a Codex Voice call routed to this exact session. During a call, you can transfer back to the Agenthail orchestrator or to another session.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Session").accessibilityIdentifier("session-inspector-anchor")
                 }
                 Section("Context") {
                     if let context = detail.context {
                         LabeledContent("Used tokens", value: context.usedTokens.formatted())
-                        LabeledContent(context.windowEstimated == true ? "Estimated window" : "Context window", value: context.contextWindow > 0 ? context.contextWindow.formatted() : "Unavailable")
+						LabeledContent(context.windowEstimated == true ? "Estimated window" : (context.contextWindowSource == "configured" ? "Configured window" : "Context window"), value: context.contextWindow > 0 ? context.contextWindow.formatted() : "Unavailable")
                         if let value = context.inputTokens { LabeledContent("Input", value: value.formatted()) }
                         if let value = context.cachedInputTokens { LabeledContent("Cached input", value: value.formatted()) }
                         if let value = context.outputTokens { LabeledContent("Output", value: value.formatted()) }
@@ -914,10 +974,54 @@ struct SessionInspector: View {
                         }
                     } label: { Label("Session inbox", systemImage: "tray") }
                 }
-                if let goal = detail.goal, !goal.objective.isEmpty {
-                    Section("Goal") { Text(goal.objective).textSelection(.enabled); LabeledContent("Status", value: goal.status) }
+                if let goal = detail.goal {
+                    Section("Goal") {
+                        if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }
+                        LabeledContent("Status", value: goal.displayStatus)
+                            .foregroundStyle(goal.needsAttention ? .orange : .primary)
+                        if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatGoalDuration(value)) }
+                        if let value = goal.tokensUsed { LabeledContent("Tokens used", value: value.formatted()) }
+                        if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
+                        if let value = goal.createdAt { LabeledContent("Created", value: value) }
+                        if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
+                    }
+                }
+                if let runs = detail.claudeRuns, !runs.isEmpty {
+                    Section("Claude runs") {
+                        ForEach(runs) { run in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(run.jobId).font(.body.weight(.medium)).textSelection(.enabled)
+                                if let state = run.providerState, !state.isEmpty { LabeledContent("Provider state", value: state) }
+                                if let type = run.runType, !type.isEmpty { LabeledContent("Run type", value: type) }
+                                if let updated = run.updatedAt, !updated.isEmpty { LabeledContent("Updated", value: updated) }
+                                if !run.recordPath.isEmpty { Text(run.recordPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
+                if let links = detail.claudeSubagents, !links.isEmpty {
+                    Section("Claude subagents") {
+                        ForEach(links) { link in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
+                if let errors = detail.metadataErrors, !errors.isEmpty {
+                    Section("Metadata warnings") {
+                        ForEach(errors.keys.sorted(), id: \.self) { key in
+                            if let message = errors[key] {
+                                LabeledContent(key, value: message)
+                            }
+                        }
+                    }
                 }
                 Section("Controls") {
+                    if detail.session.runtime?.focusable == true {
+                        Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
+                    }
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
                     else {
                         if detail.capabilities.model {
@@ -944,11 +1048,16 @@ struct SessionInspector: View {
                     }
                 }, reload: { try await model.creationModels(surface: session.surface) })
             }
-            .sheet(isPresented: $showingVoice) {
-                AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
-            }
         }
     }
+}
+
+func formatGoalDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "\(seconds)s" }
+    let minutes = seconds / 60
+    let remainingSeconds = seconds % 60
+    if minutes < 60 { return "\(minutes)m \(remainingSeconds)s" }
+    return "\(minutes / 60)h \(minutes % 60)m"
 }
 
 extension ISO8601DateFormatter {

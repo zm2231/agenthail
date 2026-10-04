@@ -13,6 +13,7 @@ struct NewSessionSheet: View {
     @State private var modelError: String?
     @State private var loading = false
     @State private var claude = ClaudeCreationSettings()
+    @State private var selectedLauncher: String?
     @State private var showingModels = false
     @State private var turnSettings = TurnSettings()
 
@@ -30,6 +31,24 @@ struct NewSessionSheet: View {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
                             Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        let launchers = launchers(for: selectedSurface, options: options)
+                        if !launchers.isEmpty {
+                            Section("Where it runs") {
+                                Picker("Launcher", selection: $selectedLauncher) {
+                                    Text("Use Mac default").tag(String?.none)
+                                    ForEach(launchers) { launcher in
+                                        Text(launcher.available ? launcher.label : "\(launcher.label) (unavailable)")
+                                            .tag(Optional(launcher.id))
+                                            .disabled(!launcher.available)
+                                    }
+                                }
+                                ForEach(launchers.filter { !$0.available }) { launcher in
+                                    if let detail = launcher.detail, !detail.isEmpty {
+                                        Text("\(launcher.label): \(detail)").font(.footnote).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
                         if options.surfaces.first(where: { $0.id == selectedSurface })?.workspace == true {
                             Section("Workspace on your Mac") {
@@ -50,7 +69,7 @@ struct NewSessionSheet: View {
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on your Mac.").font(.footnote).foregroundStyle(.secondary)
                         }
                         if selectedSurface == "codex" {
-                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: true)
+                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher == nil)
                         }
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
@@ -75,11 +94,12 @@ struct NewSessionSheet: View {
                                     }
                                     Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
                                 }
-                            }
+                            }.disabled(selectedLauncher != nil)
                         }
                     }
                 }
                 if let error = model.creationError { Section { Text(error).foregroundStyle(.red) } }
+                if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(.orange) } }
             }
             .disabled(model.creatingSession)
             .navigationTitle("New session")
@@ -88,13 +108,14 @@ struct NewSessionSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(model.creatingSession) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task {
-                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude) { dismiss() }
+                        if await model.createSession(surface: selectedSurface, message: message, cwd: cwd, model: selectedModel, turnSettings: turnSettings, claude: claude, launcher: selectedLauncher) { dismiss() }
                     } } label: {
                         if model.creatingSession { ProgressView() } else { Text("Start") }
-                    }.disabled(model.creatingSession || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }.disabled(model.creatingSession || model.creationWarning != nil || selectedSurface.isEmpty || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .interactiveDismissDisabled(model.creatingSession)
+            .onAppear { model.prepareNewSessionForm() }
             .sheet(isPresented: $showingModels) {
                 SearchableModelSelectionSheet(initialOptions: models, currentSelectedID: selectedModel.isEmpty ? nil : selectedModel, allowsDefault: true, onSelect: { value in
                     selectedModel = value ?? ""
@@ -108,15 +129,24 @@ struct NewSessionSheet: View {
             }
             .task { await load() }
             .task(id: selectedSurface) {
-                models = []; selectedModel = ""; modelError = nil; turnSettings = .init()
+                selectedLauncher = nil
+                models = []; selectedModel = ""; modelError = nil; turnSettings = .init(); claude = .init()
                 guard !selectedSurface.isEmpty else { return }
                 do { let values = try await model.creationModels(surface: selectedSurface); try Task.checkCancellation(); models = values }
                 catch is CancellationError {} catch { modelError = "Models unavailable. You can still use the runtime default." }
+            }
+            .onChange(of: selectedLauncher) { _, launcher in
+                guard launcher != nil else { return }
+                turnSettings = .init()
+                claude = .init()
             }
         }
     }
     private var selectedModelOption: ModelOption? {
         models.first { $0.id == selectedModel } ?? (selectedModel.isEmpty ? models.first { $0.default == true } : nil)
+    }
+    private func launchers(for surface: String, options: SessionCreationOptions) -> [LauncherOption] {
+        options.launchers?.filter { $0.agents.contains(surface) } ?? []
     }
     private func load() async {
         loading = true; error = nil

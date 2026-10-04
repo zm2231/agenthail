@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/skills"
 )
@@ -80,6 +81,10 @@ type Target struct {
 
 type TargetResolver func(context.Context, string) (*Target, error)
 
+type SessionStreamProvider interface {
+	PrepareSessionStream(context.Context, *surface.Session) (sessionstream.Subscription, error)
+}
+
 type State struct {
 	Protocol       int              `json:"protocol"`
 	Session        *surface.Session `json:"session,omitempty"`
@@ -129,6 +134,7 @@ type Service struct {
 	target                  TargetResolver
 	dispatcher              delivery.Dispatcher
 	setOperatorSourceActive func(session *surface.Session, active bool)
+	stream                  SessionStreamProvider
 	operatorSourceActive    bool
 }
 
@@ -141,7 +147,11 @@ func NewWithTargets(path string, provider Provider, register func(surface.Sessio
 }
 
 func NewWithTargetsAndOperatorSource(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool)) *Service {
-	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive}
+	return NewWithTargetsAndOperatorSourceAndStream(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, nil)
+}
+
+func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
+	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream}
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -495,24 +505,40 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	if !target.Adapter.Capabilities().Stream {
 		return errors.New("selected target cannot return correlated voice updates")
 	}
+	var streamSubscription sessionstream.Subscription
+	if s.stream != nil {
+		streamSubscription, err = s.stream.PrepareSessionStream(ctx, target.Session)
+		if err != nil {
+			return fmt.Errorf("prepare target session stream: %w", err)
+		}
+	}
 	s.state.Messages = append(s.state.Messages, a.MessageID)
 	receipt, err := s.dispatcher.DeliverWithoutQueue(ctx, target.Adapter, target.Session, a.Text, "voice:"+v.AttemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: v.Session.ID})
 	if err != nil {
+		if streamSubscription.Cancel != nil {
+			streamSubscription.Cancel()
+		}
 		return err
 	}
 	if receipt.Evidence != surface.EvidenceDelivered {
+		if streamSubscription.Cancel != nil {
+			streamSubscription.Cancel()
+		}
 		s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
 		v.Message = "Target is " + string(receipt.Evidence) + "; no uncorrelated reply will be spoken."
 		return s.save()
 	}
 	if receipt.TurnID == "" || receipt.TurnID == target.Session.ID {
+		if streamSubscription.Cancel != nil {
+			streamSubscription.Cancel()
+		}
 		s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
 		v.Message = "Target did not provide an authoritative turn ID; no uncorrelated reply will be spoken."
 		return s.save()
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
 	attemptID, targetID, turnID := v.AttemptID, target.Session.ID, receipt.TurnID
-	go s.watchDelegation(attemptID, a.MessageID, targetID, turnID)
+	go s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription)
 	return s.save()
 }
 
@@ -557,59 +583,161 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	return nil
 }
 
-func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string) {
+func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string, subscription sessionstream.Subscription) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	s.mu.Lock()
 	if s.target == nil || s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
+		if subscription.Cancel != nil {
+			subscription.Cancel()
+		}
 		s.mu.Unlock()
 		return
 	}
 	target, err := s.target(ctx, targetID)
 	s.mu.Unlock()
 	if err != nil || target == nil || target.Session == nil || target.Adapter == nil {
+		if subscription.Cancel != nil {
+			subscription.Cancel()
+		}
 		if err == nil {
 			err = errors.New("selected target is unavailable")
 		}
 		s.recordDelegationFailure(attemptID, messageID, targetID, err)
 		return
 	}
+	if subscription.Events != nil {
+		defer subscription.Cancel()
+		s.watchJournalDelegation(ctx, attemptID, messageID, target.Session, turnID, subscription)
+		return
+	}
 	finalSpoken := false
 	terminalDone := false
-	interimText := ""
-	err = target.Adapter.Stream(ctx, target.Session, turnID, func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			terminalDone = true
-			return
-		}
-		if event.Kind == "text" && strings.TrimSpace(event.Text) != "" {
-			if event.Final {
-				if finalSpoken {
-					return
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	lastBody := map[string]string{}
+	seenVersion := map[string]uint64{}
+	finalItems := map[string]bool{}
+	var streamFailure error
+	err = target.Adapter.Stream(streamCtx, target.Session, turnID, func(event surface.StreamEvent) {
+		switch event.Class() {
+		case surface.StreamEventTerminal:
+			if event.Failed() {
+				reason := event.Status
+				if reason == "" {
+					reason = "terminal failure"
 				}
-				finalSpoken = true
-				if event.Text == interimText {
-					return
-				}
-				text := event.Text
-				if strings.HasPrefix(text, interimText) {
-					text = strings.TrimPrefix(text, interimText)
-				}
-				if strings.TrimSpace(text) != "" {
-					s.speakDelegation(attemptID, messageID, target.Session, turnID, text, "final")
-				}
+				streamFailure = errors.New(reason)
+				cancelStream()
 				return
 			}
-			interimText += event.Text
-			s.speakDelegation(attemptID, messageID, target.Session, turnID, event.Text, "interim")
+			terminalDone = true
+		case surface.StreamEventMessage:
+			if event.Role != "" && event.Role != "assistant" {
+				return
+			}
+			if event.Final {
+				finalSpoken = true
+			}
+			key := event.ID
+			if key == "" {
+				key = event.ProviderKey
+			}
+			if key != "" {
+				if prior, found := seenVersion[key]; found && event.Version > 0 && prior > 0 && event.Version <= prior {
+					return
+				}
+				seenVersion[key] = event.Version
+			}
+			if event.Final && key != "" {
+				if finalItems[key] {
+					return
+				}
+				finalItems[key] = true
+			}
+			text := event.Text
+			if key != "" {
+				previous := lastBody[key]
+				text = surface.StreamEventDelta(event, previous)
+				if event.Operation == "append" {
+					lastBody[key] = previous + event.Text
+				} else {
+					lastBody[key] = event.Text
+				}
+			}
+			if strings.TrimSpace(text) != "" {
+				stage := "interim"
+				if event.Final {
+					stage = "final"
+				}
+				s.speakDelegation(attemptID, messageID, target.Session, turnID, text, stage)
+			}
 		}
 	}, 5*time.Minute)
+	if streamFailure != nil {
+		s.recordDelegationFailure(attemptID, messageID, targetID, streamFailure)
+		return
+	}
 	if err != nil {
 		s.recordDelegationFailure(attemptID, messageID, targetID, err)
 		return
 	}
 	if !finalSpoken && !terminalDone {
 		s.recordDelegationFailure(attemptID, messageID, targetID, errors.New("selected worker stream ended without an authoritative final"))
+	}
+}
+
+func (s *Service) watchJournalDelegation(ctx context.Context, attemptID, messageID string, target *surface.Session, turnID string, subscription sessionstream.Subscription) {
+	lastBody := map[string]string{}
+	seenVersion := map[string]uint64{}
+	for {
+		select {
+		case <-ctx.Done():
+			s.recordDelegationFailure(attemptID, messageID, target.ID, ctx.Err())
+			return
+		case event, ok := <-subscription.Events:
+			if !ok {
+				s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New("selected worker journal ended before completion"))
+				return
+			}
+			if event.Kind == "source-error" {
+				reason := event.Reason
+				if reason == "" {
+					reason = "selected worker journal source failed"
+				}
+				s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New(reason))
+				return
+			}
+			if event.TurnID != turnID {
+				continue
+			}
+			if prior, found := seenVersion[event.ItemID]; found && ((event.Version > 0 && prior > 0 && event.Version <= prior) || (event.Version == 0 && lastBody[event.ItemID] == event.Body)) {
+				continue
+			}
+			seenVersion[event.ItemID] = event.Version
+			if event.SpokenAssistantContent() {
+				previous := lastBody[event.ItemID]
+				body := event.Body
+				lastBody[event.ItemID] = body
+				delta := body
+				if strings.HasPrefix(body, previous) {
+					delta = strings.TrimPrefix(body, previous)
+				}
+				if strings.TrimSpace(delta) != "" {
+					s.speakDelegation(attemptID, messageID, target, turnID, delta, map[bool]string{true: "final", false: "interim"}[event.Final])
+				}
+			}
+			if event.Terminal() {
+				if event.Failed() {
+					reason := event.Reason
+					if reason == "" {
+						reason = "selected worker journal turn failed"
+					}
+					s.recordDelegationFailure(attemptID, messageID, target.ID, errors.New(reason))
+				}
+				return
+			}
+		}
 	}
 }
 

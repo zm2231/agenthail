@@ -1,11 +1,27 @@
 package registry
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+var ErrSessionJournalEntryTooLarge = errors.New("session journal entry exceeds byte retention")
+
+type SessionJournalHistoryGapError struct {
+	EarliestSeq uint64
+	LatestSeq   uint64
+}
+
+func (e *SessionJournalHistoryGapError) Error() string {
+	return "session journal history cursor is no longer retained"
+}
 
 type SessionJournalEntry struct {
 	SessionID   string
@@ -31,6 +47,168 @@ type SessionJournalWindow struct {
 	Gap         bool
 }
 
+type SessionJournalPage struct {
+	Entries       []SessionJournalEntry
+	NextBefore    uint64
+	LatestSeq     uint64
+	HistoryBefore int64
+}
+
+const (
+	SessionJournalSeedUnknown = "unknown"
+	SessionJournalSeedFailed  = "failed"
+	SessionJournalSeeded      = "succeeded"
+)
+
+func (r *Registry) SessionJournalSeedStatus(sessionID string) (string, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return "", fmt.Errorf("session id is required")
+	}
+	var status string
+	err := r.db.QueryRow(`SELECT seed_status FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return SessionJournalSeedUnknown, nil
+	}
+	return status, err
+}
+
+func (r *Registry) MarkSessionJournalSeed(sessionID string, succeeded bool) error {
+	return r.MarkSessionJournalSeedWithIdentity(sessionID, succeeded, "")
+}
+
+func (r *Registry) MarkSessionJournalSeedWithIdentity(sessionID string, succeeded bool, transcriptIdentity string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("session id is required")
+	}
+	status := SessionJournalSeedFailed
+	if succeeded {
+		status = SessionJournalSeeded
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	seedSeq := uint64(0)
+	if succeeded {
+		var latest sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&latest); err != nil {
+			return err
+		}
+		if latest.Valid && latest.Int64 > 0 {
+			seedSeq = uint64(latest.Int64)
+		}
+		_, err = tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,seed_status,seed_seq,seed_identity) VALUES(?,0,0,?,?,?) ON CONFLICT(session_id) DO UPDATE SET seed_status=excluded.seed_status,seed_seq=excluded.seed_seq,seed_identity=CASE WHEN excluded.seed_identity!='' THEN excluded.seed_identity ELSE session_journal_state.seed_identity END`, sessionID, status, seedSeq, transcriptIdentity)
+	} else {
+		_, err = tx.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,seed_status) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET seed_status=excluded.seed_status`, sessionID, status)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Registry) SessionJournalSeedCheckpoint(sessionID string) (string, uint64, string, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return "", 0, "", fmt.Errorf("session id is required")
+	}
+	var status string
+	var seq int64
+	var identity string
+	err := r.db.QueryRow(`SELECT seed_status,seed_seq,seed_identity FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status, &seq, &identity)
+	if err == sql.ErrNoRows {
+		return SessionJournalSeedUnknown, 0, "", nil
+	}
+	if err != nil {
+		return "", 0, "", err
+	}
+	if seq < 0 {
+		return "", 0, "", fmt.Errorf("invalid session journal seed sequence")
+	}
+	return status, uint64(seq), identity, nil
+}
+
+func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit int) (SessionJournalPage, error) {
+	if strings.TrimSpace(sessionID) == "" || limit < 1 || limit > 200 {
+		return SessionJournalPage{}, fmt.Errorf("invalid journal page request")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return SessionJournalPage{}, err
+	}
+	defer tx.Rollback()
+	var earliest, latest sql.NullInt64
+	if err := tx.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
+		return SessionJournalPage{}, err
+	}
+	var prunedBefore, historyBefore sql.NullInt64
+	if err := tx.QueryRow(`SELECT pruned_before,history_before FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&prunedBefore, &historyBefore); err != nil && err != sql.ErrNoRows {
+		return SessionJournalPage{}, err
+	}
+	if before > 0 {
+		historyUnknown := !historyBefore.Valid || historyBefore.Int64 < 0
+		if !earliest.Valid || (prunedBefore.Valid && uint64(prunedBefore.Int64) >= before-1) || (historyUnknown && before <= uint64(earliest.Int64)) {
+			var earliestSeq, latestSeq uint64
+			if earliest.Valid {
+				earliestSeq = uint64(earliest.Int64)
+			}
+			if latest.Valid {
+				latestSeq = uint64(latest.Int64)
+			}
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+		}
+		earliestSeq, latestSeq := uint64(earliest.Int64), uint64(latest.Int64)
+		if before < earliestSeq-1 {
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+		}
+	}
+	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, limit+1)
+	if err != nil {
+		return SessionJournalPage{}, err
+	}
+	defer rows.Close()
+	entries := make([]SessionJournalEntry, 0, limit+1)
+	for rows.Next() {
+		entry, err := scanSessionJournalEntry(rows)
+		if err != nil {
+			return SessionJournalPage{}, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return SessionJournalPage{}, err
+	}
+	var next uint64
+	if len(entries) > limit {
+		entries = entries[:limit]
+		next = entries[len(entries)-1].Seq
+	} else if ((prunedBefore.Valid && prunedBefore.Int64 > 0) || !historyBefore.Valid || historyBefore.Int64 < 0) && len(entries) > 0 && entries[len(entries)-1].Seq == uint64(earliest.Int64) {
+		next = entries[len(entries)-1].Seq
+	}
+	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
+		entries[left], entries[right] = entries[right], entries[left]
+	}
+	if err := rows.Close(); err != nil {
+		return SessionJournalPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return SessionJournalPage{}, err
+	}
+	page := SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latest.Int64)}
+	if next == 0 && (!prunedBefore.Valid || prunedBefore.Int64 == 0) && historyBefore.Valid && historyBefore.Int64 > 0 {
+		page.HistoryBefore = historyBefore.Int64
+	}
+	return page, nil
+}
+
+func (r *Registry) RecordSessionJournalHistoryBoundary(sessionID string, before int64) error {
+	if strings.TrimSpace(sessionID) == "" || before < 0 {
+		return fmt.Errorf("invalid session journal history boundary")
+	}
+	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,history_before) SELECT ?,0,0,? WHERE NOT EXISTS (SELECT 1 FROM session_journal WHERE session_id=? AND kind<>'source-error') ON CONFLICT(session_id) DO UPDATE SET history_before=CASE WHEN session_journal_state.history_before<0 AND session_journal_state.pruned_before=0 THEN excluded.history_before ELSE session_journal_state.history_before END`, sessionID, before, sessionID)
+	return err
+}
+
 func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, bool, error) {
 	if strings.TrimSpace(input.SessionID) == "" || strings.TrimSpace(input.Kind) == "" {
 		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry requires session and kind")
@@ -45,9 +223,9 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 	}
 	input.Payload = append([]byte(nil), input.Payload...)
 	input.FullBody = append([]byte(nil), input.FullBody...)
-	input.Bytes = len(input.Payload)
+	input.Bytes = len(input.Payload) + len(input.FullBody)
 	if input.Bytes > retention.Bytes {
-		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry exceeds byte retention")
+		return SessionJournalEntry{}, false, fmt.Errorf("%w: %d > %d", ErrSessionJournalEntryTooLarge, input.Bytes, retention.Bytes)
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -71,6 +249,13 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			return SessionJournalEntry{}, false, err
 		}
 		if found {
+			existingBody, existingBodyFound, err := sessionJournalBody(tx, existing)
+			if err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			if sameSessionJournalContent(existing, input, existingBody, existingBodyFound) {
+				return existing, false, tx.Commit()
+			}
 			if existing.BodyRef != "" && existing.BodyRef != input.BodyRef {
 				if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref=?`, input.SessionID, existing.BodyRef); err != nil {
 					return SessionJournalEntry{}, false, err
@@ -88,7 +273,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
-			return input, false, tx.Commit()
+			return input, true, tx.Commit()
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
@@ -104,6 +289,46 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		return SessionJournalEntry{}, false, err
 	}
 	return input, true, tx.Commit()
+}
+
+func sameSessionJournalContent(existing, input SessionJournalEntry, existingBody []byte, existingBodyFound bool) bool {
+	if existing.Kind != input.Kind || !sameSessionJournalPayload(existing.Payload, input.Payload) {
+		return false
+	}
+	if (existing.BodyRef == "") != (input.BodyRef == "") {
+		return false
+	}
+	if existing.BodyRef != "" && !existingBodyFound {
+		return false
+	}
+	return bytes.Equal(existingBody, input.FullBody)
+}
+
+func sameSessionJournalPayload(existing, input []byte) bool {
+	if bytes.Equal(existing, input) {
+		return true
+	}
+	var existingObject, inputObject map[string]any
+	if json.Unmarshal(existing, &existingObject) != nil || json.Unmarshal(input, &inputObject) != nil {
+		return false
+	}
+	delete(existingObject, "bodyRef")
+	delete(inputObject, "bodyRef")
+	return reflect.DeepEqual(existingObject, inputObject)
+}
+
+func sessionJournalBody(q interface{ QueryRow(string, ...any) *sql.Row }, entry SessionJournalEntry) ([]byte, bool, error) {
+	if entry.BodyRef == "" {
+		return nil, true, nil
+	}
+	var body []byte
+	if err := q.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, entry.SessionID, entry.BodyRef).Scan(&body); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return body, true, nil
 }
 
 func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int) (SessionJournalWindow, error) {
@@ -146,6 +371,17 @@ type sessionJournalRow interface {
 	Scan(...any) error
 }
 
+func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey string) (SessionJournalEntry, bool, error) {
+	entry, found, err := sessionJournalByProviderKey(r.db, sessionID, providerKey)
+	if err != nil || !found || entry.BodyRef == "" {
+		return entry, found, err
+	}
+	if err := r.db.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, entry.BodyRef).Scan(&entry.FullBody); err != nil && err != sql.ErrNoRows {
+		return SessionJournalEntry{}, false, err
+	}
+	return entry, true, nil
+}
+
 func sessionJournalByProviderKey(q interface{ QueryRow(string, ...any) *sql.Row }, sessionID, providerKey string) (SessionJournalEntry, bool, error) {
 	entry, err := scanSessionJournalEntry(q.QueryRow(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND provider_key=?`, sessionID, providerKey))
 	if err == sql.ErrNoRows {
@@ -183,7 +419,14 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 		if count <= retention.Count && bytes <= retention.Bytes {
 			return refreshSessionJournalState(tx, sessionID)
 		}
-		if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND seq=(SELECT seq FROM session_journal WHERE session_id=? ORDER BY seq LIMIT 1)`, sessionID, sessionID); err != nil {
+		var prunedSeq int64
+		if err := tx.QueryRow(`SELECT seq FROM session_journal WHERE session_id=? ORDER BY seq LIMIT 1`, sessionID).Scan(&prunedSeq); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND seq=?`, sessionID, prunedSeq); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?) WHERE session_id=?`, prunedSeq, sessionID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref NOT IN (SELECT body_ref FROM session_journal WHERE session_id=? AND body_ref!='')`, sessionID, sessionID); err != nil {
@@ -207,17 +450,27 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(ref) == "" || start < 0 || end < start {
 		return nil, 0, fmt.Errorf("invalid session journal body range")
 	}
+	if start == int(^uint(0)>>1) || end-start == int(^uint(0)>>1) {
+		return nil, 0, fmt.Errorf("invalid session journal body range")
+	}
 	var body []byte
-	if err := r.db.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, ref).Scan(&body); err != nil {
+	var total int
+	if err := r.db.QueryRow(`SELECT length(body),substr(body,?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`, start+1, end-start+1, sessionID, ref).Scan(&total, &body); err != nil {
 		return nil, 0, err
 	}
-	if start > len(body) {
+	if start > total {
 		return nil, 0, fmt.Errorf("session journal body range is outside the retained body")
 	}
-	if end > len(body) {
-		end = len(body)
+	if start < total && len(body) > 0 && !utf8.RuneStart(body[0]) {
+		return nil, 0, fmt.Errorf("session journal body range starts inside a UTF-8 code point")
 	}
-	return append([]byte(nil), body[start:end]...), len(body), nil
+	if end > total {
+		end = total
+	}
+	for end > start && end < total && !utf8.RuneStart(body[end-start]) {
+		end--
+	}
+	return append([]byte(nil), body[:end-start]...), total, nil
 }
 
 func refreshSessionJournalState(tx *sql.Tx, sessionID string) error {

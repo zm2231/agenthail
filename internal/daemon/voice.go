@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/voice"
@@ -31,13 +31,28 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	if err != nil {
 		provider = nil
 	}
-	s := voice.NewWithTargetsAndOperatorSource(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, delivery.Dispatcher{Registry: d.Registry}, func(session *surface.Session, active bool) {
+	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, d.dispatcher(), func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")
-	})
+	}, daemonVoiceStreamProvider{daemon: d})
 	mux.HandleFunc("/api/v1/voice", d.voiceBearerGuard(dashboard, voiceHandler(s)))
 	mux.HandleFunc("/api/v1/voice/peer", d.voiceBearerGuard(dashboard, voicePeerHandler))
 	mux.HandleFunc("/api/voice", dashboard.guard(dashboardVoiceHandler(s, dashboard.token)))
 	mux.HandleFunc("/voice-peer.js", dashboard.guard(voicePeerScriptHandler))
+}
+
+type daemonVoiceStreamProvider struct {
+	daemon *Daemon
+}
+
+func (p daemonVoiceStreamProvider) PrepareSessionStream(ctx context.Context, session *surface.Session) (sessionstream.Subscription, error) {
+	if p.daemon == nil || session == nil {
+		return sessionstream.Subscription{}, fmt.Errorf("voice session source is unavailable")
+	}
+	adapter := p.daemon.surfaceForKind(session.Surface)
+	if adapter == nil {
+		return sessionstream.Subscription{}, fmt.Errorf("voice session source has no adapter")
+	}
+	return p.daemon.sources.prepareStream(ctx, session, adapter)
 }
 
 func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voice.Target, error) {

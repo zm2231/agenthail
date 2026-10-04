@@ -160,6 +160,34 @@ func TestOpenAddsQueueOperationToExistingDatabase(t *testing.T) {
 	}
 }
 
+func TestOpenAddsDeliveryDismissedAtToExistingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-delivery.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.Exec(`ALTER TABLE delivery_intents DROP COLUMN dismissed_at; PRAGMA user_version=8`); err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	var dismissedAt sql.NullString
+	if err := second.db.QueryRow(`SELECT dismissed_at FROM delivery_intents LIMIT 1`).Scan(&dismissedAt); err != sql.ErrNoRows {
+		t.Fatalf("dismissed_at query err=%v", err)
+	}
+	var version int
+	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("version=%d err=%v", version, err)
+	}
+}
+
 func TestQueueCompactIsTypedAndDeduplicated(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
@@ -373,7 +401,7 @@ func TestRegisterSessionMergesResumedClaudeIdentity(t *testing.T) {
 
 func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	r := openTestRegistry(t)
-	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1784424580603)}
+	want := surface.Session{ID: "full", Surface: surface.KindClaude, Name: "writer", Cwd: "/tmp/project", PID: 42, Status: surface.StatusBusy, Transcript: "/tmp/thread.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", ConfiguredModel: "claude-opus-5-5[1m]", LastActive: time.UnixMilli(1784424580603)}
 	if err := r.RegisterSession(want); err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +409,7 @@ func TestSessionReturnsCompleteRegisteredSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal || got.Source != want.Source || got.Transport != want.Transport || !got.LastActive.Equal(want.LastActive) {
+	if got.ID != want.ID || got.Surface != want.Surface || got.Name != want.Name || got.Cwd != want.Cwd || got.PID != want.PID || got.Status != want.Status || got.Transcript != want.Transcript || got.HasLocal != want.HasLocal || got.Source != want.Source || got.Transport != want.Transport || got.ConfiguredModel != want.ConfiguredModel || !got.LastActive.Equal(want.LastActive) {
 		t.Fatalf("session=%+v want=%+v", got, want)
 	}
 }
@@ -711,7 +739,10 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,?,?)`, "s", id, "Delivery outcome could not be confirmed", "Retry or cancel this message"); err != nil {
+	if _, err := r.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := r.ListQueue(false)
@@ -1106,12 +1137,89 @@ func TestAttentionItemsRefreshLegacyUnknownHTTPRecovery(t *testing.T) {
 	if err := r.DeadLetterUnknown(item.ID, errors.New("send failed (HTTP 404): session not found")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.db.Exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,?,?)`, "s", item.ID, "Delivery outcome could not be confirmed", "Retry or cancel this message"); err != nil {
-		t.Fatal(err)
-	}
 	items, err := r.ListAttentionItems(false)
 	if err != nil || len(items) != 1 || items[0].Reason != "Delivery target is unavailable" || items[0].RequestedAction != "Cancel and send this message to an available session" {
 		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
+
+func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s", "sender")
+	id, deliveryID, err := r.QueueDeliveryWithIntent("s", "expired snapshot", "expired-snapshot", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, time.Now().Add(-time.Second).UnixMilli(), id); err != nil {
+		t.Fatal(err)
+	}
+	beforeHistory, err := r.ListHistory(20, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRow, err := r.QueueItem(id)
+	if err != nil || beforeRow.Status != "pending" {
+		t.Fatalf("before row=%+v err=%v", beforeRow, err)
+	}
+	beforeDelivery, err := r.DeliveryIntent(deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := r.ListQueue(false); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
+		t.Fatalf("expired current snapshot=%+v err=%v", rows, err)
+	}
+	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
+		t.Fatalf("attention snapshot=%+v err=%v", items, err)
+	}
+	afterRow, err := r.QueueItem(id)
+	if err != nil || afterRow.Status != "pending" {
+		t.Fatalf("after row=%+v err=%v", afterRow, err)
+	}
+	afterDelivery, err := r.DeliveryIntent(deliveryID)
+	if err != nil || afterDelivery.Status != beforeDelivery.Status || afterDelivery.Failure != beforeDelivery.Failure || afterDelivery.NotificationQueueID != beforeDelivery.NotificationQueueID {
+		t.Fatalf("delivery intent changed before=%+v after=%+v err=%v", beforeDelivery, afterDelivery, err)
+	}
+	afterHistory, err := r.ListHistory(20, "")
+	if err != nil || len(afterHistory) != len(beforeHistory) {
+		t.Fatalf("history changed before=%+v after=%+v err=%v", beforeHistory, afterHistory, err)
+	}
+	if _, err := r.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := r.QueueItem(id)
+	if err != nil || expired.Status != "expired" {
+		t.Fatalf("background expiry row=%+v err=%v", expired, err)
+	}
+	history, err := r.ListHistory(20, "")
+	if err != nil || len(history) != len(beforeHistory)+1 || history[0].Kind != "expired" {
+		t.Fatalf("background expiry history=%+v err=%v", history, err)
+	}
+}
+
+func TestListAttentionSnapshotDoesNotReconcileDeadQueue(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "s")
+	id, err := r.QueueMessageWithKey("s", "dead snapshot", "dead-snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`UPDATE message_queue SET status='dead',last_error=? WHERE id=?`, "delivery failed", id); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.ListAttentionItems(false)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("GET reconciled attention=%+v err=%v", items, err)
+	}
+	var count int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM attention_items WHERE queue_id=?`, id).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("attention rows=%d err=%v", count, err)
+	}
+	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	items, err = r.ListAttentionItems(false)
+	if err != nil || len(items) != 1 || items[0].QueueID != id {
+		t.Fatalf("writer reconciliation=%+v err=%v", items, err)
 	}
 }
 
@@ -1133,6 +1241,54 @@ func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 	}
 	if item, err := r.ClaimNextMessage("s", time.Now()); err != nil || item != nil {
 		t.Fatalf("canceled item claimed: item=%+v err=%v", item, err)
+	}
+}
+
+func TestSteerClaimSkipsOlderExplicitQueueWithoutReorderingIt(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusBusy}); err != nil {
+		t.Fatal(err)
+	}
+	queueID, err := r.QueueMessageWithOptions("target", "explicit queue", "", surface.SendOptions{BusyDelivery: "queue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerID, err := r.QueueMessageWithOptions("target", "busy steer", "", surface.SendOptions{BusyDelivery: "steer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steer, err := r.ClaimNextSteerMessage("target", time.Now())
+	if err != nil || steer == nil || steer.ID != steerID {
+		t.Fatalf("steer=%+v err=%v", steer, err)
+	}
+	if err := r.AckMessage(steer.ID); err != nil {
+		t.Fatal(err)
+	}
+	queue, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || queue == nil || queue.ID != queueID || queue.Message != "explicit queue" {
+		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+}
+
+func TestSteerQueueNormalizesOptionsAndExcludesThemFromSteerClaims(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusBusy}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueRelayMessageWithOptions("target", "optioned steer", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.QueueItem(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.BusyDelivery != "queue" || item.Model != "model-a" || item.Effort != "high" {
+		t.Fatalf("normalized queue item=%+v", item)
+	}
+	steer, err := r.ClaimNextSteerMessage("target", time.Now())
+	if err != nil || steer != nil {
+		t.Fatalf("option-bearing item was steer-claimable: item=%+v err=%v", steer, err)
 	}
 }
 

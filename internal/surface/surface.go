@@ -26,17 +26,27 @@ const (
 )
 
 type Session struct {
-	ID         string        `json:"id"`
-	Surface    SurfaceKind   `json:"surface"`
-	Name       string        `json:"name"`
-	Cwd        string        `json:"cwd"`
-	PID        int           `json:"pid"`
-	Status     SessionStatus `json:"status"`
-	Transcript string        `json:"transcript"`
-	HasLocal   bool          `json:"hasLocal"`
-	Source     string        `json:"source,omitempty"`
-	Transport  string        `json:"transport,omitempty"`
-	LastActive time.Time     `json:"lastActive"`
+	ID                    string        `json:"id"`
+	Surface               SurfaceKind   `json:"surface"`
+	Name                  string        `json:"name"`
+	Cwd                   string        `json:"cwd"`
+	PID                   int           `json:"pid"`
+	Status                SessionStatus `json:"status"`
+	Transcript            string        `json:"transcript"`
+	HasLocal              bool          `json:"hasLocal"`
+	Source                string        `json:"source,omitempty"`
+	Transport             string        `json:"transport,omitempty"`
+	ConfiguredModel       string        `json:"configuredModel,omitempty"`
+	LastActive            time.Time     `json:"lastActive"`
+	Runtime               *Runtime      `json:"runtime,omitempty"`
+	StreamCursor          uint64        `json:"-"`
+	StreamCursorSet       bool          `json:"-"`
+	TranscriptOffset      int64         `json:"-"`
+	TranscriptOffsetSet   bool          `json:"-"`
+	TranscriptIdentity    string        `json:"-"`
+	CodexPendingEventUser bool          `json:"-"`
+	CodexPendingEventTurn string        `json:"-"`
+	CodexCurrentTurnID    string        `json:"-"`
 }
 
 type SessionSearchResult struct {
@@ -50,6 +60,14 @@ type SessionSearcher interface {
 
 type ReadinessChecker interface {
 	Ready(ctx context.Context) error
+}
+
+type StreamCursorReader interface {
+	StreamCursor(context.Context, *Session) (uint64, error)
+}
+
+type LocalTranscriptProvider interface {
+	RequiresLocalTranscript(*Session) bool
 }
 
 func IsReadOnlySession(session *Session) bool {
@@ -205,6 +223,7 @@ type SendOptions struct {
 	TurnOptions
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	BusyDelivery    string `json:"busyDelivery,omitempty"`
 }
 
 type sourceSessionIDContextKey struct{}
@@ -247,6 +266,9 @@ type SessionAccessChecker interface {
 }
 
 func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) error {
+	if err := ValidateRuntimeTransport(sess); err != nil {
+		return err
+	}
 	if checker, ok := adapter.(SessionAccessChecker); ok {
 		if err := checker.EnsureWritable(ctx, sess); err != nil {
 			return err
@@ -318,22 +340,73 @@ type Exchange struct {
 	Source    string    `json:"source,omitempty"`
 }
 
-type GoalState struct {
-	Objective string `json:"objective"`
-	Status    string `json:"status"` // "active", "complete", ""
+type StreamEvent struct {
+	Role             string        `json:"role,omitempty"`
+	Title            string        `json:"title,omitempty"`
+	Status           string        `json:"status,omitempty"`
+	CallID           string        `json:"callId,omitempty"`
+	Attachment       *Attachment   `json:"attachment,omitempty"`
+	Truncated        bool          `json:"truncated,omitempty"`
+	TruncationReason string        `json:"truncationReason,omitempty"`
+	ID               string        `json:"id,omitempty"`
+	ProviderKey      string        `json:"providerKey,omitempty"`
+	Cursor           uint64        `json:"cursor,omitempty"`
+	Version          uint64        `json:"version,omitempty"`
+	Operation        string        `json:"operation,omitempty"`
+	Final            bool          `json:"final,omitempty"`
+	TurnID           string        `json:"turnId,omitempty"`
+	Timestamp        time.Time     `json:"timestamp,omitempty"`
+	Kind             string        `json:"kind"`
+	Text             string        `json:"text"`
+	Context          *ContextUsage `json:"context,omitempty"`
+	Goal             *GoalState    `json:"goal,omitempty"`
 }
 
-type StreamEvent struct {
-	ID          string        `json:"id,omitempty"`
-	ProviderKey string        `json:"providerKey,omitempty"`
-	Version     uint64        `json:"version,omitempty"`
-	Operation   string        `json:"operation,omitempty"`
-	Final       bool          `json:"final,omitempty"`
-	TurnID      string        `json:"turnId,omitempty"`
-	Timestamp   time.Time     `json:"timestamp,omitempty"`
-	Kind        string        `json:"kind"`
-	Text        string        `json:"text"`
-	Context     *ContextUsage `json:"context,omitempty"`
+type StreamEventClass string
+
+const (
+	StreamEventMessage    StreamEventClass = "message"
+	StreamEventToolCall   StreamEventClass = "tool_call"
+	StreamEventToolResult StreamEventClass = "tool_result"
+	StreamEventTerminal   StreamEventClass = "terminal"
+	StreamEventOther      StreamEventClass = "other"
+)
+
+func (e StreamEvent) Class() StreamEventClass {
+	switch e.Kind {
+	case "text", "message", "assistant":
+		return StreamEventMessage
+	case "tool_use", "toolCall", "tool_call":
+		return StreamEventToolCall
+	case "tool_result", "toolResult":
+		return StreamEventToolResult
+	case "done", "source-error":
+		return StreamEventTerminal
+	default:
+		return StreamEventOther
+	}
+}
+
+func (e StreamEvent) Failed() bool {
+	if e.Class() != StreamEventTerminal {
+		return false
+	}
+	switch e.Status {
+	case "failed", "error", "cancelled", "canceled":
+		return true
+	default:
+		return e.Kind == "source-error"
+	}
+}
+
+func StreamEventDelta(event StreamEvent, previous string) string {
+	if event.Operation == "append" {
+		return event.Text
+	}
+	if strings.HasPrefix(event.Text, previous) {
+		return strings.TrimPrefix(event.Text, previous)
+	}
+	return event.Text
 }
 
 type ContextUsage struct {
@@ -351,11 +424,26 @@ type ContextUsage struct {
 	PostCompactTokens     int64     `json:"postCompactTokens,omitempty"`
 	ReclaimedTokens       int64     `json:"reclaimedTokens,omitempty"`
 	WindowEstimated       bool      `json:"windowEstimated,omitempty"`
+	ContextWindowSource   string    `json:"contextWindowSource,omitempty"`
 	UpdatedAt             time.Time `json:"updatedAt,omitempty"`
 }
 
 type ContextUsageProvider interface {
 	ContextUsage(ctx context.Context, sess *Session) (*ContextUsage, error)
+}
+
+// GoalUpdate is the typed control payload supported by Codex thread/goal/set.
+// A nil field is omitted, except ClearTokenBudget, which explicitly sends a
+// JSON null token budget.
+type GoalUpdate struct {
+	Objective        *string `json:"objective,omitempty"`
+	Status           *string `json:"status,omitempty"`
+	TokenBudget      *int64  `json:"tokenBudget,omitempty"`
+	ClearTokenBudget bool    `json:"-"`
+}
+
+type GoalController interface {
+	UpdateGoal(context.Context, *Session, GoalUpdate) error
 }
 
 type Capabilities struct {
@@ -377,7 +465,7 @@ type SessionCapabilities struct {
 
 func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
 	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
-		capabilities.Stream = false
+		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
 		if !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_") {
 			capabilities.Steer = false
 			capabilities.Compact = false
@@ -455,6 +543,8 @@ func truncate(s string, n int) string {
 func TruncateString(s string, n int) string { return truncate(s, n) }
 
 var ErrUnsupported = errUnsupported{}
+
+var ErrStreamWindow = errors.New("stream window elapsed")
 
 type errUnsupported struct{}
 

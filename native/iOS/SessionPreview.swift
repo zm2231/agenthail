@@ -12,7 +12,12 @@ struct SessionPreview: View {
         let capture = SessionCapture.current
         let snapshot = try! decoder.decode(DashboardSnapshot.self, from: Data((capture?.snapshotJSON ?? Self.snapshotJSON).utf8))
         let capturedDetail = capture.flatMap { $0.detailJSON[$0.initialSessionID] }
-        let detail = try! decoder.decode(SessionDetail.self, from: Data((capturedDetail ?? Self.previewDetailJSON).utf8))
+        var detail = try! decoder.decode(SessionDetail.self, from: Data((capturedDetail ?? Self.previewDetailJSON).utf8))
+        if ProcessInfo.processInfo.arguments.contains("--preview-app") || ProcessInfo.processInfo.arguments.contains("--preview-metadata"),
+           let metadata = try? decoder.decode(SessionMetadata.self, from: Data(Self.previewMetadataJSON.utf8)) {
+            detail.claudeRuns = metadata.claudeRuns
+            detail.claudeSubagents = metadata.claudeSubagents
+        }
         self.detail = detail
         session = snapshot.sessions.first(where: { $0.id == detail.session.id }) ?? SessionState(
             id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias,
@@ -40,7 +45,7 @@ struct SessionPreview: View {
         } else if ProcessInfo.processInfo.arguments.contains("--preview-new") {
             NewSessionSheet(model: model)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-inspector") {
-            SessionInspector(model: model, session: session, detail: detail)
+            SessionInspector(model: model, session: session, initialDetail: detail)
         } else if ProcessInfo.processInfo.arguments.contains("--preview-workspace") {
             ConversationFlow(model: model, initialSessionID: session.id).tint(SessionStyle.accent)
         } else {
@@ -86,9 +91,12 @@ struct SessionPreview: View {
 
     nonisolated static let queueJSON = #"{"items":[{"id":1,"sessionId":"demo","target":"Make the build reliable","message":"Keep the regression check with the fix.","status":"pending","evidence":"queued","attempts":0,"queuedAt":"2026-09-12 04:00:00"},{"id":2,"sessionId":"codex-demo","target":"Review the release pipeline","message":"Verify the signing step before the next release.","status":"dead","evidence":"unknown","attempts":1,"lastError":"Delivery outcome is unknown. Check the session before retrying.","queuedAt":"2026-09-11 18:20:00"},{"id":3,"sessionId":"saved-demo","target":"Map the application architecture","message":"Old release reminder","status":"expired","evidence":"expired","attempts":0,"queuedAt":"2026-09-09 11:00:00"}]}"#
 
+    nonisolated static let previewMetadataJSON = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
+
     nonisolated static let detailJSON = #"""
     {
       "session":{"id":"demo","surface":"claude","name":"Make the build reliable","status":"busy","lastActive":"2026-09-07T12:05:00Z","cwd":"/Users/demo/projects/fieldnotes","source":"cli","transport":"local"},
+      "journalSeq":2048,
       "exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":true,"compact":true,"model":true,"interrupt":true,"steer":true},
       "readOnly":false,"readOnlyReason":"","model":"Claude Sonnet",
       "models":[{"id":"sonnet","displayName":"Claude Sonnet"},{"id":"opus","displayName":"Claude Opus"}],
@@ -136,6 +144,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
+        case "/api/v1/session-metadata": body = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#
         case "/api/v1/session":
             let id = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value ?? "demo"
             body = SessionPreview.previewDetailJSON.replacingOccurrences(of: "\"id\":\"demo\"", with: "\"id\":\"\(id)\"")

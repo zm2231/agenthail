@@ -2,7 +2,7 @@
 
 Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
 
-The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means a post-dispatch response could not be confirmed. A `submitted` receipt carries a `deliveryId` only when Agenthail durably recorded a sender-bound intent; without a resolved sender, no intent is recorded and the receipt has no `deliveryId`. Channel sends count `submitted` members separately from `sent` and `queued`. `submitted` is not acceptance, delivery, failure, or permission to retry. Evidence in Inbox and history remains `submitted`, `queued`, `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, or `canceled`. `transport_accepted` is deliberately weaker than `delivered`; for a Claude peer it means the authenticated socket accepted the frame, while receiver policy and model completion remain pending. `reply_observed` is emitted only after Agenthail reads the completed reply. User interfaces must not relabel either state as a completed delivery.
+The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, and `canceled`. Socket acceptance never proves model completion.
 
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
@@ -24,28 +24,33 @@ newest page is returned first, text and JSON identify the source, and JSON
 includes `nextBefore`. A page holds at most `count` exchanges and the activity
 recorded alongside them, and `nextBefore` addresses the record before the oldest
 exchange on the page, so `--before <nextBefore>` reads the preceding page with
-no gap.
-Claude reads the bounded local transcript page and groups exchanges by turn, so
-a reply that spans several text blocks around tool calls is one exchange with
-its full text. Codex reads the newest page from the native app-server RPC
-first; when that bounded read fails it falls back to the local transcript page
-and reports the RPC failure as a `warning`, and when no transcript exists either
-the RPC failure is part of `readError`. Phone session detail uses the same
-reader and cursor; timeline items always come from the local transcript. A read
-failure never resends a message.
+no gap. Past the oldest journal entry, the cursor continues into the provider
+history recorded at seed time.
+With the daemon running, phone detail, `last`, and `reply` read the same bounded
+per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
+error does not fall back to a second provider reader. Metadata loads independently.
+The shared session source seeds and updates the journal rather than each viewer
+reading the provider. Only when the daemon is offline does the CLI use the bounded
+provider reader: Claude reads its local transcript, and Codex tries its native
+RPC then its local transcript. The source and any read warning remain explicit.
+A read failure never resends a message.
 
-The daemon's retained event journal is the single live-update producer.
-`/api/v1/events` is a replayable SSE view over that journal; consumers use an
-event as an invalidation signal and fetch the bounded session page they need.
-Agenthail does not run a second per-connection session poller or publish a
-separate `/session-stream` contract.
+The shared session source writes a retained journal for each session.
+`/api/v1/session-stream` replays that journal using its session cursor;
+`/api/v1/catalog-events` publishes catalog changes using a separate catalog
+cursor. `/api/v1/events` retains the general event view. None of these viewers
+starts a separate provider poller. See [session stream and catalog](session-stream-catalog.md)
+for paging, replay, gaps and source lifetime.
 
-Busy-target behavior is explicit: `send` delivers immediately when idle and queues
-when busy; `send --no-queue` refuses delayed delivery. `queue` always creates the
-durable pending item, and `agenthail daemon start` is the runnable continuation
-when the daemon is down. `steer` affects an active turn only; use `send` for an
-idle target. Read-only targets fail before dispatch. An unknown delivery outcome
-must be inspected before an explicit retry; it is never resent automatically.
+Busy-target behavior is explicit: `send` delivers immediately when idle and follows
+the persisted `busyDelivery` setting (`queue` by default, or `steer` when the
+target advertises steering) when busy. A steer-policy target without steering
+capability is queued instead. `send --no-queue` refuses delayed delivery, while
+`queue` always creates the durable pending item and `steer` is an explicit active-
+turn control. The setting is exposed by the dashboard/API settings endpoint and
+the existing dashboard settings write path. Read-only targets fail before
+dispatch. An unknown delivery outcome must be inspected before an explicit retry;
+it is never resent automatically.
 
 ## Claude background sessions
 
@@ -78,7 +83,7 @@ Claude assigns the background ID. Agenthail parses that ID from the native launc
 
 Status, logs, stop and resume operate only on native background records. A registered alias or `claude:<full-session-id>` can address a stopped session. Resume is a no-op when the native catalog reports working, running, starting or blocked. Otherwise it invokes `--bg --resume` and checks the returned identity. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Destructive removal is not exposed.
 
-Creation and mutations with an uncertain response are reported as unknown. Inspect native `claude agents --json --all` before retrying an uncertain launch. Agenthail does not automatically repeat it.
+If creation returns a session, that session is registered before the initial-turn result is reported. An ambiguous initial-turn outcome records a durable `delivery_intents` row targeting that session and returns a neutral, non-retryable `submitted` result with its `deliveryId`; no automatic retry occurs. A definitive initial-turn failure records a failed delivery problem and returns a typed failure while preserving the created session. If the session identity is absent, or the durable intent cannot be recorded, the result is an explicit bounded failure rather than an `unknown` receipt; inspect the native catalog before any explicit retry.
 
 ## Codex forks
 
@@ -130,7 +135,7 @@ Turn settings survive the durable Agenthail queue, retries and daemon replay eve
 - `native-queue`: `sessionId`, `nativeQueue: {queueAction, message, queuedSubmissionId, clientUserMessageId, queuedSubmissionIds, cursor}`.
 - `session-lifecycle-status`, `session-lifecycle-logs`, `session-lifecycle-stop`, `session-lifecycle-resume`: `sessionId`.
 
-Optional fields may be omitted. Fork, queue and lifecycle successes return `{ok: true, result: ...}`; failures return `{ok: false, unknown, error}`. Creation retains its existing session/result envelope, including unknown launch outcomes without a confirmed session. CLI fork, queue and lifecycle successes print JSON even without `--json`. With `--json`, operation failures also emit a JSON error object on stdout and return a nonzero exit status; the CLI writes its diagnostic to stderr.
+Optional fields may be omitted. Fork, queue and lifecycle successes return `{ok: true, result: ...}`; failures return `{ok: false, unknown, error}`. An ambiguous session creation returns HTTP `202` and `{ok:true,status:"submitted",accepted:true,retryable:false,session,deliveryId,detail:"Submitted to <target>."}`; the CLI JSON shape uses the same status fields and exits successfully, while human output is exactly `Submitted to <target>.`. Definitive initial-turn failures return `{ok:false,status:"failed",retryable:false,session,deliveryId,error}` and remain non-retryable. Creation without a known session or without a durable intent is an explicit failure and is never represented as an accepted receipt. CLI fork, queue and lifecycle successes print JSON even without `--json`. With `--json`, operation failures also emit a JSON error object on stdout and return a nonzero exit status; the CLI writes its diagnostic to stderr.
 
 ## Verification boundary
 

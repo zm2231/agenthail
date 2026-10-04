@@ -136,7 +136,7 @@ func (c *Claude) Models(ctx context.Context) ([]surface.ModelOption, error) {
 }
 
 func (c *Claude) loadModels(ctx context.Context) ([]surface.ModelOption, error) {
-	binary, err := claudeBinary(c.home)
+	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
 		return nil, err
 	}

@@ -31,6 +31,11 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+      - name: Session journal browser tests
+        run: |
+          node scripts/test-session-journal.mjs
+          node scripts/test-dashboard-idempotency.mjs
+          node scripts/test-dashboard-timeline.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Race tests
@@ -84,6 +89,8 @@ jobs:
           "$RUNNER_TEMP/responsive-pair-layout-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/tests/dashboard_snapshot_test.swift -o "$RUNNER_TEMP/dashboard-snapshot-test"
           "$RUNNER_TEMP/dashboard-snapshot-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/tests/goal_editor_state_test.swift -o "$RUNNER_TEMP/goal-editor-state-test"
+          "$RUNNER_TEMP/goal-editor-state-test"
       - name: Installer lint
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
@@ -106,7 +113,9 @@ jobs:
           cache: npm
           cache-dependency-path: sidecar/package-lock.json
       - name: Install and upgrade test
-        run: scripts/test-install-upgrade.sh
+        run: |
+          scripts/test-pkg-component-plist.sh
+          scripts/test-install-upgrade.sh
 
   package:
     runs-on: macos-15

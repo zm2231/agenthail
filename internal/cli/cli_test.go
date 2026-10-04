@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -30,11 +31,14 @@ type cliSurface struct {
 	observations  []*surface.TurnObservation
 	observeErr    error
 	sendResult    *surface.SendResult
+	sendErr       error
 	reply         *surface.ReplyResult
 	replyWait     bool
 	sendWait      bool
 	tailBlock     <-chan struct{}
 	sent          []string
+	steerSource   string
+	steered       []string
 	tail          []surface.Exchange
 	streamEvents  []surface.StreamEvent
 	searchResults []surface.SessionSearchResult
@@ -227,6 +231,9 @@ func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnOb
 }
 func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
 	if f.sendWait {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -271,9 +278,13 @@ func (f *cliSurface) Compact(context.Context, *surface.Session) error {
 func (*cliSurface) Model(context.Context, *surface.Session, string) (string, error) {
 	return "model", nil
 }
-func (*cliSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
-func (*cliSurface) Steer(context.Context, *surface.Session, string) error { return nil }
-func (f *cliSurface) Capabilities() surface.Capabilities                  { return f.caps }
+func (*cliSurface) Interrupt(context.Context, *surface.Session) error { return nil }
+func (f *cliSurface) Steer(ctx context.Context, _ *surface.Session, message string) error {
+	f.steerSource = surface.SourceSessionID(ctx)
+	f.steered = append(f.steered, message)
+	return nil
+}
+func (f *cliSurface) Capabilities() surface.Capabilities { return f.caps }
 func (*cliSurface) EnsureWritable(_ context.Context, session *surface.Session) error {
 	if session.Source == "cli" || session.Transport == "readOnly" {
 		return errors.New(surface.ReadOnlySessionReason(session))
@@ -292,7 +303,7 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second}, r
+	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }}, r
 }
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -312,6 +323,41 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 		t.Fatal(readErr)
 	}
 	return string(data), runErr
+}
+
+func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
+	fake := &cliSurface{
+		kind: surface.KindCodex,
+		sessions: map[string]surface.Session{
+			"target": {ID: "target", Name: "Target", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop", Status: surface.StatusBusy},
+		},
+		caps: surface.Capabilities{Steer: true},
+	}
+	app, r := cliFixture(t, fake)
+	source := surface.Session{ID: "source", Name: "Source", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle}
+	if err := r.RegisterSession(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_SESSION_ID", "source")
+	output, err := captureStdout(t, func() error {
+		return app.cmdSteer([]string{"target", "focus now"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.steerSource != "source" || len(fake.steered) != 1 || fake.steered[0] != "focus now" {
+		t.Fatalf("source=%q steered=%v", fake.steerSource, fake.steered)
+	}
+	if output != "Sent to codex/Target.\n" {
+		t.Fatalf("output=%q", output)
+	}
+	intent, err := r.DeliveryIntent(1)
+	if err != nil || intent.SenderSessionID != "source" || intent.Status != registry.DeliveryIntentSent {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
 }
 
 func TestValidateCommandFlags(t *testing.T) {
@@ -791,6 +837,49 @@ func TestSendStreamPreservesFragmentBytes(t *testing.T) {
 	}
 }
 
+func TestSendDirectStreamDisplaysNormalizedClaudeTimelineAndFailsTerminal(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindClaude}
+	fake := &cliSurface{
+		kind:       surface.KindClaude,
+		sessions:   map[string]surface.Session{"s": session},
+		caps:       surface.Capabilities{Send: true, Stream: true},
+		sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true},
+		streamEvents: []surface.StreamEvent{
+			{ID: "user", Role: "user", Kind: "message", Text: "do not print"},
+			{ID: "answer", Role: "assistant", Kind: "message", Text: "answer", Final: true, Version: 6},
+			{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x", CallID: "call-1"},
+			{ID: "result", Role: "user", Kind: "toolResult", Text: "contents", CallID: "call-1"},
+			{Kind: "done", Status: "cancelled"},
+		},
+	}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"claude:s", "hello", "--stream"}) })
+	if err == nil || !strings.Contains(err.Error(), "did not complete successfully: cancelled") || output != "answer  -> Read x\n  <- contents\n" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{
+		kind:       surface.KindCodex,
+		sessions:   map[string]surface.Session{"s": session},
+		caps:       surface.Capabilities{Send: true, Stream: true},
+		sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true},
+		streamEvents: []surface.StreamEvent{
+			{ID: "managed:turn-a:text", Operation: "append", Version: 3, Kind: "text", Text: "hel"},
+			{ID: "managed:turn-a:text", Operation: "append", Version: 5, Kind: "text", Text: "lo"},
+			{ID: "managed:turn-a:text", Operation: "upsert", Version: 11, Final: true, Kind: "message", Role: "assistant", Text: "hello final"},
+			{Kind: "done"},
+		},
+	}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	if err != nil || output != "hello final\n" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestWaitForReplyReportsTurnThatEndsWithoutCompletion(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, observations: []*surface.TurnObservation{
 		{Status: surface.StatusBusy, ActiveTurnID: "turn", CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old", Done: true}},
@@ -910,6 +999,81 @@ func TestListCwdFiltersByCanonicalAncestryInTextAndJSON(t *testing.T) {
 		if session.ID == "root" && session.Cwd != canonicalProject {
 			t.Fatalf("root cwd=%q want=%q", session.Cwd, canonicalProject)
 		}
+	}
+}
+
+func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	other := filepath.Join(t.TempDir(), "other")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex}}}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	if err := store.EnsureCatalogState(); err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	for _, item := range []surface.Session{
+		{ID: "catalog-root", Surface: surface.KindCodex, Name: "root", Cwd: root, LastActive: observedAt},
+		{ID: "catalog-nested", Surface: surface.KindCodex, Name: "nested", Cwd: nested, LastActive: observedAt.Add(-time.Minute)},
+		{ID: "catalog-other", Surface: surface.KindCodex, Name: "other", Cwd: other, LastActive: observedAt.Add(-2 * time.Minute)},
+	} {
+		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
+			Session:               item,
+			HostProject:           json.RawMessage(`{}`),
+			Checkout:              json.RawMessage(`{}`),
+			ObservedAt:            observedAt,
+			ProjectionFingerprint: item.ID,
+		}, registry.CatalogEvent{DedupeKey: "session:" + item.ID, Type: "session.upserted", EntityID: item.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := store.RecordCatalogSurface(registry.CatalogSurfaceState{Surface: surface.KindCodex, Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface:codex:healthy", Type: "surface.health", EntityID: string(surface.KindCodex), Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := captureStdout(t, func() error { return app.cmdList([]string{"--cwd", root, "--wide", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.listCalls != 0 {
+		t.Fatalf("provider list calls=%d, want zero while daemon catalog is authoritative", fake.listCalls)
+	}
+	var document struct {
+		Sessions []surface.Session `json:"sessions"`
+		Catalog  struct {
+			Source     string `json:"source"`
+			CatalogSeq uint64 `json:"catalogSeq"`
+			Surfaces   []struct {
+				Health string `json:"health"`
+			} `json:"surfaces"`
+			Freshness map[string]struct {
+				Generation uint64    `json:"generation"`
+				ObservedAt time.Time `json:"observedAt"`
+				Stale      bool      `json:"stale"`
+			} `json:"freshness"`
+		} `json:"catalog"`
+	}
+	if err := json.Unmarshal([]byte(output), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Catalog.Source != "daemon" || document.Catalog.CatalogSeq == 0 || len(document.Catalog.Surfaces) != 1 || document.Catalog.Surfaces[0].Health != "healthy" {
+		t.Fatalf("catalog metadata=%+v", document.Catalog)
+	}
+	if len(document.Sessions) != 2 || document.Sessions[0].ID == "catalog-other" || document.Sessions[1].ID == "catalog-other" {
+		t.Fatalf("sessions=%+v", document.Sessions)
+	}
+	if got := document.Catalog.Freshness["catalog-root"].ObservedAt; !got.Equal(observedAt) {
+		t.Fatalf("root freshness=%s want=%s", got, observedAt)
+	}
+	if got := document.Catalog.Freshness["catalog-root"]; got.Generation != 1 || got.Stale {
+		t.Fatalf("root freshness=%+v", got)
 	}
 }
 
@@ -1147,5 +1311,79 @@ func TestSelectCodexPIDValidatesExecutableAndMultipleResults(t *testing.T) {
 `, []string{"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", "/Applications/Codex.app/Contents/MacOS/ChatGPT"})
 	if pid != 34 {
 		t.Fatalf("pid=%d", pid)
+	}
+}
+
+func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
+	receiptPath := filepath.Join(t.TempDir(), "launch.json")
+	var prepared struct {
+		cwd   string
+		model string
+	}
+	var executed struct {
+		path string
+		argv []string
+	}
+	var receiptAtExec surface.ManagedCodexLaunchReceipt
+	errExec := errors.New("provider process exited after dispatch")
+	err := runManagedCodexLaunch(
+		context.Background(),
+		[]string{"--model", "o4-mini", "--", "hello"},
+		"/work/project", "agenthail-launch", receiptPath,
+		managedCodexLaunchBinding{Runtime: surface.LauncherCMUX, Workspace: "workspace:7", Surface: "surface:9"},
+		func(_ context.Context, cwd, model string) (*surface.Session, error) {
+			prepared.cwd, prepared.model = cwd, model
+			return &surface.Session{ID: "provider-thread"}, nil
+		},
+		func(path string, argv, _ []string) error {
+			executed.path, executed.argv = path, append([]string(nil), argv...)
+			var readErr error
+			receiptAtExec, readErr = surface.ReadManagedCodexLaunchReceipt(receiptPath)
+			if readErr != nil {
+				t.Fatalf("receipt was not durable before exec: %v", readErr)
+			}
+			return errExec
+		},
+		"/usr/local/bin/codex",
+	)
+	if !errors.Is(err, errExec) {
+		t.Fatalf("err=%v, want provider exec error", err)
+	}
+	if prepared.cwd != "/work/project" || prepared.model != "o4-mini" {
+		t.Fatalf("prepared=%+v", prepared)
+	}
+	if executed.path != "/usr/local/bin/codex" || !reflect.DeepEqual(executed.argv, []string{"codex", "resume", "provider-thread", "--remote", "unix://", "--", "hello"}) {
+		t.Fatalf("executed=%+v", executed)
+	}
+	if receiptAtExec.LaunchID != "agenthail-launch" || receiptAtExec.ThreadID != "provider-thread" || receiptAtExec.Workspace != "workspace:7" || receiptAtExec.Surface != "surface:9" || receiptAtExec.TmuxPane != "" {
+		t.Fatalf("receipt=%+v", receiptAtExec)
+	}
+}
+
+func TestManagedCodexLaunchBindingSelectsDeclaredTMUXRuntime(t *testing.T) {
+	t.Setenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME", surface.LauncherTMUX)
+	t.Setenv("TMUX_PANE", "%17")
+	t.Setenv("CMUX_WORKSPACE_ID", "workspace:7")
+	t.Setenv("CMUX_SURFACE_ID", "surface:9")
+	binding, err := managedCodexLaunchBindingFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.Runtime != surface.LauncherTMUX || binding.TmuxPane != "%17" || binding.Workspace != "" || binding.Surface != "" {
+		t.Fatalf("binding=%+v", binding)
+	}
+}
+
+func TestManagedCodexLaunchBindingSelectsDeclaredCMUXRuntime(t *testing.T) {
+	t.Setenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME", surface.LauncherCMUX)
+	t.Setenv("TMUX_PANE", "%17")
+	t.Setenv("CMUX_WORKSPACE_ID", "workspace:7")
+	t.Setenv("CMUX_SURFACE_ID", "surface:9")
+	binding, err := managedCodexLaunchBindingFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.Runtime != surface.LauncherCMUX || binding.TmuxPane != "" || binding.Workspace != "workspace:7" || binding.Surface != "surface:9" {
+		t.Fatalf("binding=%+v", binding)
 	}
 }

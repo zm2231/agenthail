@@ -2,6 +2,33 @@ import XCTest
 @testable import Agenthail
 
 final class AgenthailIOSTests: XCTestCase {
+    func testGoalDurationFormatsElapsedCounters() {
+        XCTAssertEqual(formatGoalDuration(7), "7s")
+        XCTAssertEqual(formatGoalDuration(125), "2m 5s")
+        XCTAssertEqual(formatGoalDuration(3720), "1h 2m")
+    }
+
+    func testGoalStatusesRequiringAttentionShowNeedsYou() throws {
+        for status in ["blocked", "usageLimited", "budgetLimited"] {
+            let goal = try JSONDecoder().decode(GoalState.self, from: Data("{\"objective\":\"Ship\",\"status\":\"\(status)\"}".utf8))
+            XCTAssertEqual(goal.displayStatus, "Needs you")
+            XCTAssertTrue(goal.needsAttention)
+        }
+        let active = try JSONDecoder().decode(GoalState.self, from: Data(#"{"objective":"Ship","status":"active"}"#.utf8))
+        XCTAssertEqual(active.displayStatus, "Active")
+        XCTAssertFalse(active.needsAttention)
+    }
+    func testContextStateUsesTokensWhenWindowIsUnknownOrExceeded() throws {
+        let unknown = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":0,"compacting":false,"compactionCount":0,"contextWindowSource":"unknown"}"#.utf8))
+        XCTAssertNil(unknown.fraction)
+
+        let exceeded = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":200000,"compacting":false,"compactionCount":0,"windowEstimated":true}"#.utf8))
+        XCTAssertNil(exceeded.fraction)
+
+        let configured = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":1000000,"compacting":false,"compactionCount":0,"contextWindowSource":"configured"}"#.utf8))
+        XCTAssertEqual(configured.fraction ?? -1, 0.25, accuracy: 0.0001)
+    }
+
     func testEmptyEventStreamMarksConnectionHealthy() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [EmptyEventStreamURLProtocol.self]
@@ -66,6 +93,26 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testCatalogQueueWatermarkUpdatesCountAndPresenceLocally() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let claude = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":50,"type":"session.upserted","data":{"session":{"id":"queued-claude","surface":"claude","name":"Queued","status":"idle","queueCount":0,"open":false,"current":false,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
+        await model.receiveCatalog(claude)
+        let queued = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":51,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":2}}"#.utf8))
+        await model.receiveCatalog(queued)
+        var session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
+        XCTAssertEqual(session?.queueCount, 2)
+        XCTAssertEqual(session?.current, true)
+        XCTAssertEqual(session?.currentReason, "queued")
+        let drained = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":52,"type":"session.queue","data":{"sessionId":"queued-claude","queueCount":0}}"#.utf8))
+        await model.receiveCatalog(drained)
+        session = model.snapshot?.sessions.first { $0.id == "queued-claude" }
+        XCTAssertEqual(session?.queueCount, 0)
+        XCTAssertEqual(session?.current, false)
+        XCTAssertNil(session?.currentReason)
+    }
+
+    @MainActor
     func testCatalogRemovalDeletesOnlyItsSession() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
@@ -74,6 +121,24 @@ final class AgenthailIOSTests: XCTestCase {
         await model.receiveCatalog(event)
         XCTAssertNil(model.snapshot?.sessions.first { $0.id == "demo" })
         XCTAssertEqual(model.snapshot?.totalSessions, before - 1)
+    }
+
+    func testEstimatedClaudeContextOverflowKeepsTokenCountEvidence() throws {
+        let context = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":210,"contextWindow":200,"compacting":false,"compactionCount":0,"windowEstimated":true}"#.utf8))
+        XCTAssertTrue(context.exceedsEstimatedWindow)
+
+        let knownWindow = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":210,"contextWindow":200,"compacting":false,"compactionCount":0}"#.utf8))
+        XCTAssertFalse(knownWindow.exceedsEstimatedWindow)
+    }
+
+    @MainActor
+    func testSessionDeltaEventsUseTheirOwnStreamsWithoutSnapshotRefresh() {
+        XCTAssertFalse(AgenthailIOSModel.shouldRefreshSnapshot(for: "session.updated"))
+        XCTAssertFalse(AgenthailIOSModel.shouldRefreshSnapshot(for: "turn.completed"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "state.changed"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "settings.updated"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "device.push.updated"))
+        XCTAssertTrue(AgenthailIOSModel.shouldRefreshSnapshot(for: "stream.reset"))
     }
 
     @MainActor
@@ -86,6 +151,111 @@ final class AgenthailIOSTests: XCTestCase {
         let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"","version":1,"kind":"text","op":"upsert","ts":"2026-10-03T12:00:00Z","body":"must not replace existing rows","truncated":false}}"#.utf8))
         model.applySessionStreamEvent(event)
         XCTAssertEqual(model.selectedDetail?.timeline?.items, before)
+    }
+
+    @MainActor
+    func testSessionStreamPreservesJournalItemMetadataAndBodyReference() throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"message-1","version":1,"kind":"message","op":"append","role":"user","title":"user","status":"complete","turnId":"turn-1","callId":"call-1","truncationReason":"body_budget","ts":"2026-10-03T12:00:00Z","body":"journal body","truncated":true,"bodyRef":"body-ref-1","attachment":{"id":"image-1","mediaType":"image/png","width":320,"height":200,"bytes":4096}}}"#.utf8))
+        model.applySessionStreamEvent(event)
+        let item = try XCTUnwrap(model.selectedDetail?.timeline?.items.first)
+        XCTAssertEqual(item.role, "user")
+        XCTAssertEqual(item.title, "user")
+        XCTAssertEqual(item.status, "complete")
+        XCTAssertEqual(item.callId, "call-1")
+        XCTAssertEqual(item.truncationReason, "body_budget")
+        XCTAssertEqual(item.bodyRef, "body-ref-1")
+        XCTAssertEqual(item.attachment?.id, "image-1")
+    }
+
+    @MainActor
+    func testRetainedBodyLoadsAllBoundedRanges() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.text.count, 40_000)
+        XCTAssertNil(result?.error)
+        XCTAssertGreaterThan(RetainedBodyURLProtocol.state.requestCount, 1)
+    }
+
+    func testSessionAttachmentFetchIsAuthenticatedAndBounded() async throws {
+        AttachmentURLProtocol.state.reset(oversized: false)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AttachmentURLProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "secret", session: URLSession(configuration: configuration))
+        let data = try await api.sessionAttachment(sessionID: "demo", id: "image-1")
+        XCTAssertEqual(data, Data([137, 80, 78, 71]))
+        XCTAssertEqual(AttachmentURLProtocol.state.authorization, "Bearer secret")
+        XCTAssertEqual(AttachmentURLProtocol.state.sessionID, "demo")
+        XCTAssertEqual(AttachmentURLProtocol.state.attachmentID, "image-1")
+
+        AttachmentURLProtocol.state.reset(oversized: true)
+        do {
+            _ = try await api.sessionAttachment(sessionID: "demo", id: "large")
+            XCTFail("Expected oversized attachment to be rejected")
+        } catch let error as AgenthailAPIError {
+            XCTAssertEqual(error.errorDescription, "This image is too large to display on the device.")
+        }
+    }
+
+    @MainActor
+    func testRetainedBodyReportsEightMiBCapInsteadOfPretendingPrefixIsFull() async throws {
+        RetainedBodyURLProtocol.state.reset(total: (8 << 20) + 1)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.text.count, 8 << 20)
+        XCTAssertEqual(result?.error, "The retained body exceeds the 8 MiB display limit.")
+    }
+
+    @MainActor
+    func testRetainedBodyRejectsInvalidUTF8RangeBoundary() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000, invalidBoundary: true)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref", attachment: nil)
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.error, "The retained body is not valid UTF-8 at a range boundary.")
+    }
+
+    @MainActor
+    func testSessionStreamUpdatesAndClearsContextAndGoalImmediately() throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+
+        let contextEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":2,"type":"item","data":{"itemId":"","version":1,"kind":"context","op":"upsert","ts":"2026-10-03T12:00:01Z","context":{"usedTokens":12,"contextWindow":100,"compacting":false,"compactionCount":0},"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(contextEvent)
+        XCTAssertEqual(model.selectedDetail?.context?.usedTokens, 12)
+
+        let goalEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":3,"type":"item","data":{"itemId":"","version":1,"kind":"goal","op":"upsert","ts":"2026-10-03T12:00:02Z","goal":{"objective":"Ship the fix","status":"active"},"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(goalEvent)
+        XCTAssertEqual(model.selectedDetail?.goal?.objective, "Ship the fix")
+
+        let clearEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":4,"type":"item","data":{"itemId":"","version":2,"kind":"goal","op":"upsert","ts":"2026-10-03T12:00:03Z","goal":null,"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(clearEvent)
+        XCTAssertNil(model.selectedDetail?.goal)
     }
 
     @MainActor
@@ -238,6 +408,44 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertNil(KeychainStore.get("pushRegistration"))
         XCTAssertFalse(model.isPaired)
     }
+}
+
+private final class RetainedBodyState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var total = 0
+    private var invalidBoundary = false
+    private var requests = 0
+    var requestCount: Int { lock.withLock { requests } }
+    func reset(total: Int, invalidBoundary: Bool = false) { lock.withLock { self.total = total; self.invalidBoundary = invalidBoundary; requests = 0 } }
+    func response(start: Int, end: Int) -> String {
+        lock.withLock {
+            requests += 1
+            let boundedEnd = min(end, total)
+            let length = max(0, boundedEnd - start)
+            let body = invalidBoundary && boundedEnd < total ? String(repeating: "x", count: max(0, length - 1)) + "\u{FFFD}" : String(repeating: "x", count: length)
+            return String(data: try! JSONSerialization.data(withJSONObject: [
+                "sessionId": "demo", "bodyRef": "body-ref", "start": start, "end": boundedEnd,
+                "total": total, "body": body, "truncated": boundedEnd < total
+            ]), encoding: .utf8)!
+        }
+    }
+}
+
+private final class RetainedBodyURLProtocol: URLProtocol, @unchecked Sendable {
+    static let state = RetainedBodyState()
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/session-stream-body" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        let query = Dictionary(uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") })
+        let start = Int(query["start"]!)!
+        let end = Int(query["end"]!)!
+        let body = Self.state.response(start: start, end: end)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 @MainActor
@@ -427,6 +635,50 @@ private final class RequestRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         requests.removeAll()
     }
+}
+
+private final class AttachmentState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var oversized = false
+    private var auth = ""
+    private var session = ""
+    private var attachment = ""
+    var authorization: String { lock.withLock { auth } }
+    var sessionID: String { lock.withLock { session } }
+    var attachmentID: String { lock.withLock { attachment } }
+    func reset(oversized: Bool) {
+        lock.withLock {
+            self.oversized = oversized
+            auth = ""
+            session = ""
+            attachment = ""
+        }
+    }
+    func record(_ request: URLRequest) {
+        lock.withLock {
+            auth = request.value(forHTTPHeaderField: "Authorization") ?? ""
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            session = query.first(where: { $0.name == "sessionId" })?.value ?? ""
+            attachment = query.first(where: { $0.name == "id" })?.value ?? ""
+        }
+    }
+    func response() -> (Int, Data, [String: String]) {
+        lock.withLock { oversized ? (413, Data(), [:]) : (200, Data([137, 80, 78, 71]), ["Content-Length": "4"]) }
+    }
+}
+
+private final class AttachmentURLProtocol: URLProtocol, @unchecked Sendable {
+    static let state = AttachmentState()
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/session-attachment" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.state.record(request)
+        let (status, body, headers) = Self.state.response()
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 private final class ReplacementURLProtocol: URLProtocol, @unchecked Sendable {

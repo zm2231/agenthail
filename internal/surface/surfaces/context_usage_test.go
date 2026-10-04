@@ -24,7 +24,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.UsedTokens != 42000 || usage.ContextWindow != 200000 || usage.CompactionCount != 1 || usage.ReclaimedTokens != 108000 || usage.Compacting {
+	if usage.UsedTokens != 42000 || usage.ContextWindow != 0 || usage.WindowEstimated || usage.CompactionCount != 1 || usage.ReclaimedTokens != 108000 || usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
 	}
 	appendTestTranscript(t, path, `{"type":"user","timestamp":"2026-07-16T01:02:00Z","message":{"content":"/compact"}}`)
@@ -43,7 +43,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.Compacting || usage.UsedTokens != 41000 || usage.ContextWindow != 1000000 || usage.CompactionCount != 2 {
+	if usage.Compacting || usage.UsedTokens != 41000 || usage.ContextWindow != 0 || usage.WindowEstimated || usage.CompactionCount != 2 {
 		t.Fatalf("usage=%+v", usage)
 	}
 	appendTestTranscript(t, path, `{"type":"user","timestamp":"2026-07-16T01:03:00Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
@@ -61,6 +61,59 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	}
 	if usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestClaudeContextUsageReturnsTokensWhenWindowIsUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.UsedTokens != 250000 || usage.ContextWindow != 0 || usage.WindowEstimated {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestClaudeContextUsageUsesExplicitConfiguredWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path, ConfiguredModel: "claude-opus-5-5[1m]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.ContextWindow != 1_000_000 || usage.ContextWindowSource != ClaudeContextWindowSourceConfigured || usage.WindowEstimated {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestClaudeContextUsageInvalidatesStaleConfiguredWindowAfterObservedModelSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path, ConfiguredModel: "claude-opus-5-5[1m]"}
+	usage, err := adapter.ContextUsage(context.Background(), session)
+	if err != nil || usage.ContextWindow != 1_000_000 {
+		t.Fatalf("initial usage=%+v err=%v", usage, err)
+	}
+	appendTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:01:00Z","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":1000,"output_tokens":500}}}`,
+	)
+	usage, err = adapter.ContextUsage(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ContextWindow != 0 || usage.ContextWindowSource != ClaudeContextWindowSourceUnknown || usage.WindowEstimated {
+		t.Fatalf("stale capacity=%+v", usage)
 	}
 }
 
@@ -134,6 +187,26 @@ func TestCodexContextUsageUsesLatestContextSnapshot(t *testing.T) {
 	}
 	if usage.UsedTokens != 80000 || usage.ContextWindow != 258400 || usage.CumulativeTokens != 980000 || usage.CompactionCount != 3 || usage.PreCompactTokens != 180000 || usage.PostCompactTokens != 80000 || usage.ReclaimedTokens != 100000 || usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestCodexContextUsageResetsWhenTranscriptIsReplacedAtSamePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	writeTestTranscript(t, path, codexTokenRecord("2026-07-16T04:29:00Z", 100, 100))
+	adapter := NewCodex("")
+	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, Transcript: path}
+	usage, err := adapter.ContextUsage(context.Background(), session)
+	if err != nil || usage == nil || usage.UsedTokens != 100 {
+		t.Fatalf("initial usage=%+v err=%v", usage, err)
+	}
+	replacement := filepath.Join(t.TempDir(), "replacement.jsonl")
+	writeTestTranscript(t, replacement, codexTokenRecord("2026-07-16T04:30:00Z", 200, 200))
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	usage, err = adapter.ContextUsage(context.Background(), session)
+	if err != nil || usage == nil || usage.UsedTokens != 200 {
+		t.Fatalf("replacement usage=%+v err=%v", usage, err)
 	}
 }
 

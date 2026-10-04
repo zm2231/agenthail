@@ -26,7 +26,9 @@ type daemonSurface struct {
 	sessions       map[string]surface.Session
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
+	nilResult      bool
 	sent           []string
+	steered        []string
 	models         []string
 	modelOptions   []surface.ModelOption
 	listCalls      atomic.Int32
@@ -198,6 +200,9 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.sent = append(f.sent, message)
+	if f.nilResult {
+		return nil, nil
+	}
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
@@ -212,6 +217,9 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.sent = append(f.sent, message)
+	if f.nilResult {
+		return nil, nil
+	}
 	f.models = append(f.models, options.Model)
 	if f.sendErr != nil {
 		return nil, f.sendErr
@@ -265,9 +273,12 @@ func (*daemonSurface) Model(context.Context, *surface.Session, string) (string, 
 func (f *daemonSurface) Models(context.Context) ([]surface.ModelOption, error) {
 	return f.modelOptions, nil
 }
-func (*daemonSurface) Interrupt(context.Context, *surface.Session) error     { return nil }
-func (*daemonSurface) Steer(context.Context, *surface.Session, string) error { return nil }
-func (f *daemonSurface) Capabilities() surface.Capabilities                  { return f.caps }
+func (*daemonSurface) Interrupt(context.Context, *surface.Session) error { return nil }
+func (f *daemonSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
+	f.steered = append(f.steered, message)
+	return nil
+}
+func (f *daemonSurface) Capabilities() surface.Capabilities { return f.caps }
 func (f *daemonSurface) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
 	return f.contextUsage, nil
 }
@@ -333,6 +344,82 @@ func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {
 	daemon.observeSession(context.Background(), fake, &from)
 	if len(fake.sent) != 0 || r.QueueCount("to") != 1 {
 		t.Fatalf("duplicate: sent=%v pending=%d", fake.sent, r.QueueCount("to"))
+	}
+}
+
+func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	d, r, fake, from, to := daemonFixture(t)
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	d.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	if len(fake.steered) != 0 {
+		t.Fatalf("relay steered before outbox: %v", fake.steered)
+	}
+	item, err := r.QueueItem(1)
+	if err != nil || item.BusyDelivery != "steer" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	d.drainSteerMessageQueue(context.Background(), fake, &to)
+	if len(fake.steered) != 1 || r.QueueCount(to.ID) != 0 {
+		t.Fatalf("steered=%v queued=%d", fake.steered, r.QueueCount(to.ID))
+	}
+}
+
+func TestObservationKeepsQueueItemsBlockedWhileSteerIsPending(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	if _, err := r.QueueMessageWithOptions(to.ID, "ordinary queued", "queue:1", surface.SendOptions{BusyDelivery: "queue"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueMessageWithOptions(to.ID, "steer queued", "steer:1", surface.SendOptions{BusyDelivery: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, observation := range []*surface.TurnObservation{
+		{Status: surface.StatusUnknown},
+		{Status: surface.StatusOffline},
+		{Status: surface.StatusIdle, ActiveTurnID: "still-running"},
+	} {
+		fake.observations[to.ID] = observation
+		d.observeSession(context.Background(), fake, &to)
+		if len(fake.sent) != 0 || len(fake.steered) != 0 || r.QueueCount(to.ID) != 2 {
+			t.Fatalf("status=%s active=%q sent=%v steered=%v queued=%d", observation.Status, observation.ActiveTurnID, fake.sent, fake.steered, r.QueueCount(to.ID))
+		}
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-busy"}
+	d.observeSession(context.Background(), fake, &to)
+	if len(fake.sent) != 0 || len(fake.steered) != 1 || fake.steered[0] != "steer queued" || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("busy sent=%v steered=%v queued=%d", fake.sent, fake.steered, r.QueueCount(to.ID))
+	}
+}
+
+func TestRelayOutboxPreservesOptionsWhenBusySteerIsConfigured(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	to.Status = surface.StatusBusy
+	if err := r.RegisterSession(to); err != nil {
+		t.Fatal(err)
+	}
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	queueID, err := r.QueueRelayMessageWithOptions(to.ID, "relay with options", "relay:options", 1, surface.SendOptions{Model: "model-a", BusyDelivery: "steer", TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.QueueItem(queueID)
+	if err != nil || item.BusyDelivery != "queue" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	d.drainMessageQueue(context.Background(), fake, &to)
+	if len(fake.steered) != 0 || len(fake.models) != 1 || fake.models[0] != "model-a" || r.QueueCount(to.ID) != 0 {
+		t.Fatalf("steered=%v models=%v queued=%d", fake.steered, fake.models, r.QueueCount(to.ID))
 	}
 }
 
@@ -511,7 +598,7 @@ func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	if events := withoutQueueCatalogEvents(window.Events); err != nil || len(events) != 1 || events[0].Type != "delivery.problem" {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -527,7 +614,7 @@ func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 0 {
+	if err != nil || len(withoutQueueCatalogEvents(window.Events)) != 0 {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -1177,7 +1264,13 @@ func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	problems := 0
+	for _, event := range window.Events {
+		if event.Type == "delivery.problem" {
+			problems++
+		}
+	}
+	if err != nil || problems != 1 {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -1225,6 +1318,23 @@ func TestOutboxDeadLettersUnknownDeliveryWithoutAutomaticRetry(t *testing.T) {
 	daemon.drainMessageQueue(context.Background(), fake, &to)
 	if len(fake.sent) != 1 {
 		t.Fatalf("ambiguous delivery retried %d times", len(fake.sent))
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestOutboxDeadLettersEmptyResultWithoutAutomaticRetry(t *testing.T) {
+	daemon, r, fake, _, to := daemonFixture(t)
+	if err := r.QueueMessage("to", "empty result"); err != nil {
+		t.Fatal(err)
+	}
+	fake.nilResult = true
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	if len(fake.sent) != 1 {
+		t.Fatalf("empty result retried %d times", len(fake.sent))
 	}
 	rows, err := r.ListQueue(false)
 	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {

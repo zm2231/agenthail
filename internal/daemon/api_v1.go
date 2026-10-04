@@ -42,14 +42,16 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/events", d.apiV1Guard(dashboard, "read", d.apiEventsHandler))
 	mux.HandleFunc("/api/v1/catalog-events", d.apiV1Guard(dashboard, "read", d.apiCatalogStreamHandler))
 	mux.HandleFunc("/api/v1/session", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSessionHandler)))
+	mux.HandleFunc("/api/v1/session-metadata", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSessionMetadataHandler)))
 	mux.HandleFunc("/api/v1/session-stream", d.apiV1Guard(dashboard, "read", d.apiSessionStreamHandler))
+	mux.HandleFunc("/api/v1/session-attachment", d.apiV1Guard(dashboard, "read", d.apiSessionAttachmentHandler))
 	mux.HandleFunc("/api/v1/session-stream-body", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.sessionStreamBodyHandler)))
 	mux.HandleFunc("/api/v1/search", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSearchHandler)))
 	mux.HandleFunc("/api/v1/models", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardModelsHandler)))
 	mux.HandleFunc("/api/v1/session-options", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.sessionOptionsHandler)))
 	mux.HandleFunc("/api/v1/queue", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.mobileQueueHandler)))
 	mux.HandleFunc("/api/v1/history", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardHistoryHandler)))
-	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", apiV1JSONHandler(d.dashboardActionHandler)))
+	mux.HandleFunc("/api/v1/actions", d.apiV1Guard(dashboard, "control", d.idempotentActionHandler(apiV1JSONHandler(d.dashboardActionHandler))))
 	mux.HandleFunc("/api/v1/settings", d.apiV1Guard(dashboard, "settings", apiV1JSONHandler(d.dashboardSettingsHandler)))
 	mux.HandleFunc("/api/v1/pairings", d.apiV1Guard(dashboard, "settings", d.apiPairingsHandler))
 	mux.HandleFunc("/api/v1/devices", d.apiV1Guard(dashboard, "settings", d.apiDevicesHandler))
@@ -65,9 +67,11 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 		if token := bearerToken(r); token != "" {
 			if constantTokenEqual(token, dashboard.token) {
 				bearerAuthorized = true
-			} else if _, err := d.Registry.AuthenticateDevice(token, scope); err == nil {
+			} else if device, err := d.Registry.AuthenticateDevice(token, scope); err == nil {
 				bearerAuthorized = true
-				r = r.WithContext(context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token))
+				ctx := context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token)
+				ctx = context.WithValue(ctx, actionPrincipalContextKey{}, device.ID)
+				r = r.WithContext(ctx)
 			}
 		}
 		if !cookieAuthorized && !bearerAuthorized {
