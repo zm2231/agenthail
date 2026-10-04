@@ -161,6 +161,7 @@ func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateO
 	output.Status = "submitted"
 	output.Accepted = true
 	output.Retryable = false
+	output.Delivery = nil
 	output.Detail = submittedThreadDetail(output.Session, request.alias)
 	if request.jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(output)
