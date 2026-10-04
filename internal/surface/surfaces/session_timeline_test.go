@@ -500,6 +500,36 @@ func TestCodexTranscriptPreservesTerminalStatusesAndOpaqueRecords(t *testing.T) 
 	}
 }
 
+func TestCodexStreamPreservesObservedCommandOutputTruncationMetadata(t *testing.T) {
+	record := fmt.Sprintf(`{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","stdout":%q}}}`+"\n", strings.Repeat("x", 34517))
+	path := timelineFixture(t, record)
+	session := &surface.Session{ID: "observed-item-completed", Transcript: path, TranscriptOffsetSet: true}
+	var events []surface.StreamEvent
+	err := NewCodex("").Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, 20*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("stream error=%v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events=%+v", events)
+	}
+	if !events[0].Truncated || events[0].TruncationReason != "timeline text limit" {
+		t.Fatalf("truncation metadata=%+v", events[0])
+	}
+	encoded, err := json.Marshal(events[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["truncated"] != true || payload["truncationReason"] != "timeline text limit" {
+		t.Fatalf("serialized truncation metadata=%s", encoded)
+	}
+}
+
 func TestClaudeReplyDoneFollowsTranscriptTurnStateNotRegistryStatus(t *testing.T) {
 	path := timelineFixture(t, `{"type":"user","timestamp":"2026-09-07T10:00:00Z","message":{"content":"fix it"}}
 {"type":"assistant","timestamp":"2026-09-07T10:01:00Z","message":{"id":"m1","content":[{"type":"text","text":"Looking at the file"}]}}
