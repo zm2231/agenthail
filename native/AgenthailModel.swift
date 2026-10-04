@@ -68,6 +68,7 @@ final class AgenthailModel: ObservableObject {
         let idempotencyKey: String
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
+    private var pendingCreation: (identity: [String], key: String)?
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -252,8 +253,14 @@ final class AgenthailModel: ObservableObject {
 
     func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> String? {
         guard let api else { return "Agenthail isn't connected." }
+        let identity = [agent, folder, message, launcher ?? ""]
+        if pendingCreation?.identity != identity {
+            pendingCreation = (identity, UUID().uuidString)
+        }
+        let idempotencyKey = pendingCreation?.key
         do {
-            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher)
+            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey)
+            if receipt.ok || receipt.accepted == true { pendingCreation = nil }
             if receipt.unknown == true {
                 if let id = receipt.id { await openCreatedSession(id) }
                 return "Agenthail couldn't confirm the session started. Check the sidebar before trying again."
