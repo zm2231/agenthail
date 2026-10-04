@@ -969,7 +969,8 @@ struct SessionInspector: View {
                 if let goal = detail.goal {
                     Section("Goal") {
                         if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }
-                        LabeledContent("Status", value: goalStatusLabel(goal.status))
+                        LabeledContent("Status", value: goal.displayStatus)
+                            .foregroundStyle(goal.needsAttention ? .orange : .primary)
                         if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatGoalDuration(value)) }
                         if let value = goal.tokensUsed { LabeledContent("Tokens used", value: value.formatted()) }
                         if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
@@ -1008,18 +1009,6 @@ struct SessionInspector: View {
                 }, reload: { try await model.creationModels(surface: session.surface) })
             }
         }
-    }
-}
-
-private func goalStatusLabel(_ status: String) -> String {
-    switch status {
-    case "active": return "Active"
-    case "paused": return "Paused"
-    case "blocked": return "Blocked"
-    case "usageLimited": return "Usage limited"
-    case "budgetLimited": return "Budget limited"
-    case "complete": return "Complete"
-    default: return status.capitalized
     }
 }
 
