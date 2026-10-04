@@ -712,13 +712,14 @@ struct TranscriptBlock: Identifiable, Equatable {
             switch item.kind {
             case "message", "text":
                 flushTools()
-                let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { continue }
-                if item.role == "user", text.hasPrefix("[Image: "), text.hasSuffix("]"), !text.dropFirst().contains("[") {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached")))
-                    continue
+                guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                if item.role == "user" {
+                    let (text, images) = stripImageMarkers(item.text)
+                    if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text))) }
+                    if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
+                } else {
+                    blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text)))
                 }
-                blocks.append(TranscriptBlock(id: item.id, kind: item.role == "user" ? .user(item.text) : .assistant(item.text)))
             case "attachment":
                 flushTools()
                 if let attachment = item.attachment, attachment.isImage {
@@ -738,6 +739,17 @@ struct TranscriptBlock: Identifiable, Equatable {
         flushTools()
         return blocks
     }
+}
+
+func stripImageMarkers(_ text: String) -> (text: String, images: Int) {
+    var images = 0
+    let kept = text.components(separatedBy: "\n").filter { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let isMarker = (trimmed.hasPrefix("[Image: ") || trimmed.hasPrefix("[Image attachment: ")) && trimmed.hasSuffix("]") && !trimmed.dropFirst().contains("[")
+        if isMarker { images += 1 }
+        return !isMarker
+    }
+    return (kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), images)
 }
 
 struct TranscriptBlockView: View {
@@ -902,6 +914,24 @@ struct ToolCallRow: View {
     let failed: Bool
     @State private var expanded = false
 
+    static func fullInput(_ text: String) -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], !object.isEmpty else { return text }
+        let command = (object["command"] ?? object["cmd"]) as? String
+        let rest = object.filter { $0.key != "command" && $0.key != "cmd" }
+        var lines: [String] = command.map { ["$ " + $0] } ?? []
+        for key in rest.keys.sorted() {
+            let value = rest[key].map { value -> String in
+                if let string = value as? String { return string }
+                if JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) {
+                    return String(decoding: data, as: UTF8.self)
+                }
+                return "\(value)"
+            } ?? ""
+            lines.append("\(key): \(value)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     var body: some View {
         let presentation = ToolPresentation(name: call.title, text: call.text)
         let isCommand: Bool = { if case .command = presentation.content { return true } else { return false } }()
@@ -930,7 +960,7 @@ struct ToolCallRow: View {
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                Text(presentation.summary.isEmpty ? call.text : presentation.summary)
+                Text(Self.fullInput(call.text))
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(DesktopPalette.text)
                     .textSelection(.enabled)

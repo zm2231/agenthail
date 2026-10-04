@@ -59,7 +59,12 @@ final class AgenthailModel: ObservableObject {
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
     private var drafts: [String: String] = [:]
-    private let attachmentCache = NSCache<NSString, NSData>()
+    private let attachmentCache: NSCache<NSString, NSData> = {
+        let cache = NSCache<NSString, NSData>()
+        cache.totalCostLimit = 64 * 1024 * 1024
+        cache.countLimit = 100
+        return cache
+    }()
     private var selectionGeneration: UInt64 = 0
     private var detailRequestGeneration: UInt64 = 0
     private var detailAppliedGeneration: UInt64 = 0
