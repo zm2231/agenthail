@@ -4,14 +4,18 @@ Agenthail includes a Mac app, a menu bar shortcut, and an optional iPhone compan
 
 ## Mac app
 
-The Mac app opens automatically and keeps your connected conversations in one place.
+The Mac app keeps your connected conversations in one window.
 
-- **Overview** shows what is working and which apps are connected.
-- **Conversations** lets you read, send, steer, stop, compact, and change models when supported.
-- Search starts with Agenthail's saved conversations; typing at least three characters can also search older Codex history on demand.
-- **Operations** manages waiting messages, automatic handoffs, history, phone access, and settings.
+- **Sessions** sit in the sidebar, grouped by Mac workspace, with **Running**, **Recent**, and **All** (⌘1, ⌘2, ⌘3). Sessions that need you appear first. Search (⌘F) filters the list; typing at least three characters also searches older Codex history.
+- **Conversations** open at the latest work. You can send, steer, stop (⌘.), and jump to latest (⌘L). ⌘↩ queues a message while an agent works and ⌥⌘↩ steers the running turn; Settings can swap the two. Drafts belong to their session.
+- The **inspector** (⌥⌘I) shows a session's details, context, controls, and delivery work.
+- **⌘K** opens a command palette for jumping to any session, starting a new one (⌘N), and session actions.
+- Any session can open in its own window from its context menu or the palette. Windows showing the same session share its draft.
+- A session that disappears from the host stays readable with a notice until you close it.
 
-The menu bar item gives you a quick connection check and opens the full app.
+The menu bar item lists sessions that need you, are working, or finished recently, and opens the app, a new session, or Settings.
+
+Settings holds the connection and service controls, phone pairing and devices, notifications, waiting messages and automatic handoffs, and recent activity.
 
 Agenthail updates the app, command line tool, and background service together. If parts of an installation ever fall out of sync, the app asks you to update instead of attempting an unsafe action.
 
