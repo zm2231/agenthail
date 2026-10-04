@@ -940,7 +940,9 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			case strings.Contains(strings.ToLower(method), "agentmessage"):
 				if txt := codexEventText(event.Params); txt != "" {
 					if uuid == "" {
-						onEvent(desktopState.textEvent(txt, codexEventItemID(event.Params)))
+						if textEvent, ok := desktopState.textEvent(txt, codexEventItemID(event.Params)); ok {
+							onEvent(textEvent)
+						}
 					} else {
 						emittedText += txt
 						onEvent(codexStreamEvent(event.Sequence, "text", txt, nil, uuid))
@@ -949,10 +951,16 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			case strings.Contains(strings.ToLower(method), "tool"):
 				if name := codexEventTool(event.Params); name != "" {
 					if uuid == "" {
-						onEvent(desktopState.toolEvent(event.Sequence, name, codexEventItemID(event.Params)))
+						if toolEvent, ok := desktopState.toolEvent(event.Sequence, name, codexEventItemID(event.Params), codexEventItemBody(codexEventItem(event.Params))); ok {
+							onEvent(toolEvent)
+						}
 					} else {
 						onEvent(codexStreamEvent(event.Sequence, "tool_use", name, nil, uuid))
 					}
+				}
+			case uuid == "" && strings.Contains(strings.ToLower(method), "item"):
+				if itemEvent, ok := desktopState.itemEvent(event); ok {
+					onEvent(itemEvent)
 				}
 			case codexCompletionMethod(method):
 				thread, readErr := c.readObservationThread(ctx, client, sess.ID)
@@ -979,7 +987,9 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 					}
 				}
 				if uuid == "" {
-					onEvent(desktopState.doneEvent(event.Sequence, turnID))
+					if doneEvent, ok := desktopState.doneEvent(event.Sequence, turnID); ok {
+						onEvent(doneEvent)
+					}
 				} else {
 					onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
 				}
@@ -1002,7 +1012,7 @@ type codexDesktopStreamState struct {
 	turnID        string
 	assistantKey  string
 	assistantItem string
-	text          string
+	textByItem    map[string]string
 }
 
 func (s *codexDesktopStreamState) observe(event codexEvent) {
@@ -1013,44 +1023,105 @@ func (s *codexDesktopStreamState) observe(event codexEvent) {
 	s.turnID = turnID
 	s.assistantKey = ""
 	s.assistantItem = ""
-	s.text = ""
+	s.textByItem = make(map[string]string)
 }
 
-func (s *codexDesktopStreamState) textEvent(text, itemID string) surface.StreamEvent {
+func (s *codexDesktopStreamState) textEvent(text, itemID string) (surface.StreamEvent, bool) {
+	if s.turnID == "" {
+		return surface.StreamEvent{}, false
+	}
+	if s.textByItem == nil {
+		s.textByItem = make(map[string]string)
+	}
 	if itemID != "" && itemID != s.assistantItem {
 		s.assistantItem = itemID
 		s.assistantKey = codexDesktopStreamKey(s.turnID, "assistant", itemID)
-		s.text = ""
 	} else if s.assistantKey == "" {
 		s.assistantKey = codexDesktopStreamKey(s.turnID, "assistant", "")
 	}
-	s.text += text
-	return surface.StreamEvent{ID: s.assistantKey, ProviderKey: s.assistantKey, Version: uint64(len(s.text)), Operation: "append", TurnID: s.turnID, Kind: "text", Text: text}
+	s.textByItem[s.assistantKey] += text
+	return surface.StreamEvent{ID: s.assistantKey, ProviderKey: s.assistantKey, Version: uint64(len(s.textByItem[s.assistantKey])), Operation: "append", TurnID: s.turnID, Kind: "text", Text: text}, true
 }
 
-func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID string) surface.StreamEvent {
+func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, body string) (surface.StreamEvent, bool) {
+	if s.turnID == "" {
+		return surface.StreamEvent{}, false
+	}
 	if itemID == "" {
 		itemID = strconv.FormatInt(sequence, 10)
 	}
 	key := codexDesktopStreamKey(s.turnID, "tool", itemID)
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, Kind: "tool_use", Text: name}
+	if body == "" {
+		body = name
+	}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, Kind: "tool_use", Title: name, Text: body}, true
+}
+
+func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEvent, bool) {
+	item := codexEventItem(event.Params)
+	if item == nil {
+		return surface.StreamEvent{}, false
+	}
+	itemID := codexEventItemID(item)
+	if itemID == "" {
+		itemID = strconv.FormatInt(event.Sequence, 10)
+	}
+	typ := strings.ToLower(str(item, "type"))
+	kind, role := "", ""
+	switch {
+	case strings.Contains(typ, "usermessage") || typ == "user":
+		kind, role = "message", "user"
+	case strings.Contains(typ, "reason"):
+		kind, role = "reasoning", "assistant"
+	case strings.Contains(typ, "functioncall") || strings.Contains(typ, "toolcall"):
+		kind, role = "tool_use", "assistant"
+	case strings.Contains(typ, "functioncalloutput") || strings.Contains(typ, "toolresult"):
+		kind, role = "tool_result", "assistant"
+	case strings.Contains(typ, "agentmessage") || typ == "assistant":
+		kind, role = "text", "assistant"
+	default:
+		return surface.StreamEvent{}, false
+	}
+	turnID := s.turnID
+	if eventTurnID := codexEventTurnID(event.Params); eventTurnID != "" {
+		turnID = eventTurnID
+	}
+	if turnID == "" {
+		return surface.StreamEvent{}, false
+	}
+	body := codexEventItemBody(item)
+	if body == "" {
+		return surface.StreamEvent{}, false
+	}
+	key := codexDesktopStreamKey(turnID, kind, itemID)
+	result := surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(body)), Operation: "upsert", TurnID: turnID, Kind: kind, Role: role, Title: str(item, "name"), Text: body, Status: str(item, "status")}
+	if kind == "text" && str(item, "phase") == "final_answer" {
+		result.Final = true
+	}
+	return result, true
 }
 
 func (s *codexDesktopStreamState) finalEvent(turnID string, turn *codexTurn) (surface.StreamEvent, bool) {
+	if turnID == "" {
+		return surface.StreamEvent{}, false
+	}
 	assistant, ok := turn.authoritativeAssistant()
 	if !ok || assistant.Text == "" {
 		return surface.StreamEvent{}, false
 	}
-	key := s.assistantKey
-	if key == "" {
-		key = codexDesktopStreamKey(turnID, "assistant", assistant.ID)
+	key := codexDesktopStreamKey(turnID, "assistant", assistant.ID)
+	if assistant.ID == "" && s.assistantKey != "" {
+		key = s.assistantKey
 	}
 	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(assistant.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: assistant.Text}, true
 }
 
-func (s *codexDesktopStreamState) doneEvent(sequence int64, turnID string) surface.StreamEvent {
+func (s *codexDesktopStreamState) doneEvent(sequence int64, turnID string) (surface.StreamEvent, bool) {
+	if turnID == "" {
+		return surface.StreamEvent{}, false
+	}
 	key := codexDesktopStreamKey(turnID, "done", "")
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(sequence), Operation: "phase", TurnID: turnID, Kind: "done"}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(sequence), Operation: "phase", TurnID: turnID, Kind: "done"}, true
 }
 
 func codexDesktopStreamKey(turnID, kind, itemID string) string {
