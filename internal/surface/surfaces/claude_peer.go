@@ -89,10 +89,6 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 }
 
 func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surface.Session, bool, error) {
-	byPID := make(map[int]bool, len(ancestorPIDs))
-	for _, pid := range ancestorPIDs {
-		byPID[pid] = true
-	}
 	sessions, err := c.List(ctx)
 	if err != nil {
 		return nil, false, err
@@ -103,8 +99,7 @@ func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surfac
 			valid[session.PID] = session
 		}
 	}
-	var matches []surface.Session
-	for pid := range byPID {
+	for _, pid := range ancestorPIDs {
 		record, present := c.peerRecord(pid)
 		if !present || str(record, "agenthail") == "peer-worker" {
 			continue
@@ -113,15 +108,9 @@ func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surfac
 		if !ok {
 			return nil, false, fmt.Errorf("Claude ancestor PID %d has no validated messaging endpoint", pid)
 		}
-		matches = append(matches, session)
+		return &session, true, nil
 	}
-	if len(matches) == 0 {
-		return nil, false, nil
-	}
-	if len(matches) > 1 {
-		return nil, false, fmt.Errorf("ambiguous Claude caller ancestry matches %d sessions", len(matches))
-	}
-	return &matches[0], true, nil
+	return nil, false, nil
 }
 
 func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session, string, bool, error) {

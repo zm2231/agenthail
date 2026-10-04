@@ -2,6 +2,7 @@ package peerbridge
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,6 +52,9 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if err := manager.Ensure(ctx, "recent"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := reg.ReverseAlias("recent"); err != sql.ErrNoRows {
+		t.Fatalf("background registration minted handle: %v", err)
+	}
 	if err := Ensure(ctx, home, "older"); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +72,33 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("manager send receipt=%+v err=%v", receipt, err)
 	}
+	if alias, err := reg.ReverseAlias("recent"); err != nil || alias != "recent" {
+		t.Fatalf("first send handle=%q err=%v", alias, err)
+	}
+	relay := manager.relays["recent"]
+	if !relay.healthy() {
+		t.Fatalf("new reply relay is not healthy: pid=%d path=%q", relay.process.Pid, relay.socketPath)
+	}
+	results := make(chan error, 4)
+	for range 4 {
+		go func() {
+			session, sessionErr := reg.Session("recent")
+			if sessionErr != nil {
+				results <- sessionErr
+				return
+			}
+			err := manager.ensureRelay(ctx, *session)
+			results <- err
+		}()
+	}
+	for range 4 {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent relay send: %v", err)
+		}
+	}
+	if manager.relays["recent"] != relay {
+		t.Fatalf("concurrent sends replaced the durable relay: before=%d after=%d path=%q paths=%d healthy=%v", relay.process.Pid, manager.relays["recent"].process.Pid, relay.socketPath, len(relay.paths), relay.healthy())
+	}
 	receipt, err = Send(ctx, home, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), strings.Repeat("x", 16<<10))
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("large manager send receipt=%+v err=%v", receipt, err)
@@ -83,9 +114,102 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if first.process.Pid == oldFirstPID {
 		t.Fatal("missing control endpoint did not replace its worker")
 	}
+	if manager.relays["recent"] != relay {
+		t.Fatal("helper replacement discarded the durable relay")
+	}
 	receipt, err = manager.Send(ctx, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "send after control repair")
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("post-repair receipt=%+v err=%v", receipt, err)
+	}
+	if err := first.process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-first.done
+	manager.RetireInactive(time.Now(), 24*time.Hour)
+	if manager.children["recent"] != nil {
+		t.Fatal("dead helper was not retired")
+	}
+	if manager.relays["recent"] != relay {
+		t.Fatal("retiring a dead helper discarded the durable relay")
+	}
+	if manager.relays["recent"] == nil {
+		t.Fatal("non-Claude sender did not get a durable reply relay")
+	}
+	nativeSocket := filepath.Join(manager.socketDir, strconv.Itoa(os.Getpid())+".sock")
+	nativeListener, err := net.Listen("unix", nativeSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nativeListener.Close()
+	receipts := make(chan []byte, 2)
+	go func() {
+		for {
+			conn, err := nativeListener.Accept()
+			if err != nil {
+				return
+			}
+			data, _ := io.ReadAll(conn)
+			receipts <- data
+			_ = conn.Close()
+		}
+	}()
+	startCmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
+	startCmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	startBytes, err := startCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	nativeRecord := map[string]any{"pid": os.Getpid(), "sessionId": "native-test", "procStart": strings.TrimSpace(string(startBytes)), "messagingSocketPath": nativeSocket}
+	data, _ := json.Marshal(nativeRecord)
+	if err := os.WriteFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	replyID := uuid.NewString()
+	replyFrame := map[string]any{"msgV": 1, "msg_id": replyID, "type": "user", "from": "uds:" + nativeSocket, "message": map[string]string{"role": "user", "content": "reply after helper replacement"}}
+	for range 2 {
+		conn, err := net.Dial("unix", manager.relays["recent"].socketPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if err := json.NewEncoder(conn).Encode(replyFrame); err != nil {
+			t.Fatal(err)
+		}
+		conn.(*net.UnixConn).CloseWrite()
+		if _, err := io.ReadAll(conn); err != nil {
+			t.Fatal(err)
+		}
+		conn.Close()
+	}
+	if count := reg.QueueCount("recent"); count != 1 {
+		t.Fatalf("relay reply queue count=%d", count)
+	}
+	select {
+	case receiptData := <-receipts:
+		if !strings.Contains(string(receiptData), `"status":"received"`) || !strings.Contains(string(receiptData), replyID) {
+			t.Fatalf("native receipt=%s", receiptData)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("native receipt not delivered")
+	}
+	oldRelayPID, oldRelaySocket := relay.process.Pid, relay.socketPath
+	if err := relay.process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-relay.done
+	receipt, err = manager.Send(ctx, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "send after relay restart")
+	if err != nil || receipt == nil || !receipt.Accepted {
+		t.Fatalf("relay restart receipt=%+v err=%v", receipt, err)
+	}
+	newRelay := manager.relays["recent"]
+	if newRelay == nil || newRelay.process.Pid == oldRelayPID || newRelay.socketPath == oldRelaySocket {
+		t.Fatalf("relay was not recreated with fresh ownership: old=%d/%q new=%v", oldRelayPID, oldRelaySocket, newRelay)
+	}
+	if _, err := os.Lstat(oldRelaySocket); !os.IsNotExist(err) {
+		t.Fatalf("old relay socket remains after restart: %v", err)
 	}
 	socket := filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock")
 	messageID := uuid.NewString()
@@ -105,14 +229,14 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 		}
 		conn.Close()
 	}
-	if count := reg.QueueCount("older"); count != 4 {
+	if count := reg.QueueCount("older"); count != 5 {
 		t.Fatalf("duplicate inbound queue count=%d", count)
 	}
 	if err := reg.ReplaceAlias("renamed", "older"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(2200 * time.Millisecond)
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(second.process.Pid)+".json"))
+	data, err = os.ReadFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(second.process.Pid)+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,16 +256,28 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if manager.children["older"].process.Pid == second.process.Pid {
 		t.Fatal("dead worker reused")
 	}
-	if err := reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusIdle, LastActive: time.Now().Add(-48 * time.Hour)}); err != nil {
+	if err := reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusOffline, LastActive: time.Now().Add(-48 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	manager.children["recent"].lastUsed = time.Now().Add(-48 * time.Hour)
+	if recent := manager.children["recent"]; recent != nil {
+		recent.lastUsed = time.Now().Add(-48 * time.Hour)
+		if err := recent.process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		<-recent.done
+	}
 	manager.RetireInactive(time.Now(), 24*time.Hour)
 	if manager.children["recent"] != nil {
 		t.Fatal("inactive peer was not retired")
 	}
+	if manager.relays["recent"] != nil {
+		t.Fatal("offline relay was not retired after its helper died")
+	}
 	children := manager.children
 	manager.Close()
+	nativeListener.Close()
+	_ = os.Remove(nativeSocket)
+	_ = os.Remove(filepath.Join(home, ".claude", "sessions", strconv.Itoa(os.Getpid())+".json"))
 	for _, entry := range children {
 		select {
 		case <-entry.done:

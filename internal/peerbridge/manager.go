@@ -2,6 +2,7 @@ package peerbridge
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ type child struct {
 	process     *os.Process
 	paths       map[string]os.FileInfo
 	controlPath string
+	socketPath  string
 	recordPath  string
 	record      recordOwnership
 	lastUsed    time.Time
@@ -81,6 +83,7 @@ type managerRequest struct {
 	SourceSessionID string `json:"sourceSessionId"`
 	TargetSocket    string `json:"targetSocket,omitempty"`
 	Message         string `json:"message,omitempty"`
+	ReplySocket     string `json:"replySocket,omitempty"`
 }
 
 type managerError struct {
@@ -104,6 +107,7 @@ type Manager struct {
 	listener   net.Listener
 	mu         sync.Mutex
 	children   map[string]*child
+	relays     map[string]*child
 	closed     bool
 	generation string
 	requests   chan struct{}
@@ -182,7 +186,7 @@ func start(ctx context.Context, home string, reg *registry.Registry, executable,
 		listener.Close()
 		return nil, err
 	}
-	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint}
+	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, relays: map[string]*child{}, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint}
 	lockTransferred = true
 	go m.serve()
 	return m, nil
@@ -305,6 +309,13 @@ func (m *Manager) Ensure(ctx context.Context, id string) error {
 		if session.Status == surface.StatusOffline {
 			return fmt.Errorf("sender %q is offline", id)
 		}
+		if session.Surface != surface.KindClaude {
+			if alias, aliasErr := m.registry.ReverseAlias(session.ID); aliasErr == nil && alias != "" {
+				session.Name = alias
+			} else if aliasErr != nil && !errors.Is(aliasErr, sql.ErrNoRows) {
+				return fmt.Errorf("load sender handle: %w", aliasErr)
+			}
+		}
 	}
 	if id == OperatorID {
 		if err := m.registry.RegisterSession(*session); err != nil {
@@ -400,8 +411,40 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 	if err := claudepeer.ValidateSend(sourceID, targetSocket, message); err != nil {
 		return nil, err
 	}
+	if sourceID != OperatorID {
+		session, err := m.registry.Session(sourceID)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
+		}
+		if session.Surface != surface.KindClaude {
+			if _, err := m.registry.ReserveGeneratedAlias(session.ID, session.Name); err != nil {
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("reserve sender handle: %w", err))
+			}
+		}
+	}
 	if err := m.Ensure(ctx, sourceID); err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("register Claude peer: %w", err))
+	}
+	replySocket := ""
+	if sourceID != OperatorID {
+		session, err := m.registry.Session(sourceID)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
+		}
+		if session.Surface != surface.KindClaude {
+			if err := m.ensureRelay(ctx, *session); err != nil {
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("start reply relay: %w", err))
+			}
+			m.mu.Lock()
+			relay := m.relays[sourceID]
+			if relay != nil {
+				replySocket = relay.socketPath
+			}
+			m.mu.Unlock()
+			if replySocket == "" {
+				return nil, surface.DeliveryUnavailable(errors.New("reply relay disappeared before delivery"))
+			}
+		}
 	}
 	m.mu.Lock()
 	entry := m.children[sourceID]
@@ -412,7 +455,75 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 	if entry == nil || entry.controlPath == "" {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude peer registration disappeared before delivery"))
 	}
-	return claudepeer.Send(ctx, entry.controlPath, sourceID, targetSocket, message)
+	return claudepeer.SendWithReplySocket(ctx, entry.controlPath, sourceID, targetSocket, replySocket, message)
+}
+
+func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing := m.relays[session.ID]; existing != nil && existing.healthy() {
+		existing.lastUsed = time.Now()
+		return nil
+	} else if existing != nil {
+		existing.stop(2 * time.Second)
+		existing.cleanup()
+		delete(m.relays, session.ID)
+	}
+	processToken := uuid.NewString()
+	command := exec.Command(m.executable, "claude-peer-relay", processToken)
+	command.Env = append(os.Environ(), "AGENTHAIL_PEER_TOKEN="+processToken)
+	input, err := command.StdinPipe()
+	if err != nil {
+		return err
+	}
+	output, err := command.StdoutPipe()
+	if err != nil {
+		input.Close()
+		return err
+	}
+	command.Stderr = os.Stderr
+	if err := command.Start(); err != nil {
+		input.Close()
+		output.Close()
+		return err
+	}
+	entry := &child{input: input, done: make(chan struct{}), process: command.Process, lastUsed: time.Now()}
+	go func() { _ = command.Wait(); close(entry.done) }()
+	fail := func(err error) error { input.Close(); _ = command.Process.Kill(); <-entry.done; return err }
+	config := claudepeer.Config{Home: m.home, RegistryPath: m.registry.Path(), Session: session, SocketDir: m.socketDir, ManifestPath: claudepeer.WorkerManifestPath(m.home, m.generation, command.Process.Pid), Generation: m.generation, ProcessToken: processToken, ReplyRelay: true}
+	if err := json.NewEncoder(input).Encode(config); err != nil {
+		return fail(err)
+	}
+	var result claudepeer.Ready
+	ready := make(chan error, 1)
+	go func() {
+		err := json.NewDecoder(io.LimitReader(output, workerReadyBytes)).Decode(&result)
+		if err == nil && result.PID != command.Process.Pid {
+			err = fmt.Errorf("reply relay readiness PID mismatch")
+		}
+		ready <- err
+	}()
+	select {
+	case err := <-ready:
+		if err != nil {
+			return fail(err)
+		}
+	case <-ctx.Done():
+		return fail(ctx.Err())
+	}
+	entry.paths = map[string]os.FileInfo{}
+	entry.socketPath = result.SocketPath
+	for _, path := range []string{result.SocketPath, claudepeer.WorkerManifestPath(m.home, m.generation, command.Process.Pid)} {
+		if info, err := os.Lstat(path); err == nil {
+			entry.paths[path] = info
+		}
+	}
+	entry.record = recordOwnership{PID: command.Process.Pid, SessionID: session.ID, ProcStart: "", Agenthail: "peer-relay", ProcessToken: processToken}
+	if m.closed {
+		return fail(errors.New("peer manager is stopping"))
+	}
+	m.relays[session.ID] = entry
+	return nil
 }
 
 // RetireInactive bounds the set of Claude-visible Agenthail peers. Busy and
@@ -433,13 +544,37 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 		default:
 		}
 		session, err := m.registry.Session(id)
-		keep := now.Sub(entry.lastUsed) <= maxIdle || (err == nil && session.Status != surface.StatusOffline && (session.Status == surface.StatusBusy || (!session.LastActive.IsZero() && now.Sub(session.LastActive) <= maxIdle)))
+		keep := keepPeerAlive(now, maxIdle, entry.lastUsed, session, err)
 		if keep {
 			continue
 		}
 		delete(m.children, id)
 		entry.input.Close()
 		retired = append(retired, entry)
+		if relay := m.relays[id]; relay != nil {
+			delete(m.relays, id)
+			relay.input.Close()
+			retired = append(retired, relay)
+		}
+	}
+	for id, relay := range m.relays {
+		if _, childPresent := m.children[id]; childPresent {
+			continue
+		}
+		select {
+		case <-relay.done:
+			delete(m.relays, id)
+			retired = append(retired, relay)
+			continue
+		default:
+		}
+		session, err := m.registry.Session(id)
+		if keepRelayAlive(now, maxIdle, relay.lastUsed, session, err) {
+			continue
+		}
+		delete(m.relays, id)
+		relay.input.Close()
+		retired = append(retired, relay)
 	}
 	m.mu.Unlock()
 	for _, entry := range retired {
@@ -453,6 +588,20 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 	}
 }
 
+func keepPeerAlive(now time.Time, maxIdle time.Duration, lastUsed time.Time, session *surface.Session, err error) bool {
+	if now.Sub(lastUsed) <= maxIdle {
+		return true
+	}
+	return err == nil && session.Status != surface.StatusOffline && (session.Status == surface.StatusBusy || (!session.LastActive.IsZero() && now.Sub(session.LastActive) <= maxIdle))
+}
+
+func keepRelayAlive(now time.Time, maxIdle time.Duration, lastUsed time.Time, session *surface.Session, err error) bool {
+	if err == nil && session.Status == surface.StatusOffline {
+		return false
+	}
+	return keepPeerAlive(now, maxIdle, lastUsed, session, err)
+}
+
 func (m *Manager) Close() {
 	m.mu.Lock()
 	if m.closed {
@@ -462,12 +611,26 @@ func (m *Manager) Close() {
 	m.closed = true
 	m.listener.Close()
 	children := m.children
+	relays := m.relays
 	m.children = map[string]*child{}
+	m.relays = map[string]*child{}
 	for _, child := range children {
+		child.input.Close()
+	}
+	for _, child := range relays {
 		child.input.Close()
 	}
 	m.mu.Unlock()
 	for _, child := range children {
+		select {
+		case <-child.done:
+		case <-time.After(8 * time.Second):
+			_ = child.process.Kill()
+			<-child.done
+		}
+		child.cleanup()
+	}
+	for _, child := range relays {
 		select {
 		case <-child.done:
 		case <-time.After(8 * time.Second):
@@ -491,15 +654,19 @@ func (c *child) healthy() bool {
 		return false
 	default:
 	}
-	owned := c.paths[c.controlPath]
+	path := c.controlPath
+	if path == "" {
+		path = c.socketPath
+	}
+	owned := c.paths[path]
 	if owned == nil {
 		return false
 	}
-	current, err := os.Lstat(c.controlPath)
+	current, err := os.Lstat(path)
 	if err != nil || current.Mode()&os.ModeSocket == 0 || !os.SameFile(owned, current) {
 		return false
 	}
-	conn, err := net.DialTimeout("unix", c.controlPath, 200*time.Millisecond)
+	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
 	if err != nil {
 		return false
 	}
