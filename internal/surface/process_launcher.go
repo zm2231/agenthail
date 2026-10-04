@@ -68,13 +68,20 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		if err != nil {
 			return LaunchResult{}, err
 		}
-		args := []string{"new-workspace", "--cwd", request.Cwd, "--command", command}
+		args := []string{"new-workspace", "--json", "--cwd", request.Cwd, "--command", command}
+		if request.Name != "" {
+			args = append(args, "--name", request.Name)
+		}
 		out, runErr := l.run(ctx, l.command, args...)
 		if runErr != nil {
 			_ = os.Remove(intentPath)
 			return LaunchResult{}, fmt.Errorf("%s launch: %w: %s", l.id, runErr, strings.TrimSpace(string(out)))
 		}
-		return parseLaunchResult(l.id, out), nil
+		result, parseErr := parseLaunchResult(l.id, out)
+		if parseErr != nil {
+			return LaunchResult{}, parseErr
+		}
+		return result, nil
 	}
 
 	sessionName := "agenthail-" + uuid.NewString()
@@ -89,7 +96,11 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	if err != nil {
 		return LaunchResult{}, fmt.Errorf("%s launch: %w: %s", l.id, err, strings.TrimSpace(string(out)))
 	}
-	return parseLaunchResult(l.id, out), nil
+	result, parseErr := parseLaunchResult(l.id, out)
+	if parseErr != nil {
+		return LaunchResult{}, parseErr
+	}
+	return result, nil
 }
 
 func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
@@ -168,10 +179,10 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func parseLaunchResult(id string, out []byte) LaunchResult {
+func parseLaunchResult(id string, out []byte) (LaunchResult, error) {
 	text := strings.TrimSpace(string(out))
 	if text == "" {
-		return LaunchResult{}
+		return LaunchResult{}, nil
 	}
 	if id == LauncherTMUX {
 		fields := strings.Fields(text)
@@ -182,9 +193,23 @@ func parseLaunchResult(id string, out []byte) LaunchResult {
 		if len(fields) > 1 {
 			location.Pane = fields[1]
 		}
-		return LaunchResult{Location: location}
+		return LaunchResult{Location: location}, nil
 	}
-	return LaunchResult{Location: &Location{Workspace: text}}
+	var payload struct {
+		WorkspaceRef string `json:"workspace_ref"`
+		WorkspaceID  string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		return LaunchResult{}, fmt.Errorf("parse %s launch result: %w", id, err)
+	}
+	workspace := payload.WorkspaceRef
+	if workspace == "" {
+		workspace = payload.WorkspaceID
+	}
+	if workspace == "" {
+		return LaunchResult{}, fmt.Errorf("parse %s launch result: workspace handle is missing", id)
+	}
+	return LaunchResult{Location: &Location{Workspace: workspace}}, nil
 }
 
 func (l *processLauncher) Locate(ctx context.Context, sessions []Session) map[string]Location {
@@ -195,11 +220,11 @@ func (l *processLauncher) Locate(ctx context.Context, sessions []Session) map[st
 }
 
 type cmuxRecord struct {
-	SessionID string `json:"session_id"`
-	Workspace string `json:"workspace_id"`
-	Surface   string `json:"surface_id"`
-	Pane      string `json:"pane_id"`
-	PID       int    `json:"pid"`
+	SessionID       string `json:"session_id"`
+	Workspace       string `json:"workspace_id"`
+	Surface         string `json:"surface_id"`
+	PID             int    `json:"pid"`
+	StoredPIDExists *bool  `json:"stored_pid_exists"`
 }
 
 func (l *processLauncher) locateCMUX(ctx context.Context, sessions []Session) map[string]Location {
@@ -219,13 +244,13 @@ func (l *processLauncher) locateCMUX(ctx context.Context, sessions []Session) ma
 	}
 	located := make(map[string]Location)
 	for _, record := range envelope.Sessions {
-		if record.SessionID == "" || record.PID <= 0 || !l.pidAlive(record.PID) {
+		if record.SessionID == "" || record.PID <= 0 || (record.StoredPIDExists != nil && !*record.StoredPIDExists) || !l.pidAlive(record.PID) {
 			continue
 		}
 		if _, ok := wanted[record.SessionID]; !ok {
 			continue
 		}
-		located[record.SessionID] = Location{Workspace: record.Workspace, Surface: record.Surface, Pane: record.Pane, Session: record.SessionID}
+		located[record.SessionID] = Location{Workspace: record.Workspace, Surface: record.Surface}
 	}
 	return located
 }
@@ -319,11 +344,23 @@ func (l *processLauncher) Focus(ctx context.Context, location Location) error {
 	if location.Session == "" {
 		return errors.New("tmux focus requires a session")
 	}
-	target := location.Session
-	if location.Pane != "" {
-		target += ":" + location.Pane
+	clients, err := l.run(ctx, l.command, "list-clients", "-F", "#{client_name} #{session_name}")
+	if err != nil {
+		return fmt.Errorf("list tmux clients: %w: %s", err, strings.TrimSpace(string(clients)))
 	}
-	if _, err := l.run(ctx, l.command, "switch-client", "-t", target); err == nil {
+	for _, line := range strings.Split(strings.TrimSpace(string(clients)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[1] != location.Session {
+			continue
+		}
+		if location.Pane != "" {
+			if out, err := l.run(ctx, l.command, "select-pane", "-t", location.Pane); err != nil {
+				return fmt.Errorf("select tmux pane: %w: %s", err, strings.TrimSpace(string(out)))
+			}
+		}
+		if out, err := l.run(ctx, l.command, "switch-client", "-c", fields[0], "-t", location.Session); err != nil {
+			return fmt.Errorf("switch tmux client: %w: %s", err, strings.TrimSpace(string(out)))
+		}
 		return nil
 	}
 	attach := "tmux attach-session -t " + shellQuote(location.Session)

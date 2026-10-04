@@ -346,7 +346,7 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 		locations := launcher.Locate(ctx, sessions)
 		matched := ""
 		for id, location := range locations {
-			if location != item.Location {
+			if !locationMatches(item.Location, location) {
 				continue
 			}
 			if matched != "" {
@@ -360,7 +360,9 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 		}
 		for index := range sessions {
 			if sessions[index].ID == matched {
-				sessions[index].Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &item.Location, Focusable: true}
+				located := locations[matched]
+				locationsCopy := located
+				sessions[index].Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
 				_ = d.Registry.RegisterSession(sessions[index])
 				_ = d.Registry.DeletePendingLaunch(item.ID)
 				break

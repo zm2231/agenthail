@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestNewLaunchersInjectsExistingStarterAndSeams(t *testing.T) {
 		t.Fatalf("launcher ids = %#v, want %#v", ids, want)
 	}
 	result, err := launchers[2].Launch(context.Background(), LaunchRequest{Agent: KindClaude, Message: "hello"})
-	if err != nil || result.SessionID != "created" {
+	if err != nil || result.SessionID != "created" || result.Session == nil || result.Session.ID != "created" {
 		t.Fatalf("starter launch = %#v, %v", result, err)
 	}
 	if starter.options == nil || starter.options.Agent != "" || starter.options.Owner != "" {
@@ -78,11 +79,11 @@ func TestNewLaunchersInjectsExistingStarterAndSeams(t *testing.T) {
 func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "args")
-	writeExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CMUX_TEST_ARGS\"\nprintf '%s' 'workspace:1'\n")
+	writeExecutable(t, filepath.Join(dir, "cmux"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CMUX_TEST_ARGS\"\nprintf '%s' '{\"workspace_ref\":\"workspace:1\"}'\n")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CMUX_TEST_ARGS", logPath)
 	launcher := newCMUX().(*processLauncher)
-	request := LaunchRequest{Agent: KindCodex, Cwd: "/tmp/project", Model: "model x", Message: `$(touch /tmp/nope); "quoted"`}
+	request := LaunchRequest{Agent: KindCodex, Cwd: "/tmp/project", Model: "model x", Name: "named", Message: `$(touch /tmp/nope); "quoted"`}
 	result, err := launcher.Launch(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -95,10 +96,14 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(args), "\n"), "\n")
-	if !containsLine(lines, "--command") || containsLine(lines, request.Message) {
+	if !containsLine(lines, "--json") || !containsLine(lines, "--command") || !containsLine(lines, request.Name) || containsLine(lines, request.Message) {
 		t.Fatalf("argv log = %#v", lines)
 	}
-	command := lines[len(lines)-1]
+	commandIndex := slices.Index(lines, "--command")
+	if commandIndex < 0 || commandIndex+1 >= len(lines) {
+		t.Fatalf("cmux command argument missing: %#v", lines)
+	}
+	command := lines[commandIndex+1]
 	match := regexp.MustCompile(`launcher-exec '([^']+)'`).FindStringSubmatch(command)
 	if len(match) != 2 {
 		t.Fatalf("unsafe cmux command = %q", command)
@@ -123,11 +128,11 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 func TestCMUXLocateRequiresLivePID(t *testing.T) {
 	launcher := newCMUX().(*processLauncher)
 	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
-		return []byte(`{"sessions":[{"session_id":"live","workspace_id":"w","surface_id":"s","pane_id":"p","pid":7},{"session_id":"dead","pid":8}]}`), nil
+		return []byte(`{"sessions":[{"session_id":"live","workspace_id":"w","surface_id":"s","pid":7,"stored_pid_exists":true},{"session_id":"dead","pid":8,"stored_pid_exists":false}]}`), nil
 	}
 	launcher.pidAlive = func(pid int) bool { return pid == 7 }
 	got := launcher.Locate(context.Background(), []Session{{ID: "live"}, {ID: "dead"}})
-	want := map[string]Location{"live": {Workspace: "w", Surface: "s", Pane: "p", Session: "live"}}
+	want := map[string]Location{"live": {Workspace: "w", Surface: "s"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations = %#v, want %#v", got, want)
 	}
@@ -210,8 +215,8 @@ func TestTMUXFocusFallsBackToTerminalAttach(t *testing.T) {
 	var calls [][]string
 	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, append([]string{name}, args...))
-		if name == "tmux" {
-			return nil, os.ErrNotExist
+		if name == "tmux" && len(args) > 0 && args[0] == "list-clients" {
+			return nil, nil
 		}
 		return nil, nil
 	}
@@ -223,6 +228,24 @@ func TestTMUXFocusFallsBackToTerminalAttach(t *testing.T) {
 	}
 	if len(calls[1]) < 3 || !strings.Contains(calls[1][2], "build") {
 		t.Fatalf("attach call = %#v", calls[1])
+	}
+}
+
+func TestTMUXFocusSelectsAttachedClientAndPane(t *testing.T) {
+	launcher := newTMUX().(*processLauncher)
+	var calls [][]string
+	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{name}, args...))
+		if name == "tmux" && args[0] == "list-clients" {
+			return []byte("client-1 build\n"), nil
+		}
+		return nil, nil
+	}
+	if err := launcher.Focus(context.Background(), Location{Session: "build", Pane: "%1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 3 || calls[1][1] != "select-pane" || calls[1][3] != "%1" || calls[2][1] != "switch-client" || !containsLine(calls[2], "client-1") || !containsLine(calls[2], "build") {
+		t.Fatalf("focus calls = %#v", calls)
 	}
 }
 

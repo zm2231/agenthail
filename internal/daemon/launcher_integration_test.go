@@ -99,3 +99,40 @@ func TestLocateLaunchedSessionRejectsAmbiguousLocation(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestLocateLaunchedSessionRejectsUndiscoveredID(t *testing.T) {
+	fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"other": {ID: "other"}}}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, locations: map[string]surface.Location{"missing": {Workspace: "workspace-1"}}}
+	_, _, err := locateLaunchedSession(context.Background(), launcher, fake, surface.LaunchResult{Location: &surface.Location{Workspace: "workspace-1"}})
+	if err == nil || !strings.Contains(err.Error(), "did not discover session") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	location := surface.Location{Workspace: "workspace-1"}
+	fullLocation := surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{"created": fullLocation}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", location); err != nil {
+		t.Fatal(err)
+	}
+	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, Cwd: "/repo", Status: surface.StatusIdle}})
+	pending, err := r.PendingLaunches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending=%+v", pending)
+	}
+	created, err := r.Session("created")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Runtime == nil || created.Runtime.Location == nil || *created.Runtime.Location != fullLocation {
+		t.Fatalf("created runtime=%+v", created.Runtime)
+	}
+}
