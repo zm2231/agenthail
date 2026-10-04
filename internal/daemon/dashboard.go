@@ -245,7 +245,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/models", dashboard.guard(d.dashboardModelsHandler))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
-	mux.HandleFunc("/api/action", dashboard.guard(d.dashboardActionHandler))
+	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.dashboardActionHandler)))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	d.registerAPIV1(mux, dashboard)
