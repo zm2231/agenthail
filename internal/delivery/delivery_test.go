@@ -20,6 +20,7 @@ type fakeSurface struct {
 	observeErr   error
 	sent         []string
 	steered      []string
+	steerErr     error
 	capabilities surface.Capabilities
 	compactCalls int
 }
@@ -64,7 +65,7 @@ func (*fakeSurface) Model(context.Context, *surface.Session, string) (string, er
 func (*fakeSurface) Interrupt(context.Context, *surface.Session) error               { return nil }
 func (f *fakeSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
 	f.steered = append(f.steered, message)
-	return nil
+	return f.steerErr
 }
 func (f *fakeSurface) Capabilities() surface.Capabilities { return f.capabilities }
 func (*fakeSurface) EnsureWritable(_ context.Context, session *surface.Session) error {
@@ -251,6 +252,149 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 	intent, err := r.DeliveryIntent(receipt.DeliveryID)
 	if err != nil || intent.Status != registry.DeliveryIntentSent || intent.TargetSessionID != session.ID {
 		t.Fatalf("steer intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDispatcherBusySteerUnknownKeepsSubmittedIntent(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "busy-unknown", Name: "builder", Surface: surface.KindCodex, Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	unknown := surface.DeliveryOutcomeUnknown(errors.New("steer acknowledgement lost"))
+	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, steerErr: unknown, capabilities: surface.Capabilities{Steer: true}}
+	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "interrupt", "", surface.SendOptions{BusyDelivery: "steer"})
+	if err != nil || receipt == nil || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID == 0 || len(adapter.steered) != 1 {
+		t.Fatalf("receipt=%+v err=%v steered=%v", receipt, err, adapter.steered)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.Status != registry.DeliveryIntentSubmitted || intent.Evidence != surface.EvidenceSubmitted {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	if got := r.QueueCount(session.ID); got != 0 {
+		t.Fatalf("ambiguous steer was queued for retry: %d", got)
+	}
+}
+
+func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "failed-send", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{err: errors.New("target rejected input")}
+	if _, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "bad input", ""); err == nil {
+		t.Fatal("expected provider rejection")
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil || len(problems) != 1 || problems[0].SessionID != session.ID || problems[0].Status != registry.DeliveryIntentFailed {
+		t.Fatalf("problems=%+v err=%v", problems, err)
+	}
+	if got := r.QueueCount(registry.OperatorSessionID); got != 1 {
+		t.Fatalf("expected one durable failure notice, got %d", got)
+	}
+}
+
+func TestDispatcherAcceptedThenUnknownKeepsSameSubmittedIntent(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "accepted-unknown", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	unknown := surface.DeliveryOutcomeUnknown(errors.New("response lost after provider acceptance"))
+	adapter := &fakeSurface{result: &surface.SendResult{UUID: "turn-uncertain", Accepted: true}, err: unknown}
+	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "possibly sent", "")
+	if err != nil || receipt == nil || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID == 0 || len(adapter.sent) != 1 {
+		t.Fatalf("receipt=%+v err=%v sent=%v", receipt, err, adapter.sent)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.Status != registry.DeliveryIntentSubmitted || intent.ProviderKey != "" {
+		t.Fatalf("ambiguous intent=%+v err=%v", intent, err)
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+		t.Fatalf("ambiguous send became a failure: problems=%+v err=%v", problems, err)
+	}
+}
+
+func TestDispatcherDoesNotCallProviderWhenIntentPersistenceFails(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &surface.Session{ID: "storage-failure", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{result: &surface.SendResult{Accepted: true}}
+	if _, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "must not send", ""); err == nil {
+		t.Fatal("expected intent persistence failure")
+	}
+	if len(adapter.sent) != 0 {
+		t.Fatalf("provider was called after intent persistence failed: %v", adapter.sent)
+	}
+	steerAdapter := &fakeSurface{}
+	if _, err := (Dispatcher{Registry: r}).Steer(context.Background(), steerAdapter, session, "must not steer"); err == nil {
+		t.Fatal("expected steer intent persistence failure")
+	}
+	if len(steerAdapter.steered) != 0 {
+		t.Fatalf("steer provider was called after intent persistence failed: %v", steerAdapter.steered)
+	}
+}
+
+func TestDispatcherSteerPreservesContextSourceInIntent(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, id := range []string{"steer-source", "steer-target"} {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adapter := &fakeSurface{capabilities: surface.Capabilities{Steer: true}}
+	receipt, err := (Dispatcher{Registry: r}).Steer(surface.WithSourceSessionID(context.Background(), "steer-source"), adapter, &surface.Session{ID: "steer-target", Surface: surface.KindCodex}, "focus")
+	if err != nil || receipt == nil || receipt.DeliveryID == 0 {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.SenderSessionID != "steer-source" || intent.Status != registry.DeliveryIntentSent {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDispatcherNilResultRemainsSubmitted(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "nil-result", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{result: nil}, session, "maybe accepted", "")
+	if err != nil || receipt == nil || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID == 0 {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("ambiguous result became a failure: problems=%+v err=%v", problems, err)
 	}
 }
 
