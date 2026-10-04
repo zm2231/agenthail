@@ -43,10 +43,26 @@ final class WorkflowParityTests: XCTestCase {
         ParityProtocol.state.reset(unknown: true)
         let model = makeModel()
         let created = await model.createSession(surface: "claude", message: "Build", cwd: "/project", model: "")
-        XCTAssertFalse(created); XCTAssertNil(model.requestedSessionID)
-        XCTAssertTrue(model.creationError?.contains("without a confirmed session ID") == true)
-        XCTAssertTrue(model.creationError?.contains("registration delayed") == true)
+        XCTAssertTrue(created); XCTAssertNil(model.requestedSessionID)
+        XCTAssertNil(model.creationError)
         XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+    }
+
+    @MainActor
+    func testTerminalLauncherBodyOmitsAdvancedDefaultsAndRejectsUnsupportedSettings() async throws {
+        ParityProtocol.state.reset()
+        let model = makeModel()
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", launcher: "tmux")
+        XCTAssertTrue(created)
+        XCTAssertEqual(ParityProtocol.state.actions[0]["launcher"] as? String, "tmux")
+        XCTAssertNil(ParityProtocol.state.actions[0]["effort"])
+        XCTAssertNil(ParityProtocol.state.actions[0]["mode"])
+
+        let settings = TurnSettings(effort: "high", mode: .plan)
+        let rejected = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen", turnSettings: settings, launcher: "tmux")
+        XCTAssertFalse(rejected)
+        XCTAssertEqual(ParityProtocol.state.actions.count, 1)
+        XCTAssertTrue(model.creationError?.contains("do not support advanced") == true)
     }
 
     func testQueueDecodesIntegratedTurnSettings() throws {
