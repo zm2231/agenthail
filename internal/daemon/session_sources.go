@@ -53,7 +53,7 @@ type sessionSourceManager struct {
 
 type sessionSource struct {
 	manager       *sessionSourceManager
-	session       *surface.Session
+	session       surface.Session
 	adapter       surface.Surface
 	epoch         string
 	ctx           context.Context
@@ -95,7 +95,7 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, seedReady: make(chan struct{})}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, seedReady: make(chan struct{})}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -126,7 +126,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 			return nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, seedReady: make(chan struct{})}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, seedReady: make(chan struct{})}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -191,7 +191,7 @@ func (s *sessionSource) stop() {
 func (s *sessionSource) run() {
 	s.seedJournal()
 	close(s.seedReady)
-	effective := surface.EffectiveCapabilities(s.session, s.adapter.Capabilities())
+	effective := surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities())
 	if s.session.Surface == surface.KindClaude && s.session.Transport == "uds" && !effective.Stream {
 		<-s.ctx.Done()
 		s.closeSubscribers()
@@ -199,7 +199,7 @@ func (s *sessionSource) run() {
 		return
 	}
 	for {
-		current := *s.session
+		current := s.session
 		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
 			current = *refreshed
 		}
@@ -283,7 +283,7 @@ func boundedSessionSourceReason(value string) string {
 func (s *sessionSource) seedJournal() {
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
-	read, err := surface.ReadSession(ctx, s.adapter, s.session, surface.SessionReadRequest{Limit: 40})
+	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
 	if err != nil || read == nil {
 		return
 	}
