@@ -102,13 +102,13 @@ func (l starterLauncher) Launch(ctx context.Context, request LaunchRequest) (Lau
 	session, _, err := l.starter.StartSession(ctx, SessionStartOptions{
 		Cwd: request.Cwd, Message: request.Message, Model: request.Model, Name: request.Name,
 	})
-	if err != nil {
-		return LaunchResult{}, err
-	}
 	if session == nil || session.ID == "" {
+		if err != nil {
+			return LaunchResult{}, err
+		}
 		return LaunchResult{}, errors.New("session starter returned no session id")
 	}
-	return LaunchResult{SessionID: session.ID, Session: session}, nil
+	return LaunchResult{SessionID: session.ID, Session: session}, err
 }
 
 type unavailableLauncher struct {

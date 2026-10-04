@@ -62,7 +62,10 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	if err := validateLaunchRequest(request, l.agents); err != nil {
 		return LaunchResult{}, err
 	}
-	argv := agentArgv(request)
+	argv, err := agentArgv(request)
+	if err != nil {
+		return LaunchResult{}, err
+	}
 	if l.id == LauncherCMUX {
 		command, intentPath, err := writeLauncherIntent(request.Cwd, argv)
 		if err != nil {
@@ -120,22 +123,34 @@ func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
 	return nil
 }
 
-func agentArgv(request LaunchRequest) []string {
+func agentArgv(request LaunchRequest) ([]string, error) {
 	if request.Agent == KindClaude {
-		argv := []string{"claude"}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home for Claude executable: %w", err)
+		}
+		binary, err := ClaudeBinary(home)
+		if err != nil {
+			return nil, err
+		}
+		argv := []string{binary}
 		if request.Model != "" {
 			argv = append(argv, "--model", request.Model)
 		}
 		if request.Name != "" {
 			argv = append(argv, "--name", request.Name)
 		}
-		return append(argv, "--", request.Message)
+		return append(argv, "--", request.Message), nil
 	}
-	argv := []string{"agenthail", "codex", "--cd", request.Cwd}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve agenthail executable: %w", err)
+	}
+	argv := []string{executable, "codex", "--cd", request.Cwd}
 	if request.Model != "" {
 		argv = append(argv, "--model", request.Model)
 	}
-	return append(argv, "--", request.Message)
+	return append(argv, "--", request.Message), nil
 }
 
 type launcherIntent struct {

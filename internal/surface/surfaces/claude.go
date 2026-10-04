@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -533,7 +534,13 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	deadline := time.Now().Add(timeout)
 	currentTurnID := ""
 	if state.hasCurrent {
-		currentTurnID = state.current.UserID
+		hasTurnStart, scanErr := claudeTranscriptHasTurnStart(ctx, path, offset)
+		if scanErr != nil {
+			return scanErr
+		}
+		if !hasTurnStart {
+			currentTurnID = state.current.UserID
+		}
 	}
 	terminalTurns := map[string]bool{}
 	for time.Now().Before(deadline) {
@@ -547,7 +554,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				return nil
 			}
 			turnID := currentTurnID
-			if str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) {
+			if claudeRecordStartsTurn(record) {
 				currentTurnID = str(record, "uuid")
 				turnID = currentTurnID
 			}
@@ -602,7 +609,30 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
+}
+
+var errClaudeTurnStartFound = errors.New("claude turn start found")
+
+func claudeTranscriptHasTurnStart(ctx context.Context, path string, offset int64) (bool, error) {
+	_, err := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		if !bytes.Contains(line, []byte(`"user"`)) {
+			return nil
+		}
+		var record map[string]any
+		if json.Unmarshal(line, &record) == nil && claudeRecordStartsTurn(record) {
+			return errClaudeTurnStartFound
+		}
+		return nil
+	})
+	if errors.Is(err, errClaudeTurnStartFound) {
+		return true, nil
+	}
+	return false, err
+}
+
+func claudeRecordStartsTurn(record map[string]any) bool {
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {

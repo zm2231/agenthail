@@ -207,3 +207,84 @@ func mustAttachmentData(t *testing.T) []byte {
 	}
 	return data
 }
+
+func TestCodexInputImageURLSiblingsKeepDistinctFetchableIdentities(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	image := "data:image/png;base64," + testPNG
+	line := `{"timestamp":"2026-09-01T12:00:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_siblings","role":"user","content":[{"type":"input_text","text":"compare these"},{"type":"input_image","image_url":"` + image + `"},{"type":"input_image","image_url":"` + image + `"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seed []surface.TimelineItem
+	for _, item := range page.Items {
+		if item.Kind == "attachment" {
+			seed = append(seed, item)
+		}
+	}
+	if len(seed) != 2 || seed[0].Attachment == nil || seed[1].Attachment == nil {
+		t.Fatalf("seed attachments=%+v", seed)
+	}
+	if seed[0].ID == seed[1].ID || seed[0].Attachment.ID == seed[1].Attachment.ID {
+		t.Fatalf("sibling attachments share identity: %+v", seed)
+	}
+	for _, item := range seed {
+		if item.Attachment.MediaType != "image/png" || item.Attachment.Width != 1 || item.Attachment.Height != 1 {
+			t.Fatalf("attachment metadata=%+v", item.Attachment)
+		}
+		attachment, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "siblings", Transcript: path}, item.Attachment.ID)
+		if err != nil || attachment.ID != item.Attachment.ID || !bytes.Equal(data, mustAttachmentData(t)) {
+			t.Fatalf("fetch attachment=%+v bytes=%d err=%v", attachment, len(data), err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var live []surface.StreamEvent
+	err = (&Codex{}).Stream(ctx, &surface.Session{ID: "siblings", Transcript: path, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
+		if event.Kind == "attachment" {
+			live = append(live, event)
+			if len(live) == 2 {
+				cancel()
+			}
+		}
+	}, time.Second)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if len(live) != 2 {
+		t.Fatalf("live attachments=%+v", live)
+	}
+	for index, event := range live {
+		if event.ProviderKey != seed[index].ID || event.Attachment == nil || event.Attachment.ID != seed[index].Attachment.ID {
+			t.Fatalf("live attachment %d=%+v seed=%+v", index, event, seed[index])
+		}
+	}
+}
+
+func TestClaudeUnsupportedImageSourceKeepsLaterAttachmentAligned(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"url","url":"https://example.invalid/a.png"}},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachments []surface.TimelineItem
+	for _, item := range page.Items {
+		if item.Kind == "attachment" {
+			attachments = append(attachments, item)
+		}
+	}
+	if len(attachments) != 2 || attachments[0].Attachment != nil || attachments[1].Attachment == nil {
+		t.Fatalf("attachments=%+v", attachments)
+	}
+	_, data, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, attachments[1].Attachment.ID)
+	if err != nil || !bytes.Equal(data, mustAttachmentData(t)) {
+		t.Fatalf("aligned attachment bytes=%d err=%v", len(data), err)
+	}
+}

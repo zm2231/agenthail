@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -602,6 +603,47 @@ func TestClaudeStreamKeepsTargetTurnAcrossLongTranscriptOverlap(t *testing.T) {
 	}
 	if !sawAnswer || !sawDone {
 		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestClaudeStreamDoesNotCreditOlderTurnCompletionInOverlapToNewestTurn(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"older","message":{"content":"first"}}`)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	padding := `{"type":"system","subtype":"background"}` + "\n"
+	for written := 0; written < initialClaudeObservationBytes+(1<<20); written += len(padding) {
+		if _, err := file.WriteString(padding); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+	}
+	for _, record := range []string{
+		`{"type":"assistant","uuid":"assistant-older","message":{"id":"older-answer","stop_reason":"end_turn","content":[{"type":"text","text":"older answer"}]}}`,
+		`{"type":"system","subtype":"turn_duration","durationMs":10}`,
+		`{"type":"user","uuid":"newest","message":{"content":"second"}}`,
+	} {
+		if _, err := file.WriteString(record + "\n"); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	claude := NewClaude("Default", t.TempDir())
+	var events []surface.StreamEvent
+	err = claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "newest", func(event surface.StreamEvent) {
+		events = append(events, event)
+	}, time.Second)
+	if !errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("stream err=%v events=%+v", err, events)
+	}
+	for _, event := range events {
+		if event.Kind == "done" || event.Text == "older answer" {
+			t.Fatalf("older turn credited to newest: %+v", event)
+		}
 	}
 }
 

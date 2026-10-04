@@ -120,6 +120,9 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 	if len(intent.Argv) == 0 || intent.Argv[len(intent.Argv)-1] != request.Message {
 		t.Fatalf("intent did not preserve message: %#v", intent)
 	}
+	if executable, err := os.Executable(); err != nil || intent.Argv[0] != executable {
+		t.Fatalf("intent argv[0]=%q, want agenthail executable %q (%v)", intent.Argv[0], executable, err)
+	}
 	if info, err := os.Stat(match[1]); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("intent permissions = %v, %v", info, err)
 	}
@@ -127,6 +130,9 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 }
 
 func TestCMUXMalformedAcceptedOutputCleansIntentAndReturnsAcceptedError(t *testing.T) {
+	claude := filepath.Join(t.TempDir(), "claude")
+	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
 	launcher := newCMUX().(*processLauncher)
 	var args []string
 	launcher.run = func(_ context.Context, _ string, got ...string) ([]byte, error) {
@@ -179,6 +185,10 @@ func TestCMUXAvailabilityProbesCommandsInsteadOfHelpText(t *testing.T) {
 }
 
 func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
+	claude := filepath.Join(t.TempDir(), "claude")
+	writeExecutable(t, claude, "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", claude)
 	launcher := newTMUX().(*processLauncher)
 	var got []string
 	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -198,6 +208,24 @@ func TestTMUXLaunchPassesMessageAsDirectArgument(t *testing.T) {
 	}
 	if containsLine(got, "--command") {
 		t.Fatalf("tmux launch used shell command mode: %#v", got)
+	}
+	if !containsLine(got, claude) || containsLine(got, "claude") {
+		t.Fatalf("tmux launch did not use the resolved Claude executable: %#v", got)
+	}
+}
+
+func TestProcessLaunchFailsBeforeLaunchWhenClaudeIsMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", "")
+	launcher := newTMUX().(*processLauncher)
+	launched := false
+	launcher.run = func(context.Context, string, ...string) ([]byte, error) {
+		launched = true
+		return []byte("build:1"), nil
+	}
+	if _, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/work", Message: "hello"}); err == nil || launched {
+		t.Fatalf("launch with missing Claude executable err=%v launched=%v", err, launched)
 	}
 }
 
