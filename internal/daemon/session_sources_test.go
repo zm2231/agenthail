@@ -232,40 +232,6 @@ func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testin
 	}
 }
 
-type seedBarrierSurface struct {
-	*sourceCountingSurface
-	readStarted chan struct{}
-	release     chan struct{}
-}
-
-func (s *seedBarrierSurface) StreamCursor(context.Context, *surface.Session) (uint64, error) {
-	select {
-	case <-s.readStarted:
-		return 8, nil
-	default:
-		return 7, nil
-	}
-}
-
-func (s *seedBarrierSurface) ReadSession(ctx context.Context, _ *surface.Session, _ surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	close(s.readStarted)
-	select {
-	case <-s.release:
-		return &surface.SessionReadResult{Items: append([]surface.TimelineItem(nil), s.items...)}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (s *seedBarrierSurface) Stream(ctx context.Context, session *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
-	if !session.StreamCursorSet || session.StreamCursor != 7 {
-		return errors.New("stream did not receive the pre-seed cursor barrier")
-	}
-	onEvent(surface.StreamEvent{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 8, Version: 6, Operation: "append", Kind: "text", Role: "assistant", Text: " world"})
-	<-ctx.Done()
-	return ctx.Err()
-}
-
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
