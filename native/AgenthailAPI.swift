@@ -116,9 +116,9 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init()) async throws -> ActionReceipt {
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), idempotencyKey: String? = nil) async throws -> ActionReceipt {
         let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
-        return try await requestEncoded("/api/v1/actions", method: "POST", body: body)
+        return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
     func sessionOptions() async throws -> SessionCreationOptions { try await get("/api/v1/session-options") }
@@ -342,18 +342,19 @@ final class AgenthailAPI: @unchecked Sendable {
         try await request(path, method: "POST", body: body)
     }
 
-    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25) async throws -> T {
+    private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25, idempotencyKey: String? = nil) async throws -> T {
         var request = authorizedRequest(path: path)
         request.httpMethod = method
         request.timeoutInterval = timeout
         request.httpBody = try JSONEncoder().encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: path, method: method, key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func request<T: Decodable>(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval = 25) async throws -> T {
+    private func request<T: Decodable>(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval = 25, idempotencyKey: String? = nil) async throws -> T {
         var request = authorizedRequest(path: path)
         request.httpMethod = method
         request.timeoutInterval = timeout
@@ -361,6 +362,7 @@ final class AgenthailAPI: @unchecked Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        setIdempotencyHeader(on: &request, path: path, method: method, key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         if T.self == EmptyResponse.self {
@@ -375,6 +377,11 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 25
         return request
+    }
+
+    private func setIdempotencyHeader(on request: inout URLRequest, path: String, method: String, key: String?) {
+        guard method == "POST", path == "/api/v1/actions" else { return }
+        request.setValue(key ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
     }
 
     private func validate(response: URLResponse, data: Data?) throws {

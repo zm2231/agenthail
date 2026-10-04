@@ -44,11 +44,30 @@ final class TurnSettingsFlowTests: XCTestCase {
         configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
         let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
 
-        _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", turnSettings: TurnSettings(effort: "high", mode: .plan))
+        _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", turnSettings: TurnSettings(effort: "high", mode: .plan), idempotencyKey: "stable-steer-key")
+        _ = try await api.sendInstruction(action: "steer", sessionID: "codex-flow", message: "Steer the active turn", turnSettings: TurnSettings(effort: "high", mode: .plan), idempotencyKey: "stable-steer-key")
 
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "steer")
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["effort"])
         XCTAssertNil(TurnSettingsFlowProtocol.state.actions[0]["mode"])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys, ["stable-steer-key", "stable-steer-key"])
+    }
+
+    func testActionGetsGeneratedKeyButReadsDoNot() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        _ = try await api.sendInstruction(action: "send", sessionID: "codex-flow", message: "Send once")
+        try await api.action("goal-set", sessionID: "codex-flow", message: "Set a goal")
+        _ = try await api.queuedInstructions()
+
+        let generated = try XCTUnwrap(TurnSettingsFlowProtocol.state.actionIdempotencyKeys.compactMap { $0 }.first)
+        XCTAssertNotNil(UUID(uuidString: generated))
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys.count, 2)
+        XCTAssertNotEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys[0], TurnSettingsFlowProtocol.state.actionIdempotencyKeys[1])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.nonActionIdempotencyKeys, [nil])
     }
 
     @MainActor
@@ -133,6 +152,8 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
         private var blockSessionRefresh = false
         private var refreshStarted = false
         private var sessionRefreshReleased = false
+        private var actionKeys: [String?] = []
+        private var nonActionKeys: [String?] = []
 
         var actions: [[String: Any]] {
             condition.lock(); defer { condition.unlock() }
@@ -142,18 +163,29 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
             condition.lock(); defer { condition.unlock() }
             return refreshStarted
         }
+        var actionIdempotencyKeys: [String?] {
+            condition.lock(); defer { condition.unlock() }
+            return actionKeys
+        }
+        var nonActionIdempotencyKeys: [String?] {
+            condition.lock(); defer { condition.unlock() }
+            return nonActionKeys
+        }
 
         func reset(failActions: Bool = false, blockSessionRefresh: Bool = false) {
             condition.lock()
-            records = []; self.failActions = failActions; self.blockSessionRefresh = blockSessionRefresh
+            records = []; actionKeys = []; nonActionKeys = []; self.failActions = failActions; self.blockSessionRefresh = blockSessionRefresh
             refreshStarted = false; sessionRefreshReleased = false
             condition.broadcast(); condition.unlock()
         }
 
-        func record(_ body: [String: Any]) -> (Int, String) {
-            condition.lock(); records.append(body); condition.broadcast(); condition.unlock()
+        func record(_ body: [String: Any], idempotencyKey: String?) -> (Int, String) {
+            condition.lock(); records.append(body); actionKeys.append(idempotencyKey); condition.broadcast(); condition.unlock()
             if failActions { return (502, #"{"error":{"message":"unavailable"}}"#) }
             return (200, #"{"ok":true}"#)
+        }
+        func recordNonAction(idempotencyKey: String?) {
+            condition.lock(); nonActionKeys.append(idempotencyKey); condition.unlock()
         }
 
         func beginSessionRefresh() {
@@ -187,7 +219,10 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
                 }
             }
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            (status, body) = Self.state.record(object)
+            (status, body) = Self.state.record(object, idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
+        } else if request.url?.path == "/api/v1/queue" {
+            Self.state.recordNonAction(idempotencyKey: request.value(forHTTPHeaderField: "Idempotency-Key"))
+            body = #"{"items":[]}"#
         } else if request.url?.path == "/api/v1/session" {
             Self.state.beginSessionRefresh()
             status = 200
