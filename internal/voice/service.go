@@ -100,7 +100,6 @@ type State struct {
 	Target         *surface.Session `json:"target,omitempty"`
 	AudioProvider  string           `json:"audioProvider,omitempty"`
 	CodingProvider string           `json:"codingProvider,omitempty"`
-	DynamicTools   bool             `json:"dynamicTools"`
 }
 
 type Action struct {
@@ -301,10 +300,7 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		if v.Phase == "creating" {
 			return errors.New("operator creation outcome is unknown; inspect Codex before creating another operator")
 		}
-		if v.Session != nil && !v.DynamicTools && s.active() {
-			return errors.New("resolve the existing voice call before upgrading its orchestrator")
-		}
-		if v.Session != nil && v.DynamicTools {
+		if v.Session != nil {
 			if s.register != nil {
 				return s.register(*v.Session)
 			}
@@ -797,7 +793,6 @@ func (s *Service) appendDelegationEvent(messageID string, target *surface.Sessio
 
 func (s *Service) createOperator(ctx context.Context) error {
 	previous := s.state
-	migratingTools := previous.State.Session != nil && !previous.State.DynamicTools
 	instructions := OperatorInstructions(s.commandPath)
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
 	s.state.State.Phase = "creating"
@@ -823,12 +818,8 @@ func (s *Service) createOperator(ctx context.Context) error {
 		}
 		return err
 	}
-	message := ""
-	if migratingTools {
-		message = "Created an upgraded voice orchestrator with Agenthail transfer tools. The previous conversation remains in Sessions."
-	}
 	s.state = diskState{State: State{
-		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, DynamicTools: true, Message: message, Events: []Event{},
+		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, Events: []Event{},
 	}}
 	s.cursor, s.boundAttempt, s.eventGap = Cursor{}, "", false
 	if err := s.save(); err != nil {
