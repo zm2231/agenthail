@@ -76,7 +76,7 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	}
 }
 
-func TestAPISessionStreamReplaysSeedForClaudeWithoutLiveStream(t *testing.T) {
+func TestAPISessionStreamRejectsClaudeWithoutLiveStream(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
 	from.Transport = "uds"
@@ -94,9 +94,7 @@ func TestAPISessionStreamReplaysSeedForClaudeWithoutLiveStream(t *testing.T) {
 	d = New(reg, []surface.Surface{adapter})
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
 	defer server.Close()
-	requestContext, cancelRequest := context.WithCancel(context.Background())
-	defer cancelRequest()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,25 +104,13 @@ func TestAPISessionStreamReplaysSeedForClaudeWithoutLiveStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusConflict {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
 	}
-	reader := bufio.NewReader(response.Body)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.HasPrefix(line, "data: ") {
-			if !strings.Contains(line, `"body":"seeded over API"`) || strings.Contains(line, `"kind":"source-error"`) {
-				t.Fatalf("line=%q", line)
-			}
-			break
-		}
-	}
-	if calls := adapter.calls.Load(); calls != 0 {
-		t.Fatalf("seed-only provider was invoked for live stream: %d", calls)
+	body, _ := io.ReadAll(response.Body)
+	if !strings.Contains(string(body), `"code":"stream_unsupported"`) {
+		t.Fatalf("body=%s", body)
 	}
 }
 

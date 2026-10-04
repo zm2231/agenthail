@@ -54,7 +54,7 @@ type sessionSource struct {
 	seeded        chan struct{}
 	seedErr       error
 	manager       *sessionSourceManager
-	session       *surface.Session
+	session       surface.Session
 	adapter       surface.Surface
 	epoch         string
 	ctx           context.Context
@@ -95,7 +95,7 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -126,7 +126,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 			return nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -205,14 +205,18 @@ func (m *sessionSourceManager) shutdown() {
 func (s *sessionSource) run() {
 	s.seedJournal()
 	close(s.seeded)
-	if !surface.EffectiveCapabilities(s.session, s.adapter.Capabilities()).Stream {
+	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
 		<-s.ctx.Done()
 		s.closeSubscribers()
 		s.remove()
 		return
 	}
 	for {
-		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
+		current := s.session
+		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
+			current = *refreshed
+		}
+		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
 			break
@@ -309,7 +313,7 @@ func boundedSessionSourceReason(value string) string {
 func (s *sessionSource) seedJournal() {
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
-	read, err := surface.ReadSession(ctx, s.adapter, s.session, surface.SessionReadRequest{Limit: 40})
+	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
 	if err != nil || read == nil {
 		if err == nil {
 			err = fmt.Errorf("session source returned no activity result")

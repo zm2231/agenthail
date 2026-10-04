@@ -170,9 +170,13 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		if len(items) == 0 {
 			continue
 		}
-		digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
 		for i := range items {
-			items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+			if source == "claude" {
+				items[i].ID = stableTimelineItemID(offset, line, i)
+			} else {
+				digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
+				items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+			}
 			items[i].Timestamp = str(record, "timestamp")
 		}
 		full := slices.Clone(items)
@@ -370,8 +374,8 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 			}
 		case "image":
 			item.Kind = "attachment"
-			item.Title = "Image attachment"
-			item.Text = "Open the original agent app to view this image."
+			item.Title = "Image"
+			item.Text = "Image attachment"
 		default:
 			continue
 		}
