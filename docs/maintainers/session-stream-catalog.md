@@ -33,14 +33,15 @@ same journal. `Last-Event-ID` is accepted as the same per-session cursor.
 Replay emits entries strictly after the cursor. When retention cannot satisfy a
 cursor, the endpoint returns the typed `stream_gap` response so a client can
 reload a bounded page. Session sequence numbers are never catalog sequence
-numbers.
+numbers. A mutation of an existing provider key receives a new session
+sequence, so a reconnect after its prior version replays the latest value.
 
 Each session event has `itemId`, optional `providerKey`, mutation `version`,
 operation (`append`, `upsert`, `remove`, or `phase`), `kind`, optional `turnId`
 and `ts`, bounded `body`, `truncated`, and optional `bodyRef`. A body
 reference is opaque, bound to the authenticated session, range-limited and
 expires with journal retention; it never names a host path. A source rebuild is
-a typed reset, not a removal. A provider absence or partial read never deletes
+a typed `source-error` reset with a bounded `reason`, not a removal. A provider absence or partial read never deletes
 historical journal content.
 
 Catalog event envelopes are `{stream:"catalog",seq,type,data}` and session event
