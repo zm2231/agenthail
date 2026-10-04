@@ -33,6 +33,20 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.sessionStreamCursor, 2048)
     }
 
+    @MainActor
+    func testCatalogEpochResetsCursorToCurrentSnapshot() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        RecoveryProtocol.state.configureCatalog(epoch: "epoch-a", sequence: 41)
+        let firstRefresh = await model.refresh()
+        XCTAssertTrue(firstRefresh)
+        XCTAssertEqual(model.catalogStreamCursor, 41)
+        RecoveryProtocol.state.configureCatalog(epoch: "epoch-b", sequence: 2)
+        let secondRefresh = await model.refresh()
+        XCTAssertTrue(secondRefresh)
+        XCTAssertEqual(model.catalogStreamCursor, 2)
+    }
+
     func testQueuedReceiptFollowsExpirationWithoutResending() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
@@ -104,11 +118,13 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var queueHistorical: Bool?
         private var evidence: String?
         private var queueFailure = false
+        private var catalogEpoch: String?
+        private var catalogSequence: UInt64?
         private var reads = 0
         private var actions = 0
         var sessionReads: Int { lock.withLock { reads } }
         var actionCount: Int { lock.withLock { actions } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; reads = 0; actions = 0 } }
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0 } }
         func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
@@ -118,6 +134,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                 if let queueFailure { self.queueFailure = queueFailure }
             }
         }
+        func configureCatalog(epoch: String, sequence: UInt64) { lock.withLock { catalogEpoch = epoch; catalogSequence = sequence } }
         func response(path: String, olderPage: Bool = false) -> (Int, String) {
             lock.withLock {
                 switch path {
@@ -129,6 +146,8 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                 case "/api/v1/snapshot":
                     var snapshot = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
                     snapshot["daemon"] = ["running": true, "stale": stale, "refreshError": "Agent catalog refresh failed"]
+                    if let catalogEpoch { snapshot["hostEpoch"] = catalogEpoch }
+                    if let catalogSequence { snapshot["catalogSeq"] = catalogSequence }
                     return (200, String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!)
                 case "/api/v1/actions":
                     actions += 1
