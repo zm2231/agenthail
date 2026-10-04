@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-install-test.XXXXXX")"
 TEST_HOME="$TMP/home odd\" dollar\$ back\\slash"
 DATA_DIR="$TEST_HOME/data odd\" dollar\$ back\\slash"
 OLD_BIN="$TEST_HOME/.local/bin"

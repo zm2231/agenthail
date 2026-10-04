@@ -20,7 +20,7 @@ else
 fi
 
 if [ -z "$CLI_SOURCE" ]; then
-	CLI_SOURCE="$(mktemp -d)/agenthail"
+	CLI_SOURCE="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-cli-build.XXXXXX")/agenthail"
 	trap 'rm -rf "$(dirname "$CLI_SOURCE")"' EXIT
 	LDFLAGS=""
 	if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
@@ -60,7 +60,7 @@ PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$OUTPUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_BUILD" "$OUTPUT/Contents/Info.plist"
 
-ICON_ROOT="$(mktemp -d)"
+ICON_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-icons.XXXXXX")"
 ICONSET="$ICON_ROOT/Agenthail.iconset"
 mkdir -p "$ICONSET"
 if [ ! -f "$ICON_SOURCE" ]; then
