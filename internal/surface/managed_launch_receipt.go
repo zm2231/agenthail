@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ManagedCodexLaunchReceipt struct {
@@ -15,9 +16,12 @@ type ManagedCodexLaunchReceipt struct {
 	Cwd         string `json:"cwd"`
 	TmuxSession string `json:"tmuxSession"`
 	TmuxPane    string `json:"tmuxPane"`
+	Workspace   string `json:"workspace,omitempty"`
+	Surface     string `json:"surface,omitempty"`
 }
 
 const managedCodexLaunchReceiptMaxBytes = 16 << 10
+const managedCodexLaunchReceiptReclaimLimit = 128
 
 func ManagedCodexLaunchReceiptPath(launchID string) (string, error) {
 	if launchID == "" || filepath.Base(launchID) != launchID || filepath.IsAbs(launchID) {
@@ -30,8 +34,109 @@ func ManagedCodexLaunchReceiptPath(launchID string) (string, error) {
 	return filepath.Join(home, ".agenthail", "launches", launchID+".json"), nil
 }
 
+func managedCodexLaunchReceiptDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home for managed Codex launch receipts: %w", err)
+	}
+	return filepath.Join(home, ".agenthail", "launches"), nil
+}
+
+func ReclaimManagedCodexLaunchReceipts(liveSessions map[string]struct{}, verifyCurrent func(string) (bool, error)) error {
+	if verifyCurrent == nil {
+		return errors.New("managed Codex receipt reclaim requires current-session verification")
+	}
+	return reclaimManagedCodexLaunchReceipts(".reclaim-cursor", func(receipt ManagedCodexLaunchReceipt) (bool, error) {
+		if receipt.TmuxSession == "" || receipt.TmuxPane == "" {
+			return true, nil
+		}
+		if _, live := liveSessions[receipt.TmuxSession]; live {
+			return true, nil
+		}
+		return verifyCurrent(receipt.TmuxSession)
+	})
+}
+
+func ReclaimManagedCodexCMUXLaunchReceipts(verifyCurrent func(string, string) (bool, error)) error {
+	if verifyCurrent == nil {
+		return errors.New("managed Codex CMUX receipt reclaim requires current-surface verification")
+	}
+	return reclaimManagedCodexLaunchReceipts(".cmux-reclaim-cursor", func(receipt ManagedCodexLaunchReceipt) (bool, error) {
+		if receipt.Workspace == "" || receipt.Surface == "" {
+			return true, nil
+		}
+		return verifyCurrent(receipt.Workspace, receipt.Surface)
+	})
+}
+
+func reclaimManagedCodexLaunchReceipts(cursorName string, verifyCurrent func(ManagedCodexLaunchReceipt) (bool, error)) error {
+	dir, err := managedCodexLaunchReceiptDir()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	candidates := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), "agenthail-") && strings.HasSuffix(entry.Name(), ".json") {
+			candidates = append(candidates, entry)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	cursorPath := filepath.Join(dir, cursorName)
+	cursorBytes, _ := os.ReadFile(cursorPath)
+	cursor := strings.TrimSpace(string(cursorBytes))
+	start := 0
+	if cursor != "" {
+		for index, entry := range candidates {
+			if entry.Name() > cursor {
+				start = index
+				break
+			}
+			start = (index + 1) % len(candidates)
+		}
+	}
+	lastScanned := ""
+	for scanned := 0; scanned < len(candidates) && scanned < managedCodexLaunchReceiptReclaimLimit; scanned++ {
+		entry := candidates[(start+scanned)%len(candidates)]
+		lastScanned = entry.Name()
+		launchID := strings.TrimSuffix(entry.Name(), ".json")
+		path, err := ManagedCodexLaunchReceiptPath(launchID)
+		if err != nil || filepath.Clean(path) != filepath.Clean(filepath.Join(dir, entry.Name())) {
+			continue
+		}
+		receipt, err := ReadManagedCodexLaunchReceipt(path)
+		if err != nil {
+			continue
+		}
+		if receipt.LaunchID != launchID {
+			continue
+		}
+		current, err := verifyCurrent(receipt)
+		if err != nil || current {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if lastScanned != "" {
+		if err := os.WriteFile(cursorPath, []byte(lastScanned+"\n"), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func WriteManagedCodexLaunchReceipt(path string, receipt ManagedCodexLaunchReceipt) error {
-	if receipt.LaunchID == "" || receipt.ThreadID == "" || receipt.Cwd == "" || receipt.TmuxSession == "" || receipt.TmuxPane == "" {
+	if !managedCodexLaunchReceiptComplete(receipt) {
 		return errors.New("managed Codex launch receipt is incomplete")
 	}
 	data, err := json.Marshal(receipt)
@@ -88,8 +193,15 @@ func ReadManagedCodexLaunchReceipt(path string) (ManagedCodexLaunchReceipt, erro
 	if err := json.Unmarshal(data, &receipt); err != nil {
 		return ManagedCodexLaunchReceipt{}, fmt.Errorf("parse managed Codex launch receipt: %w", err)
 	}
-	if receipt.LaunchID == "" || receipt.ThreadID == "" || receipt.Cwd == "" || receipt.TmuxSession == "" || receipt.TmuxPane == "" {
+	if !managedCodexLaunchReceiptComplete(receipt) {
 		return ManagedCodexLaunchReceipt{}, errors.New("managed Codex launch receipt is incomplete")
 	}
 	return receipt, nil
+}
+
+func managedCodexLaunchReceiptComplete(receipt ManagedCodexLaunchReceipt) bool {
+	if receipt.LaunchID == "" || receipt.ThreadID == "" || receipt.Cwd == "" {
+		return false
+	}
+	return receipt.TmuxSession != "" && receipt.TmuxPane != "" || receipt.Workspace != "" && receipt.Surface != ""
 }

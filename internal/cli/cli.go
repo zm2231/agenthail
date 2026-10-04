@@ -246,31 +246,55 @@ func (a *App) cmdCodex(args []string) error {
 		if err != nil || filepath.Clean(receiptPath) != filepath.Clean(expectedReceiptPath) {
 			return fmt.Errorf("managed Codex launch receipt path is not launch-owned")
 		}
-		paneID := strings.TrimSpace(os.Getenv("TMUX_PANE"))
-		if !strings.HasPrefix(paneID, "%") {
-			return fmt.Errorf("managed Codex launch did not receive TMUX_PANE")
+		binding := managedCodexLaunchBinding{TmuxPane: strings.TrimSpace(os.Getenv("TMUX_PANE")), Workspace: strings.TrimSpace(os.Getenv("CMUX_WORKSPACE_ID")), Surface: strings.TrimSpace(os.Getenv("CMUX_SURFACE_ID"))}
+		if binding.TmuxPane == "" && (binding.Workspace == "" || binding.Surface == "") {
+			return fmt.Errorf("managed Codex launch did not receive a terminal identity")
 		}
-		model, message, err := managedCodexLaunchArgs(args)
-		if err != nil {
-			return err
+		if binding.TmuxPane != "" && !strings.HasPrefix(binding.TmuxPane, "%") {
+			return fmt.Errorf("managed Codex launch received invalid TMUX_PANE")
 		}
 		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		session, err := surfaces.NewCodex("").PrepareManagedTerminalSession(prepareCtx, cwd, model)
-		if err != nil {
-			return err
-		}
-		if err := surface.WriteManagedCodexLaunchReceipt(receiptPath, surface.ManagedCodexLaunchReceipt{LaunchID: launchID, ThreadID: session.ID, Cwd: cwd, TmuxSession: launchID, TmuxPane: paneID}); err != nil {
-			return err
-		}
-		argv := []string{"resume", session.ID, "--remote", "unix://"}
-		if message != "" {
-			argv = append(argv, "--", message)
-		}
-		return syscall.Exec(path, append([]string{"codex"}, argv...), os.Environ())
+		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, surfaces.NewCodex("").PrepareManagedTerminalSession, func(path string, argv, env []string) error {
+			return syscall.Exec(path, argv, env)
+		}, path)
 	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
 	return syscall.Exec(path, argv, os.Environ())
+}
+
+type managedCodexPreparer func(context.Context, string, string) (*surface.Session, error)
+type managedCodexExec func(string, []string, []string) error
+type managedCodexLaunchBinding struct {
+	TmuxPane  string
+	Workspace string
+	Surface   string
+}
+
+func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string) error {
+	model, message, err := managedCodexLaunchArgs(args)
+	if err != nil {
+		return err
+	}
+	session, err := prepare(ctx, cwd, model)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.ID == "" {
+		return errors.New("managed Codex launch returned no provider thread ID")
+	}
+	receipt := surface.ManagedCodexLaunchReceipt{LaunchID: launchID, ThreadID: session.ID, Cwd: cwd, TmuxSession: launchID, TmuxPane: binding.TmuxPane, Workspace: binding.Workspace, Surface: binding.Surface}
+	if receipt.TmuxPane == "" {
+		receipt.TmuxSession = ""
+	}
+	if err := surface.WriteManagedCodexLaunchReceipt(receiptPath, receipt); err != nil {
+		return err
+	}
+	argv := []string{"codex", "resume", session.ID, "--remote", "unix://"}
+	if message != "" {
+		argv = append(argv, "--", message)
+	}
+	return execute(path, argv, os.Environ())
 }
 
 func managedCodexLaunchArgs(args []string) (string, string, error) {
