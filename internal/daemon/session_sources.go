@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -37,6 +38,7 @@ type sessionJournalPayload struct {
 	Kind             string                `json:"kind"`
 	TurnID           string                `json:"turnId,omitempty"`
 	CallID           string                `json:"callId,omitempty"`
+	Final            bool                  `json:"final,omitempty"`
 	TS               string                `json:"ts"`
 	Body             string                `json:"body,omitempty"`
 	Truncated        bool                  `json:"truncated"`
@@ -276,6 +278,7 @@ func (m *sessionSourceManager) seed(ctx context.Context, session *surface.Sessio
 }
 
 func (s *sessionSource) appendSourceError(streamErr error) {
+	_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
 	s.mu.Lock()
 	s.sourceVersion++
 	payload := sessionJournalPayload{
@@ -315,6 +318,10 @@ func boundedSessionSourceReason(value string) string {
 }
 
 func (s *sessionSource) seedJournal() {
+	seedStatus, statusErr := s.manager.registry.SessionJournalSeedStatus(s.session.ID)
+	if statusErr == nil && seedStatus == registry.SessionJournalSeeded {
+		return
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
 	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
@@ -323,6 +330,7 @@ func (s *sessionSource) seedJournal() {
 			err = fmt.Errorf("session source returned no activity result")
 		}
 		s.seedErr = err
+		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
 		s.appendSourceError(err)
 		return
 	}
@@ -344,13 +352,17 @@ func (s *sessionSource) seedJournal() {
 			ProviderKey: providerKey,
 			Version:     uint64(len(item.Text)),
 			Operation:   "upsert",
-			TurnID:      item.CallID,
+			TurnID:      item.TurnID,
 			CallID:      item.CallID,
 			Attachment:  item.Attachment,
 			Timestamp:   at,
 			Kind:        item.Kind,
 			Text:        item.Text,
 		})
+	}
+	if err := s.manager.registry.MarkSessionJournalSeed(s.session.ID, true); err != nil {
+		s.seedErr = err
+		s.appendSourceError(err)
 	}
 }
 
@@ -485,5 +497,63 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated}
+}
+
+func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surface.Session, adapter surface.Surface) (sessionstream.Subscription, error) {
+	subscription, err := m.subscribeContext(ctx, session, adapter)
+	if err != nil {
+		return sessionstream.Subscription{}, err
+	}
+	m.mu.Lock()
+	source := m.sources[session.ID]
+	m.mu.Unlock()
+	if source == nil {
+		subscription.Cancel()
+		return sessionstream.Subscription{}, fmt.Errorf("session source disappeared while preparing stream")
+	}
+	select {
+	case <-source.seeded:
+	case <-ctx.Done():
+		subscription.Cancel()
+		return sessionstream.Subscription{}, ctx.Err()
+	}
+	if source.seedErr != nil {
+		err := source.seedErr
+		subscription.Cancel()
+		return sessionstream.Subscription{}, fmt.Errorf("seed session source: %w", err)
+	}
+	window, err := m.registry.SessionJournalAfter(session.ID, 0, 1)
+	if err != nil {
+		subscription.Cancel()
+		return sessionstream.Subscription{}, fmt.Errorf("capture session journal cursor: %w", err)
+	}
+	events := make(chan sessionstream.Event, 64)
+	go func() {
+		defer close(events)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case entry, ok := <-subscription.Entries:
+				if !ok {
+					return
+				}
+				event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
+				if decodeErr != nil {
+					select {
+					case events <- sessionstream.Event{Seq: entry.Seq, Kind: "source-error", Reason: decodeErr.Error()}:
+					case <-ctx.Done():
+					}
+					return
+				}
+				select {
+				case events <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return sessionstream.Subscription{Cursor: window.LatestSeq, Events: events, Cancel: subscription.Cancel}, nil
 }

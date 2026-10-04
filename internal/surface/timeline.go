@@ -11,6 +11,7 @@ type TimelineItem struct {
 	Text             string      `json:"text"`
 	Timestamp        string      `json:"timestamp,omitempty"`
 	CallID           string      `json:"callId,omitempty"`
+	TurnID           string      `json:"turnId,omitempty"`
 	Status           string      `json:"status,omitempty"`
 	Truncated        bool        `json:"truncated"`
 	TruncationReason string      `json:"truncationReason,omitempty"`

@@ -53,6 +53,36 @@ type SessionJournalPage struct {
 	LatestSeq  uint64
 }
 
+const (
+	SessionJournalSeedUnknown = "unknown"
+	SessionJournalSeedFailed  = "failed"
+	SessionJournalSeeded      = "succeeded"
+)
+
+func (r *Registry) SessionJournalSeedStatus(sessionID string) (string, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return "", fmt.Errorf("session id is required")
+	}
+	var status string
+	err := r.db.QueryRow(`SELECT seed_status FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return SessionJournalSeedUnknown, nil
+	}
+	return status, err
+}
+
+func (r *Registry) MarkSessionJournalSeed(sessionID string, succeeded bool) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("session id is required")
+	}
+	status := SessionJournalSeedFailed
+	if succeeded {
+		status = SessionJournalSeeded
+	}
+	_, err := r.db.Exec(`INSERT INTO session_journal_state(session_id,next_seq,retained_bytes,seed_status) VALUES(?,0,0,?) ON CONFLICT(session_id) DO UPDATE SET seed_status=excluded.seed_status`, sessionID, status)
+	return err
+}
+
 func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit int) (SessionJournalPage, error) {
 	if strings.TrimSpace(sessionID) == "" || limit < 1 || limit > 200 {
 		return SessionJournalPage{}, fmt.Errorf("invalid journal page request")
