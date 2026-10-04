@@ -38,11 +38,16 @@ sequence, so a reconnect after its prior version replays the latest value.
 
 Each session event has `itemId`, optional `providerKey`, mutation `version`,
 operation (`append`, `upsert`, `remove`, or `phase`), `kind`, optional `turnId`
-and `ts`, bounded `body`, `truncated`, and optional `bodyRef`. A body
+and `ts`, bounded `body`, `truncated`, optional `truncationReason`, and optional `bodyRef`. A body
 reference is opaque, bound to the authenticated session, range-limited and
 expires with journal retention; it never names a host path. A source rebuild is
 a typed `source-error` reset with a bounded `reason`, not a removal. A provider absence or partial read never deletes
 historical journal content.
+
+Body range reads use byte offsets with UTF-8 boundaries: `start` must begin at
+a code-point boundary, while `end` is reduced to the preceding boundary when
+needed. The response's `end` is the actual returned byte offset, so clients can
+concatenate successive ranges without splitting a code point.
 
 Catalog event envelopes are `{stream:"catalog",seq,type,data}` and session event
 envelopes are `{stream:"session",sessionId,seq,type,data}`. Their cursors are

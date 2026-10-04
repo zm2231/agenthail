@@ -21,7 +21,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 8
+	schemaVersion   = 9
 	queueMessageTTL = time.Hour
 )
 
@@ -137,6 +137,15 @@ func (r *Registry) migrate() error {
 	}
 	if err := r.ensureColumn("delivery_intents", "queue_id", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
+	}
+	if version < 9 {
+		if _, err := r.db.Exec(`
+			UPDATE session_journal
+			SET bytes=length(payload)+CASE WHEN body_ref!='' THEN COALESCE((SELECT length(body) FROM session_journal_bodies WHERE session_journal_bodies.session_id=session_journal.session_id AND session_journal_bodies.ref=session_journal.body_ref),0) ELSE 0 END;
+			UPDATE session_journal_state
+			SET retained_bytes=COALESCE((SELECT SUM(bytes) FROM session_journal WHERE session_journal.session_id=session_journal_state.session_id),0);`); err != nil {
+			return err
+		}
 	}
 	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 		return err
