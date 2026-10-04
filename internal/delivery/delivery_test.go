@@ -410,6 +410,54 @@ func TestDispatcherDefiniteSendFailureFailsPreEffectIntent(t *testing.T) {
 	}
 }
 
+func TestDispatcherDeliveryUnavailableLeavesNoProblemOrNotice(t *testing.T) {
+	unavailable := surface.DeliveryUnavailable(errors.New("managed Codex app-server is unavailable"))
+	cases := []struct {
+		name string
+		run  func(Dispatcher, *fakeSurface, *surface.Session) (*Receipt, error)
+		fake *fakeSurface
+	}{
+		{"send", func(d Dispatcher, a *fakeSurface, s *surface.Session) (*Receipt, error) {
+			return d.Deliver(context.Background(), a, s, "probe", "")
+		}, &fakeSurface{err: unavailable}},
+		{"steer", func(d Dispatcher, a *fakeSurface, s *surface.Session) (*Receipt, error) {
+			return d.Steer(context.Background(), a, s, "probe")
+		}, &fakeSurface{steerErr: unavailable, capabilities: surface.Capabilities{Steer: true}}},
+		{"busy steer", func(d Dispatcher, a *fakeSurface, s *surface.Session) (*Receipt, error) {
+			return d.DeliverWithOptions(context.Background(), a, s, "probe", "", surface.SendOptions{BusyDelivery: "steer"})
+		}, &fakeSurface{result: &surface.SendResult{Accepted: false}, steerErr: unavailable, capabilities: surface.Capabilities{Steer: true}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			session := &surface.Session{ID: "unavailable", Surface: surface.KindCodex}
+			if err := r.RegisterSession(*session); err != nil {
+				t.Fatal(err)
+			}
+			if receipt, err := tc.run(Dispatcher{Registry: r}, tc.fake, session); !surface.IsDeliveryUnavailable(err) {
+				t.Fatalf("receipt=%+v err=%v", receipt, err)
+			}
+			if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+				t.Fatalf("problems=%+v err=%v", problems, err)
+			}
+			if got := r.QueueCount(registry.OperatorSessionID); got != 0 {
+				t.Fatalf("did-not-start refusal injected %d failure notices", got)
+			}
+			if intent, err := r.DeliveryIntent(1); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("intent=%+v err=%v", intent, err)
+			}
+			history, err := r.ListHistory(20, session.ID)
+			if err != nil || len(history) == 0 || history[0].Error == "" {
+				t.Fatalf("refusal left no audit entry: %+v err=%v", history, err)
+			}
+		})
+	}
+}
+
 func TestDispatcherAcceptedThenUnknownKeepsSameSubmittedIntent(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {

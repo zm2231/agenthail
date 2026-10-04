@@ -10,7 +10,8 @@ notice are produced only when a provider rejects a submitted delivery or queued
 work later fails or expires. The daemon publishes the event to live catalog
 subscribers as soon as it commits. Refusals that happen before any provider
 effect (busy target with queuing disabled, unwritable session, queue storage
-failure) return their error synchronously, keep a history audit entry, and
+failure, or any adapter `delivery did not start` error such as an unreachable
+app-server or steering an idle thread) return their error synchronously, keep a history audit entry, and
 leave no intent, problem, or notice.
 
 Clients dismiss a problem with an authenticated `POST /api/v1/actions` body:
