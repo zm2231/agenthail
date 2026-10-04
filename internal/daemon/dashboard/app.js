@@ -973,17 +973,78 @@ function renderImageAttachment(item, session) {
   const url = `/api/session-attachment?sessionId=${encodeURIComponent(session.id)}&id=${encodeURIComponent(attachment.id)}`;
   return `<figure class="turn transcript-image"><img src="${escape(url)}" loading="lazy" decoding="async" alt="${fallback}" referrerpolicy="no-referrer"><figcaption>${fallback}</figcaption></figure>`;
 }
-function renderImageTimeline(items, session) {
-  return items.map(item => {
-    if (item.kind === "attachment") return renderImageAttachment(item, session);
-    if (!["text", "message"].includes(item.kind) || !item.text) return "";
+function timelineKindClass(kind) {
+  return String(kind || "unknown").replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+function timelineItemAttributes(item) {
+  const attributes = [`data-timeline-item="${escape(item.id || "")}"`];
+  if (item.callId) attributes.push(`data-call-id="${escape(item.callId)}"`);
+  if (item.status) attributes.push(`data-status="${escape(item.status)}"`);
+  return attributes.join(" ");
+}
+function renderTimelineMetadata(item) {
+  const fields = [];
+  if (item.title) fields.push(`<span>Title: ${escape(item.title)}</span>`);
+  if (item.callId) fields.push(`<span>Call: ${escape(item.callId)}</span>`);
+  if (item.status) fields.push(`<span>Status: ${escape(item.status)}</span>`);
+  if (item.timestamp) fields.push(`<time datetime="${escape(item.timestamp)}">${escape(item.timestamp)}</time>`);
+  if (item.truncated) {
+    const reason = item.truncationReason ? ` (${escape(item.truncationReason)})` : "";
+    fields.push(`<span>Content truncated${reason}</span>`);
+  }
+  if (item.bodyRef) fields.push(`<span>Body reference: <code>${escape(item.bodyRef)}</code></span>`);
+  return fields.length ? `<div class="timeline-meta">${fields.join(" · ")}</div>` : "";
+}
+function renderTimelineItem(item, session) {
+  const kind = String(item.kind || "unknown");
+  const kindClass = timelineKindClass(kind);
+  const attributes = timelineItemAttributes(item);
+  const metadata = renderTimelineMetadata(item);
+  if (kind === "attachment") {
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderImageAttachment(item, session)}${metadata}</section>`;
+  }
+  if (["text", "message", "assistant"].includes(kind)) {
     const user = item.role === "user";
-    const content = user ? handoffMessage(item.text) : {text: item.text, label: labels[session.surface] || session.surface};
-    return renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`);
-  }).join("");
+    const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`)}${metadata}</section>`;
+  }
+  if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
+    const title = item.title || kind;
+    const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
+    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div></details>`;
+  }
+  const title = item.title || "Unknown timeline item";
+  const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
+  return `<article class="turn timeline-item timeline-${kindClass} timeline-unknown" ${attributes}><header class="turn-header"><span class="turn-label">${escape(title)}</span><span class="timeline-kind">${escape(kind)}</span></header>${metadata}<div class="turn-content">${body}</div></article>`;
+}
+function renderTimeline(items, session) {
+  return items.map(item => renderTimelineItem(item, session)).join("");
+}
+function renderImageTimeline(items, session) {
+  return renderTimeline(items, session);
+}
+function timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents) {
+  return JSON.stringify([
+    session.id,
+    exchanges,
+    JSON.stringify(goal || null),
+    Boolean(capabilities.goal),
+    transcriptWarning,
+    timeline,
+    claudeRuns,
+    claudeSubagents,
+  ]);
+}
+function renderClaudeMetadata(claudeRuns, claudeSubagents) {
+  if (!Array.isArray(claudeRuns) && !Array.isArray(claudeSubagents)) return "";
+  const runs = Array.isArray(claudeRuns) ? claudeRuns : [];
+  const links = Array.isArray(claudeSubagents) ? claudeSubagents : [];
+  const runRows = runs.map((run) => `<li>${run.jobId ? `<span>Job: ${escape(run.jobId)}</span>` : ""}${run.runType ? ` · <span>Type: ${escape(run.runType)}</span>` : ""}${run.providerState ? ` · <span>Provider state: ${escape(run.providerState)}</span>` : ""}${run.sessionId ? ` · <span>Session: ${escape(run.sessionId)}</span>` : ""}${run.resumeSessionId ? ` · <span>Resume session: ${escape(run.resumeSessionId)}</span>` : ""}${run.createdAt ? ` · <time datetime="${escape(run.createdAt)}">Created ${escape(run.createdAt)}</time>` : ""}${run.updatedAt ? ` · <time datetime="${escape(run.updatedAt)}">Updated ${escape(run.updatedAt)}</time>` : ""}${run.recordPath ? ` · <span>Record: ${escape(run.recordPath)}</span>` : ""}</li>`).join("");
+  const subagentRows = links.map((link) => `<li>${link.agentId ? `<span>Agent: ${escape(link.agentId)}</span>` : ""}${link.parentSessionId ? ` · <span>Parent: ${escape(link.parentSessionId)}</span>` : ""}${link.transcriptPath ? ` · <span>Transcript: ${escape(link.transcriptPath)}</span>` : ""}</li>`).join("");
+  return `<details class="session-details"><summary>Observed Claude runs</summary>${runRows ? `<ul>${runRows}</ul>` : "<p>No observed Claude runs.</p>"}</details><details class="session-details"><summary>Observed Claude subagents</summary>${subagentRows ? `<ul>${subagentRows}</ul>` : "<p>No observed Claude subagents.</p>"}</details>`;
 }
 function renderChat() {
-  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning } = app.history || {};
+  const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning, claudeRuns, claudeSubagents } = app.history || {};
   const session = app.selected;
   const controls = [];
   if (session.runtime?.focusable)
@@ -1037,22 +1098,16 @@ function renderChat() {
     `<details class="session-details"><summary>Conversation settings</summary>${settings.join("")}</details>`,
     `<details class="session-details"><summary>Voice</summary><p>Call this exact conversation through Codex Voice, or transfer an active call here.</p><button class="soft-button" type="button" data-voice-session="${escape(session.id)}">Call this session</button></details>`,
   ];
-  const signature = JSON.stringify([
-    session.id,
-    exchanges,
-    JSON.stringify(goal || null),
-    Boolean(capabilities.goal),
-    transcriptWarning,
-    app.history?.timeline?.items?.filter(item => item.attachment),
-  ]);
+  if (readOnly && session.surface === "claude") toolRows.push(renderClaudeMetadata(claudeRuns, claudeSubagents));
+  const timeline = app.history?.timeline?.items || [];
+  const signature = timelineSignature(session, exchanges, goal, capabilities, transcriptWarning, timeline, claudeRuns, claudeSubagents);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;
   const wasPinned =
     chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24;
-  const timeline = app.history?.timeline?.items || [];
-  const messages = timeline.some(item => item.kind === "attachment")
-    ? renderImageTimeline(timeline, session)
+  const messages = timeline.length
+    ? renderTimeline(timeline, session)
     : exchanges
     .flatMap((exchange, index) => {
       const user = handoffMessage(exchange.user);
