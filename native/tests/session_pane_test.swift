@@ -34,13 +34,13 @@ struct SessionPaneTest {
         check(model.turnSettings(for: "A").isEmpty, "resetting removes a session's next-turn settings")
 
         let working = SessionState(id: "W", surface: "codex", name: "w", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
-        check(SessionPane.stopAvailable(working, removed: false, draft: "  \n"), "an empty draft lets Stop interrupt a working session")
-        check(!SessionPane.stopAvailable(working, removed: false, draft: "follow up"), "a draft turns Stop into queue or steer")
-        check(!SessionPane.stopAvailable(working, removed: true, draft: ""), "a removed session cannot be stopped")
+        check(SessionPane.stopAvailable(working, removed: false, draftEmpty: true), "an empty draft lets Stop interrupt a working session")
+        check(!SessionPane.stopAvailable(working, removed: false, draftEmpty: false), "a draft turns Stop into queue or steer")
+        check(!SessionPane.stopAvailable(working, removed: true, draftEmpty: true), "a removed session cannot be stopped")
         let readOnly = SessionState(id: "R", surface: "codex", name: "r", alias: nil, status: "busy", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: true, readOnlyReason: nil)
-        check(!SessionPane.stopAvailable(readOnly, removed: false, draft: ""), "a read-only session cannot be stopped")
+        check(!SessionPane.stopAvailable(readOnly, removed: false, draftEmpty: true), "a read-only session cannot be stopped")
         let idle = SessionState(id: "I", surface: "codex", name: "i", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
-        check(!SessionPane.stopAvailable(idle, removed: false, draft: "") && !SessionPane.stopAvailable(nil, removed: false, draft: ""), "nothing to stop when idle or unselected")
+        check(!SessionPane.stopAvailable(idle, removed: false, draftEmpty: true) && !SessionPane.stopAvailable(nil, removed: false, draftEmpty: true), "nothing to stop when idle or unselected")
 
         let watched = model.openPane()
         watched.select("E")
@@ -57,6 +57,10 @@ struct SessionPaneTest {
         check(!watched.draftIsEmpty, "edits from a pane sharing the draft are observed")
         watched.select("F")
         check(watched.draftIsEmpty, "a new session's empty draft is observed")
+        watched.composerDraft.attachments = [URL(fileURLWithPath: "/tmp/shot.png")]
+        check(!watched.draftIsEmpty && !watched.composerDraft.isEmpty, "an attachment alone makes the draft sendable")
+        watched.composerDraft.attachments = []
+        check(watched.draftIsEmpty, "removing the last attachment empties the draft")
         observation.cancel()
 
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))

@@ -853,6 +853,9 @@ enum FollowUpAction: String {
 
 final class ComposerDraft: ObservableObject {
     @Published var text = ""
+    @Published var attachments: [URL] = []
+
+    var isEmpty: Bool { ComposerDrop.isEmpty(text: text, attachments: attachments) }
 
     func restore(_ restored: String) {
         text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"

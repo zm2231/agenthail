@@ -1134,7 +1134,7 @@ struct ComposerView: View {
         self.draft = pane.composerDraft
     }
 
-    private var hasText: Bool { !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasText: Bool { !draft.isEmpty }
     private var canSteer: Bool { session.capabilities.steer }
 
     var body: some View {
@@ -1158,6 +1158,10 @@ struct ComposerView: View {
                     QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
                         .padding(.horizontal, 10)
                 }
+                if !draft.attachments.isEmpty {
+                    AttachmentDock(attachments: $draft.attachments, roundedTop: queued.isEmpty)
+                        .padding(.horizontal, 10)
+                }
                 VStack(spacing: 0) {
                     TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -1169,9 +1173,18 @@ struct ComposerView: View {
                         .padding(.bottom, 4)
                         .onSubmit { submit(alternate: false) }
                     HStack(spacing: 4) {
+                        Button(action: chooseAttachments) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 13))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.text2)
+                        .help("Attach files or images")
+                        .accessibilityLabel("Attach files or images")
+                        .padding(.leading, 5)
                         if session.surface == "codex" {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
-                                .padding(.leading, 7)
                         }
                         Spacer()
                         if session.isWorking && hasText {
@@ -1206,8 +1219,8 @@ struct ComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
-                    guard let dropped = ComposerDrop.text(for: urls) else { return false }
-                    draft.text = ComposerDrop.insert(dropped, into: draft.text)
+                    guard let files = ComposerDrop.files(urls) else { return false }
+                    draft.attachments = ComposerDrop.adding(files, to: draft.attachments)
                     focused = true
                     return true
                 } isTargeted: { dropTargeted = $0 }
@@ -1231,7 +1244,17 @@ struct ComposerView: View {
         .onAppear { focused = true }
     }
 
-    private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draft: draft.text) }
+    private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }
+
+    private func chooseAttachments() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK else { return }
+        draft.attachments = ComposerDrop.adding(panel.urls, to: draft.attachments)
+        focused = true
+    }
     private var primarySymbol: String {
         if primaryIsStop { return "stop.fill" }
         if session.isWorking && resolvedAction(alternate: false) == .queue { return "text.line.last.and.arrowtriangle.forward" }
@@ -1387,6 +1410,49 @@ struct QueueDock: View {
         .padding(.bottom, 4)
         .background(DesktopPalette.dock, in: UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
         .overlay(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14).strokeBorder(DesktopPalette.line))
+    }
+}
+
+struct AttachmentDock: View {
+    @Binding var attachments: [URL]
+    let roundedTop: Bool
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: roundedTop ? 14 : 0, topTrailingRadius: roundedTop ? 14 : 0)
+        VStack(spacing: 0) {
+            ForEach(attachments, id: \.self) { url in
+                HStack(spacing: 10) {
+                    Image(systemName: ComposerDrop.isImage(url) ? "photo" : url.hasDirectoryPath ? "folder" : "doc")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .frame(width: 14)
+                    HStack(spacing: 6) {
+                        Text(url.lastPathComponent)
+                            .foregroundStyle(DesktopPalette.text)
+                        Text(url.deletingLastPathComponent().path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .truncationMode(.head)
+                    }
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(url.path)
+                    Button {
+                        attachments.removeAll { $0 == url }
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.text2)
+                    .accessibilityLabel("Remove \(url.lastPathComponent)")
+                }
+                .font(.system(size: 13))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+            }
+        }
+        .padding(.vertical, 4)
+        .background(DesktopPalette.dock, in: shape)
+        .overlay(shape.strokeBorder(DesktopPalette.line))
     }
 }
 

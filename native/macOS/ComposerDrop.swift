@@ -1,16 +1,33 @@
 import Foundation
+import UniformTypeIdentifiers
 
 enum ComposerDrop {
     private static let plain = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/._-+,:@%="))
 
-    static func text(for urls: [URL]) -> String? {
+    static func files(_ urls: [URL]) -> [URL]? {
         guard !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return nil }
-        return urls.map { word(for: $0.path) }.joined(separator: " ")
+        return urls
     }
 
-    static func insert(_ dropped: String, into draft: String) -> String {
-        guard !draft.isEmpty else { return dropped }
-        return draft.last?.isWhitespace == true ? draft + dropped : "\(draft) \(dropped)"
+    static func adding(_ urls: [URL], to attachments: [URL]) -> [URL] {
+        urls.reduce(into: attachments) { result, url in
+            if !result.contains(where: { $0.standardizedFileURL == url.standardizedFileURL }) { result.append(url) }
+        }
+    }
+
+    static func isEmpty(text: String, attachments: [URL]) -> Bool {
+        attachments.isEmpty && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func message(text: String, attachments: [URL]) -> String {
+        guard !attachments.isEmpty else { return text }
+        let paths = attachments.map { word(for: $0.path) }.joined(separator: "\n")
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? paths : "\(typed)\n\n\(paths)"
+    }
+
+    static func isImage(_ url: URL) -> Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
     }
 
     private static func word(for path: String) -> String {

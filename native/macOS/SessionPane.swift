@@ -54,8 +54,8 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func observeDraft() {
-        draftObservation = composerDraft.$text
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        draftObservation = composerDraft.$text.combineLatest(composerDraft.$attachments)
+            .map { ComposerDrop.isEmpty(text: $0, attachments: $1) }
             .removeDuplicates()
             .sink { [weak self] empty in
                 guard let self, self.draftIsEmpty != empty else { return }
@@ -253,18 +253,19 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func submit(busyDelivery: String?) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
-        let text = composer
+        let text = ComposerDrop.message(text: composer, attachments: composerDraft.attachments)
         composer = ""
+        composerDraft.attachments = []
         let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
         model.send(text, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
     }
 
-    static func stopAvailable(_ session: SessionState?, removed: Bool, draft: String) -> Bool {
+    static func stopAvailable(_ session: SessionState?, removed: Bool, draftEmpty: Bool) -> Bool {
         guard let session, !removed, !session.isReadOnly, session.isWorking else { return false }
-        return draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return draftEmpty
     }
 
-    var canStop: Bool { Self.stopAvailable(displayedSession, removed: removedSession != nil, draft: draftIsEmpty ? "" : composer) }
+    var canStop: Bool { Self.stopAvailable(displayedSession, removed: removedSession != nil, draftEmpty: draftIsEmpty) }
 
     func interrupt() {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
