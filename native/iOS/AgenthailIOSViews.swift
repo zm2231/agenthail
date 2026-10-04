@@ -753,10 +753,10 @@ struct IOSMessage: View {
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
-	var bodyLoader: ((TimelineItem) async -> String?)? = nil
+	var bodyLoader: ((TimelineItem) async -> RetainedBodyResult?)? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
-	@State private var retainedBody: String?
+	@State private var retainedBody: RetainedBodyResult?
 
     var body: some View {
         if compactContext, let title = TranscriptContext.title(for: item) {
@@ -805,7 +805,12 @@ struct IOSTimelineRow: View {
                 if item.truncated { shortened }
 				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
 					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
-				} else if let retainedBody { SessionMarkdown(text: retainedBody, readingStyle: item.kind == "reasoning") }
+				} else if let retainedBody {
+                    SessionMarkdown(text: retainedBody.text, readingStyle: item.kind == "reasoning")
+                    if let error = retainedBody.error {
+                        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.vertical, 4)
         }

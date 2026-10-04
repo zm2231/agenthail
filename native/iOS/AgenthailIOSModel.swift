@@ -43,6 +43,20 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
 
+    var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
+
+    func dismissDeliveryProblem(_ problem: DeliveryProblem) async throws {
+        guard let api else { throw AgenthailAPIError.unavailable("Connect to your Mac first.") }
+        let key = "delivery:\(problem.deliveryId)"
+        guard !pendingControls.contains(key) else { return }
+        pendingControls.insert(key)
+        defer { pendingControls.remove(key) }
+        try await api.action("delivery-dismiss", deliveryID: problem.deliveryId)
+        guard var current = snapshot else { return }
+        current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != problem.deliveryId }
+        snapshot = current
+    }
+
     private func deliveryLabel(_ evidence: String?, detail: String?) -> String {
         switch evidence {
         case "submitted": return detail ?? "Submitted"
@@ -732,6 +746,22 @@ final class AgenthailIOSModel: ObservableObject {
             let previous = current.surfaces[index]
             current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities)
             snapshot = current
+        case "delivery.problem":
+            guard let deliveryId = event.data.deliveryId,
+                  let sessionId = event.data.sessionId,
+                  let message = event.data.message,
+                  let reason = event.data.reason,
+                  let at = event.data.at else { return }
+            var problems = current.deliveryProblems ?? []
+            let problem = DeliveryProblem(deliveryId: deliveryId, sessionId: sessionId, sourceSessionId: event.data.sourceSessionId, message: message, reason: reason, status: event.data.status, at: at)
+            problems.removeAll { $0.deliveryId == deliveryId }
+            problems.insert(problem, at: 0)
+            current.deliveryProblems = Array(problems.prefix(50))
+            snapshot = current
+        case "delivery.dismissed":
+            guard let deliveryId = event.data.deliveryId else { return }
+            current.deliveryProblems = current.deliveryProblems?.filter { $0.deliveryId != deliveryId }
+            snapshot = current
         default:
             return
         }
@@ -792,9 +822,36 @@ final class AgenthailIOSModel: ObservableObject {
         sessionError = nil
     }
 
-    func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> String? {
+    func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> RetainedBodyResult? {
         guard let api, let id = selectedSessionID, let ref = item.bodyRef else { return nil }
-        return try? await api.sessionStreamBody(id: id, ref: ref, start: start).body
+        let chunkSize = 16 << 10
+        let maximum = 8 << 20
+        var cursor = max(0, start)
+        var total: Int?
+        var chunks: [String] = []
+
+        do {
+            while cursor < (total ?? maximum) {
+                let requestedEnd = min(cursor + chunkSize, maximum)
+                let chunk = try await api.sessionStreamBody(id: id, ref: ref, start: cursor, end: requestedEnd)
+                if total == nil { total = chunk.total }
+                guard chunk.total == total, chunk.start == cursor, chunk.end > cursor, chunk.end <= maximum else {
+                    return RetainedBodyResult(text: chunks.joined(), error: "The retained body returned an invalid range.")
+                }
+                if chunk.end < chunk.total && chunk.body.last == "\u{FFFD}" {
+                    return RetainedBodyResult(text: chunks.joined(), error: "The retained body is not valid UTF-8 at a range boundary.")
+                }
+                chunks.append(chunk.body)
+                cursor = chunk.end
+                if cursor >= chunk.total { return RetainedBodyResult(text: chunks.joined(), error: nil) }
+                if cursor >= maximum {
+                    return RetainedBodyResult(text: chunks.joined(), error: "The retained body exceeds the 8 MiB display limit.")
+                }
+            }
+            return RetainedBodyResult(text: chunks.joined(), error: "The retained body could not be completed.")
+        } catch {
+            return RetainedBodyResult(text: chunks.joined(), error: error.localizedDescription)
+        }
     }
 
     private func receive(_ event: AgenthailEvent) async {

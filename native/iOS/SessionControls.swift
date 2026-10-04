@@ -86,6 +86,14 @@ struct QueueListView: View {
             }.pickerStyle(.segmented).listRowSeparator(.hidden)
             if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote) }
             if let error = model.connectionError { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.secondary).font(.footnote) }
+            let problems = model.deliveryProblems.filter { sessionID == nil || $0.sessionId == sessionID || $0.sourceSessionId == sessionID }
+            if !problems.isEmpty {
+                Section("Delivery problems") {
+                    ForEach(problems) { problem in
+                        deliveryProblemRow(problem)
+                    }
+                }
+            }
             if loading && items.isEmpty { ProgressView("Loading deliveries") }
             if !showHistory {
                 let review = current.filter { $0.status == "dead" }
@@ -167,6 +175,29 @@ struct QueueListView: View {
             .controlSize(.large)
             .disabled(model.pendingControls.contains("queue:\(item.id)"))
         }.padding(.vertical, 6)
+    }
+
+    private func deliveryProblemRow(_ problem: DeliveryProblem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(problem.status?.capitalized ?? "Delivery problem")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(problem.at).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Text(problem.message).font(.body).textSelection(.enabled)
+            Text(problem.reason).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+            Button("Dismiss", role: .destructive) {
+                Task {
+                    error = nil
+                    do { try await model.dismissDeliveryProblem(problem) }
+                    catch { self.error = error.localizedDescription }
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.pendingControls.contains("delivery:\(problem.deliveryId)"))
+        }
+        .padding(.vertical, 6)
     }
 
     private func update(_ item: QueueState, retry: Bool) {

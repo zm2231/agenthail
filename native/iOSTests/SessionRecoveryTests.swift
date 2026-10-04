@@ -108,6 +108,21 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
     }
 
+    func testDeliveryProblemDismissalRemovesNoticeWithoutResending() async throws {
+        RecoveryProtocol.state.reset()
+        RecoveryProtocol.state.configure(deliveryProblem: true)
+        let model = makeModel()
+        let refreshed = await model.refresh()
+        XCTAssertTrue(refreshed)
+        let problem = try XCTUnwrap(model.deliveryProblems.first)
+        XCTAssertEqual(problem.deliveryId, 42)
+
+        try await model.dismissDeliveryProblem(problem)
+
+        XCTAssertTrue(model.deliveryProblems.isEmpty)
+        XCTAssertEqual(RecoveryProtocol.state.actionCount, 1)
+    }
+
     private func sendQueuedInstruction(_ model: AgenthailIOSModel) async throws {
         await model.loadSession("demo")
         _ = await model.refresh()
@@ -132,23 +147,33 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var queueHistorical: Bool?
         private var evidence: String?
         private var queueFailure = false
+        private var deliveryProblem = false
         private var catalogEpoch: String?
         private var catalogSequence: UInt64?
         private var reads = 0
         private var actions = 0
+        private var actionHistory: [String] = []
         private var freshSnapshots = 0
         var sessionReads: Int { lock.withLock { reads } }
         var actionCount: Int { lock.withLock { actions } }
+        var actionNames: [String] { lock.withLock { actionHistory } }
         var freshSnapshotReads: Int { lock.withLock { freshSnapshots } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; freshSnapshots = 0 } }
-        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil) {
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; deliveryProblem = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
+        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, deliveryProblem: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
                 if let queueStatus { self.queueStatus = queueStatus }
                 if let queueHistorical { self.queueHistorical = queueHistorical }
                 if let evidence { self.evidence = evidence }
                 if let queueFailure { self.queueFailure = queueFailure }
+                if let deliveryProblem { self.deliveryProblem = deliveryProblem }
             }
+        }
+        func recordAction(_ request: URLRequest) {
+            guard let body = request.httpBody,
+                  let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let action = object["action"] as? String else { return }
+            lock.withLock { actionHistory.append(action) }
         }
         func configureCatalog(epoch: String, sequence: UInt64) { lock.withLock { catalogEpoch = epoch; catalogSequence = sequence } }
         func recordFreshSnapshot() { lock.withLock { freshSnapshots += 1 } }
@@ -165,6 +190,9 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     snapshot["daemon"] = ["running": true, "stale": stale, "refreshError": "Agent catalog refresh failed"]
                     if let catalogEpoch { snapshot["hostEpoch"] = catalogEpoch }
                     if let catalogSequence { snapshot["catalogSeq"] = catalogSequence }
+                    if deliveryProblem {
+                        snapshot["deliveryProblems"] = [["deliveryId": 42, "sessionId": "demo", "sourceSessionId": "source", "message": "Keep the regression test", "reason": "source unavailable", "status": "failed", "at": "2026-10-04T03:00:00Z"]]
+                    }
                     return (200, String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!)
                 case "/api/v1/actions":
                     actions += 1
@@ -184,6 +212,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        Self.state.recordAction(request)
         let olderPage = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "timelineBefore" } == true
         if request.url?.path == "/api/v1/snapshot",
            URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "fresh" && $0.value == "1" }) == true {

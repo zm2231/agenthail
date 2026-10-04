@@ -129,6 +129,51 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testRetainedBodyLoadsAllBoundedRanges() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, bodyRef: "body-ref")
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.text.count, 40_000)
+        XCTAssertNil(result?.error)
+        XCTAssertGreaterThan(RetainedBodyURLProtocol.state.requestCount, 1)
+    }
+
+    @MainActor
+    func testRetainedBodyReportsEightMiBCapInsteadOfPretendingPrefixIsFull() async throws {
+        RetainedBodyURLProtocol.state.reset(total: (8 << 20) + 1)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, bodyRef: "body-ref")
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.text.count, 8 << 20)
+        XCTAssertEqual(result?.error, "The retained body exceeds the 8 MiB display limit.")
+    }
+
+    @MainActor
+    func testRetainedBodyRejectsInvalidUTF8RangeBoundary() async throws {
+        RetainedBodyURLProtocol.state.reset(total: 40_000, invalidBoundary: true)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RetainedBodyURLProtocol.self]
+        let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
+        model.selectedSessionID = "demo"
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, bodyRef: "body-ref")
+
+        let result = await model.retainedSessionBody(for: item)
+
+        XCTAssertEqual(result?.error, "The retained body is not valid UTF-8 at a range boundary.")
+    }
+
+    @MainActor
     func testSessionStreamUpdatesAndClearsContextAndGoalImmediately() throws {
         let model = AgenthailIOSModel(autoConnect: false)
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
@@ -299,6 +344,44 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertNil(KeychainStore.get("pushRegistration"))
         XCTAssertFalse(model.isPaired)
     }
+}
+
+private final class RetainedBodyState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var total = 0
+    private var invalidBoundary = false
+    private var requests = 0
+    var requestCount: Int { lock.withLock { requests } }
+    func reset(total: Int, invalidBoundary: Bool = false) { lock.withLock { self.total = total; self.invalidBoundary = invalidBoundary; requests = 0 } }
+    func response(start: Int, end: Int) -> String {
+        lock.withLock {
+            requests += 1
+            let boundedEnd = min(end, total)
+            let length = max(0, boundedEnd - start)
+            let body = invalidBoundary && boundedEnd < total ? String(repeating: "x", count: max(0, length - 1)) + "\u{FFFD}" : String(repeating: "x", count: length)
+            return String(data: try! JSONSerialization.data(withJSONObject: [
+                "sessionId": "demo", "bodyRef": "body-ref", "start": start, "end": boundedEnd,
+                "total": total, "body": body, "truncated": boundedEnd < total
+            ]), encoding: .utf8)!
+        }
+    }
+}
+
+private final class RetainedBodyURLProtocol: URLProtocol, @unchecked Sendable {
+    static let state = RetainedBodyState()
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/api/v1/session-stream-body" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+        let query = Dictionary(uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") })
+        let start = Int(query["start"]!)!
+        let end = Int(query["end"]!)!
+        let body = Self.state.response(start: start, end: end)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
 
 @MainActor
