@@ -331,4 +331,3 @@ struct PageHeader: View {
         }
     }
 }
-

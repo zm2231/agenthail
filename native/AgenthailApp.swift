@@ -384,6 +384,7 @@ private struct AgenthailMenuBarApp: App {
                 .frame(minWidth: 900, minHeight: 560)
         }
         .defaultSize(width: 1440, height: 900)
+        .windowStyle(.hiddenTitleBar)
 
         Settings {
             DesktopSettings(model: model)

@@ -10,30 +10,21 @@ struct DesktopWindow: View {
                 .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
         } detail: {
             ConversationPane(model: model)
+                .ignoresSafeArea(.container, edges: .top)
                 .inspector(isPresented: $model.inspectorVisible) {
                     SessionInspector(model: model)
+                        .ignoresSafeArea(.container, edges: .top)
                         .inspectorColumnWidth(min: 270, ideal: 284, max: 300)
                 }
         }
         .background(DesktopPalette.window)
-        .navigationTitle("")
-        .toolbar(removing: .title)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.inspectorVisible.toggle()
-                } label: {
-                    Label("Inspector", systemImage: "sidebar.right")
-                }
-                .keyboardShortcut("i", modifiers: [.command, .option])
-                .help("Inspector ⌥⌘I")
-            }
-        }
+        .toolbar(removing: .sidebarToggle)
     }
 }
 
 struct SessionSidebar: View {
     @ObservedObject var model: AgenthailModel
+    @State private var expandedProjects: Set<String> = []
 
     var body: some View {
         let tree = model.sessionTree
@@ -60,6 +51,7 @@ struct SessionSidebar: View {
             }
             .font(.system(size: 12.5))
             .padding(.horizontal, 16)
+            .padding(.top, 4)
             .padding(.bottom, 10)
 
             ScrollView {
@@ -73,15 +65,27 @@ struct SessionSidebar: View {
                         }
                     }
                     ForEach(tree.projects) { project in
+                        let expanded = expandedProjects.contains(project.id)
+                        let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: model.selectedSessionID)
                         VStack(alignment: .leading, spacing: 1) {
                             ProjectHeaderView(name: project.name)
-                            ForEach(project.checkouts) { checkout in
+                            ForEach(shown.checkouts) { checkout in
                                 if project.checkouts.count > 1 || !checkout.isMain {
                                     CheckoutRowView(checkout: checkout)
                                 }
                                 ForEach(checkout.sessions) { session in
                                     sessionButton(session, needsYou: model.attentionSessionIDs.contains(session.id))
                                 }
+                            }
+                            if project.sessionCount > shown.sessionCount || expanded && project.sessionCount > SessionTree.collapsedSessionLimit {
+                                Button(expanded ? "Show less" : "Show \(project.sessionCount - shown.sessionCount) more") {
+                                    if expanded { expandedProjects.remove(project.id) } else { expandedProjects.insert(project.id) }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12))
+                                .foregroundStyle(DesktopPalette.text2)
+                                .padding(.leading, 35)
+                                .padding(.vertical, 4)
                             }
                         }
                     }
@@ -193,11 +197,8 @@ struct SessionRowView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Circle()
-                .fill(DesktopPalette.statusColor(session, needsYou: needsYou))
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
-            Text(session.displayName)
+            StatusIndicator(session: session, needsYou: needsYou)
+            Text(session.title)
                 .lineLimit(1)
                 .foregroundStyle(session.open || session.isWorking ? DesktopPalette.text : DesktopPalette.text2)
             Spacer(minLength: 4)
@@ -209,6 +210,37 @@ struct SessionRowView: View {
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
         .accessibilityValue(needsYou ? "Needs you" : session.isWorking ? "Working" : "Idle")
+    }
+}
+
+struct StatusIndicator: View {
+    let session: SessionState
+    let needsYou: Bool
+
+    var body: some View {
+        Group {
+            if session.isWorking && !needsYou {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(DesktopPalette.work)
+                    .scaleEffect(0.8)
+            } else {
+                Circle()
+                    .fill(DesktopPalette.statusColor(session, needsYou: needsYou))
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .frame(width: 12, height: 12)
+        .accessibilityHidden(true)
+    }
+}
+
+extension SessionState {
+    var title: String {
+        if let alias, !alias.isEmpty { return "@\(alias)" }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == id || UUID(uuidString: trimmed) != nil { return "Untitled conversation" }
+        return trimmed
     }
 }
 
@@ -243,7 +275,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = model.selectedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, model: model.detail?.model)
+                ConversationHeader(session: session, model: model.detail?.model, inspectorVisible: $model.inspectorVisible)
                 ZStack(alignment: .bottom) {
                     TranscriptView(model: model, session: session)
                     ComposerView(model: model, session: session)
@@ -260,11 +292,12 @@ struct ConversationPane: View {
 struct ConversationHeader: View {
     let session: SessionState
     let model: String?
+    @Binding var inspectorVisible: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(session.name.isEmpty ? session.id : session.name)
+                Text(session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? session.title)
                     .font(.system(size: 13.5, weight: .semibold))
                 if let alias = session.alias, !alias.isEmpty {
                     Text("@\(alias)")
@@ -275,7 +308,7 @@ struct ConversationHeader: View {
             .lineLimit(1)
             Spacer()
             HStack(spacing: 6) {
-                Circle().fill(DesktopPalette.statusColor(session, needsYou: false)).frame(width: 7, height: 7)
+                StatusIndicator(session: session, needsYou: false)
                 Text(session.isWorking ? "Working" : session.open ? "Idle" : "Closed")
             }
             .font(.system(size: 12))
@@ -283,6 +316,19 @@ struct ConversationHeader: View {
             Text([session.surface.capitalized, model].compactMap { $0 }.joined(separator: " · "))
                 .font(.system(size: 12))
                 .foregroundStyle(DesktopPalette.text2)
+            Button {
+                inspectorVisible.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .frame(width: 30, height: 30)
+                    .background(inspectorVisible ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesktopPalette.text2)
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .help("Inspector ⌥⌘I")
+            .accessibilityLabel("Toggle inspector")
+            .accessibilityValue(inspectorVisible ? "Shown" : "Hidden")
         }
         .padding(.leading, 22)
         .padding(.trailing, 14)
@@ -313,7 +359,7 @@ struct TranscriptView: View {
                 }
                 if session.isWorking {
                     HStack(spacing: 8) {
-                        Circle().fill(DesktopPalette.work).frame(width: 6, height: 6)
+                        StatusIndicator(session: session, needsYou: false)
                         Text("Working")
                     }
                     .font(.system(size: 12.5))
@@ -477,7 +523,7 @@ struct ComposerView: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
                 VStack(spacing: 0) {
-                    TextField("Message \(session.displayName)", text: $model.composer, axis: .vertical)
+                    TextField("Message \(session.title)", text: $model.composer, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 14))
                         .lineLimit(2...10)
@@ -645,16 +691,19 @@ struct DetailsTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let context = model.detail?.context, context.contextWindow > 0 {
-                let ratio = Double(context.usedTokens) / Double(context.contextWindow)
+            if let context = model.detail?.context, context.usedTokens > 0 {
+                let ratio = context.contextWindow > 0 ? Double(context.usedTokens) / Double(context.contextWindow) : 0
+                let knownWindow = context.contextWindow > 0 && !(context.windowEstimated == true && ratio > 1)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Context").foregroundStyle(DesktopPalette.text2)
                         Spacer()
-                        Text(ratio.formatted(.percent.precision(.fractionLength(0))))
+                        Text(knownWindow ? ratio.formatted(.percent.precision(.fractionLength(0))) : "\(context.usedTokens.formatted(.number.notation(.compactName))) tokens used")
                     }
-                    ProgressView(value: min(ratio, 1))
-                        .tint(DesktopPalette.accent)
+                    if knownWindow {
+                        ProgressView(value: min(ratio, 1))
+                            .tint(DesktopPalette.accent)
+                    }
                 }
             }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 9) {

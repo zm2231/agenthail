@@ -86,6 +86,10 @@ jobs:
           "$RUNNER_TEMP/dashboard-snapshot-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/tests/session_tree_test.swift -o "$RUNNER_TEMP/session-tree-test"
           "$RUNNER_TEMP/session-tree-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/macOS/LocalSend.swift native/tests/local_send_test.swift -o "$RUNNER_TEMP/local-send-test"
+          "$RUNNER_TEMP/local-send-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/CatalogPosition.swift native/tests/catalog_position_test.swift -o "$RUNNER_TEMP/catalog-position-test"
+          "$RUNNER_TEMP/catalog-position-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

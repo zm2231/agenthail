@@ -13,7 +13,24 @@ struct SessionTree: Equatable {
         let id: String
         let name: String
         var checkouts: [Checkout]
+
+        var sessionCount: Int { checkouts.reduce(0) { $0 + $1.sessions.count } }
+
+        func limited(to limit: Int, keeping selectedID: String?) -> Project {
+            let ordered = checkouts.flatMap(\.sessions).sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+            var visible = Set(ordered.prefix(limit).map(\.id))
+            if let selectedID, ordered.contains(where: { $0.id == selectedID }) { visible.insert(selectedID) }
+            var copy = self
+            copy.checkouts = checkouts.compactMap { checkout in
+                var trimmed = checkout
+                trimmed.sessions = checkout.sessions.filter { visible.contains($0.id) }
+                return trimmed.sessions.isEmpty ? nil : trimmed
+            }
+            return copy
+        }
     }
+
+    static let collapsedSessionLimit = 5
 
     struct Checkout: Identifiable, Equatable {
         let id: String

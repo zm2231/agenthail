@@ -82,6 +82,7 @@ cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 SWIFT_ARCH="$ARCH"
 [ "$SWIFT_ARCH" = "amd64" ] && SWIFT_ARCH="x86_64"
 SWIFT_BIN="$(swift build --package-path "$ROOT/native" -c release --arch "$SWIFT_ARCH" --show-bin-path)"
+rm -rf "$SWIFT_BIN"/*.bundle
 swift build --package-path "$ROOT/native" -c release --arch "$SWIFT_ARCH" --product AgenthailMac >/dev/null
 cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
 for bundle in "$SWIFT_BIN"/*.bundle; do

@@ -28,6 +28,12 @@ struct SessionTreeTest {
 
         let all = SessionTree.build(sessions, filter: .all, attentionSessionIDs: [], now: now)
         expect(all.projects[0].checkouts.first { $0.label == "main" }?.sessions.map(\.id) == ["idle", "old"], "All keeps older sessions, newest first")
+        let project = all.projects[0]
+        let capped = project.limited(to: 2, keeping: nil)
+        expect(capped.sessionCount == 2 && capped.checkouts.flatMap(\.sessions).map(\.id) == ["busy", "idle"], "a capped workspace keeps its most recent sessions")
+        expect(capped.checkouts.map(\.label) == ["feat/x", "main"], "checkouts with no visible sessions are hidden")
+        let keepSelected = project.limited(to: 1, keeping: "old")
+        expect(Set(keepSelected.checkouts.flatMap(\.sessions).map(\.id)) == ["busy", "old"], "the selected session stays visible past the cap")
         print("session tree tests passed")
     }
 

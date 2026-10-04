@@ -32,8 +32,11 @@ final class AgenthailModel: ObservableObject {
     private var lastEventID: UInt64 = 0
     private var catalogStreamTask: Task<Void, Never>?
     private var sessionStreamTask: Task<Void, Never>?
-    private var catalogCursor: UInt64 = 0
+    private var catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
     private var sessionCursor: UInt64 = 0
+    private var detailReloadTask: Task<Void, Never>?
+    private var detailLoadedAt: Date?
+    private var detailReloadPending = false
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -98,12 +101,12 @@ final class AgenthailModel: ObservableObject {
             if snapshot?.hasSamePresentation(as: loaded) != true {
                 snapshot = loaded
             }
-            catalogCursor = max(catalogCursor, loaded.catalogSeq ?? 0)
+            if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
+                startCatalogStream()
+            }
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
-            if selectedSessionID == nil, let first = currentSessions.first?.id ?? snapshot?.sessions.first?.id {
-                selectSession(first)
-            }
+            reconcileSelection()
         } catch {
             connectionError = error.localizedDescription
             setLoading(false)
@@ -117,29 +120,58 @@ final class AgenthailModel: ObservableObject {
         guard id != selectedSessionID || detail == nil else { return }
         selectedSessionID = id
         detail = nil
-        sessionStreamTask?.cancel()
+        detailLoadedAt = nil
+        detailReloadPending = false
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        startSessionStream(id)
         Task { await loadSession(id) }
     }
 
     func loadSession(_ id: String) async {
         guard let api else { return }
         do {
+            let startedAt = Date()
+            if selectedSessionID == id { detailLoadedAt = startedAt }
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
             detail = loaded
+            if let items = loaded.timeline?.items, let sends = localSends[id] {
+                localSends[id] = LocalSend.reconcile(sends, with: items)
+            }
             operationError = nil
-            startSessionStream(id)
         } catch {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
             operationError = error.localizedDescription
         }
     }
 
-    func send() {
-        let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, let sessionID = selectedSessionID else { return }
-        composer = ""
-        perform(action: selectedSession?.isWorking == true ? "steer" : "send", sessionID: sessionID, message: message)
+    private func reconcileSelection() {
+        guard let sessions = snapshot?.sessions else { return }
+        let next = reconciledSelection(selected: selectedSessionID, sessions: sessions)
+        guard next != selectedSessionID else { return }
+        sessionStreamTask?.cancel()
+        detailReloadTask?.cancel()
+        detailReloadTask = nil
+        detailReloadPending = false
+        detail = nil
+        selectedSessionID = nil
+        if let next { selectSession(next) }
+    }
+
+    private func scheduleDetailReload(_ id: String) {
+        guard selectedSessionID == id else { return }
+        detailReloadPending = true
+        guard detailReloadTask == nil else { return }
+        detailReloadTask = Task {
+            defer { detailReloadTask = nil }
+            while detailReloadPending, !Task.isCancelled, selectedSessionID == id {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, selectedSessionID == id else { return }
+                detailReloadPending = false
+                await loadSession(id)
+            }
+        }
     }
 
     func perform(action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil) {
@@ -276,7 +308,7 @@ final class AgenthailModel: ObservableObject {
     func submit(_ message: String, steer: Bool) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let api, let sessionID = selectedSessionID else { return }
-        let pending = LocalSend(text: text, status: nil)
+        let pending = LocalSend(text: text, sentAt: Date(), status: nil)
         localSends[sessionID, default: []].append(pending)
         Task {
             do {
@@ -308,14 +340,14 @@ final class AgenthailModel: ObservableObject {
             while !Task.isCancelled {
                 guard let api else { return }
                 do {
-                    try await api.streamCatalog(after: catalogCursor, onConnected: {}, onEvent: { [weak self] event in
+                    try await api.streamCatalog(after: catalogPosition.cursor, onConnected: {}, onEvent: { [weak self] event in
                         backoff.reset()
                         await self?.applyCatalogEvent(event)
                     })
                 } catch {
                     if Task.isCancelled { return }
                     if case AgenthailAPIError.streamGap = error {
-                        catalogCursor = 0
+                        catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
                         _ = await refresh(fresh: true)
                         continue
                     }
@@ -326,8 +358,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     func applyCatalogEvent(_ event: CatalogStreamEvent) {
-        guard event.stream == "catalog", event.seq > catalogCursor, var current = snapshot else { return }
-        catalogCursor = event.seq
+        guard event.stream == "catalog", var current = snapshot, catalogPosition.accept(event.seq) else { return }
         switch event.type {
         case "session.upserted":
             guard let changed = event.data.session else { return }
@@ -348,6 +379,7 @@ final class AgenthailModel: ObservableObject {
         }
         current.totalSessions = current.sessions.count
         snapshot = current
+        reconcileSelection()
     }
 
     private func startSessionStream(_ id: String) {
@@ -360,14 +392,14 @@ final class AgenthailModel: ObservableObject {
                 do {
                     try await api.streamSession(id: id, after: sessionCursor, onConnected: {}, onEvent: { [weak self] event in
                         backoff.reset()
-                        await self?.applySessionEvent(event)
+                        await self?.receiveSessionEvent(event)
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
                     if case AgenthailAPIError.streamGap = error {
                         sessionCursor = 0
-                        await loadSession(id)
-                        return
+                        scheduleDetailReload(id)
+                        continue
                     }
                     try? await Task.sleep(for: .seconds(backoff.nextDelay()))
                 }
@@ -375,22 +407,13 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func applySessionEvent(_ event: SessionStreamEvent) {
-        guard event.stream == "session", event.sessionId == selectedSessionID, var current = detail, var timeline = current.timeline else { return }
+    func receiveSessionEvent(_ event: SessionStreamEvent) {
+        guard event.stream == "session", event.sessionId == selectedSessionID else { return }
         sessionCursor = max(sessionCursor, event.seq)
-        let data = event.data
-        guard !data.itemId.isEmpty, data.op != "reset" else { return }
-        if data.op == "remove" {
-            timeline.items.removeAll { $0.id == data.itemId }
-        } else if let index = timeline.items.firstIndex(where: { $0.id == data.itemId }) {
-            let previous = timeline.items[index]
-            let text = data.body ?? previous.text
-            timeline.items[index] = TimelineItem(id: previous.id, kind: previous.kind, role: previous.role, title: previous.title, text: text, timestamp: data.ts, callId: previous.callId, status: previous.status, truncated: data.truncated, bodyRef: data.bodyRef)
-        } else {
-            timeline.items.append(TimelineItem(id: data.itemId, kind: data.kind, role: nil, title: data.kind, text: data.body ?? "", timestamp: data.ts, callId: data.turnId, status: nil, truncated: data.truncated, bodyRef: data.bodyRef))
+        if let loadedAt = detailLoadedAt, let changedAt = SessionTree.parseTimestamp(event.data.ts), changedAt < loadedAt {
+            return
         }
-        current.timeline = timeline
-        detail = current
+        scheduleDetailReload(event.sessionId)
     }
 
     private func startEvents() {
@@ -454,6 +477,9 @@ final class AgenthailModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(180))
             if Task.isCancelled { return }
             _ = await refresh()
+            if let entityID = event.entityId, entityID == selectedSessionID {
+                scheduleDetailReload(entityID)
+            }
             if OperationsRefreshPolicy.reloadOperations(for: event.type) {
                 await loadOperations()
             } else if operationsVisible && OperationsRefreshPolicy.reloadAudit(for: event.type) {
@@ -474,19 +500,5 @@ final class AgenthailModel: ObservableObject {
 
     private func clearConnectionError() {
         if connectionError != nil { connectionError = nil }
-    }
-}
-
-struct LocalSend: Identifiable, Equatable {
-    let id = UUID()
-    let text: String
-    var status: String?
-
-    static func label(for status: String?) -> String {
-        switch status {
-        case "queued": return "Queued"
-        case "submitted": return "Submitted"
-        default: return "Sent"
-        }
     }
 }
