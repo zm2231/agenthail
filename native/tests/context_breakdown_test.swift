@@ -14,6 +14,12 @@ struct ContextBreakdownTest {
             ContextBreakdownRow(label: "Compactions", value: 0.formatted()),
         ], "unreported figures are left out and an unknown window says so")
 
+        let compacted = try context(#"{"usedTokens":0,"contextWindow":200000,"compacting":true,"compactionCount":1,"reclaimedTokens":150000}"#)
+        check(ContextBreakdown.usage(compacted) == 0.0.formatted(.percent.precision(.fractionLength(0))), "a reported zero usage still has a usage label")
+        check(ContextBreakdown.rows(compacted).map(\.label) == ["Used tokens", "Context window", "Compactions", "Tokens reclaimed"], "a compacted context keeps its figures")
+        let unknownWindow = try context(#"{"usedTokens":404000,"contextWindow":200000,"compacting":false,"compactionCount":0,"windowEstimated":true}"#)
+        check(ContextBreakdown.usage(unknownWindow) == "\(Int64(404000).formatted(.number.notation(.compactName))) tokens used", "usage past an estimated window is shown as tokens")
+
         let estimated = try context(#"{"usedTokens":10,"contextWindow":100,"compacting":false,"compactionCount":0,"windowEstimated":true}"#)
         check(ContextBreakdown.rows(estimated)[1].label == "Estimated window", "an estimated window is labeled")
         let configured = try context(#"{"usedTokens":10,"contextWindow":100,"compacting":false,"compactionCount":0,"contextWindowSource":"configured"}"#)

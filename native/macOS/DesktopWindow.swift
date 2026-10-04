@@ -1489,12 +1489,6 @@ extension ContextState {
         if let ratio = fraction { return "\(ratio.formatted(.percent.precision(.fractionLength(0)))) context" }
         return "\(usedTokens.formatted(.number.notation(.compactName))) tokens"
     }
-
-    var usageLabel: String? {
-        guard usedTokens > 0 else { return nil }
-        if let ratio = fraction { return ratio.formatted(.percent.precision(.fractionLength(0))) }
-        return "\(usedTokens.formatted(.number.notation(.compactName))) tokens used"
-    }
 }
 
 struct DetailsTab: View {
@@ -1514,12 +1508,12 @@ struct DetailsTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let context = pane.detail?.context, let usage = context.usageLabel {
+            if let context = pane.detail?.context {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Context").foregroundStyle(DesktopPalette.text2)
                         Spacer()
-                        Text(usage)
+                        Text(ContextBreakdown.usage(context))
                     }
                     if let ratio = context.fraction {
                         ProgressView(value: min(ratio, 1))

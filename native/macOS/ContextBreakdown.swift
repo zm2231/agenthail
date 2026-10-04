@@ -6,6 +6,11 @@ struct ContextBreakdownRow: Equatable {
 }
 
 enum ContextBreakdown {
+    static func usage(_ context: ContextState) -> String {
+        if let ratio = context.fraction { return ratio.formatted(.percent.precision(.fractionLength(0))) }
+        return "\(context.usedTokens.formatted(.number.notation(.compactName))) tokens used"
+    }
+
     static func rows(_ context: ContextState) -> [ContextBreakdownRow] {
         let window = context.windowEstimated == true ? "Estimated window" : context.contextWindowSource == "configured" ? "Configured window" : "Context window"
         var rows = [
