@@ -68,10 +68,11 @@ struct SessionSidebar: View {
                     ForEach(tree.projects) { project in
                         let expanded = expandedProjects.contains(project.id)
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: model.selectedSessionID)
+                        let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name)
+                            ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false)
                             ForEach(shown.checkouts) { checkout in
-                                if project.checkouts.count > 1 || !checkout.isMain {
+                                if single == nil {
                                     CheckoutRowView(checkout: checkout)
                                 }
                                 ForEach(checkout.sessions) { session in
@@ -104,16 +105,41 @@ struct SessionSidebar: View {
             ConnectionFooter(model: model)
         }
         .background(DesktopPalette.side)
+        .background {
+            let order = visibleOrder(tree)
+            Button("") { step(order, by: -1) }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .hidden()
+            Button("") { step(order, by: 1) }
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .hidden()
+        }
     }
 }
 
 extension SessionSidebar {
+    private func visibleOrder(_ tree: SessionTree) -> [String] {
+        var ids = tree.needsYou.map(\.id)
+        for project in tree.projects {
+            let shown = expandedProjects.contains(project.id) ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: model.selectedSessionID)
+            ids += shown.checkouts.flatMap(\.sessions).map(\.id).filter { !ids.contains($0) }
+        }
+        return ids
+    }
+
+    private func step(_ order: [String], by offset: Int) {
+        guard !order.isEmpty else { return }
+        let current = model.selectedSessionID.flatMap { order.firstIndex(of: $0) }
+        let next = current.map { min(max($0 + offset, 0), order.count - 1) } ?? 0
+        model.selectSession(order[next])
+    }
+
     private func sessionButton(_ session: SessionState, needsYou: Bool) -> some View {
         let selected = model.selectedSessionID == session.id
         return Button {
             model.selectSession(session.id)
         } label: {
-            SessionRowView(session: session, needsYou: needsYou)
+            SessionRowView(session: session, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
                 .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,6 +176,8 @@ private extension SessionFilter {
 
 struct ProjectHeaderView: View {
     let name: String
+    var branch: String? = nil
+    var dirty = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -162,6 +190,18 @@ struct ProjectHeaderView: View {
             Text(name)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(DesktopPalette.text)
+                .lineLimit(1)
+            if let branch {
+                Text(branch)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if dirty {
+                Circle().fill(DesktopPalette.amber).frame(width: 5, height: 5)
+                    .accessibilityLabel("Uncommitted changes")
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -195,10 +235,11 @@ struct CheckoutRowView: View {
 struct SessionRowView: View {
     let session: SessionState
     let needsYou: Bool
+    var finishedUnseen = false
 
     var body: some View {
         HStack(spacing: 9) {
-            StatusIndicator(session: session, needsYou: needsYou)
+            StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             Text(session.title)
                 .lineLimit(1)
                 .foregroundStyle(session.open || session.isWorking ? DesktopPalette.text : DesktopPalette.text2)
@@ -217,6 +258,7 @@ struct SessionRowView: View {
 struct StatusIndicator: View {
     let session: SessionState
     let needsYou: Bool
+    var finishedUnseen = false
 
     var body: some View {
         Group {
@@ -227,7 +269,7 @@ struct StatusIndicator: View {
                     .scaleEffect(0.8)
             } else {
                 Circle()
-                    .fill(DesktopPalette.statusColor(session, needsYou: needsYou))
+                    .fill(DesktopPalette.statusColor(session, needsYou: needsYou, finishedUnseen: finishedUnseen))
                     .frame(width: 7, height: 7)
             }
         }

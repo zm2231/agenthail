@@ -3,7 +3,10 @@ import Foundation
 
 @MainActor
 final class AgenthailModel: ObservableObject {
-    @Published var snapshot: DashboardSnapshot?
+    @Published var snapshot: DashboardSnapshot? {
+        didSet { trackFinishedSessions(from: oldValue) }
+    }
+    @Published private(set) var finishedUnseen: Set<String> = []
     @Published var selectedSessionID: String?
     @Published var detail: SessionDetail?
     @Published var devices: [DeviceState] = []
@@ -131,6 +134,7 @@ final class AgenthailModel: ObservableObject {
             composer = drafts.removeValue(forKey: id) ?? ""
         }
         selectedSessionID = id
+        finishedUnseen.remove(id)
         olderItems = []
         olderCursor = nil
         olderError = nil
@@ -166,6 +170,21 @@ final class AgenthailModel: ObservableObject {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
             operationError = error.localizedDescription
         }
+    }
+
+    private func trackFinishedSessions(from previous: DashboardSnapshot?) {
+        guard let previous, let current = snapshot else { return }
+        let wasWorking = Set(previous.sessions.filter(\.isWorking).map(\.id))
+        var next = finishedUnseen
+        for session in current.sessions {
+            if session.isWorking {
+                next.remove(session.id)
+            } else if wasWorking.contains(session.id), session.id != selectedSessionID {
+                next.insert(session.id)
+            }
+        }
+        next.formIntersection(current.sessions.map(\.id))
+        if next != finishedUnseen { finishedUnseen = next }
     }
 
     func loadOlder() async {

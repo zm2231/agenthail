@@ -24,9 +24,10 @@ enum DesktopPalette {
     static let warnLine = dynamic(light: 0xF0D9B5, dark: 0x5A4224)
     static let stop = dynamic(light: 0x3F3A36, dark: 0x4A4643)
 
-    static func statusColor(_ session: SessionState, needsYou: Bool) -> Color {
+    static func statusColor(_ session: SessionState, needsYou: Bool, finishedUnseen: Bool = false) -> Color {
         if needsYou { return amber }
         if session.isWorking { return work }
+        if finishedUnseen { return green }
         return muted
     }
 

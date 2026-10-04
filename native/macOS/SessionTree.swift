@@ -35,6 +35,7 @@ struct SessionTree: Equatable {
     struct Checkout: Identifiable, Equatable {
         let id: String
         let label: String
+        let branchLabel: String?
         let isMain: Bool
         let dirty: Bool
         var sessions: [SessionState]
@@ -63,7 +64,7 @@ struct SessionTree: Equatable {
             let projectIndex = projects.firstIndex { $0.id == projectID }!
             let checkoutID = session.checkout?.id ?? session.checkout?.path ?? session.cwd ?? projectID
             if !projects[projectIndex].checkouts.contains(where: { $0.id == checkoutID }) {
-                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, sessions: []))
+                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, sessions: []))
             }
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
             projects[projectIndex].checkouts[checkoutIndex].sessions.append(session)
@@ -104,8 +105,12 @@ struct SessionTree: Equatable {
     }
 
     private static func checkoutLabel(_ session: SessionState) -> String {
+        branchLabel(session) ?? session.checkout?.path ?? session.cwd ?? "unknown checkout"
+    }
+
+    private static func branchLabel(_ session: SessionState) -> String? {
         if let branch = session.checkout?.branch, !branch.isEmpty { return branch }
         if let head = session.checkout?.detachedHead, !head.isEmpty { return "detached at \(head.prefix(7))" }
-        return session.checkout?.path ?? session.cwd ?? "unknown checkout"
+        return nil
     }
 }
