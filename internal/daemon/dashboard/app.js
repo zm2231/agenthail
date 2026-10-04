@@ -1077,7 +1077,7 @@ function renderChat() {
     })
     .join("");
   chatBody.innerHTML =
-    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
+    `${transcriptWarning ? `<p role="status">${escape(transcriptWarning)}</p>` : ""}${renderGoalAttention(goal)}${toolRows.join("")}${messages || '<div class="empty-state"><span class="empty-glyph">✦</span><h2>No saved exchanges yet</h2><p>Send a message to start this conversation from Agenthail.</p></div>'}`;
   renderLiveTurn();
   app.transcriptSignature = signature;
   if (app.pendingEntryScroll) {
@@ -1102,6 +1102,10 @@ function compactTokenCount(value) {
 }
 function goalStatusLabel(status) {
   return ({ active: "Active", paused: "Paused", blocked: "Blocked", usageLimited: "Usage limited", budgetLimited: "Budget limited", complete: "Complete" })[status] || status || "Unknown";
+}
+function renderGoalAttention(goal) {
+  if (!goal || !["blocked", "usageLimited", "budgetLimited"].includes(goal.status)) return "";
+  return `<p class="goal-attention" role="status">Needs you: ${escape(goalStatusLabel(goal.status))}. Review the goal in Conversation settings.</p>`;
 }
 function formatGoalDuration(seconds) {
   const value = Number(seconds);
