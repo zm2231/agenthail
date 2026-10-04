@@ -978,6 +978,20 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, cwdErr.Error(), http.StatusBadRequest)
 				return
 			}
+			adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
+			if adapter == nil {
+				http.Error(w, "surface is not configured", http.StatusConflict)
+				return
+			}
+			if err := d.Registry.EnsureAliasAvailable(alias); err != nil {
+				var taken registry.AliasTakenError
+				if errors.As(err, &taken) {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+				} else {
+					http.Error(w, fmt.Sprintf("check conversation name: %s", err), http.StatusInternalServerError)
+				}
+				return
+			}
 			if d.transportResolver == nil {
 				http.Error(w, "launcher transport is unavailable", http.StatusConflict)
 				return
@@ -1004,20 +1018,19 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, launchErr.Error(), http.StatusBadGateway)
 				return
 			}
-			adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
-			if adapter == nil {
-				http.Error(w, "surface is not configured", http.StatusConflict)
-				return
-			}
 			session, location, launchErr := locateLaunchedSession(ctx, launcher, adapter, launchResult)
 			if launchErr != nil {
-				http.Error(w, launchErr.Error(), http.StatusBadGateway)
+				writeAcceptedLaunch(w, request.Launcher, launchResult.Location, fmt.Sprintf("launcher accepted the session, but discovery failed: %s; check the catalog before retrying", launchErr))
 				return
 			}
 			if session == nil {
+				if location == nil {
+					writeAcceptedLaunch(w, request.Launcher, nil, "launcher accepted the session, but its location is still unresolved; check the catalog before retrying")
+					return
+				}
 				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, alias, *location)
 				if err != nil {
-					http.Error(w, fmt.Sprintf("persist pending launch: %s", err), http.StatusInternalServerError)
+					writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but pending correlation could not be persisted: %s; check the catalog before retrying", err))
 					return
 				}
 				_ = pendingID
@@ -1031,12 +1044,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
 			if err := d.Registry.RegisterSession(*session); err != nil {
-				http.Error(w, fmt.Sprintf("register conversation: %s", err), http.StatusInternalServerError)
+				writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but registration failed: %s; check the catalog before retrying", err))
 				return
 			}
 			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
 				if err := d.Registry.SetAlias(alias, session.ID); err != nil {
-					http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
+					writeAcceptedLaunch(w, request.Launcher, location, fmt.Sprintf("launcher accepted the session, but its name could not be persisted: %s; check the catalog before retrying", err))
 					return
 				}
 			}
@@ -1901,4 +1914,19 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, warning string) {
+	body := map[string]any{
+		"ok":        true,
+		"status":    "submitted",
+		"accepted":  true,
+		"retryable": false,
+		"launcher":  launcher,
+		"warning":   warning,
+	}
+	if location != nil {
+		body["location"] = location
+	}
+	writeDashboardJSON(w, http.StatusAccepted, body)
 }

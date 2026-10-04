@@ -617,6 +617,21 @@ func (r *Registry) LookupAlias(name string) (string, error) {
 	return sid, err
 }
 
+func (r *Registry) EnsureAliasAvailable(name string) error {
+	if name == "" {
+		return nil
+	}
+	var owner string
+	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return AliasTakenError{Name: name, Owner: owner}
+}
+
 func (r *Registry) SetAlias(name, sessionID string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
