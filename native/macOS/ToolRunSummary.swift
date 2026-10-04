@@ -1,10 +1,15 @@
 import Foundation
 
-struct ToolInvocation: Identifiable {
-    let call: TimelineItem?
-    var results: [TimelineItem]
+enum ToolRunEntry: Identifiable {
+    case call(TimelineItem, results: [TimelineItem])
+    case output(TimelineItem)
+    case reasoning(TimelineItem)
 
-    var id: String { call?.id ?? results.first?.id ?? "" }
+    var id: String {
+        switch self {
+        case .call(let item, _), .output(let item), .reasoning(let item): item.id
+        }
+    }
 }
 
 enum ToolRunSummary {
@@ -31,22 +36,24 @@ enum ToolRunSummary {
         item.status == "failed" || item.status == "error"
     }
 
-    static func invocations(_ items: [TimelineItem]) -> [ToolInvocation] {
-        var invocations: [ToolInvocation] = []
+    static func entries(_ items: [TimelineItem]) -> [ToolRunEntry] {
+        var entries: [ToolRunEntry] = []
         var callIndex: [String: Int] = [:]
         for item in items {
             if isCall(item) {
-                if let callID = item.callId { callIndex[callID] = invocations.count }
-                invocations.append(ToolInvocation(call: item, results: []))
+                if let callID = item.callId { callIndex[callID] = entries.count }
+                entries.append(.call(item, results: []))
             } else if item.kind == "toolResult" {
-                if let callID = item.callId, let index = callIndex[callID] {
-                    invocations[index].results.append(item)
+                if let callID = item.callId, let index = callIndex[callID], case .call(let call, let results) = entries[index] {
+                    entries[index] = .call(call, results: results + [item])
                 } else {
-                    invocations.append(ToolInvocation(call: nil, results: [item]))
+                    entries.append(.output(item))
                 }
+            } else if item.kind == "reasoning", !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                entries.append(.reasoning(item))
             }
         }
-        return invocations
+        return entries
     }
 
     static func outputPreview(_ text: String) -> String {

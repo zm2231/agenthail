@@ -16,15 +16,21 @@ struct ToolRunSummaryTest {
         let mcp = [item("toolCall", "mcp__agent-hands__press_key"), item("toolCall", "mcp__agent-hands__list_apps"), item("toolCall", "Bash")]
         expect(ToolRunSummary.label(mcp) == "Used 2 agent-hands tools and ran 1 command", ToolRunSummary.label(mcp))
         let run = [item("toolCall", "Bash", callId: "a"), item("toolCall", "Read", callId: "b"), item("reasoning", "Thinking"), item("toolResult", "Tool result", text: "read", callId: "b"), item("toolResult", "Tool result", status: "error", text: "boom", callId: "a"), item("toolResult", "Tool result", text: "earlier page", callId: "z"), item("toolCall", "Edit", callId: "c")]
-        let invocations = ToolRunSummary.invocations(run)
-        expect(invocations.map { $0.call?.title ?? "-" } == ["Bash", "Read", "-", "Edit"], "calls keep order and an unmatched result stands alone")
-        expect(invocations[0].results.map(\.text) == ["boom"] && invocations[1].results.map(\.text) == ["read"], "results pair with their call by call ID")
-        expect(invocations[2].results.map(\.text) == ["earlier page"] && invocations[3].results.isEmpty, "a call without a result has none")
+        let entries = ToolRunSummary.entries(run + [item("reasoning", "Thinking", text: "Weigh the options")])
+        expect(entries.map(describe) == ["Bash:boom", "Read:read", "output:earlier page", "Edit:", "reasoning:Weigh the options"], entries.map(describe).joined(separator: ","))
         let long = (1...40).map { "line \($0)" }.joined(separator: "\n")
         expect(ToolRunSummary.outputPreview(long).split(separator: "\n").count == 24, "preview keeps the first 24 lines")
         expect(ToolRunSummary.outputPreview(String(repeating: "x", count: 5000)).count == 3000, "preview caps characters")
         expect(ToolRunSummary.outputPreview("short") == "short", "short output is its own preview")
         print("tool run summary tests passed")
+    }
+
+    static func describe(_ entry: ToolRunEntry) -> String {
+        switch entry {
+        case .call(let call, let results): "\(call.title):\(results.map(\.text).joined(separator: "|"))"
+        case .output(let item): "output:\(item.text)"
+        case .reasoning(let item): "reasoning:\(item.text)"
+        }
     }
 
     static func expect(_ condition: Bool, _ message: String) {
