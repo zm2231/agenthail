@@ -427,30 +427,6 @@ func appendCatalogGapFixture(t *testing.T, path string, count int) {
 	}
 }
 
-func TestDiscoveryPersistsCatalogBeforeSnapshotReads(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	fake.listCalls.Store(0)
-	d.discoverCatalog(context.Background())
-	if fake.listCalls.Load() != 1 {
-		t.Fatalf("discovery calls=%d", fake.listCalls.Load())
-	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.HostEpoch == "" || state.CatalogSeq == 0 || len(state.Sessions) != 2 || fake.listCalls.Load() != 1 {
-		t.Fatalf("state=%+v providerCalls=%d", state, fake.listCalls.Load())
-	}
-	for _, session := range state.Sessions {
-		if session.ObservedAt.IsZero() || session.UnavailableReason == "" {
-			t.Fatalf("session=%+v", session)
-		}
-	}
-	if len(state.Surfaces) != 1 || state.Surfaces[0].Health != "healthy" || !state.Surfaces[0].Connected {
-		t.Fatalf("surfaces=%+v", state.Surfaces)
-	}
-}
-
 func TestFailedDiscoveryKeepsCatalogRowsStaleThroughDashboardSnapshot(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())

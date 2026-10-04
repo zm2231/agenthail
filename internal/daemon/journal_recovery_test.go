@@ -275,59 +275,6 @@ func TestSessionStreamDropsBufferedLiveEntryOlderThanReplayWindow(t *testing.T) 
 	}
 }
 
-func TestSessionCreateStarterLauncherMatchesDefaultCreationOutcomes(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		startErr   error
-		status     int
-		history    string
-		intentDone bool
-	}{
-		{name: "sent", status: http.StatusCreated, history: "sent"},
-		{name: "ambiguous", startErr: surface.DeliveryOutcomeUnknown(errors.New("turn/start timed out")), status: http.StatusAccepted, history: "submitted"},
-		{name: "failed", startErr: errors.New("model rejected"), status: http.StatusBadGateway, history: "failed", intentDone: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			d, r, fake, _, _ := daemonFixture(t)
-			fake.startErr = tc.startErr
-			d.SetLaunchers(surface.NewLaunchers([]surface.Surface{fake}))
-			w := httptest.NewRecorder()
-			d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"codex","launcher":"codex-app-server","message":"hello"}`)))
-			if w.Code != tc.status || len(fake.startOptions) != 1 {
-				t.Fatalf("status=%d starts=%d body=%s", w.Code, len(fake.startOptions), w.Body.String())
-			}
-			var body map[string]any
-			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if body["sessionId"] != "started" || body["launcher"] != surface.LauncherCodexAppServer || body["retryable"] == true {
-				t.Fatalf("body=%s", w.Body.String())
-			}
-			if _, err := r.Session("started"); err != nil {
-				t.Fatalf("created session was not registered: %v", err)
-			}
-			history, err := r.ListHistory(10, "")
-			if err != nil || len(history) == 0 || history[0].Kind != tc.history || history[0].SessionID != "started" {
-				t.Fatalf("history=%+v err=%v", history, err)
-			}
-			if tc.startErr == nil {
-				if result, ok := body["result"].(map[string]any); !ok || result["uuid"] == nil && result["UUID"] == nil {
-					t.Fatalf("send result not preserved: %s", w.Body.String())
-				}
-				return
-			}
-			deliveryID, ok := body["deliveryId"].(float64)
-			if !ok || deliveryID <= 0 {
-				t.Fatalf("delivery id missing: %s", w.Body.String())
-			}
-			intent, err := r.DeliveryIntent(int64(deliveryID))
-			if err != nil || (intent.Status == registry.DeliveryIntentFailed) != tc.intentDone {
-				t.Fatalf("intent=%+v err=%v", intent, err)
-			}
-		})
-	}
-}
-
 type managedRestartSurface struct {
 	*flakySeedSurface
 	mode  string

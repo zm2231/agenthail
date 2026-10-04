@@ -34,10 +34,17 @@ func TestDashboardConfigPersistsBusyDelivery(t *testing.T) {
 	}
 }
 
-func TestDashboardConfigRejectsInvalidBusyDelivery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "drop"}); err == nil {
-		t.Fatal("invalid busy delivery accepted")
+func TestDashboardConfigRejectsInvalidValues(t *testing.T) {
+	for name, config := range map[string]DashboardConfig{
+		"busy delivery": {BusyDelivery: "drop"},
+		"codex recency": {CodexRecentHours: 169},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			if err := SaveDashboardConfig(config); err == nil {
+				t.Fatalf("invalid config accepted: %+v", config)
+			}
+		})
 	}
 }
 
@@ -80,9 +87,20 @@ func TestDashboardConfigMigratesMissingCodexRecency(t *testing.T) {
 	}
 }
 
-func TestDashboardConfigRejectsInvalidCodexRecency(t *testing.T) {
+func TestDashboardListenIsLoopbackOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	if err := SaveDashboardConfig(DashboardConfig{CodexRecentHours: 169}); err == nil {
-		t.Fatal("invalid Codex recency accepted")
+	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
+		if err := SaveDashboardConfig(DashboardConfig{Listen: listen}); err != nil {
+			t.Fatalf("%s: %v", listen, err)
+		}
+	}
+	if err := SaveDashboardConfig(DashboardConfig{Listen: "0.0.0.0:7412"}); err == nil {
+		t.Fatal("non-loopback listener was saved")
+	}
+	if err := os.WriteFile(DashboardConfigPath(), []byte(`{"enabled":true,"listen":"0.0.0.0:7412"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDashboardConfig(); err == nil {
+		t.Fatal("hand-edited non-loopback listener was loaded")
 	}
 }
