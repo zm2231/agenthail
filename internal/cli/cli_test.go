@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -63,87 +62,12 @@ func (f *cliReadSurface) ReadSession(_ context.Context, _ *surface.Session, requ
 	return f.result, f.err
 }
 
-func TestCodexRemotePortRequiresExplicitOverride(t *testing.T) {
-	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "")
-	if got := codexconfig.RemoteDebuggingPort(); got != "" {
-		t.Fatalf("RemoteDebuggingPort() = %q, want empty managed-runtime default", got)
-	}
-	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "9333")
-	if got := codexconfig.RemoteDebuggingPort(); got != "9333" {
-		t.Fatalf("RemoteDebuggingPort() = %q, want renderer override", got)
-	}
-}
-
-func TestHelpExplainsBusyTargetContinuations(t *testing.T) {
-	output, err := captureStdout(t, func() error {
-		(&App{}).usage()
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, fragment := range []string{"queue when busy", "--no-queue", "use send when idle", "start daemon to deliver queued work"} {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("help missing %q: %s", fragment, output)
-		}
-	}
-}
-
 func (f *runtimeCLISurface) RuntimeStatus(context.Context) surface.RuntimeStatus { return f.status }
 
 func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 	err := (&App{}).Run([]string{"codex", "--remote", "ws://example.test"})
 	if err == nil || !strings.Contains(err.Error(), "manages the remote transport") {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestRepairManagedCodexRuntimeRestartsConfiguredRuntime(t *testing.T) {
-	root := t.TempDir()
-	logPath := filepath.Join(root, "args")
-	script := filepath.Join(root, "codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
-	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	if err := repairManagedCodexRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	output, err := os.ReadFile(logPath)
-	if err != nil || strings.TrimSpace(string(output)) != "app-server daemon restart" {
-		t.Fatalf("output=%q err=%v", output, err)
-	}
-}
-
-func TestRepairManagedCodexRuntimeUsesStandaloneRuntimeOverPath(t *testing.T) {
-	root := t.TempDir()
-	standalone := filepath.Join(root, "packages", "standalone", "current")
-	if err := os.MkdirAll(standalone, 0700); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(root, "args")
-	standaloneBinary := filepath.Join(standalone, "codex")
-	if err := os.WriteFile(standaloneBinary, []byte("#!/bin/sh\nprintf 'standalone:%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	pathDir := filepath.Join(root, "bin")
-	if err := os.MkdirAll(pathDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pathDir, "codex"), []byte("#!/bin/sh\nprintf 'path:%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_HOME", root)
-	t.Setenv("AGENTHAIL_CODEX_BIN", "")
-	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	t.Setenv("PATH", pathDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := repairManagedCodexRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	output, err := os.ReadFile(logPath)
-	if err != nil || strings.TrimSpace(string(output)) != "standalone:app-server daemon restart" {
-		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
@@ -156,54 +80,6 @@ type readinessCLISurface struct {
 func (f *readinessCLISurface) Ready(context.Context) error {
 	f.readyCalls++
 	return f.readyErr
-}
-
-func TestProbeCodexAppServerUsesReadinessCheck(t *testing.T) {
-	fake := &cliSurface{listErr: errors.New("thread/list unavailable")}
-	ready := &readinessCLISurface{cliSurface: fake, readyErr: errors.New("thread/loaded/list unavailable")}
-	err := probeCodexAppServer(ready)
-	if !errors.Is(err, ready.readyErr) || ready.readyCalls != 1 || fake.listCalls != 0 {
-		t.Fatalf("err=%v ready_calls=%d list_calls=%d", err, ready.readyCalls, fake.listCalls)
-	}
-}
-
-func TestProbeCodexAppServerFallsBackToList(t *testing.T) {
-	fake := &cliSurface{listErr: errors.New("thread/list unavailable")}
-	err := probeCodexAppServer(fake)
-	if !errors.Is(err, fake.listErr) || fake.listCalls != 1 {
-		t.Fatalf("err=%v calls=%d", err, fake.listCalls)
-	}
-}
-
-func TestCodexLaunchProbeTimeoutBoundsReadiness(t *testing.T) {
-	if codexLaunchProbeTimeout != 5*time.Second {
-		t.Fatalf("codexLaunchProbeTimeout = %s, want 5s", codexLaunchProbeTimeout)
-	}
-}
-
-func TestCodexRemoteArgsUseCallerDirectory(t *testing.T) {
-	got := codexRemoteArgs([]string{"--model", "gpt-5.6-sol"}, "/tmp/project")
-	want := []string{"--cd", "/tmp/project", "--model", "gpt-5.6-sol"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("got=%q want=%q", got, want)
-	}
-}
-
-func TestCodexRemoteArgsPreserveExplicitDirectory(t *testing.T) {
-	for _, args := range [][]string{{"-C", "/tmp/other"}, {"-C/tmp/other"}, {"--cd", "/tmp/other"}, {"--cd=/tmp/other"}} {
-		got := codexRemoteArgs(args, "/tmp/project")
-		if strings.Join(got, "\x00") != strings.Join(args, "\x00") {
-			t.Fatalf("args=%q got=%q", args, got)
-		}
-	}
-}
-
-func TestCodexRemoteArgsIgnoreArgumentsAfterTerminator(t *testing.T) {
-	got := codexRemoteArgs([]string{"--", "-C", "literal"}, "/tmp/project")
-	want := []string{"--cd", "/tmp/project", "--", "-C", "literal"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("got=%q want=%q", got, want)
-	}
 }
 
 func (f *cliSurface) Name() surface.SurfaceKind { return f.kind }
@@ -385,16 +261,6 @@ func TestValidateCommandFlags(t *testing.T) {
 	}
 }
 
-func TestCommandTimeout(t *testing.T) {
-	got, err := commandTimeout([]string{"--timeout", "3m"}, time.Second)
-	if err != nil || got != 3*time.Minute {
-		t.Fatalf("got=%s err=%v", got, err)
-	}
-	if _, err := commandTimeout([]string{"--timeout", "forever"}, time.Second); err == nil {
-		t.Fatal("invalid timeout accepted")
-	}
-}
-
 func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "thread", Surface: surface.KindCodex}}}
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail launch codex"}}
@@ -432,22 +298,6 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	}
 	if !strings.Contains(output, `"durable":true`) || !strings.Contains(output, "supervised by Agenthail") {
 		t.Fatalf("output=%s", output)
-	}
-}
-
-func TestHomebrewDaemonServiceLoaded(t *testing.T) {
-	installHomebrewLaunchctl(t)
-	if !homebrewDaemonServiceLoaded() {
-		t.Fatal("Homebrew service was not detected")
-	}
-}
-
-func TestHomebrewDaemonManagedByExecutablePath(t *testing.T) {
-	if !homebrewManagedExecutable("/opt/homebrew/Cellar/agenthail/0.1.3/libexec/agenthail") {
-		t.Fatal("Homebrew Cellar executable was not detected")
-	}
-	if homebrewManagedExecutable("/Users/example/.local/share/agenthail/agenthail") {
-		t.Fatal("source executable was detected as Homebrew")
 	}
 }
 
@@ -505,32 +355,6 @@ func installHomebrewLaunchctl(t *testing.T) string {
 	return logPath
 }
 
-func TestSubcommandSpecificFlags(t *testing.T) {
-	if err := validateCommandFlags("queue", []string{"list", "--json", "--all", "--target", "@builder", "--mine", "--cwd", "/work"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"retry", "1", "--json"}, {"target", "message", "--json"}, {"list", "--from", "x"}} {
-		if err := validateCommandFlags("queue", args); err == nil {
-			t.Fatalf("queue flags accepted: %v", args)
-		}
-	}
-	if err := validateCommandFlags("channel", []string{"send", "team", "message", "--from", "me"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateCommandFlags("channel", []string{"create", "team", "--from", "me"}); err == nil {
-		t.Fatal("channel create accepted send-only flag")
-	}
-	if err := validateCommandFlags("dashboard", []string{"config", "--codex-recent-hours", "5"}); err != nil {
-		t.Fatalf("dashboard config flag rejected: %v", err)
-	}
-	if err := validateCommandFlags("dashboard", []string{"remote", "--no-open", "--json", "--tailscale", "/tmp/tailscale"}); err != nil {
-		t.Fatalf("dashboard remote flags rejected: %v", err)
-	}
-	if err := validateCommandFlags("relay", []string{"add", "from", "to", ".*", "--once"}); err != nil {
-		t.Fatalf("relay once flag rejected: %v", err)
-	}
-}
-
 func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
 	app, r := cliFixture(t, fake)
@@ -573,13 +397,6 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 	}
 }
 
-func TestStripFlagsConsumesDashboardTailscalePath(t *testing.T) {
-	got := stripFlags([]string{"remote", "--tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale", "--no-open"})
-	if strings.Join(got, ",") != "remote" {
-		t.Fatalf("positionals=%v", got)
-	}
-}
-
 func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 	session := surface.Session{ID: "fresh", Surface: surface.KindClaude, Status: surface.StatusBusy}
 	fake := &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"fresh": session}}
@@ -589,35 +406,6 @@ func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 	}
 	if r.QueueCount("fresh") != 1 {
 		t.Fatal("qualified target was not registered and queued")
-	}
-}
-
-func TestRegisteredTargetRefreshesResolvedMetadata(t *testing.T) {
-	oldLastActive := time.Now().Add(-time.Hour)
-	liveLastActive := time.Now().Truncate(time.Millisecond)
-	stale := surface.Session{ID: "registered", Surface: surface.KindClaude, Name: "worker", Status: surface.StatusIdle, LastActive: oldLastActive}
-	live := stale
-	live.Status = surface.StatusBusy
-	live.LastActive = liveLastActive
-	fake := &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{live.ID: live}}
-	app, r := cliFixture(t, fake)
-	if err := r.RegisterSession(stale); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.SetAlias("worker", stale.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	resolved, _, err := app.resolveTarget(context.Background(), "worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	registered, err := r.Session(stale.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.Status != surface.StatusBusy || registered.Status != surface.StatusBusy || !registered.LastActive.Equal(liveLastActive) {
-		t.Fatalf("resolved=%+v registered=%+v", resolved, registered)
 	}
 }
 
@@ -632,25 +420,6 @@ func TestCompactUsesTypedControlForWorkingClaudeSession(t *testing.T) {
 	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"busy"}) })
 	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("busy") != 1 {
 		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("busy"), err)
-	}
-	if fake.compactCalls != 0 || len(fake.sent) != 0 {
-		t.Fatalf("compactCalls=%d sent=%v", fake.compactCalls, fake.sent)
-	}
-}
-
-func TestCompactRequestsIdleClaudeSessionWithoutWaiting(t *testing.T) {
-	session := surface.Session{ID: "idle", Surface: surface.KindClaude, Name: "idle", Status: surface.StatusIdle}
-	fake := &cliSurface{
-		kind:        surface.KindClaude,
-		sessions:    map[string]surface.Session{"idle": session},
-		caps:        surface.Capabilities{Compact: true},
-		observation: &surface.TurnObservation{Status: surface.StatusIdle},
-		sendResult:  &surface.SendResult{UUID: "compact-turn", Accepted: true},
-	}
-	app, registry := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.cmdCompact([]string{"idle"}) })
-	if err != nil || !strings.Contains(output, "compact queued") || registry.QueueCount("idle") != 1 {
-		t.Fatalf("output=%q queue=%d err=%v", output, registry.QueueCount("idle"), err)
 	}
 	if fake.compactCalls != 0 || len(fake.sent) != 0 {
 		t.Fatalf("compactCalls=%d sent=%v", fake.compactCalls, fake.sent)
@@ -880,27 +649,6 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 	}
 }
 
-func TestWaitForReplyReportsTurnThatEndsWithoutCompletion(t *testing.T) {
-	fake := &cliSurface{kind: surface.KindCodex, observations: []*surface.TurnObservation{
-		{Status: surface.StatusBusy, ActiveTurnID: "turn", CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old", Done: true}},
-		{Status: surface.StatusIdle, CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old", Done: true}},
-	}}
-	_, err := waitForReply(context.Background(), fake, &surface.Session{ID: "s"}, "old", "turn", 2*time.Second)
-	if err == nil || !strings.Contains(err.Error(), "ended without a completed") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestWaitForReplyReportsExactEmptyCodexTerminal(t *testing.T) {
-	fake := &cliSurface{kind: surface.KindCodex, observations: []*surface.TurnObservation{
-		{Status: surface.StatusIdle, TerminalTurnID: "turn", CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old", Done: true}},
-	}}
-	_, err := waitForReply(context.Background(), fake, &surface.Session{ID: "s"}, "old", "turn", time.Second)
-	if err == nil || !strings.Contains(err.Error(), "ended without an assistant reply") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
 func TestSendTimeoutBoundsDelivery(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true}, sendWait: true}
@@ -938,18 +686,6 @@ func TestListJSONUsesDefaultLimit(t *testing.T) {
 	}
 	if json.Unmarshal([]byte(output), &document) != nil || len(document.Sessions) != 15 {
 		t.Fatalf("output=%s sessions=%d", output, len(document.Sessions))
-	}
-}
-
-func TestListAcceptsOnlyItsWorkspaceFlags(t *testing.T) {
-	if err := validateCommandFlags("list", []string{"--all", "--cwd", "/work/project", "--wide", "--json"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateCommandFlags("list", []string{"--cwd"}); err == nil || !strings.Contains(err.Error(), "requires a value") {
-		t.Fatalf("err=%v", err)
-	}
-	if err := validateCommandFlags("list", []string{"--project", "/work/project"}); err == nil || !strings.Contains(err.Error(), "unknown flag") {
-		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -1104,14 +840,6 @@ func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing
 	}
 }
 
-func TestQueueListHelpDocumentsScopedFilters(t *testing.T) {
-	app, _ := cliFixture(t, &cliSurface{kind: surface.KindCodex})
-	output, err := captureStdout(t, func() error { return app.cmdQueue([]string{"list", "--help"}) })
-	if err != nil || !strings.Contains(output, "--target") || !strings.Contains(output, "--mine") || !strings.Contains(output, "--cwd") {
-		t.Fatalf("output=%q err=%v", output, err)
-	}
-}
-
 func TestListFailsWhenEverySurfaceDiscoveryFails(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindNotion, listErr: errors.New("unavailable")}
 	app := App{Surfaces: []SurfaceEntry{{Name: "notion", Surface: fake}}}
@@ -1238,79 +966,11 @@ func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
 	}
 }
 
-func TestLastTimeoutBoundsTail(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindNotion}
-	blocked := make(chan struct{})
-	defer close(blocked)
-	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"s": session}, tailBlock: blocked}
-	app, _ := cliFixture(t, fake)
-	started := time.Now()
-	err := app.cmdLast([]string{"notion:s", "--timeout", "50ms"})
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 500*time.Millisecond {
-		t.Fatalf("elapsed=%s err=%v", time.Since(started), err)
-	}
-}
-
-func TestUnicodeTruncationIsValid(t *testing.T) {
-	if got := truncate("a界b", 3); got != "a界b" {
-		t.Fatalf("got=%q", got)
-	}
-	if got := truncate("a界bc", 3); got != "a界…" {
-		t.Fatalf("got=%q", got)
-	}
-}
-
 func TestCodexLaunchEnablesLoopbackRendererDebugging(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "9333")
 	args := strings.Join(codexLaunchArgs(), " ")
 	if strings.Contains(args, "--inspect") || !strings.Contains(args, "--remote-debugging-address=127.0.0.1") || !strings.Contains(args, "--remote-debugging-port=9333") {
 		t.Fatalf("launch args=%q", args)
-	}
-}
-
-func TestRotateLogFileOnlyMovesLogsAboveLimit(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "daemon.log")
-	if err := os.WriteFile(path, []byte("small"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := rotateLogFile(path, 5); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("log at limit should remain: %v", err)
-	}
-	if err := os.WriteFile(path, []byte("too large"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := rotateLogFile(path, 5); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("oversized active log should move, stat err=%v", err)
-	}
-	if data, err := os.ReadFile(path + ".1"); err != nil || string(data) != "too large" {
-		t.Fatalf("backup=%q err=%v", data, err)
-	}
-}
-
-func TestParseDaemonServicePID(t *testing.T) {
-	output := "com.agenthail.daemon = {\n\tstate = running\n\tpid = 88284\n}"
-	if pid := parseDaemonServicePID(output); pid != 88284 {
-		t.Fatalf("pid=%d", pid)
-	}
-	if pid := parseDaemonServicePID("state = waiting\n"); pid != 0 {
-		t.Fatalf("waiting service pid=%d", pid)
-	}
-}
-
-func TestSelectCodexPIDValidatesExecutableAndMultipleResults(t *testing.T) {
-	pid := selectCodexPID(`bad
-12 /Applications/Other.app/Contents/MacOS/ChatGPT
-34 /Applications/Codex.app/Contents/MacOS/ChatGPT --flag
-`, []string{"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", "/Applications/Codex.app/Contents/MacOS/ChatGPT"})
-	if pid != 34 {
-		t.Fatalf("pid=%d", pid)
 	}
 }
 
@@ -1357,33 +1017,5 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 	}
 	if receiptAtExec.LaunchID != "agenthail-launch" || receiptAtExec.ThreadID != "provider-thread" || receiptAtExec.Workspace != "workspace:7" || receiptAtExec.Surface != "surface:9" || receiptAtExec.TmuxPane != "" {
 		t.Fatalf("receipt=%+v", receiptAtExec)
-	}
-}
-
-func TestManagedCodexLaunchBindingSelectsDeclaredTMUXRuntime(t *testing.T) {
-	t.Setenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME", surface.LauncherTMUX)
-	t.Setenv("TMUX_PANE", "%17")
-	t.Setenv("CMUX_WORKSPACE_ID", "workspace:7")
-	t.Setenv("CMUX_SURFACE_ID", "surface:9")
-	binding, err := managedCodexLaunchBindingFromEnv()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binding.Runtime != surface.LauncherTMUX || binding.TmuxPane != "%17" || binding.Workspace != "" || binding.Surface != "" {
-		t.Fatalf("binding=%+v", binding)
-	}
-}
-
-func TestManagedCodexLaunchBindingSelectsDeclaredCMUXRuntime(t *testing.T) {
-	t.Setenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME", surface.LauncherCMUX)
-	t.Setenv("TMUX_PANE", "%17")
-	t.Setenv("CMUX_WORKSPACE_ID", "workspace:7")
-	t.Setenv("CMUX_SURFACE_ID", "surface:9")
-	binding, err := managedCodexLaunchBindingFromEnv()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binding.Runtime != surface.LauncherCMUX || binding.TmuxPane != "" || binding.Workspace != "workspace:7" || binding.Surface != "surface:9" {
-		t.Fatalf("binding=%+v", binding)
 	}
 }

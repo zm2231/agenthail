@@ -2,10 +2,11 @@ package registry
 
 import (
 	"encoding/json"
-	"github.com/zm2231/agenthail/internal/surface"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 func TestTurnOptionsSurviveV2MigrationAndQueueReload(t *testing.T) {

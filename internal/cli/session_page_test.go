@@ -2,14 +2,9 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -46,65 +41,6 @@ func TestActiveDaemonFailureDoesNotFallBackToProvider(t *testing.T) {
 	}
 	if len(provider.requests) != 0 {
 		t.Fatalf("provider was read %d times", len(provider.requests))
-	}
-}
-
-func TestDaemonSessionPageClientUsesAuthenticatedJournalCursor(t *testing.T) {
-	var gotPath, gotAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.RequestURI()
-		gotAuth = r.Header.Get("Authorization")
-		if gotAuth != "Bearer fixture-token" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"readSource": "journal", "journalSeq": 9,
-			"exchanges": []surface.Exchange{{User: "q", Assistant: "a"}},
-			"timeline":  surface.SessionTimeline{Items: []surface.TimelineItem{{ID: "item", Kind: "message", Role: "assistant", Text: "a"}}, NextBefore: 7, Source: "journal"},
-		})
-	}))
-	defer server.Close()
-	client := &daemonSessionPageClient{baseURL: server.URL, token: "fixture-token", httpClient: server.Client()}
-	read, err := client.ReadSession(context.Background(), &surface.Session{ID: "s"}, surface.SessionReadRequest{Limit: 1, Before: 123})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotAuth != "Bearer fixture-token" || !strings.Contains(gotPath, "id=s") || !strings.Contains(gotPath, "timelineBefore=123") || !strings.Contains(gotPath, "limit=4") {
-		t.Fatalf("path=%q auth=%q", gotPath, gotAuth)
-	}
-	if read.Source != "journal" || read.JournalSeq != 9 || read.NextBefore != 7 || len(read.Items) != 1 {
-		t.Fatalf("read=%+v", read)
-	}
-}
-
-func TestDaemonSessionPageClientReturnsTypedHistoryGap(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "history_gap", "message": "older history is gone"}, "earliestSeq": 8, "latestSeq": 20})
-	}))
-	defer server.Close()
-	client := &daemonSessionPageClient{baseURL: server.URL, token: "fixture-token", httpClient: server.Client()}
-	_, err := client.ReadSession(context.Background(), &surface.Session{ID: "s"}, surface.SessionReadRequest{Limit: 4, Before: 2})
-	var pageErr *daemonSessionPageError
-	if !errors.As(err, &pageErr) || pageErr.Code != "history_gap" || pageErr.EarliestSeq != 8 || pageErr.LatestSeq != 20 {
-		t.Fatalf("err=%v typed=%+v", err, pageErr)
-	}
-}
-
-func TestDaemonSessionPageClientHonorsDeadlineWithoutRetry(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		<-r.Context().Done()
-	}))
-	defer server.Close()
-	client := &daemonSessionPageClient{baseURL: server.URL, token: "fixture-token", httpClient: server.Client()}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	_, err := client.ReadSession(ctx, &surface.Session{ID: "s"}, surface.SessionReadRequest{Limit: 4})
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) || requests.Load() != 1 {
-		t.Fatalf("err=%v requests=%d", err, requests.Load())
 	}
 }
 

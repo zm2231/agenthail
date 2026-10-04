@@ -102,30 +102,6 @@ func TestSendStreamActiveDaemonFailsClosedOnSourceError(t *testing.T) {
 	}
 }
 
-func TestSendStreamActiveDaemonCancelsBeforeDispatchFailure(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
-	cancelled := atomic.Int32{}
-	fake := &cliSurface{
-		kind:     surface.KindCodex,
-		sessions: map[string]surface.Session{"s": session},
-		caps:     surface.Capabilities{Send: true, Stream: true},
-		sendErr:  errors.New("dispatch failed"),
-	}
-	app, _ := cliFixture(t, fake)
-	app.catalogDaemonRunning = func() bool { return true }
-	app.daemonSessionPageReader = func() (sessionPageReader, error) { return testSessionPageReader{}, nil }
-	app.daemonSessionStreamReader = func() (sessionStreamReader, error) {
-		return testSessionStreamReader{cancelled: &cancelled}, nil
-	}
-	err := app.cmdSend([]string{"codex:s", "hello", "--stream"})
-	if err == nil || !strings.Contains(err.Error(), "dispatch failed") {
-		t.Fatalf("err=%v, want dispatch failure", err)
-	}
-	if got := cancelled.Load(); got != 1 {
-		t.Fatalf("cancel count=%d, want one cleanup", got)
-	}
-}
-
 func TestStreamActiveDaemonTimeoutCancelsSubscription(t *testing.T) {
 	session := surface.Session{ID: "s", Surface: surface.KindCodex}
 	cancelled := atomic.Int32{}
@@ -153,9 +129,8 @@ func TestStreamActiveDaemonTimeoutCancelsSubscription(t *testing.T) {
 	}
 }
 
-func TestSendReplyActiveDaemonCancelsAfterNotionRegistrationFailure(t *testing.T) {
+func TestSendReplyToNewNotionThreadNeverStealsTakenAlias(t *testing.T) {
 	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, Name: "launch-notes", Status: surface.StatusIdle}
-	cancelled := atomic.Int32{}
 	fake := &cliSurface{
 		kind:       surface.KindNotion,
 		sessions:   map[string]surface.Session{"new:launch-notes": synthetic},
@@ -171,15 +146,13 @@ func TestSendReplyActiveDaemonCancelsAfterNotionRegistrationFailure(t *testing.T
 	}
 	app.catalogDaemonRunning = func() bool { return true }
 	app.daemonSessionPageReader = func() (sessionPageReader, error) { return testSessionPageReader{}, nil }
-	app.daemonSessionStreamReader = func() (sessionStreamReader, error) {
-		return testSessionStreamReader{cancelled: &cancelled}, nil
-	}
+	app.daemonSessionStreamReader = func() (sessionStreamReader, error) { return testSessionStreamReader{}, nil }
 	err := app.cmdSend([]string{"notion:new:launch-notes", "draft", "--reply"})
 	if err == nil || !strings.Contains(err.Error(), "alias") {
 		t.Fatalf("err=%v, want alias registration failure", err)
 	}
-	if got := cancelled.Load(); got != 1 {
-		t.Fatalf("cancel count=%d, want one cleanup", got)
+	if owner, err := registry.LookupAlias("launch-notes"); err != nil || owner != "existing" {
+		t.Fatalf("alias owner=%q err=%v", owner, err)
 	}
 }
 

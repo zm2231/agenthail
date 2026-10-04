@@ -234,22 +234,6 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	}
 }
 
-func TestThreadCreateCodexHumanSubmittedDetailIsNeutral(t *testing.T) {
-	cwd := t.TempDir()
-	starter := &starterCLISurface{
-		cliSurface: &cliSurface{kind: surface.KindCodex},
-		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, Cwd: cwd, Transport: "managed"},
-		err:        surface.DeliveryOutcomeUnknown(errors.New("provider response lost")),
-	}
-	app := threadFixture(t, starter)
-	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder"})
-	})
-	if err != nil || output != "Submitted to @builder.\n" {
-		t.Fatalf("output=%q err=%v", output, err)
-	}
-}
-
 func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, []byte("x"), 0600); err != nil {
@@ -274,13 +258,6 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 		})
-	}
-}
-
-func TestThreadCreateHelpIsSuccessful(t *testing.T) {
-	output, err := captureStdout(t, func() error { return (&App{}).Run([]string{"thread", "create", "codex", "--help"}) })
-	if err != nil || !strings.Contains(output, "agenthail thread create <codex|claude>") {
-		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 

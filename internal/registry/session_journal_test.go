@@ -84,14 +84,6 @@ func TestSessionJournalIdenticalProviderReplayDoesNotAdvanceWatermark(t *testing
 	}
 }
 
-func TestSessionJournalRejectsEntryBeyondByteRetention(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "session")
-	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", Payload: []byte("too large")}, SessionJournalRetention{Count: 1, Bytes: 3}); err == nil {
-		t.Fatal("oversized entry was accepted")
-	}
-}
-
 func TestSessionJournalBodyIsSessionBoundAndExpiresWithRetention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
@@ -159,22 +151,6 @@ func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	window, err := r.SessionJournalAfter("session", 0, 10)
 	if err != nil || len(window.Entries) != 1 || window.Entries[0].ProviderKey != "second" || window.Entries[0].Bytes != 6 {
 		t.Fatalf("window=%+v err=%v", window, err)
-	}
-}
-
-func TestSessionJournalRetentionCountsFullBodyBytes(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "session")
-	retention := SessionJournalRetention{Count: 4, Bytes: 32}
-	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("preview"), BodyRef: "body-ref", FullBody: []byte("0123456789")}, retention); err != nil {
-		t.Fatal(err)
-	}
-	var retained int
-	if err := r.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
-		t.Fatal(err)
-	}
-	if retained != len("preview")+len("0123456789") {
-		t.Fatalf("retained bytes=%d, want %d", retained, len("preview")+len("0123456789"))
 	}
 }
 

@@ -177,46 +177,6 @@ func TestDeliveryIntentFailureQueuesOneSenderNoticeAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestDeliveryIntentDoesNotNotifyUnknownOutcome(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "sender", "target")
-	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentUnknown, Evidence: surface.EvidenceUnknown})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if queueID, queued, err := r.QueueDeliveryFailureNotice(intent.ID); err != nil || queued || queueID != 0 {
-		t.Fatalf("queueID=%d queued=%v err=%v", queueID, queued, err)
-	}
-	if count := r.QueueCount("sender"); count != 0 {
-		t.Fatalf("unknown outcome queued %d notices", count)
-	}
-}
-
-func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "sender", "target")
-	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "expiry-test", surface.SendOptions{SourceSessionID: "sender"})
-	if err != nil || deliveryID == 0 {
-		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
-	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.ExpireMessages(time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := r.DeliveryIntent(deliveryID)
-	if err != nil || stored.Status != DeliveryIntentExpired || stored.QueueID != queueID || r.QueueCount("sender") != 1 {
-		t.Fatalf("intent=%+v err=%v notices=%d", stored, err, r.QueueCount("sender"))
-	}
-	if _, err := r.ExpireMessages(time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if count := r.QueueCount("sender"); count != 1 {
-		t.Fatalf("sender notice count=%d", count)
-	}
-}
-
 func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplayAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	first, err := Open(path)

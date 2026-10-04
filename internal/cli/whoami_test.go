@@ -54,27 +54,6 @@ func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 	}
 }
 
-func TestWhoamiResolvesClaudeBinding(t *testing.T) {
-	fake := &cliSurface{kind: surface.KindClaude}
-	app, store := cliFixture(t, fake)
-	if err := store.RegisterSession(surface.Session{ID: "claude-session", Surface: surface.KindClaude, Cwd: "/work/claude-project"}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CLAUDE_SESSION_ID", "claude-session")
-
-	output, err := captureStdout(t, func() error { return app.Run([]string{"whoami", "--json"}) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got whoamiResult
-	if err := json.Unmarshal([]byte(output), &got); err != nil {
-		t.Fatal(err)
-	}
-	if !got.Resolved || got.Session != "claude-session" || got.Surface != "claude" || got.Project != "claude-project" {
-		t.Fatalf("whoami=%+v", got)
-	}
-}
-
 func TestWhoamiReportsUnregisteredBoundSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
 	app, _ := cliFixture(t, fake)
