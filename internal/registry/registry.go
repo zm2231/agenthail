@@ -128,6 +128,9 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("session_journal_state", "pruned_before", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -340,7 +343,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
 	next_seq INTEGER NOT NULL DEFAULT 0,
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
-	source_epoch TEXT NOT NULL DEFAULT ''
+	source_epoch TEXT NOT NULL DEFAULT '',
+	pruned_before INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,

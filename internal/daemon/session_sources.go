@@ -328,22 +328,29 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	}
 	fullBody := []byte(payload.Body)
 	if len(fullBody) > sessionStreamBodyBytes {
-		ref, err := newSessionBodyRef()
-		if err != nil {
-			return
-		}
 		prefix := fullBody[:sessionStreamBodyBytes]
 		for !utf8.Valid(prefix) {
 			prefix = prefix[:len(prefix)-1]
 		}
 		payload.Body = string(prefix)
 		payload.Truncated = true
-		payload.BodyRef = ref
+		ref, refErr := newSessionBodyRef()
+		if refErr == nil {
+			payload.BodyRef = ref
+		}
 		encoded, err = json.Marshal(payload)
 		if err != nil {
 			return
 		}
-		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: ref, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+		if payload.BodyRef == "" || len(encoded)+len(fullBody) > sessionJournalRetentionBytes {
+			payload.BodyRef = ""
+			encoded, err = json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			fullBody = nil
+		}
+		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 		if err != nil {
 			return
 		}

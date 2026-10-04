@@ -165,6 +165,37 @@ func TestReadJournalPagePreservesPagingIdentityRolesAndBodyReferences(t *testing
 	}
 }
 
+func TestDashboardSessionReturnsTypedHistoryGapAfterJournalPrune(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	retention := registry.SessionJournalRetention{Count: 2, Bytes: 1024}
+	for _, key := range []string{"one", "two", "three"} {
+		if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: key, Payload: []byte(key)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+from.ID+"&timeline=1&timelineBefore=3", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		EarliestSeq uint64 `json:"earliestSeq"`
+		LatestSeq   uint64 `json:"latestSeq"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != "history_gap" || body.EarliestSeq != 2 || body.LatestSeq != 3 {
+		t.Fatalf("body=%+v", body)
+	}
+}
+
 func TestReadJournalPageSkipsSourceErrorsWithoutProviderFallback(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	payload := []byte(`{"itemId":"source-error","version":1,"op":"upsert","kind":"source-error","body":"private detail"}`)

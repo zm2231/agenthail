@@ -1569,6 +1569,18 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 			sessionReadErr = seedErr
 		}
 	}
+	var historyGap *registry.SessionJournalHistoryGapError
+	if errors.As(sessionReadErr, &historyGap) {
+		writeDashboardJSON(w, http.StatusConflict, map[string]any{
+			"error": map[string]any{
+				"code":    "history_gap",
+				"message": "The requested older session history is no longer retained.",
+			},
+			"earliestSeq": historyGap.EarliestSeq,
+			"latestSeq":   historyGap.LatestSeq,
+		})
+		return
+	}
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	response["journalSeq"] = sessionRead.JournalSeq
