@@ -22,7 +22,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 11
+	schemaVersion   = 12
 	queueMessageTTL = time.Hour
 )
 
@@ -142,6 +142,9 @@ func (r *Registry) migrate() error {
 		return err
 	}
 	if err := r.ensureColumn("session_journal_state", "seed_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("session_journal_state", "seed_identity", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -378,7 +381,8 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	source_epoch TEXT NOT NULL DEFAULT '',
 	pruned_before INTEGER NOT NULL DEFAULT 0,
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
-	seed_seq INTEGER NOT NULL DEFAULT 0
+	seed_seq INTEGER NOT NULL DEFAULT 0,
+	seed_identity TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,

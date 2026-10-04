@@ -61,7 +61,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			result.Exchanges[len(result.Exchanges)-1].Assistant = payload.Body
 		}
 	}
-	if status, seedSeq, statusErr := d.Registry.SessionJournalSeedCheckpoint(sessionID); statusErr == nil && status == registry.SessionJournalSeeded && (newestSourceErrorSeq == 0 || newestSourceErrorSeq <= seedSeq) {
+	if status, seedSeq, _, statusErr := d.Registry.SessionJournalSeedCheckpoint(sessionID); statusErr == nil && status == registry.SessionJournalSeeded && (newestSourceErrorSeq == 0 || newestSourceErrorSeq <= seedSeq) {
 		result.UnavailableReason = ""
 	}
 	return result, nil

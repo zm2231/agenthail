@@ -358,7 +358,7 @@ func boundedSessionSourceReason(value string) string {
 }
 
 func (s *sessionSource) seedJournal() {
-	seedStatus, statusErr := s.manager.registry.SessionJournalSeedStatus(s.session.ID)
+	seedStatus, _, trustedIdentity, statusErr := s.manager.registry.SessionJournalSeedCheckpoint(s.session.ID)
 	localTranscript := false
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
@@ -367,11 +367,18 @@ func (s *sessionSource) seedJournal() {
 		if !localTranscript {
 			return
 		}
+		if trustedIdentity == "" {
+			err := fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
+			s.seedErr = err
+			_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
+			s.appendSourceError(err)
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
 	if seedStatus == registry.SessionJournalSeeded && localTranscript {
-		if err := s.catchUpLocalTranscript(ctx); err != nil {
+		if err := s.catchUpLocalTranscript(ctx, trustedIdentity); err != nil {
 			s.seedErr = err
 			_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
 			s.appendSourceError(err)
@@ -383,6 +390,13 @@ func (s *sessionSource) seedJournal() {
 		if err == nil {
 			err = fmt.Errorf("session source returned no activity result")
 		}
+		s.seedErr = err
+		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
+		s.appendSourceError(err)
+		return
+	}
+	if trustedIdentity != "" && read.TranscriptIdentity != trustedIdentity {
+		err := fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
 		s.seedErr = err
 		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
 		s.appendSourceError(err)
@@ -401,21 +415,28 @@ func (s *sessionSource) seedJournal() {
 		s.appendSourceError(err)
 		return
 	}
+	if localTranscript && read.TranscriptIdentity == "" {
+		err := fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
+		s.seedErr = err
+		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
+		s.appendSourceError(err)
+		return
+	}
 	s.appendSeedItems(read.Items)
-	if err := s.manager.registry.MarkSessionJournalSeed(s.session.ID, true); err != nil {
+	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity); err != nil {
 		s.seedErr = err
 		s.appendSourceError(err)
 	}
 }
 
-func (s *sessionSource) catchUpLocalTranscript(ctx context.Context) error {
+func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdentity string) error {
 	known, err := s.knownJournalItems()
 	if err != nil {
 		return fmt.Errorf("read journal seed identities: %w", err)
 	}
 	pages := make([][]surface.TimelineItem, 0, 2)
 	before := int64(0)
-	transcriptIdentity := ""
+	transcriptIdentity := trustedIdentity
 	for {
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
 		if err != nil || read == nil {
@@ -430,7 +451,11 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context) error {
 		if transcriptIdentity == "" {
 			transcriptIdentity = read.TranscriptIdentity
 		} else if read.TranscriptIdentity != transcriptIdentity {
-			return fmt.Errorf("Codex local transcript was replaced during catch-up: %w", surface.ErrTranscriptUnavailable)
+			phase := "during catch-up"
+			if len(pages) == 0 {
+				phase = "before catch-up"
+			}
+			return fmt.Errorf("Codex local transcript was replaced %s: %w", phase, surface.ErrTranscriptUnavailable)
 		}
 		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
 			s.session.TranscriptOffset = read.TranscriptOffset
@@ -449,7 +474,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context) error {
 	for index := len(pages) - 1; index >= 0; index-- {
 		s.appendSeedItems(pages[index])
 	}
-	if err := s.manager.registry.MarkSessionJournalSeed(s.session.ID, true); err != nil {
+	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, transcriptIdentity); err != nil {
 		return err
 	}
 	return nil
