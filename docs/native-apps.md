@@ -18,7 +18,7 @@ The Mac app keeps your connected conversations in one window.
 - Spotlight finds sessions by name and folder; choosing one opens it in the app. Settings can turn this off.
 - Links open the app from anywhere: `agenthail://session/<id or @handle>` opens a session, `agenthail://new` starts one, and `agenthail://open` brings the app forward.
 
-The menu bar item and the Dock icon's menu list sessions that need you, sessions that are working, and the most recently active idle sessions. The menu bar item also opens the app, a new session, or Settings.
+The Dock icon shows how many sessions need you. The menu bar item and the Dock icon's menu list sessions that need you, sessions that are working, and the most recently active idle sessions. The menu bar item also opens the app, a new session, or Settings.
 
 Settings holds the connection and service controls, phone pairing and devices, notifications, waiting messages and automatic handoffs, and recent activity.
 
