@@ -41,15 +41,18 @@ final class SpotlightSync {
     }
 
     private let store: SpotlightStore
+    private let retryDelay: Duration
     private let failed: (Error) -> Void
     private var target: Target?
     private var generation = 0
     private var drainTask: Task<Void, Never>?
+    private var retryWait: Task<Void, Never>?
     private var cleared = false
     private(set) var indexed: [String: SpotlightEntry] = [:]
 
-    init(store: SpotlightStore, failed: @escaping (Error) -> Void = { _ in }) {
+    init(store: SpotlightStore, retryDelay: Duration = .seconds(30), failed: @escaping (Error) -> Void = { _ in }) {
         self.store = store
+        self.retryDelay = retryDelay
         self.failed = failed
     }
 
@@ -68,6 +71,7 @@ final class SpotlightSync {
     private func set(_ next: Target) {
         target = next
         generation &+= 1
+        retryWait?.cancel()
         guard drainTask == nil else { return }
         drainTask = Task {
             await drain()
@@ -84,9 +88,16 @@ final class SpotlightSync {
                 applied = current
             } catch {
                 failed(error)
-                return
+                if generation == current { await waitBeforeRetry() }
             }
         }
+    }
+
+    private func waitBeforeRetry() async {
+        let wait = Task { [retryDelay] in _ = try? await Task.sleep(for: retryDelay) }
+        retryWait = wait
+        await wait.value
+        retryWait = nil
     }
 
     private func apply(_ target: Target) async throws {

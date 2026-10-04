@@ -4,30 +4,34 @@ import Foundation
 final class FakeStore: SpotlightStore {
     struct Failure: Error {}
     var operations: [String] = []
-    var holdDelete = false
+    var hold: String?
     var failNext: String?
     private var gate: CheckedContinuation<Void, Never>?
 
     func deleteAll() async throws {
         operations.append("deleteAll")
-        if holdDelete { await withCheckedContinuation { gate = $0 } }
-        try failIfNeeded("deleteAll")
+        try await pause("deleteAll")
     }
 
     func delete(_ ids: [String]) async throws {
         operations.append("delete \(ids.joined(separator: ","))")
-        try failIfNeeded("delete")
+        try await pause("delete")
     }
 
     func index(_ entries: [SpotlightEntry]) async throws {
         operations.append("index \(entries.map(\.id).joined(separator: ","))")
-        try failIfNeeded("index")
+        try await pause("index")
     }
 
     func release() {
-        holdDelete = false
+        hold = nil
         gate?.resume()
         gate = nil
+    }
+
+    private func pause(_ operation: String) async throws {
+        if hold == operation { await withCheckedContinuation { gate = $0 } }
+        try failIfNeeded(operation)
     }
 
     private func failIfNeeded(_ operation: String) throws {
@@ -58,8 +62,8 @@ struct SpotlightIndexTest {
 
         let store = FakeStore()
         var failures = 0
-        let sync = SpotlightSync(store: store) { _ in failures += 1 }
-        store.holdDelete = true
+        let sync = SpotlightSync(store: store, retryDelay: .milliseconds(20)) { _ in failures += 1 }
+        store.hold = "deleteAll"
         sync.update([builder, plain])
         for _ in 0..<5 { await Task.yield() }
         check(store.operations == ["deleteAll"], "nothing is indexed until clearing earlier items finishes")
@@ -74,20 +78,35 @@ struct SpotlightIndexTest {
 
         store.failNext = "index"
         sync.update([builder, renamed])
-        await sync.settle()
+        for _ in 0..<5 { await Task.yield() }
         check(failures == 1 && sync.indexed["b"]?.title == "Fix tests", "a failed write leaves the confirmed state unchanged")
-        sync.update([builder, renamed])
         await sync.settle()
-        check(sync.indexed["b"]?.title == "Fix flaky tests", "the next update retries a failed write")
+        check(sync.indexed["b"]?.title == "Fix flaky tests", "a failed write is retried without another update")
+
+        store.operations = []
+        store.failNext = "delete"
+        store.hold = "delete"
+        sync.update([renamed])
+        for _ in 0..<5 { await Task.yield() }
+        sync.update([builder, renamed, session("c", name: "Docs", cwd: nil)])
+        store.release()
+        await sync.settle()
+        check(failures == 2 && sync.indexed.keys.sorted() == ["a", "b", "c"] && store.operations == ["delete a", "index c"], "a failure moves on to the newest catalog")
+
+        let slow = FakeStore()
+        let patient = SpotlightSync(store: slow, retryDelay: .seconds(60))
+        slow.failNext = "deleteAll"
+        patient.update([builder])
+        for _ in 0..<5 { await Task.yield() }
+        patient.clear()
+        await patient.settle()
+        check(slow.operations == ["deleteAll", "deleteAll"] && patient.indexed.isEmpty, "a new target does not wait out the retry delay")
 
         store.operations = []
         store.failNext = "deleteAll"
         sync.clear()
         await sync.settle()
-        check(failures == 2 && !sync.indexed.isEmpty, "a failed clear is not recorded as done")
-        sync.clear()
-        await sync.settle()
-        check(sync.indexed.isEmpty && store.operations == ["deleteAll", "deleteAll"], "turning Spotlight off retries until it clears")
+        check(failures == 3 && sync.indexed.isEmpty && store.operations == ["deleteAll", "deleteAll"], "turning Spotlight off retries until it clears")
         sync.clear()
         await sync.settle()
         check(store.operations.count == 2, "turning it off again writes nothing")
