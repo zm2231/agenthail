@@ -32,7 +32,9 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Session journal browser tests
-        run: node scripts/test-session-journal.mjs
+        run: |
+          node scripts/test-session-journal.mjs
+          node scripts/test-dashboard-idempotency.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Race tests
