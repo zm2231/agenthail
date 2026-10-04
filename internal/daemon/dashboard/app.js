@@ -268,7 +268,7 @@ function startLiveStream() {
     app.history.timeline = { ...(app.history.timeline || {}), items };
     const exchanges = [];
     for (const value of items) {
-      if (value.kind === "attachment") continue;
+      if (!["message", "text", "assistant"].includes(value.kind)) continue;
       if (value.role === "user") exchanges.push({ user: value.text });
       else if (value.role === "assistant" || value.kind === "text") {
         if (!exchanges.length || exchanges.at(-1).assistant) exchanges.push({});
