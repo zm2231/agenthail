@@ -155,6 +155,14 @@ const usageContext = vm.createContext({$: () => indicator});
 const usageStart = source.indexOf('function compactTokenCount(');
 const usageEnd = source.indexOf('async function action(', usageStart);
 vm.runInContext(source.slice(usageStart, usageEnd), usageContext);
+usageContext.escape = value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+for (const status of ['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete']) {
+  usageContext.goal = {status};
+  const attention = vm.runInContext('renderGoalAttention(goal)', usageContext);
+  assert.equal(attention.includes('Needs you'), ['blocked', 'usageLimited', 'budgetLimited'].includes(status));
+  if (attention) assert.ok(attention.includes('role="status"'));
+}
+assert.ok(source.includes('${renderGoalAttention(goal)}${toolRows.join'), 'goal attention remains outside collapsed conversation settings');
 vm.runInContext('renderContextUsage({usedTokens:404508, contextWindow:0})', usageContext);
 assert.equal(indicator.hidden, false);
 assert.match(indicator.textContent, /405k tokens/);
