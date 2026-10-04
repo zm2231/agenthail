@@ -27,6 +27,8 @@ final class AgenthailModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
+    private var sessionMetadataTask: Task<Void, Never>?
+    private var sessionRequestID: UUID?
     private var lastEventID: UInt64 = 0
     private struct PendingSendRequest {
         let message: String
@@ -48,6 +50,7 @@ final class AgenthailModel: ObservableObject {
         eventTask?.cancel()
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
+        sessionMetadataTask?.cancel()
     }
 
     func connect() {
@@ -129,13 +132,36 @@ final class AgenthailModel: ObservableObject {
 
     func loadSession(_ id: String) async {
         guard let api else { return }
+        let requestID = UUID()
+        sessionRequestID = requestID
+        sessionMetadataTask?.cancel()
         do {
             let loaded = try await api.sessionDetail(id: id)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
             detail = loaded
             operationError = nil
+            sessionMetadataTask = Task { [weak self, api] in
+                do {
+                    let metadata = try await api.sessionMetadata(id: id)
+                    guard !Task.isCancelled else { return }
+                    guard let self, sessionLoadIsCurrent(id, selectedID: self.selectedSessionID), self.sessionRequestID == requestID,
+                          var detail = self.detail, detail.session.id == id else { return }
+                    if let context = metadata.context { detail.context = context }
+                    if let goal = metadata.goal { detail.goal = goal }
+                    if let model = metadata.model { detail.model = model }
+                    if let models = metadata.models { detail.models = models }
+                    detail.claudeRuns = metadata.claudeRuns
+                    detail.claudeSubagents = metadata.claudeSubagents
+                    detail.metadataErrors = metadata.errors
+                    self.detail = detail
+                } catch {
+                    return
+                }
+            }
         } catch {
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID else { return }
+            sessionMetadataTask?.cancel()
+            detail = nil
             operationError = error.localizedDescription
         }
     }

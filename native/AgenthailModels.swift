@@ -340,7 +340,30 @@ struct SessionMetadata: Decodable {
     let goal: GoalState?
     let model: String?
     let models: [ModelOption]?
+    let claudeRuns: [ClaudeRunObservation]?
+    let claudeSubagents: [ClaudeSubagentLink]?
     let errors: [String: String]?
+}
+
+struct ClaudeRunObservation: Decodable, Identifiable, Equatable {
+    let recordPath: String
+    let jobId: String
+    let sessionId: String?
+    let resumeSessionId: String?
+    let runType: String?
+    let providerState: String?
+    let createdAt: String?
+    let updatedAt: String?
+
+    var id: String { recordPath.isEmpty ? jobId : recordPath }
+}
+
+struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
+    let parentSessionId: String
+    let agentId: String
+    let transcriptPath: String
+
+    var id: String { agentId + transcriptPath }
 }
 
 struct SessionDetail: Decodable {
@@ -355,6 +378,9 @@ struct SessionDetail: Decodable {
     var goal: GoalState?
     var model: String?
     var models: [ModelOption]?
+    var claudeRuns: [ClaudeRunObservation]?
+    var claudeSubagents: [ClaudeSubagentLink]?
+    var metadataErrors: [String: String]?
     var timeline: SessionTimeline?
     let readSource: String?
     let readError: String?

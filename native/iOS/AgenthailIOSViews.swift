@@ -978,6 +978,29 @@ struct SessionInspector: View {
                         if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
                     }
                 }
+                if let runs = detail.claudeRuns, !runs.isEmpty {
+                    Section("Claude runs") {
+                        ForEach(runs) { run in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(run.jobId).font(.body.weight(.medium)).textSelection(.enabled)
+                                if let state = run.providerState, !state.isEmpty { LabeledContent("Provider state", value: state) }
+                                if let type = run.runType, !type.isEmpty { LabeledContent("Run type", value: type) }
+                                if let updated = run.updatedAt, !updated.isEmpty { LabeledContent("Updated", value: updated) }
+                                if !run.recordPath.isEmpty { Text(run.recordPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
+                if let links = detail.claudeSubagents, !links.isEmpty {
+                    Section("Claude subagents") {
+                        ForEach(links) { link in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
                 Section("Controls") {
                     if detail.session.runtime?.focusable == true {
                         Button("Open in host", systemImage: "arrow.up.forward.app") { model.focusSession(session); dismiss() }
