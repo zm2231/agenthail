@@ -112,16 +112,6 @@ jobs:
           udid="$(scripts/ios-simulator.sh iphone)"
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
           xcrun simctl boot "$udid"
-      - uses: actions/cache@v4
-        with:
-          path: ${{ env.DERIVED }}/SourcePackages
-          key: spm-${{ runner.os }}-${{ hashFiles('native/Agenthail.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
-      - name: Verify generated iOS project
-        run: |
-          command -v xcodegen >/dev/null || brew install xcodegen
-          scripts/test-xcodegen-project.sh
-      - name: iOS release device build
-        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO
       - name: Build for simulator tests
         run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
       - name: iOS simulator tests
@@ -131,6 +121,20 @@ jobs:
           plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
           test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
           test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
+
+  ios-release:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify generated iOS project
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          scripts/test-xcodegen-project.sh
+      - name: iOS release device build
+        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
 
   installer:
     runs-on: macos-latest
