@@ -35,11 +35,19 @@ func (r *Registry) EnsureCatalogState() error {
 		checkout BLOB NOT NULL,
 		unavailable_reason TEXT NOT NULL DEFAULT '',
 		observed_at TEXT NOT NULL,
-		misses INTEGER NOT NULL DEFAULT 0
+		misses INTEGER NOT NULL DEFAULT 0,
+		projection_fingerprint TEXT NOT NULL DEFAULT '',
+		projection_generation INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("catalog_sessions", "misses", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("catalog_sessions", "projection_fingerprint", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("catalog_sessions", "projection_generation", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (

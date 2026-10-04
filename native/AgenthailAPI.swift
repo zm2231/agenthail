@@ -249,6 +249,9 @@ final class AgenthailAPI: @unchecked Sendable {
                 dataLine = ""
             }
         }
+        if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(SessionStreamEvent.self, from: data) {
+            await onEvent(event)
+        }
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -276,6 +279,9 @@ final class AgenthailAPI: @unchecked Sendable {
                 }
                 dataLine = ""
             }
+        }
+        if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(CatalogStreamEvent.self, from: data) {
+            await onEvent(event)
         }
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }

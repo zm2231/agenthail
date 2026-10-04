@@ -47,6 +47,7 @@ type sessionSource struct {
 	nextID       uint64
 	holders      map[string]int
 	appendBodies map[string]string
+	anonymous    uint64
 }
 
 type sessionSourceSubscription struct {
@@ -246,6 +247,11 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	}
 	if itemID == "" {
 		itemID = providerKey
+	}
+	if itemID == "" {
+		s.anonymous++
+		itemID = fmt.Sprintf("%s:anonymous:%d", s.epoch, s.anonymous)
+		providerKey = itemID
 	}
 	op := event.Operation
 	if op == "" {

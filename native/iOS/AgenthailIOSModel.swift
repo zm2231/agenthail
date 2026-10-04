@@ -711,10 +711,11 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
-    private func applySessionStreamEvent(_ event: SessionStreamEvent) {
+    func applySessionStreamEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
         guard var timeline = detail.timeline else { return }
+        guard !event.data.itemId.isEmpty else { return }
         let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }

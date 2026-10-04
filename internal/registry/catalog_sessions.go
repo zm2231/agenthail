@@ -10,11 +10,12 @@ import (
 )
 
 type CatalogSessionState struct {
-	Session           surface.Session
-	HostProject       json.RawMessage
-	Checkout          json.RawMessage
-	UnavailableReason string
-	ObservedAt        time.Time
+	Session               surface.Session
+	HostProject           json.RawMessage
+	Checkout              json.RawMessage
+	UnavailableReason     string
+	ObservedAt            time.Time
+	ProjectionFingerprint string
 }
 
 type CatalogSnapshot struct {
@@ -66,6 +67,9 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if state.Session.ID == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog session id is required")
 	}
+	if state.ProjectionFingerprint == "" {
+		return CatalogEvent{}, false, fmt.Errorf("catalog session projection fingerprint is required")
+	}
 	if !json.Valid(state.HostProject) || !json.Valid(state.Checkout) {
 		return CatalogEvent{}, false, fmt.Errorf("catalog identity must be JSON")
 	}
@@ -79,15 +83,33 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	defer tx.Rollback()
+	var priorFingerprint string
+	var priorGeneration int64
+	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration)
+	if err != nil && err != sql.ErrNoRows {
+		return CatalogEvent{}, false, err
+	}
+	changed := err == sql.ErrNoRows || priorFingerprint != state.ProjectionFingerprint
+	if changed {
+		priorGeneration++
+	}
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at)
-		VALUES(?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
-		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0`,
-		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation)
+		VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
+		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
+		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation`,
+		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration); err != nil {
 		return CatalogEvent{}, false, err
 	}
+	if !changed {
+		if err := tx.Commit(); err != nil {
+			return CatalogEvent{}, false, err
+		}
+		return CatalogEvent{}, false, nil
+	}
+	event.DedupeKey = fmt.Sprintf("%s:%d", event.DedupeKey, priorGeneration)
 	persisted, created, err := r.AppendCatalogEventTx(tx, event)
 	if err != nil {
 		return CatalogEvent{}, false, err

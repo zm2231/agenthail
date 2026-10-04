@@ -239,12 +239,14 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			fingerprint, err := json.Marshal(map[string]any{"session": session, "hostProject": identity.HostProject, "checkout": identity.Checkout, "unavailableReason": identity.UnavailableReason})
+			projection := row
+			projection.ObservedAt = time.Time{}
+			fingerprint, err := json.Marshal(projection)
 			if err != nil {
 				continue
 			}
-			key := fmt.Sprintf("session.upserted:%s:%x", session.ID, fingerprint)
-			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+			key := "session.upserted:" + session.ID
+			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		}
 		_ = d.catalog.reconcileOmissions(adapter.Name(), seen)
 		observedAt := time.Now().UTC()

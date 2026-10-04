@@ -77,6 +77,18 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStreamRejectsEmptyItemIdentity() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+        let before = detail.timeline?.items
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"","version":1,"kind":"text","op":"upsert","ts":"2026-10-03T12:00:00Z","body":"must not replace existing rows","truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(event)
+        XCTAssertEqual(model.selectedDetail?.timeline?.items, before)
+    }
+
+    @MainActor
     func testEventRefreshDoesNotRestorePreviousSelection() async {
         let probe = IOSSelectionProbe()
         probe.selectedID = "A"

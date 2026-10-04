@@ -62,7 +62,7 @@ func TestAppendCatalogEventTxRollsBackWithOwnerTransaction(t *testing.T) {
 func TestRecordCatalogSessionCommitsStateAndEventTogether(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "catalog-session", Surface: surface.KindCodex, Name: "Catalog"}
-	event, created, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project-1"}`), Checkout: []byte(`{"id":"checkout-1"}`), ObservedAt: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}, CatalogEvent{DedupeKey: "catalog-session:1", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"catalog-session"}}`)})
+	event, created, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project-1"}`), Checkout: []byte(`{"id":"checkout-1"}`), ObservedAt: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC), ProjectionFingerprint: "initial"}, CatalogEvent{DedupeKey: "catalog-session:1", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"catalog-session"}}`)})
 	if err != nil || !created || event.Seq != 1 {
 		t.Fatalf("event=%+v created=%v err=%v", event, created, err)
 	}
@@ -78,7 +78,7 @@ func TestRecordCatalogSessionCommitsStateAndEventTogether(t *testing.T) {
 func TestCatalogOmissionRequiresTwoSuccessfulReconciliations(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "omitted", Surface: surface.KindCodex}
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`)}, CatalogEvent{DedupeKey: "omitted:upsert", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ProjectionFingerprint: "initial"}, CatalogEvent{DedupeKey: "omitted:upsert", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 1; attempt <= 2; attempt++ {

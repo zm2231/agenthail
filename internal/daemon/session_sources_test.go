@@ -99,6 +99,50 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 	}
 }
 
+func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
+	manager := newSessionSourceManager(registry)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 3, Operation: "append", TurnID: "turn-1", Kind: "text", Text: "hel"}
+	adapter.events <- surface.StreamEvent{ID: "managed:turn-1:text", ProviderKey: "managed:turn-1:text", Version: 5, Operation: "append", TurnID: "turn-1", Kind: "text", Text: "lo"}
+	for range 2 {
+		select {
+		case <-subscription.Entries:
+		case <-time.After(time.Second):
+			t.Fatal("subscriber did not receive event")
+		}
+	}
+	window, err := registry.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("window=%+v err=%v", window, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &payload); err != nil || payload.ItemID != "managed:turn-1:text" || payload.Body != "hello" || payload.Op != "upsert" {
+		t.Fatalf("payload=%+v err=%v", payload, err)
+	}
+}
+
+func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(registry)
+	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	first := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
+	second := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
+	if first.ItemID == "" || first.ProviderKey == "" || second.ItemID == "" || first.ItemID == second.ItemID {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+}
+
 func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{

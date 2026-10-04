@@ -1042,13 +1042,15 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 			delta := strings.TrimPrefix(turn.Assistant, emitted)
 			if delta != "" {
 				emitted = turn.Assistant
-				onEvent(surface.StreamEvent{Kind: "text", Text: delta})
+				key := "managed:" + turn.ID
+				onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: turn.ID, Kind: "text", Text: delta})
 			}
 			if turn.Done {
 				if turn.Error != "" {
 					return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
 				}
-				onEvent(surface.StreamEvent{Kind: "done"})
+				key := "managed:" + turn.ID
+				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: turn.ID, Kind: "done"})
 				return nil
 			}
 		}

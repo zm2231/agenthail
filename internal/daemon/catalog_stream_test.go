@@ -131,3 +131,46 @@ func TestDiscoveryStreamsFullDashboardSessionRow(t *testing.T) {
 	}
 	t.Fatal("session.upserted event was not recorded")
 }
+
+func TestDiscoveryStreamsProjectionChangesIncludingReturnToPriorValue(t *testing.T) {
+	d, registry, _, from, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
+	initial, err := registry.CatalogEventsAfter(0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.SetAlias("reviewer", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(context.Background())
+	changed, err := registry.CatalogEventsAfter(initial.LatestSeq, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed.Events) != 1 || changed.Events[0].Type != "session.upserted" {
+		t.Fatalf("changed=%+v", changed.Events)
+	}
+	var row struct {
+		Session dashboardSession `json:"session"`
+	}
+	if err := json.Unmarshal(changed.Events[0].Payload, &row); err != nil || row.Session.Alias != "reviewer" {
+		t.Fatalf("row=%+v err=%v", row.Session, err)
+	}
+	if err := registry.RemoveAlias("reviewer"); err != nil {
+		t.Fatal(err)
+	}
+	d.discoverCatalog(context.Background())
+	returned, err := registry.CatalogEventsAfter(changed.LatestSeq, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(returned.Events) != 1 || returned.Events[0].Type != "session.upserted" {
+		t.Fatalf("returned=%+v", returned.Events)
+	}
+	row = struct {
+		Session dashboardSession `json:"session"`
+	}{}
+	if err := json.Unmarshal(returned.Events[0].Payload, &row); err != nil || row.Session.Alias != "" {
+		t.Fatalf("row=%+v err=%v", row.Session, err)
+	}
+}
