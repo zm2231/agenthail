@@ -231,6 +231,38 @@ func TestClaudeInterruptedTurnIsNotReportedBusyOrComplete(t *testing.T) {
 	}
 }
 
+func TestClaudeStreamTreatsUserInterruptMarkerAsTargetedFailure(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":null,"content":[{"type":"text","text":"partial"}]}}
+{"type":"user","uuid":"interrupt","message":{"content":"[Request interrupted by user]"}}`)
+	claude := NewClaude("Default", t.TempDir())
+	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "u1", func(surface.StreamEvent) {}, time.Second)
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("stream err=%v", err)
+	}
+}
+
+func TestClaudeStreamDoesNotDuplicateTurnDurationCompletion(t *testing.T) {
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"turn_duration","content":"done"}`)
+	claude := NewClaude("Default", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := 0
+	err := claude.Stream(ctx, &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "", func(event surface.StreamEvent) {
+		if event.Kind == "done" {
+			done++
+			cancel()
+		}
+	}, time.Second)
+	if err != context.Canceled || done != 1 {
+		t.Fatalf("stream err=%v done=%d", err, done)
+	}
+}
+
 func TestClaudeCompletedTurnClearsPreviouslyBusyStatus(t *testing.T) {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
