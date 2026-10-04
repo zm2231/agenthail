@@ -53,7 +53,10 @@ func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, sourc
 		return nil, nil, ErrAttachmentNotFound
 	}
 	ref, ok, err := readAttachmentRecord(ctx, path, source, offset, index)
-	if err != nil || !ok {
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
 		return nil, nil, ErrAttachmentNotFound
 	}
 	data, err := readAttachmentReference(ctx, ref)
@@ -95,13 +98,28 @@ func readAttachmentRecord(ctx context.Context, path, source string, offset int64
 	if _, err = f.Seek(offset, io.SeekStart); err != nil {
 		return attachmentReference{}, false, err
 	}
+	if offset > 0 {
+		var previous [1]byte
+		if _, err = f.ReadAt(previous[:], offset-1); err != nil || previous[0] != '\n' {
+			return attachmentReference{}, false, nil
+		}
+		if _, err = f.Seek(offset, io.SeekStart); err != nil {
+			return attachmentReference{}, false, err
+		}
+	}
 	r := bufio.NewReaderSize(f, 64*1024)
 	var line []byte
 	for {
-		part, e := r.ReadBytes('\n')
-		line = append(line, part...)
-		if int64(len(line)) > maxAttachmentRecordBytes {
+		if err := ctx.Err(); err != nil {
+			return attachmentReference{}, false, err
+		}
+		part, e := r.ReadSlice('\n')
+		if int64(len(line))+int64(len(part)) > maxAttachmentRecordBytes {
 			return attachmentReference{}, false, ErrAttachmentTooLarge
+		}
+		line = append(line, part...)
+		if e == bufio.ErrBufferFull {
+			continue
 		}
 		if e == nil {
 			break
@@ -168,6 +186,10 @@ func readAttachmentReference(ctx context.Context, ref attachmentReference) ([]by
 		return nil, ErrAttachmentNotFound
 	}
 	defer f.Close()
+	openedInfo, err := f.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return nil, ErrAttachmentNotFound
+	}
 	data, err := io.ReadAll(io.LimitReader(f, maxAttachmentBytes+1))
 	if err != nil {
 		return nil, ErrAttachmentNotFound
@@ -190,12 +212,8 @@ func validateAttachment(data []byte) (string, int, int, error) {
 	return media, cfg.Width, cfg.Height, nil
 }
 func hashBytes(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }
-func attachmentID(offset int64, index int, ref attachmentReference) (string, error) {
-	data, err := readAttachmentReference(context.Background(), ref)
-	if err != nil {
-		return "", err
-	}
-	return "attachment:" + strconv.FormatInt(offset, 10) + ":" + strconv.Itoa(index) + ":" + hashBytes(data), nil
+func attachmentID(offset int64, index int, data []byte) string {
+	return "attachment:" + strconv.FormatInt(offset, 10) + ":" + strconv.Itoa(index) + ":" + hashBytes(data)
 }
 
 func attachmentReferenceFromValue(v any) (attachmentReference, bool) {
@@ -284,7 +302,7 @@ func attachmentReferencesForSource(record map[string]any, source string) []attac
 	}
 	return codexAttachmentReferences(record)
 }
-func decorateTimelineAttachments(items []surface.TimelineItem, record map[string]any, source string, offset int64) {
+func decorateTimelineAttachments(ctx context.Context, items []surface.TimelineItem, record map[string]any, source string, offset int64) error {
 	refs := attachmentReferencesForSource(record, source)
 	refIndex := 0
 	for itemIndex := range items {
@@ -296,21 +314,21 @@ func decorateTimelineAttachments(items []surface.TimelineItem, record map[string
 		}
 		ref := refs[refIndex]
 		refIndex++
-		id, err := attachmentID(offset, itemIndex, ref)
+		data, err := readAttachmentReference(ctx, ref)
 		if err != nil {
-			continue
-		}
-		data, err := readAttachmentReference(context.Background(), ref)
-		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			continue
 		}
 		media, width, height, err := validateAttachment(data)
 		if err != nil {
 			continue
 		}
-		items[itemIndex].Attachment = &surface.Attachment{ID: id, MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}
+		items[itemIndex].Attachment = &surface.Attachment{ID: attachmentID(offset, itemIndex, data), MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}
 		items[itemIndex].Text = "Image attachment"
 	}
+	return nil
 }
 func AttachmentHTTPStatus(err error) (int, string, string) {
 	if errors.Is(err, ErrAttachmentTooLarge) {

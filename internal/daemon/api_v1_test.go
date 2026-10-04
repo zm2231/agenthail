@@ -359,6 +359,7 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 		{http.MethodGet, "/api/v1/snapshot"},
 		{http.MethodGet, "/api/v1/events"},
 		{http.MethodGet, "/api/v1/session?id=missing"},
+		{http.MethodGet, "/api/v1/session-attachment?sessionId=missing&id=missing"},
 		{http.MethodGet, "/api/v1/models?surface=missing"},
 		{http.MethodGet, "/api/v1/history"},
 		{http.MethodPost, "/api/v1/actions"},
