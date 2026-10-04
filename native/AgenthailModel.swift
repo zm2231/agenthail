@@ -326,6 +326,14 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func openNotifiedSession(_ id: String) {
+        if knownSessions.contains(where: { $0.id == id }) {
+            selectSession(id)
+        } else {
+            Task { await openCreatedSession(id) }
+        }
+    }
+
     func openSearchResult(_ session: SessionState) {
         pin(session)
         selectSession(session.id)

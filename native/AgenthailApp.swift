@@ -100,6 +100,10 @@ private enum NativeCommand {
         content.body = message
         content.sound = .default
         content.categoryIdentifier = notificationCategory
+        if let sessionID = values["session"], !sessionID.isEmpty {
+            content.userInfo = ["sessionId": sessionID]
+            content.threadIdentifier = sessionID
+        }
         let request = UNNotificationRequest(identifier: values["identifier"] ?? UUID().uuidString, content: content, trigger: nil)
         let semaphore = DispatchSemaphore(value: 0)
         var sendError: Error?
@@ -252,19 +256,56 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction {
-            await MainActor.run {
-                let application = NSApplication.shared
-                application.activate(ignoringOtherApps: true)
-                if let window = application.windows.first(where: { $0.canBecomeMain }) {
-                    window.makeKeyAndOrderFront(nil)
-                    return
-                }
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = true
-                NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction else { return }
+        let sessionID = response.notification.request.content.userInfo["sessionId"] as? String
+        await MainActor.run { NotificationRoute.shared.open(sessionID: sessionID) }
+    }
+}
+
+@MainActor
+final class NotificationRoute: ObservableObject {
+    struct Request: Equatable {
+        let id = UUID()
+        let sessionID: String?
+    }
+
+    static let shared = NotificationRoute()
+    @Published private(set) var pending: Request?
+
+    func open(sessionID: String?) {
+        pending = Request(sessionID: sessionID)
+    }
+
+    func take() -> Request? {
+        defer { pending = nil }
+        return pending
+    }
+}
+
+private struct MenuBarLabel: View {
+    @ObservedObject var model: AgenthailModel
+    @ObservedObject private var route = NotificationRoute.shared
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Group {
+            if model.isConnected, let image = MenuBarArtwork.image {
+                Image(nsImage: image)
+                    .accessibilityLabel("Agenthail")
+            } else {
+                Image(systemName: "exclamationmark.triangle")
+                    .accessibilityLabel("Agenthail unavailable")
             }
         }
+        .onAppear(perform: handleRoute)
+        .onChange(of: route.pending) { handleRoute() }
+    }
+
+    private func handleRoute() {
+        guard let request = route.take() else { return }
+        if let sessionID = request.sessionID { model.openNotifiedSession(sessionID) }
+        NSApplication.shared.activate()
+        openWindow(id: "main")
     }
 }
 
@@ -428,13 +469,7 @@ private struct AgenthailMenuBarApp: App {
         MenuBarExtra {
             AgenthailMenuContent(model: model)
         } label: {
-            if model.isConnected, let image = MenuBarArtwork.image {
-                Image(nsImage: image)
-                    .accessibilityLabel("Agenthail")
-            } else {
-                Image(systemName: "exclamationmark.triangle")
-                    .accessibilityLabel("Agenthail unavailable")
-            }
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.menu)
     }
