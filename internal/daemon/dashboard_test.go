@@ -826,6 +826,20 @@ func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
 	}
 }
 
+func TestDashboardLogicalActionIdempotencyBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	script := filepath.Join("..", "..", "scripts", "test-dashboard-idempotency.mjs")
+	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("dashboard idempotency behavior failed: %v\n%s", err, output)
+	}
+}
+
 func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
@@ -945,6 +959,7 @@ func TestDashboardUsesNeutralDeliveryDetailsAndLogicalIdempotency(t *testing.T) 
 		`logicalAction("session-create", createAction, values)`,
 		`headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey }`,
 		`${status} to ${target}.`,
+		`evidence === "submitted" ? "Submitted" : "Sent"`,
 		`response.status === "submitted" ? "Submitted" : "Sent"`,
 		`clearLogicalRequest("session-create")`,
 	} {

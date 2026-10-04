@@ -1154,13 +1154,14 @@ function renderContextUsage(context) {
 function isNetworkFailure(error) {
   return error?.networkFailure === true || error?.name === "TypeError";
 }
-function logicalRequestKey(scope, actionName, payload) {
-  const fingerprint = JSON.stringify({ action: actionName, sessionId: app.selected?.id || "", payload });
+function logicalRequest(scope, actionName, payload) {
+  const sessionId = app.selected?.id || "";
+  const serializedPayload = JSON.stringify({ action: actionName, sessionId, ...payload });
   const current = app.pendingIdempotency.get(scope);
-  if (current?.fingerprint === fingerprint) return current.key;
-  const next = { fingerprint, key: crypto.randomUUID() };
+  if (current?.fingerprint === serializedPayload) return current;
+  const next = { fingerprint: serializedPayload, key: crypto.randomUUID(), sessionId };
   app.pendingIdempotency.set(scope, next);
-  return next.key;
+  return next;
 }
 function clearLogicalRequest(scope) {
   app.pendingIdempotency.delete(scope);
@@ -1170,9 +1171,9 @@ function sessionTarget(session) {
   return `${session?.surface || "session"}:${session?.id || "unknown"}`;
 }
 async function logicalAction(scope, actionName, payload) {
-  const key = logicalRequestKey(scope, actionName, payload);
+  const request = logicalRequest(scope, actionName, payload);
   try {
-    const result = await action(actionName, payload, key);
+    const result = await action(actionName, payload, request.key, request.sessionId);
     clearLogicalRequest(scope);
     return result;
   } catch (error) {
@@ -1180,7 +1181,7 @@ async function logicalAction(scope, actionName, payload) {
     throw error;
   }
 }
-async function action(action, extra = {}, idempotencyKey = crypto.randomUUID()) {
+async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), sessionID = app.selected?.id) {
   const networkAction =
     action.startsWith("channel-") ||
     action.startsWith("relay-") ||
@@ -1196,14 +1197,29 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID()) 
     response = await fetch("/api/action", {
       method: "POST",
       headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ action, sessionId: app.selected?.id, ...extra }),
+      body: JSON.stringify({ action, sessionId: sessionID, ...extra }),
     });
   } catch (error) {
     error.networkFailure = true;
     throw error;
   }
-  if (!response.ok) throw Error(await response.text());
-  return response.json();
+  if (!response.ok) {
+    let detail;
+    try {
+      detail = await response.text();
+    } catch (error) {
+      const typed = Error(`HTTP ${response.status || 500}`);
+      typed.httpFailure = true;
+      throw typed;
+    }
+    throw Error(detail);
+  }
+  try {
+    return await response.json();
+  } catch (error) {
+    error.networkFailure = true;
+    throw error;
+  }
 }
 async function voiceRequest(action, extra = {}) {
   const response = await fetch("/api/voice", {
@@ -1367,7 +1383,7 @@ async function send(requestedAction = "send") {
     resizeComposer();
     renderSlashMenu();
     const evidence = result?.result?.evidence;
-    const status = evidence === "queued" ? "Queued" : evidence === "transport_accepted" || evidence === "submitted" ? "Submitted" : "Sent";
+    const status = evidence === "queued" ? "Queued" : evidence === "submitted" ? "Submitted" : "Sent";
     const target = sessionTarget(app.selected);
     toast(
       composerAction === "steer"
