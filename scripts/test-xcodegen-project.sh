@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tmp="$(mktemp -d)"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-xcodegen.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
 cp -R "$repo/native" "$tmp/native"
