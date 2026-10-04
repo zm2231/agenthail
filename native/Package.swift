@@ -29,7 +29,8 @@ let package = Package(
                 "EventRetryBackoff.swift",
                 "OperationsRefreshPolicy.swift",
                 "AgenthailModel.swift",
-                "AgenthailViews.swift"
+                "AgenthailViews.swift",
+                "macOS"
             ],
         )
     ]

@@ -77,6 +77,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     let readOnly: Bool?
     let readOnlyReason: String?
     var cwd: String? = nil
+    var hostProject: HostProjectIdentity? = nil
+    var checkout: CheckoutIdentity? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -85,6 +87,22 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isReadOnly: Bool { readOnly == true }
+}
+
+struct HostProjectIdentity: Codable, Hashable {
+    let id: String?
+    let displayName: String?
+    let commonDir: String?
+    let path: String?
+}
+
+struct CheckoutIdentity: Codable, Hashable {
+    let id: String?
+    let path: String?
+    let branch: String?
+    let detachedHead: String?
+    let isMain: Bool?
+    let dirty: Bool?
 }
 
 struct QueueState: Decodable, Identifiable, Equatable {
@@ -360,20 +378,6 @@ struct AgenthailEvent: Decodable {
     let type: String
     let timestamp: String
     let entityId: String?
-}
-
-enum AppSection: String, CaseIterable, Identifiable {
-    case overview = "Overview"
-    case conversations = "Conversations"
-    case operations = "Operations"
-    var id: String { rawValue }
-    var symbol: String {
-        switch self {
-        case .overview: return "square.grid.2x2"
-        case .conversations: return "bubble.left.and.bubble.right"
-        case .operations: return "slider.horizontal.3"
-        }
-    }
 }
 
 struct SessionTimeline: Decodable {

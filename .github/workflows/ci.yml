@@ -84,6 +84,10 @@ jobs:
           "$RUNNER_TEMP/responsive-pair-layout-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/tests/dashboard_snapshot_test.swift -o "$RUNNER_TEMP/dashboard-snapshot-test"
           "$RUNNER_TEMP/dashboard-snapshot-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/tests/session_tree_test.swift -o "$RUNNER_TEMP/session-tree-test"
+          "$RUNNER_TEMP/session-tree-test"
+      - name: Mac app build
+        run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n

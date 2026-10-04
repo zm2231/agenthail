@@ -1,0 +1,94 @@
+import Foundation
+
+enum SessionFilter: String, CaseIterable, Identifiable {
+    case running = "Running"
+    case recent = "Recent"
+    case all = "All"
+
+    var id: String { rawValue }
+}
+
+struct SessionTree: Equatable {
+    struct Project: Identifiable, Equatable {
+        let id: String
+        let name: String
+        var checkouts: [Checkout]
+    }
+
+    struct Checkout: Identifiable, Equatable {
+        let id: String
+        let label: String
+        let isMain: Bool
+        let dirty: Bool
+        var sessions: [SessionState]
+    }
+
+    static let recentWindow: TimeInterval = 24 * 60 * 60
+
+    let projects: [Project]
+    let needsYou: [SessionState]
+    let counts: [SessionFilter: Int]
+
+    static func build(_ sessions: [SessionState], filter: SessionFilter, attentionSessionIDs: Set<String>, now: Date) -> SessionTree {
+        var counts: [SessionFilter: Int] = [:]
+        for candidate in SessionFilter.allCases {
+            counts[candidate] = sessions.filter { includes($0, in: candidate, now: now) }.count
+        }
+        let visible = sessions
+            .filter { includes($0, in: filter, now: now) }
+            .sorted { activity($0) > activity($1) }
+        var projects: [Project] = []
+        for session in visible {
+            let projectID = session.hostProject?.id ?? session.cwd ?? "unknown"
+            if !projects.contains(where: { $0.id == projectID }) {
+                projects.append(Project(id: projectID, name: projectName(session), checkouts: []))
+            }
+            let projectIndex = projects.firstIndex { $0.id == projectID }!
+            let checkoutID = session.checkout?.id ?? session.checkout?.path ?? session.cwd ?? projectID
+            if !projects[projectIndex].checkouts.contains(where: { $0.id == checkoutID }) {
+                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, sessions: []))
+            }
+            let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
+            projects[projectIndex].checkouts[checkoutIndex].sessions.append(session)
+        }
+        let needsYou = sessions
+            .filter { attentionSessionIDs.contains($0.id) }
+            .sorted { activity($0) > activity($1) }
+        return SessionTree(projects: projects, needsYou: needsYou, counts: counts)
+    }
+
+    static func includes(_ session: SessionState, in filter: SessionFilter, now: Date) -> Bool {
+        switch filter {
+        case .running:
+            return session.isWorking
+        case .recent:
+            return session.isWorking || session.current || now.timeIntervalSince(activity(session)) <= recentWindow
+        case .all:
+            return true
+        }
+    }
+
+    static func activity(_ session: SessionState) -> Date {
+        guard let raw = session.lastActive else { return .distantPast }
+        return parseTimestamp(raw) ?? .distantPast
+    }
+
+    static func parseTimestamp(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+        return ISO8601DateFormatter().date(from: raw)
+    }
+
+    private static func projectName(_ session: SessionState) -> String {
+        if let name = session.hostProject?.displayName, !name.isEmpty { return name }
+        if let cwd = session.cwd, !cwd.isEmpty { return URL(fileURLWithPath: cwd).lastPathComponent }
+        return "Other"
+    }
+
+    private static func checkoutLabel(_ session: SessionState) -> String {
+        if let branch = session.checkout?.branch, !branch.isEmpty { return branch }
+        if let head = session.checkout?.detachedHead, !head.isEmpty { return "detached at \(head.prefix(7))" }
+        return session.checkout?.path ?? session.cwd ?? "unknown checkout"
+    }
+}

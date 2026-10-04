@@ -3,7 +3,6 @@ import Foundation
 
 @MainActor
 final class AgenthailModel: ObservableObject {
-    @Published var section: AppSection = .overview
     @Published var snapshot: DashboardSnapshot?
     @Published var selectedSessionID: String?
     @Published var detail: SessionDetail?
@@ -20,7 +19,10 @@ final class AgenthailModel: ObservableObject {
     @Published var operationError: String?
     @Published var loading = false
     @Published var composer = ""
-    @Published var conversationListVisible = true
+    @Published var operationsVisible = false
+    @Published var sessionFilter: SessionFilter = .recent
+    @Published var inspectorVisible = true
+    @Published private(set) var localSends: [String: [LocalSend]] = [:]
 
     private var api: AgenthailAPI?
     private var connectionTask: Task<Void, Never>?
@@ -28,11 +30,19 @@ final class AgenthailModel: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
+    private var catalogStreamTask: Task<Void, Never>?
+    private var sessionStreamTask: Task<Void, Never>?
+    private var catalogCursor: UInt64 = 0
+    private var sessionCursor: UInt64 = 0
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var workingSessions: [SessionState] { snapshot?.sessions.filter(\.isWorking) ?? [] }
     var selectedSession: SessionState? { snapshot?.sessions.first { $0.id == selectedSessionID } }
+    var attentionSessionIDs: Set<String> { Set(snapshot?.attention.map(\.sessionId) ?? []) }
+    var sessionTree: SessionTree {
+        SessionTree.build(snapshot?.sessions ?? [], filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
+    }
 
     init() {
         connect()
@@ -43,6 +53,8 @@ final class AgenthailModel: ObservableObject {
         eventTask?.cancel()
         refreshTask?.cancel()
         statusRefreshTask?.cancel()
+        catalogStreamTask?.cancel()
+        sessionStreamTask?.cancel()
     }
 
     func connect() {
@@ -78,7 +90,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     @discardableResult
-    func refresh(fresh: Bool = false, reloadDetail: Bool = true) async -> Bool {
+    func refresh(fresh: Bool = false) async -> Bool {
         guard let api else { return false }
         setLoading(snapshot == nil)
         do {
@@ -86,13 +98,11 @@ final class AgenthailModel: ObservableObject {
             if snapshot?.hasSamePresentation(as: loaded) != true {
                 snapshot = loaded
             }
+            catalogCursor = max(catalogCursor, loaded.catalogSeq ?? 0)
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             clearConnectionError()
-            if selectedSessionID == nil {
-                selectedSessionID = currentSessions.first?.id
-            }
-            if reloadDetail, section == .conversations, let selectedSessionID {
-                await loadSession(selectedSessionID)
+            if selectedSessionID == nil, let first = currentSessions.first?.id ?? snapshot?.sessions.first?.id {
+                selectSession(first)
             }
         } catch {
             connectionError = error.localizedDescription
@@ -104,31 +114,21 @@ final class AgenthailModel: ObservableObject {
     }
 
     func selectSession(_ id: String) {
+        guard id != selectedSessionID || detail == nil else { return }
         selectedSessionID = id
         detail = nil
-        section = .conversations
-        conversationListVisible = false
+        sessionStreamTask?.cancel()
         Task { await loadSession(id) }
-    }
-
-    func showSection(_ next: AppSection) {
-        section = next
-        if next == .conversations { conversationListVisible = true }
-        guard next == .conversations, let selectedSessionID else { return }
-        Task { await loadSession(selectedSessionID) }
-    }
-
-    func showConversationList() {
-        conversationListVisible = true
     }
 
     func loadSession(_ id: String) async {
         guard let api else { return }
         do {
-            let loaded = try await api.sessionDetail(id: id)
+            let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
             detail = loaded
             operationError = nil
+            startSessionStream(id)
         } catch {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
             operationError = error.localizedDescription
@@ -187,13 +187,6 @@ final class AgenthailModel: ObservableObject {
             operationError = nil
         } catch {
             operationError = error.localizedDescription
-        }
-    }
-
-    func refreshCurrentSection() {
-        Task {
-            _ = await refresh(fresh: true)
-            if section == .operations { await loadOperations() }
         }
     }
 
@@ -280,6 +273,126 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
+    func submit(_ message: String, steer: Bool) {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let api, let sessionID = selectedSessionID else { return }
+        let pending = LocalSend(text: text, status: nil)
+        localSends[sessionID, default: []].append(pending)
+        Task {
+            do {
+                let receipt = try await api.sendInstruction(action: steer ? "steer" : "send", sessionID: sessionID, message: text)
+                updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
+                operationError = nil
+            } catch {
+                localSends[sessionID]?.removeAll { $0.id == pending.id }
+                if composer.isEmpty { composer = text }
+                operationError = error.localizedDescription
+            }
+        }
+    }
+
+    func interruptSelected() {
+        guard let sessionID = selectedSessionID else { return }
+        perform(action: "interrupt", sessionID: sessionID)
+    }
+
+    private func updateLocalSend(_ id: UUID, in sessionID: String, status: String) {
+        guard let index = localSends[sessionID]?.firstIndex(where: { $0.id == id }) else { return }
+        localSends[sessionID]?[index].status = status
+    }
+
+    private func startCatalogStream() {
+        catalogStreamTask?.cancel()
+        catalogStreamTask = Task {
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled {
+                guard let api else { return }
+                do {
+                    try await api.streamCatalog(after: catalogCursor, onConnected: {}, onEvent: { [weak self] event in
+                        backoff.reset()
+                        await self?.applyCatalogEvent(event)
+                    })
+                } catch {
+                    if Task.isCancelled { return }
+                    if case AgenthailAPIError.streamGap = error {
+                        catalogCursor = 0
+                        _ = await refresh(fresh: true)
+                        continue
+                    }
+                    try? await Task.sleep(for: .seconds(backoff.nextDelay()))
+                }
+            }
+        }
+    }
+
+    func applyCatalogEvent(_ event: CatalogStreamEvent) {
+        guard event.stream == "catalog", event.seq > catalogCursor, var current = snapshot else { return }
+        catalogCursor = event.seq
+        switch event.type {
+        case "session.upserted":
+            guard let changed = event.data.session else { return }
+            if let index = current.sessions.firstIndex(where: { $0.id == changed.id }) {
+                current.sessions[index] = changed
+            } else {
+                current.sessions.append(changed)
+            }
+        case "session.removed":
+            guard let id = event.data.sessionId else { return }
+            current.sessions.removeAll { $0.id == id }
+        case "surface.health":
+            guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
+            let previous = current.surfaces[index]
+            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities)
+        default:
+            return
+        }
+        current.totalSessions = current.sessions.count
+        snapshot = current
+    }
+
+    private func startSessionStream(_ id: String) {
+        sessionStreamTask?.cancel()
+        sessionCursor = 0
+        sessionStreamTask = Task {
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled, selectedSessionID == id {
+                guard let api else { return }
+                do {
+                    try await api.streamSession(id: id, after: sessionCursor, onConnected: {}, onEvent: { [weak self] event in
+                        backoff.reset()
+                        await self?.applySessionEvent(event)
+                    })
+                } catch {
+                    if Task.isCancelled || selectedSessionID != id { return }
+                    if case AgenthailAPIError.streamGap = error {
+                        sessionCursor = 0
+                        await loadSession(id)
+                        return
+                    }
+                    try? await Task.sleep(for: .seconds(backoff.nextDelay()))
+                }
+            }
+        }
+    }
+
+    func applySessionEvent(_ event: SessionStreamEvent) {
+        guard event.stream == "session", event.sessionId == selectedSessionID, var current = detail, var timeline = current.timeline else { return }
+        sessionCursor = max(sessionCursor, event.seq)
+        let data = event.data
+        guard !data.itemId.isEmpty, data.op != "reset" else { return }
+        if data.op == "remove" {
+            timeline.items.removeAll { $0.id == data.itemId }
+        } else if let index = timeline.items.firstIndex(where: { $0.id == data.itemId }) {
+            let previous = timeline.items[index]
+            let text = data.body ?? previous.text
+            timeline.items[index] = TimelineItem(id: previous.id, kind: previous.kind, role: previous.role, title: previous.title, text: text, timestamp: data.ts, callId: previous.callId, status: previous.status, truncated: data.truncated, bodyRef: data.bodyRef)
+        } else {
+            timeline.items.append(TimelineItem(id: data.itemId, kind: data.kind, role: nil, title: data.kind, text: data.body ?? "", timestamp: data.ts, callId: data.turnId, status: nil, truncated: data.truncated, bodyRef: data.bodyRef))
+        }
+        current.timeline = timeline
+        detail = current
+    }
+
     private func startEvents() {
         eventTask?.cancel()
         eventTask = Task {
@@ -325,7 +438,7 @@ final class AgenthailModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: StatusRefreshPolicy.interval(reconnecting: reconnecting))
                 if Task.isCancelled { return }
-                _ = await refresh(reloadDetail: false)
+                _ = await refresh()
             }
         }
     }
@@ -340,13 +453,10 @@ final class AgenthailModel: ObservableObject {
         refreshTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
             if Task.isCancelled { return }
-            _ = await refresh(reloadDetail: false)
-            if section == .conversations, let selectedSessionID, event.entityId == selectedSessionID {
-                await loadSession(selectedSessionID)
-            }
+            _ = await refresh()
             if OperationsRefreshPolicy.reloadOperations(for: event.type) {
                 await loadOperations()
-            } else if section == .operations && OperationsRefreshPolicy.reloadAudit(for: event.type) {
+            } else if operationsVisible && OperationsRefreshPolicy.reloadAudit(for: event.type) {
                 await loadAudit(reset: true)
             }
         }
@@ -355,6 +465,7 @@ final class AgenthailModel: ObservableObject {
     private func eventStreamConnected() {
         reconnecting = false
         clearConnectionError()
+        startCatalogStream()
     }
 
     private func setLoading(_ value: Bool) {
@@ -363,5 +474,19 @@ final class AgenthailModel: ObservableObject {
 
     private func clearConnectionError() {
         if connectionError != nil { connectionError = nil }
+    }
+}
+
+struct LocalSend: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+    var status: String?
+
+    static func label(for status: String?) -> String {
+        switch status {
+        case "queued": return "Queued"
+        case "submitted": return "Submitted"
+        default: return "Sent"
+        }
     }
 }

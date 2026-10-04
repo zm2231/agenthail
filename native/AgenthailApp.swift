@@ -379,11 +379,15 @@ private struct AgenthailMenuBarApp: App {
     @StateObject private var model = AgenthailModel()
 
     var body: some Scene {
-        WindowGroup("Agenthail", id: "main") {
-            AgenthailRootView(model: model)
-                .frame(minWidth: 720, minHeight: 520)
+        Window("Agenthail", id: "main") {
+            DesktopWindow(model: model)
+                .frame(minWidth: 900, minHeight: 560)
         }
-        .defaultSize(width: 1180, height: 760)
+        .defaultSize(width: 1440, height: 900)
+
+        Settings {
+            DesktopSettings(model: model)
+        }
 
         MenuBarExtra {
             AgenthailMenuContent(model: model)
