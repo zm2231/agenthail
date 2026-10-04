@@ -42,6 +42,20 @@ assert.ok(imageHTML.includes('/api/session-attachment?sessionId=session%261&id=i
 assert.ok(imageHTML.includes('loading="lazy"'));
 problemContext.imageItem.attachment.mediaType = 'image/svg+xml';
 assert.ok(!vm.runInContext('renderImageAttachment(imageItem, imageSession)', problemContext).includes('<img'), 'active SVG is not embedded');
+problemContext.handoffMessage = text => ({text, label: 'You'});
+problemContext.labels = {claude: 'Claude'};
+problemContext.renderMessage = (text, role) => `<p data-role="${role}">${text}</p>`;
+problemContext.imageSession.surface = 'claude';
+problemContext.imageItem.attachment.mediaType = 'image/png';
+problemContext.imageItems = [
+  {id: 'u1', kind: 'message', role: 'user', text: 'Before image'},
+  problemContext.imageItem,
+  {id: 'a1', kind: 'message', role: 'assistant', text: 'After image'},
+];
+const timelineHTML = vm.runInContext('renderImageTimeline(imageItems, imageSession)', problemContext);
+assert.ok(timelineHTML.indexOf('Before image') < timelineHTML.indexOf('<img'));
+assert.ok(timelineHTML.indexOf('<img') < timelineHTML.indexOf('After image'));
+assert.ok(timelineHTML.includes('data-role="user"') && timelineHTML.includes('data-role="agent"'));
 const stopStart = source.indexOf('function stopLiveStream(');
 const stopEnd = source.indexOf('function renderLiveTurn(', stopStart);
 const startStart = source.indexOf('function startLiveStream()');
