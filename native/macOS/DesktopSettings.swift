@@ -39,6 +39,7 @@ private struct SettingsError: View {
 struct GeneralSettings: View {
     @ObservedObject var model: AgenthailModel
     @AppStorage("followUpDefault") private var followUpDefault = FollowUpAction.queue.rawValue
+    @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
 
     var body: some View {
         Form {
@@ -69,6 +70,12 @@ struct GeneralSettings: View {
                 }
                 .pickerStyle(.radioGroup)
                 Text("⌥⌘↩ always does the other one. Agents that can't be steered mid-turn send queued messages after the turn.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
+            Section("Spotlight") {
+                Toggle("Show sessions in Spotlight", isOn: $spotlightSessions)
+                Text("Spotlight on this Mac can find sessions by name and folder. Choosing one opens it here.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }

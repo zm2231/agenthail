@@ -14,6 +14,7 @@ The Mac app keeps your connected conversations in one window.
 - A session that disappears from the host stays readable with a notice until you close it.
 - When an agent finishes, its notification opens that session. **Reply** on the notification sends your answer to the session; if it can't be sent, the app opens the session with your reply in its draft.
 - **Send to Agenthail** in any app's Services menu adds the selected text to the open session's draft, or opens the new session form with it filled in. Nothing is sent or started until you do it.
+- Spotlight finds sessions by name and folder; choosing one opens it in the app. Settings can turn this off.
 - Links open the app from anywhere: `agenthail://session/<id or @handle>` opens a session, `agenthail://new` starts one, and `agenthail://open` brings the app forward.
 
 The menu bar item and the Dock icon's menu list sessions that need you, sessions that are working, and the most recently active idle sessions. The menu bar item also opens the app, a new session, or Settings.

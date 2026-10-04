@@ -106,6 +106,8 @@ jobs:
           "$RUNNER_TEMP/session-launch-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/tests/goal_editor_state_test.swift -o "$RUNNER_TEMP/goal-editor-state-test"
           "$RUNNER_TEMP/goal-editor-state-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SpotlightIndex.swift native/tests/spotlight_index_test.swift -o "$RUNNER_TEMP/spotlight-index-test"
+          "$RUNNER_TEMP/spotlight-index-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

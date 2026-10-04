@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreSpotlight
 import Darwin
 import ServiceManagement
 import SwiftUI
@@ -222,6 +223,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
     weak var model: AgenthailModel?
 
     @MainActor
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType,
+              let sessionID = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return false }
+        NotificationRoute.shared.open(sessionID: sessionID)
+        return true
+    }
+
+    @MainActor
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         guard let model else { return nil }
         let menu = NSMenu()
@@ -369,6 +378,7 @@ final class NotificationRoute: ObservableObject {
 private struct MenuBarLabel: View {
     @ObservedObject var model: AgenthailModel
     @ObservedObject private var route = NotificationRoute.shared
+    @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -383,6 +393,16 @@ private struct MenuBarLabel: View {
         }
         .onAppear(perform: handleRoute)
         .onChange(of: route.latest) { handleRoute() }
+        .onChange(of: model.snapshot?.sessions, initial: true) { syncSpotlight() }
+        .onChange(of: spotlightSessions) { syncSpotlight() }
+    }
+
+    private func syncSpotlight() {
+        guard spotlightSessions else {
+            SpotlightIndex.shared.clear()
+            return
+        }
+        if let sessions = model.snapshot?.sessions { SpotlightIndex.shared.update(sessions) }
     }
 
     private func handleRoute() {
