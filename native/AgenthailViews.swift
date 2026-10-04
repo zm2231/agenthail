@@ -238,6 +238,32 @@ struct ConversationHeader: View {
 						.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
 				}
 			}
+			if let goal = model.detail?.goal {
+				VStack(alignment: .leading, spacing: 7) {
+					HStack(spacing: 8) {
+						Label("Goal", systemImage: goal.needsAttention ? "exclamationmark.triangle.fill" : "target")
+						.font(.caption.weight(.semibold))
+						.foregroundStyle(goal.needsAttention ? agenthailOrange : .secondary)
+						Text(goal.displayStatus).font(.caption.weight(.semibold)).foregroundStyle(goal.needsAttention ? agenthailOrange : .secondary)
+					}
+					if !goal.objective.isEmpty { Text(goal.objective).font(.callout).lineLimit(2) }
+					HStack(spacing: 12) {
+						if let elapsed = goal.timeUsedSeconds { Text("\(elapsed)s elapsed") }
+						if let tokens = goal.tokensUsed { Text("\(tokens.formatted()) tokens") }
+						if let budget = goal.tokenBudget { Text("\(budget.formatted()) budget") }
+					}
+					.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+					if !session.isReadOnly && session.capabilities.goal {
+						HStack(spacing: 10) {
+							if goal.status == "active" { Button("Pause") { model.perform(action: "goal-pause", sessionID: session.id) } }
+							if goal.status == "paused" { Button("Resume") { model.perform(action: "goal-resume", sessionID: session.id) } }
+							if !goal.objective.isEmpty { Button("Clear", role: .destructive) { model.perform(action: "goal-clear", sessionID: session.id) } }
+						}
+						.controlSize(.small)
+					}
+				}
+				.padding(.top, 2)
+			}
         }
         .padding(24)
     }
