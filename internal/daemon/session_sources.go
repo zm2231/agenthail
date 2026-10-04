@@ -373,6 +373,7 @@ func (s *sessionSource) seedJournal() {
 	if seedStatus == registry.SessionJournalSeeded && localTranscript {
 		if err := s.catchUpLocalTranscript(ctx); err != nil {
 			s.seedErr = err
+			_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
 			s.appendSourceError(err)
 		}
 		return
@@ -414,6 +415,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context) error {
 	}
 	pages := make([][]surface.TimelineItem, 0, 2)
 	before := int64(0)
+	transcriptIdentity := ""
 	for {
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
 		if err != nil || read == nil {
@@ -424,6 +426,11 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context) error {
 		}
 		if !read.TranscriptOffsetSet {
 			return fmt.Errorf("Codex local transcript is unavailable")
+		}
+		if transcriptIdentity == "" {
+			transcriptIdentity = read.TranscriptIdentity
+		} else if read.TranscriptIdentity != transcriptIdentity {
+			return fmt.Errorf("Codex local transcript was replaced during catch-up: %w", surface.ErrTranscriptUnavailable)
 		}
 		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
 			s.session.TranscriptOffset = read.TranscriptOffset
