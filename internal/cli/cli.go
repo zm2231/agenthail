@@ -1165,6 +1165,9 @@ func (a *App) cmdSend(args []string) error {
 		if err != nil {
 			return err
 		}
+		if daemonStream.Cancel != nil {
+			defer daemonStream.Cancel()
+		}
 	} else if wantReply {
 		observation, observeErr := surf.Observe(ctx, sess)
 		if observeErr != nil {
@@ -1176,17 +1179,11 @@ func (a *App) cmdSend(args []string) error {
 	}
 	turnOptions, err := parseTurnOptions(args)
 	if err != nil {
-		if daemonStream.Cancel != nil {
-			daemonStream.Cancel()
-		}
 		return err
 	}
 	options := surface.SendOptions{Model: flagVal(args, "--model"), TurnOptions: turnOptions}
 	options.SourceSessionID, err = a.sourceSessionID(ctx, fromLabel)
 	if err != nil {
-		if daemonStream.Cancel != nil {
-			daemonStream.Cancel()
-		}
 		return err
 	}
 	dispatcher := delivery.Dispatcher{Registry: a.Registry}
@@ -1209,9 +1206,6 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	if receipt.Evidence == surface.EvidenceQueued {
-		if daemonStream.Cancel != nil {
-			daemonStream.Cancel()
-		}
 		if _, ok := daemon.IsRunning(); !ok {
 			fmt.Fprintf(os.Stderr, "warning: daemon is not running; queued message will not be delivered until you start it (agenthail daemon start)\n")
 		}
@@ -1223,9 +1217,6 @@ func (a *App) cmdSend(args []string) error {
 		return nil
 	}
 	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
-		if daemonStream.Cancel != nil {
-			daemonStream.Cancel()
-		}
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(receipt)
 		}
@@ -1254,7 +1245,6 @@ func (a *App) cmdSend(args []string) error {
 
 	if wantStream {
 		if useDaemonStream {
-			defer daemonStream.Cancel()
 			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
 		}
 		return surf.Stream(ctx, sess, receipt.TurnID, func(ev surface.StreamEvent) {
@@ -1271,7 +1261,6 @@ func (a *App) cmdSend(args []string) error {
 	if wantReply {
 		var reply *surface.ReplyResult
 		if useDaemonStream {
-			defer daemonStream.Cancel()
 			reply, err = consumeSessionReply(ctx, daemonStream, receipt.TurnID)
 		} else {
 			reply, err = waitForReply(ctx, surf, sess, baseline, receipt.TurnID, timeout)
@@ -1566,17 +1555,18 @@ func (a *App) cmdStream(args []string) error {
 	if len(positional) != 1 {
 		return fmt.Errorf("usage: agenthail stream <target>")
 	}
-	ctx := context.Background()
+	timeout, err := commandTimeout(args, 10*time.Minute)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
 	if !surf.Capabilities().Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
-	}
-	timeout, err := commandTimeout(args, 10*time.Minute)
-	if err != nil {
-		return err
 	}
 	if a.daemonIsRunning() {
 		page, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: 1})

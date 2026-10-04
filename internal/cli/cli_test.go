@@ -30,6 +30,7 @@ type cliSurface struct {
 	observations  []*surface.TurnObservation
 	observeErr    error
 	sendResult    *surface.SendResult
+	sendErr       error
 	reply         *surface.ReplyResult
 	replyWait     bool
 	sendWait      bool
@@ -227,6 +228,9 @@ func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnOb
 }
 func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
 	if f.sendWait {
 		<-ctx.Done()
 		return nil, ctx.Err()
