@@ -7,6 +7,12 @@ final class AgenthailModel: ObservableObject {
         didSet { trackFinishedSessions(from: oldValue) }
     }
     @Published private(set) var finishedUnseen: Set<String> = []
+    @Published var searchQuery = ""
+    @Published private(set) var searchResults: [SessionSearchItem] = []
+    @Published private(set) var searching = false
+    @Published private(set) var searchError: String?
+    @Published private(set) var openedSearchSessions: [SessionState] = []
+    private var searchTask: Task<Void, Never>?
     @Published var selectedSessionID: String?
     @Published var detail: SessionDetail?
     @Published var devices: [DeviceState] = []
@@ -50,7 +56,12 @@ final class AgenthailModel: ObservableObject {
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
     var workingSessions: [SessionState] { snapshot?.sessions.filter(\.isWorking) ?? [] }
-    var selectedSession: SessionState? { snapshot?.sessions.first { $0.id == selectedSessionID } }
+    var knownSessions: [SessionState] {
+        let listed = snapshot?.sessions ?? []
+        let listedIDs = Set(listed.map(\.id))
+        return listed + openedSearchSessions.filter { !listedIDs.contains($0.id) }
+    }
+    var selectedSession: SessionState? { knownSessions.first { $0.id == selectedSessionID } }
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
     var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
@@ -187,6 +198,38 @@ final class AgenthailModel: ObservableObject {
         if next != finishedUnseen { finishedUnseen = next }
     }
 
+    func search(_ query: String) {
+        searchQuery = query
+        searchTask?.cancel()
+        searchResults = []
+        searchError = nil
+        searching = false
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 3, let api else { return }
+        searching = true
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            do {
+                let response = try await api.searchSessions(query: trimmed)
+                guard !Task.isCancelled, searchQuery == query else { return }
+                searchResults = response.results
+                searchError = response.remoteError?.isEmpty == false ? response.remoteError : nil
+            } catch {
+                guard !Task.isCancelled, searchQuery == query, !error.isCancellation else { return }
+                searchError = error.localizedDescription
+            }
+            if searchQuery == query { searching = false }
+        }
+    }
+
+    func openSearchResult(_ session: SessionState) {
+        if !(snapshot?.sessions.contains { $0.id == session.id } ?? false), !openedSearchSessions.contains(where: { $0.id == session.id }) {
+            openedSearchSessions.append(session)
+        }
+        selectSession(session.id)
+    }
+
     func loadOlder() async {
         guard let api, let id = selectedSessionID, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
         loadingOlder = true
@@ -215,7 +258,8 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func reconcileSelection() {
-        guard let sessions = snapshot?.sessions else { return }
+        guard snapshot != nil else { return }
+        let sessions = knownSessions
         let next = reconciledSelection(selected: selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID"), sessions: sessions)
         guard next != selectedSessionID else { return }
         sessionStreamTask?.cancel()

@@ -26,6 +26,7 @@ struct DesktopWindow: View {
 struct SessionSidebar: View {
     @ObservedObject var model: AgenthailModel
     @State private var expandedProjects: Set<String> = []
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         let tree = model.sessionTree
@@ -53,10 +54,48 @@ struct SessionSidebar: View {
             .font(.system(size: 12.5))
             .padding(.horizontal, 16)
             .padding(.top, 4)
+            .padding(.bottom, 8)
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DesktopPalette.text2)
+                TextField("Search sessions", text: Binding(get: { model.searchQuery }, set: { model.search($0) }))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .focused($searchFocused)
+                    .onKeyPress(.escape) {
+                        model.search("")
+                        searchFocused = false
+                        return .handled
+                    }
+                if !model.searchQuery.isEmpty {
+                    Button {
+                        model.search("")
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.muted)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(DesktopPalette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 7))
+            .padding(.horizontal, 12)
             .padding(.bottom, 10)
+            .background {
+                Button("") { searchFocused = true }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .hidden()
+            }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    if !model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        searchResults
+                    } else {
                     if !tree.needsYou.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
                             SidebarCaption("Needs you")
@@ -97,6 +136,7 @@ struct SessionSidebar: View {
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, 8)
                     }
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 16)
@@ -118,6 +158,77 @@ struct SessionSidebar: View {
 }
 
 extension SessionSidebar {
+    @ViewBuilder
+    private var searchResults: some View {
+        let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let local = model.knownSessions
+            .filter { session in
+                [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
+                    .compactMap { $0 }
+                    .contains { $0.localizedCaseInsensitiveContains(query) }
+            }
+            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let localIDs = Set(local.map(\.id))
+        let remote = model.searchResults.filter { !localIDs.contains($0.session.id) }
+        VStack(alignment: .leading, spacing: 2) {
+            SidebarCaption("Sessions")
+            ForEach(local) { session in
+                sessionButton(session, needsYou: model.attentionSessionIDs.contains(session.id))
+            }
+            if local.isEmpty {
+                Text("No matching sessions.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4)
+            }
+        }
+        if query.count >= 3 {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    SidebarCaption("Codex history")
+                    if model.searching { ProgressView().controlSize(.mini) }
+                }
+                ForEach(remote) { result in
+                    Button {
+                        model.openSearchResult(result.session)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.session.title)
+                                .lineLimit(1)
+                                .foregroundStyle(DesktopPalette.text)
+                            if let snippet = result.snippet, !snippet.isEmpty {
+                                Text(snippet)
+                                    .font(.system(size: 11.5))
+                                    .lineLimit(2)
+                                    .foregroundStyle(DesktopPalette.text2)
+                            }
+                        }
+                        .font(.system(size: 13))
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(model.selectedSessionID == result.session.id ? DesktopPalette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                if let error = model.searchError {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .padding(.horizontal, 14)
+                } else if !model.searching && remote.isEmpty {
+                    Text("No older matches.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
     private func visibleOrder(_ tree: SessionTree) -> [String] {
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
