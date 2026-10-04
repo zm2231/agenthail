@@ -54,7 +54,8 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 		remote.UnavailableReason = local.UnavailableReason
 		remote.TranscriptOffset = local.TranscriptOffset
 		remote.TranscriptOffsetSet = local.TranscriptOffsetSet
-		remote.CodexUsesEventUsers = local.CodexUsesEventUsers
+		remote.CodexPendingEventUser = local.CodexPendingEventUser
+		remote.CodexPendingEventTurn = local.CodexPendingEventTurn
 		return remote, nil
 	}
 	failure := codexNativeReadFailure(remoteErr)
@@ -122,15 +123,21 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			if turnID := codexRecordTurnID(record); turnID != "" {
 				currentTurnID = turnID
 			}
-			payload, _ := record["payload"].(map[string]any)
-			if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
-				session.CodexUsesEventUsers = true
-			}
 			items := codexTimelineItems(record)
-			if session.CodexUsesEventUsers && str(record, "type") == "response_item" && hasUserTimelineItem(items) {
+			if turnID := codexRecordTurnID(record); turnID != "" {
+				for index := range items {
+					items[index].TurnID = turnID
+				}
+			}
+			projection := codexUserProjection{pending: session.CodexPendingEventUser, turnID: session.CodexPendingEventTurn}
+			if projection.consume(record, items) {
 				lineOffset += int64(len(line))
+				session.CodexPendingEventUser = projection.pending
+				session.CodexPendingEventTurn = projection.turnID
 				return nil
 			}
+			session.CodexPendingEventUser = projection.pending
+			session.CodexPendingEventTurn = projection.turnID
 			if len(items) == 0 {
 				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
 					emitCodexTranscriptItem(session, uuid, record, line, lineOffset, 0, *opaque, currentTurnID, onEvent)
@@ -197,6 +204,34 @@ func hasUserTimelineItem(items []surface.TimelineItem) bool {
 		}
 	}
 	return false
+}
+
+type codexUserProjection struct {
+	pending bool
+	turnID  string
+}
+
+func (p *codexUserProjection) consume(record map[string]any, items []surface.TimelineItem) bool {
+	payload, _ := record["payload"].(map[string]any)
+	if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
+		p.pending = true
+		p.turnID = codexRecordTurnID(record)
+		return false
+	}
+	if str(record, "type") != "response_item" || !hasUserTimelineItem(items) {
+		if p.pending && p.turnID != "" {
+			if turnID := codexRecordTurnID(record); turnID != "" && turnID != p.turnID {
+				p.pending = false
+				p.turnID = ""
+			}
+		}
+		return false
+	}
+	turnID := codexRecordTurnID(record)
+	duplicate := p.pending && p.turnID != "" && turnID != "" && p.turnID == turnID
+	p.pending = false
+	p.turnID = ""
+	return duplicate
 }
 
 func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
@@ -296,20 +331,21 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		data = nil
 	}
 	lines := bytes.SplitAfter(data, []byte{'\n'})
-	usesEventUsers := false
+	projection := codexUserProjection{}
+	skipResponseUsers := map[int]bool{}
 	if source == "codex" {
-		for _, line := range lines {
+		for index, line := range lines {
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				continue
 			}
-			payload, _ := record["payload"].(map[string]any)
-			if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
-				usesEventUsers = true
+			if projection.consume(record, codexTimelineItems(record)) {
+				skipResponseUsers[index] = true
 			}
 		}
 	}
-	result.CodexUsesEventUsers = usesEventUsers
+	result.CodexPendingEventUser = projection.pending
+	result.CodexPendingEventTurn = projection.turnID
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
@@ -339,11 +375,16 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 					items = []surface.TimelineItem{*opaque}
 				}
 			}
+			if turnID := codexRecordTurnID(record); turnID != "" {
+				for itemIndex := range items {
+					items[itemIndex].TurnID = turnID
+				}
+			}
 		}
 		if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
 			return nil, err
 		}
-		if source == "codex" && usesEventUsers && str(record, "type") == "response_item" && hasUserTimelineItem(items) {
+		if source == "codex" && skipResponseUsers[index] {
 			continue
 		}
 		if len(items) == 0 {

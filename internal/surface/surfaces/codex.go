@@ -875,7 +875,8 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		}
 		sess.TranscriptOffset = read.TranscriptOffset
 		sess.TranscriptOffsetSet = true
-		sess.CodexUsesEventUsers = read.CodexUsesEventUsers
+		sess.CodexPendingEventUser = read.CodexPendingEventUser
+		sess.CodexPendingEventTurn = read.CodexPendingEventTurn
 	}
 	return c.streamTranscript(ctx, sess, uuid, onEvent, timeout)
 }

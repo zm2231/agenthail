@@ -217,9 +217,9 @@ func TestCodexEventUserContextSurvivesAlongsideTools(t *testing.T) {
 }
 
 func TestCodexDuplicateUserRepresentationsDoNotDuplicatePrompt(t *testing.T) {
-	path := timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Continue"}}
-{"timestamp":"2026-09-07T12:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue"}]}}
-{"timestamp":"2026-09-07T12:01:00Z","type":"event_msg","payload":{"type":"user_message","message":"Continue"}}
+	path := timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","turn_id":"turn-1","message":"Continue"}}
+{"timestamp":"2026-09-07T12:00:00Z","type":"response_item","payload":{"type":"message","turn_id":"turn-1","role":"user","content":[{"type":"input_text","text":"Continue"}]}}
+{"timestamp":"2026-09-07T12:01:00Z","type":"event_msg","payload":{"type":"user_message","turn_id":"turn-2","message":"Continue"}}
 `)
 	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 0)
 	if err != nil {
@@ -260,6 +260,46 @@ func TestCodexSeedAndTailUseTheSameUserProjection(t *testing.T) {
 	}
 	if seedUsers != tailUsers {
 		t.Fatalf("seed users=%d tail users=%d", seedUsers, tailUsers)
+	}
+}
+
+func TestCodexEmptySeedPairsUsersByTurnWithoutDroppingLaterUser(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	codex := &Codex{desktopURL: "ws://127.0.0.1:1"}
+	session := &surface.Session{ID: "review", Transport: codexTransportDesktop, Transcript: path, Status: surface.StatusBusy}
+	seed, err := codex.ReadSession(context.Background(), session, surface.SessionReadRequest{Limit: 5})
+	if err != nil || !seed.TranscriptOffsetSet {
+		t.Fatalf("seed=%+v err=%v", seed, err)
+	}
+	content := `{"type":"event_msg","payload":{"type":"user_message","turn_id":"turn-1","message":"same"}}
+{"type":"response_item","payload":{"id":"user-1","type":"message","turn_id":"turn-1","role":"user","content":[{"type":"input_text","text":"same"}]}}
+{"type":"response_item","payload":{"id":"user-2","type":"message","turn_id":"turn-2","role":"user","content":[{"type":"input_text","text":"same"}]}}
+`
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	streamSession := *session
+	streamSession.TranscriptOffset = seed.TranscriptOffset
+	streamSession.TranscriptOffsetSet = true
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var events []surface.StreamEvent
+	err = codex.Stream(ctx, &streamSession, "", func(event surface.StreamEvent) {
+		if event.Role == "user" {
+			events = append(events, event)
+			if len(events) == 2 {
+				cancel()
+			}
+		}
+	}, time.Second)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].TurnID != "turn-1" || events[1].TurnID != "turn-2" {
+		t.Fatalf("events=%+v", events)
 	}
 }
 
