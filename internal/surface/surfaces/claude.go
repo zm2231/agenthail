@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -600,6 +601,23 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 	// The overlap covers records written between page seeding and tail startup;
 	// stable record keys make replay idempotent in the journal.
 	offset := max(int64(0), state.offset-initialClaudeObservationBytes)
+	if offset > 0 {
+		file, openErr := os.Open(path)
+		if openErr != nil {
+			return openErr
+		}
+		if _, seekErr := file.Seek(offset, 0); seekErr != nil {
+			file.Close()
+			return seekErr
+		}
+		reader := bufio.NewReader(file)
+		prefix, readErr := reader.ReadBytes('\n')
+		file.Close()
+		if readErr != nil && readErr != io.EOF {
+			return readErr
+		}
+		offset += int64(len(prefix))
+	}
 	deadline := time.Now().Add(timeout)
 	currentTurnID := ""
 	for time.Now().Before(deadline) {
@@ -615,6 +633,7 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 				turnID = currentTurnID
 			}
 			items := claudeTimelineItems(record)
+			decorateTimelineAttachments(items, record, "claude", lineOffset)
 			for index, item := range items {
 				key := stableTimelineItemID(lineOffset, line, index)
 				version := uint64(len(item.Text))
@@ -622,7 +641,7 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 					version = 1
 				}
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Timestamp: at, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
 				key := stableTimelineItemID(lineOffset, line, len(items))

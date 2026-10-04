@@ -240,6 +240,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
 	mux.HandleFunc("/api/session-metadata", dashboard.guard(d.dashboardSessionMetadataHandler))
+	mux.HandleFunc("/api/session-attachment", dashboard.guard(d.apiSessionAttachmentHandler))
 	mux.HandleFunc("/api/session-stream", dashboard.guard(d.apiSessionStreamHandler))
 	mux.HandleFunc("/api/models", dashboard.guard(d.dashboardModelsHandler))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
