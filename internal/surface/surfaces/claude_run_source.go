@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,37 @@ type ClaudeSubagentLink struct {
 	ParentSessionID string `json:"parentSessionId"`
 	AgentID         string `json:"agentId"`
 	TranscriptPath  string `json:"transcriptPath"`
+}
+
+// ClaudeContextWindowObservation is the only context-window claim a Claude
+// provider may make for a session. A zero window is deliberate: it means the
+// provider has no authoritative capacity for that session and callers must
+// render usage as tokens, not a percentage.
+type ClaudeContextWindowObservation struct {
+	Window   int64  `json:"window,omitempty"`
+	Source   string `json:"source"`
+	Model    string `json:"model,omitempty"`
+	Reliable bool   `json:"reliable"`
+}
+
+const (
+	ClaudeContextWindowSourceConfigured = "configured"
+	ClaudeContextWindowSourceProvider   = "provider"
+	ClaudeContextWindowSourceUnknown    = "unknown"
+)
+
+// ObserveClaudeConfiguredContextWindow validates an explicit launch/config
+// value. Transcript model names must not be passed here: they do not preserve
+// the per-session context-window selection reliably.
+func ObserveClaudeConfiguredContextWindow(model string) ClaudeContextWindowObservation {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown}
+	}
+	if strings.Contains(strings.ToLower(model), "[1m]") {
+		return ClaudeContextWindowObservation{Window: 1_000_000, Source: ClaudeContextWindowSourceConfigured, Model: model, Reliable: true}
+	}
+	return ClaudeContextWindowObservation{Source: ClaudeContextWindowSourceUnknown, Model: model}
 }
 
 type claudeRunRecord struct {
