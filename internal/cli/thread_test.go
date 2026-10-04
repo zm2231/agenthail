@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -196,6 +197,22 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	intent, err := app.Registry.DeliveryIntent(result.DeliveryID)
 	if err != nil || intent.Status != "failed" || intent.TargetSessionID != "created" {
 		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	if got := app.Registry.QueueCount(registry.OperatorSessionID); got != 1 {
+		t.Fatalf("failure notice queue count=%d, want 1", got)
+	}
+	events, err := app.Registry.CatalogEventsAfter(0, 20)
+	if err != nil || len(events.Events) == 0 {
+		t.Fatalf("catalog events=%+v err=%v", events, err)
+	}
+	queueEvent := false
+	for _, event := range events.Events {
+		if event.Type == "session.queue" && event.EntityID == registry.OperatorSessionID {
+			queueEvent = true
+		}
+	}
+	if !queueEvent {
+		t.Fatalf("catalog events missing operator notice: %+v", events.Events)
 	}
 }
 
