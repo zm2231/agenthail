@@ -77,13 +77,19 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	}
 	relay := manager.relays["recent"]
 	if !relay.healthy() {
-		t.Fatalf("new reply relay is not healthy: pid=%d path=%q done=%v", relay.process.Pid, relay.socketPath, func() bool {
+		info, lstatErr := os.Lstat(relay.socketPath)
+		t.Fatalf("new reply relay is not healthy: pid=%d path=%q done=%v paths=%v lstat=%v mode=%v", relay.process.Pid, relay.socketPath, func() bool {
 			select {
 			case <-relay.done:
 				return true
 			default:
 				return false
 			}
+		}(), relay.paths, lstatErr, func() os.FileMode {
+			if info == nil {
+				return 0
+			}
+			return info.Mode()
 		}())
 	}
 	results := make(chan error, 4)
@@ -202,6 +208,22 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("native receipt not delivered")
 	}
+	oldRelayPID, oldRelaySocket := relay.process.Pid, relay.socketPath
+	if err := relay.process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-relay.done
+	receipt, err = manager.Send(ctx, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "send after relay restart")
+	if err != nil || receipt == nil || !receipt.Accepted {
+		t.Fatalf("relay restart receipt=%+v err=%v", receipt, err)
+	}
+	newRelay := manager.relays["recent"]
+	if newRelay == nil || newRelay.process.Pid == oldRelayPID || newRelay.socketPath == oldRelaySocket {
+		t.Fatalf("relay was not recreated with fresh ownership: old=%d/%q new=%v", oldRelayPID, oldRelaySocket, newRelay)
+	}
+	if _, err := os.Lstat(oldRelaySocket); !os.IsNotExist(err) {
+		t.Fatalf("old relay socket remains after restart: %v", err)
+	}
 	socket := filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock")
 	messageID := uuid.NewString()
 	for range 2 {
@@ -220,7 +242,7 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 		}
 		conn.Close()
 	}
-	if count := reg.QueueCount("older"); count != 4 {
+	if count := reg.QueueCount("older"); count != 5 {
 		t.Fatalf("duplicate inbound queue count=%d", count)
 	}
 	if err := reg.ReplaceAlias("renamed", "older"); err != nil {
