@@ -76,6 +76,43 @@ func TestAPISessionStreamReplaysJournalWithoutNewProviderRead(t *testing.T) {
 	}
 }
 
+func TestAPISessionStreamReplaysSeedForClaudeWithoutLiveStream(t *testing.T) {
+	d, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	from.Transport = "uds"
+	fake.kind = surface.KindClaude
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items:         []surface.TimelineItem{{ID: "seed-api", Kind: "text", Text: "seeded over API"}},
+	}
+	adapter.caps.Stream = false
+	d = New(reg, []surface.Surface{adapter})
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	defer server.Close()
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/session-stream?id="+from.ID+"&after=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"body":"seeded over API"`) || strings.Contains(string(body), `"kind":"source-error"`) {
+		t.Fatalf("status=%d body=%s", response.StatusCode, body)
+	}
+}
+
 func TestAPISessionStreamReplaysSameProviderKeyMutationAfterCursor(t *testing.T) {
 	d, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent)}

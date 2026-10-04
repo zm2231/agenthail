@@ -79,6 +79,21 @@ func TestClaudeContextUsageReturnsTokensWhenWindowIsUnknown(t *testing.T) {
 	}
 }
 
+func TestClaudeContextUsageUsesExplicitConfiguredWindow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path, ConfiguredModel: "claude-opus-5-5[1m]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.ContextWindow != 1_000_000 || usage.ContextWindowSource != ClaudeContextWindowSourceConfigured || usage.WindowEstimated {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
 func TestClaudeContextUsageIgnoresOlderCommandAfterBoundary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "claude.jsonl")
 	writeTestTranscript(t, path,

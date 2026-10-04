@@ -226,13 +226,18 @@ struct ConversationHeader: View {
                     Button("Compact") { model.perform(action: "compact", sessionID: session.id) }
                 }
             }
-            if let context = model.detail?.context, context.contextWindow > 0 {
-                HStack(spacing: 10) {
-                    ProgressView(value: context.fraction).tint(context.fraction > 0.85 ? agenthailOrange : .accentColor)
-                    Text(context.compacting ? "Compacting context" : "\(Int(context.fraction * 100))% · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted())")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
-            }
+			if let context = model.detail?.context {
+				if let fraction = context.fraction {
+					HStack(spacing: 10) {
+						ProgressView(value: fraction).tint(fraction > 0.85 ? agenthailOrange : .accentColor)
+						Text(context.compacting ? "Compacting context" : "\(Int(fraction * 100))% · \(context.usedTokens.formatted()) / \(context.contextWindow.formatted())")
+							.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+					}
+				} else {
+					Text(context.compacting ? "Compacting context" : "\(context.usedTokens.formatted()) tokens · context window unavailable")
+						.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+				}
+			}
         }
         .padding(24)
     }

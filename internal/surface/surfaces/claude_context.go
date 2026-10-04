@@ -87,7 +87,9 @@ func (c *Claude) ContextUsage(ctx context.Context, sess *surface.Session) (*surf
 				// capacity provenance. Claude can omit the launch-time [1m]
 				// selection from later records, so an unknown window must remain
 				// unknown rather than becoming a guessed denominator.
-				state.usage.ContextWindow = 0
+				window := ObserveClaudeConfiguredContextWindow(sess.ConfiguredModel)
+				state.usage.ContextWindow = window.Window
+				state.usage.ContextWindowSource = window.Source
 				state.usage.WindowEstimated = false
 				state.usage.UpdatedAt = at
 			}

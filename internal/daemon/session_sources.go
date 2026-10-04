@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ const (
 	sessionJournalRetentionBytes = 8 << 20
 	sessionStreamBodyBytes       = 16 << 10
 	sessionPageHandoffGrace      = 5 * time.Second
+	sessionJournalSeedTimeout    = 12 * time.Second
 )
 
 type sessionJournalPayload struct {
@@ -96,6 +98,10 @@ func (m *sessionSourceManager) subscribe(session *surface.Session, adapter surfa
 	m.mu.Unlock()
 	if start {
 		go source.run()
+	}
+	select {
+	case <-source.seeded:
+	case <-time.After(sessionJournalSeedTimeout):
 	}
 	return subscription, nil
 }
@@ -198,7 +204,8 @@ func (s *sessionSource) run() {
 	}
 	for {
 		streamErr := s.adapter.Stream(s.ctx, s.session, "", s.append, 30*time.Minute)
-		if streamErr != nil && s.ctx.Err() == nil {
+		unsupported := errors.Is(streamErr, surface.ErrUnsupported)
+		if streamErr != nil && !unsupported && s.ctx.Err() == nil {
 			s.appendSourceError(streamErr)
 		}
 		s.mu.Lock()
@@ -208,7 +215,7 @@ func (s *sessionSource) run() {
 		}
 		hasHolders := len(s.holders) > 0
 		s.mu.Unlock()
-		if s.ctx.Err() != nil || !hasHolders {
+		if unsupported || s.ctx.Err() != nil || !hasHolders {
 			break
 		}
 		select {
