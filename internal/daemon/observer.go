@@ -165,12 +165,21 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	completionPredatesActiveDelivery := previous.ActiveTurnID != "" && observation.ActiveTurnID == previous.ActiveTurnID
 	completionChanged := found && !completionPredatesActiveDelivery && observation.CompletedTurnID != "" && observation.CompletedTurnID != previous.CompletedTurnID
 	if completionChanged {
-		if session.Surface == surface.KindCodex && observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			reconciled, reconcileErr := d.Registry.ReconcileDeliveryIntent(session.ID, observation.CompletedTurnID)
-			if reconcileErr != nil {
-				d.log.Printf("reconcile delivery intent %s: %s", d.resolveDisplay(session.ID), reconcileErr)
-			} else if reconciled {
-				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, CompletionID: observation.CompletedTurnID, Result: "provider completion correlated to delivery intent"})
+		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
+			providerKey := ""
+			switch session.Surface {
+			case surface.KindCodex:
+				providerKey = observation.CompletedTurnID
+			case surface.KindClaude:
+				providerKey = observation.InputTurnID
+			}
+			if providerKey != "" {
+				reconciled, reconcileErr := d.Registry.ReconcileDeliveryIntent(session.ID, providerKey)
+				if reconcileErr != nil {
+					d.log.Printf("reconcile delivery intent %s: %s", d.resolveDisplay(session.ID), reconcileErr)
+				} else if reconciled {
+					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, CompletionID: observation.CompletedTurnID, Result: "provider completion correlated to delivery intent"})
+				}
 			}
 		}
 		text := ""

@@ -208,7 +208,7 @@ func TestClaudeObserveAndModelUseCompletedTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || observation.Reply.Text != "answer" {
+	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || observation.InputTurnID != "u1" || observation.Reply.Text != "answer" {
 		t.Fatalf("observation=%+v", observation)
 	}
 	model, err := claude.Model(context.Background(), session, "")

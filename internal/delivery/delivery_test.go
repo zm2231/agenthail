@@ -115,7 +115,7 @@ func TestDispatcherReturnsSubmittedForAmbiguousDeliveryWithoutClaimingAcceptance
 	}
 }
 
-func TestDispatcherSubmittedWithoutSenderDoesNotClaimRecordedIntent(t *testing.T) {
+func TestDispatcherUnknownWithoutExplicitSenderUsesDurableOperatorAttribution(t *testing.T) {
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -126,11 +126,12 @@ func TestDispatcherSubmittedWithoutSenderDoesNotClaimRecordedIntent(t *testing.T
 		t.Fatal(err)
 	}
 	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), &fakeSurface{err: surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)}, session, "maybe", "")
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || receipt == nil || receipt.DeliveryID == 0 || receipt.Status != string(registry.DeliveryIntentSubmitted) {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
-	if receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID != 0 || strings.Contains(receipt.Detail, "intent recorded") {
-		t.Fatalf("receipt=%+v", receipt)
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.SenderSessionID != registry.OperatorSessionID {
+		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 }
 

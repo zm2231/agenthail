@@ -105,6 +105,10 @@ func (r *Registry) AppendCatalogEvent(input CatalogEvent) (CatalogEvent, bool, e
 }
 
 func (r *Registry) AppendCatalogEventTx(tx *sql.Tx, input CatalogEvent) (CatalogEvent, bool, error) {
+	return appendCatalogEventTx(tx, input)
+}
+
+func appendCatalogEventTx(tx *sql.Tx, input CatalogEvent) (CatalogEvent, bool, error) {
 	if tx == nil {
 		return CatalogEvent{}, false, fmt.Errorf("catalog event transaction is required")
 	}

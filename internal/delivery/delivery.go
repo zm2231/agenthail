@@ -80,6 +80,12 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
 	}
+	if options.SourceSessionID == "" && d.Registry != nil {
+		if err := d.Registry.EnsureOperatorSession(); err != nil {
+			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("persist operator delivery source: %w", err))
+		}
+		options.SourceSessionID = registry.OperatorSessionID
+	}
 	ctx = surface.WithSourceSessionID(ctx, options.SourceSessionID)
 	if err := surface.EnsureWritableSession(ctx, adapter, session); err != nil {
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
@@ -109,16 +115,16 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if err != nil {
 		if surface.IsDeliveryOutcomeUnknown(err) {
-			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, Detail: "acceptance is unconfirmed; no delivery intent was recorded"}
-			if d.Registry != nil && options.SourceSessionID != "" {
-				intent, intentErr := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: options.SourceSessionID, TargetSessionID: session.ID, Message: message, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
-				if intentErr != nil {
-					d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: intentErr.Error()})
-				} else {
-					receipt.DeliveryID = intent.ID
-					receipt.Detail = "delivery intent recorded; receipt is pending"
-				}
+			if d.Registry == nil || options.SourceSessionID == "" {
+				d.record(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceUnknown})
+				return nil, err
 			}
+			intent, intentErr := d.Registry.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: options.SourceSessionID, TargetSessionID: session.ID, Message: message, Status: registry.DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+			if intentErr != nil {
+				d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: intentErr.Error()})
+				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("persist submitted delivery intent: %w", intentErr))
+			}
+			receipt := &Receipt{Evidence: surface.EvidenceSubmitted, Status: string(registry.DeliveryIntentSubmitted), SessionID: session.ID, DeliveryID: intent.ID, Detail: "delivery intent recorded; receipt is pending"}
 			d.record(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: err.Error(), Evidence: surface.EvidenceSubmitted})
 			return receipt, nil
 		}

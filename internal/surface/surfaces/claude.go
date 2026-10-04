@@ -374,6 +374,7 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	}
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
+		observation.InputTurnID = state.completed.UserID
 		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true}
 	}
 	return observation, nil

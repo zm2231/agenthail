@@ -12,6 +12,17 @@ import (
 
 type DeliveryIntentStatus string
 
+const OperatorSessionID = "agenthail-operator"
+
+func (r *Registry) EnsureOperatorSession() error {
+	if _, err := r.Session(OperatorSessionID); err == nil {
+		return nil
+	} else if err != sql.ErrNoRows {
+		return err
+	}
+	return r.RegisterSession(surface.Session{ID: OperatorSessionID, Surface: surface.SurfaceKind("agenthail"), Name: "Agenthail operator"})
+}
+
 const (
 	DeliveryIntentSubmitted DeliveryIntentStatus = "submitted"
 	DeliveryIntentSent      DeliveryIntentStatus = "sent"
@@ -215,11 +226,12 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	if _, err := tx.Exec(`UPDATE delivery_intents SET notification_queue_id=?,updated_at=datetime('now') WHERE id=? AND notification_queue_id IS NULL`, queueID, intent.ID); err != nil {
 		return 0, false, err
 	}
-	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": time.Now().UTC().Format(time.RFC3339Nano)})
+	at := time.Now().UTC()
+	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})
 	if err != nil {
 		return 0, false, err
 	}
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO catalog_events(dedupe_key,type,entity_id,payload,created_at) VALUES(?,?,?,?,datetime('now'))`, fmt.Sprintf("delivery.problem:%d", intent.ID), "delivery.problem", intent.TargetSessionID, payload); err != nil {
+	if _, _, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("delivery.problem:%d", intent.ID), Type: "delivery.problem", EntityID: intent.TargetSessionID, Payload: payload, CreatedAt: at}); err != nil {
 		return 0, false, err
 	}
 	return queueID, true, nil

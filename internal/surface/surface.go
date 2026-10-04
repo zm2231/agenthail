@@ -299,6 +299,7 @@ type TurnObservation struct {
 	ActiveTurnID    string        `json:"activeTurnId,omitempty"`
 	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
 	CompletedTurnID string        `json:"completedTurnId,omitempty"`
+	InputTurnID     string        `json:"inputTurnId,omitempty"`
 	Reply           *ReplyResult  `json:"reply,omitempty"`
 }
 
