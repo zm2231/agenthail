@@ -4,7 +4,10 @@ import Foundation
 @MainActor
 final class AgenthailModel: ObservableObject {
     @Published var snapshot: DashboardSnapshot? {
-        didSet { trackFinishedSessions(from: oldValue) }
+        didSet {
+            trackFinishedSessions(from: oldValue)
+            pruneDetailCache()
+        }
     }
     @Published private(set) var finishedUnseen: Set<String> = []
     @Published private(set) var snapshotLoadedAt: Date?
@@ -174,6 +177,7 @@ final class AgenthailModel: ObservableObject {
         detailAppliedGeneration = detailRequestGeneration
         UserDefaults.standard.set(id, forKey: "lastSelectedSessionID")
         detail = detailCache[id]
+        if detail != nil { touchCachedDetail(id) }
         detailStale = detail != nil
         detailRefreshFailed = false
         detailLoadedAt = nil
@@ -217,11 +221,22 @@ final class AgenthailModel: ObservableObject {
 
     private func cacheDetail(_ loaded: SessionDetail, for id: String) {
         detailCache[id] = loaded
-        detailCacheOrder.removeAll { $0 == id }
-        detailCacheOrder.append(id)
+        touchCachedDetail(id)
         while detailCacheOrder.count > 16 {
             detailCache.removeValue(forKey: detailCacheOrder.removeFirst())
         }
+    }
+
+    private func touchCachedDetail(_ id: String) {
+        detailCacheOrder.removeAll { $0 == id }
+        detailCacheOrder.append(id)
+    }
+
+    private func pruneDetailCache() {
+        guard snapshot != nil else { return }
+        let known = Set(knownSessions.map(\.id))
+        detailCacheOrder.removeAll { !known.contains($0) }
+        detailCache = detailCache.filter { known.contains($0.key) }
     }
 
     private func trackFinishedSessions(from previous: DashboardSnapshot?) {
