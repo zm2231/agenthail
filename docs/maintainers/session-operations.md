@@ -83,7 +83,7 @@ Claude assigns the background ID. Agenthail parses that ID from the native launc
 
 Status, logs, stop and resume operate only on native background records. A registered alias or `claude:<full-session-id>` can address a stopped session. Resume is a no-op when the native catalog reports working, running, starting or blocked. Otherwise it invokes `--bg --resume` and checks the returned identity. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Destructive removal is not exposed.
 
-Creation and mutations with an uncertain response are reported as unknown. Inspect native `claude agents --json --all` before retrying an uncertain launch. Agenthail does not automatically repeat it.
+If creation returns a session, that session is registered before the initial-turn result is reported. When the initial turn cannot be confirmed, the dashboard and CLI return a non-retryable `submitted` result with the session and warning, and record a durable `submitted` history intent when storage permits. They do not automatically repeat the turn. Only a creation attempt with no known session remains a typed `unknown` failure; inspect the native catalog before any explicit retry.
 
 ## Codex forks
 
@@ -135,7 +135,7 @@ Turn settings survive the durable Agenthail queue, retries and daemon replay eve
 - `native-queue`: `sessionId`, `nativeQueue: {queueAction, message, queuedSubmissionId, clientUserMessageId, queuedSubmissionIds, cursor}`.
 - `session-lifecycle-status`, `session-lifecycle-logs`, `session-lifecycle-stop`, `session-lifecycle-resume`: `sessionId`.
 
-Optional fields may be omitted. Fork, queue and lifecycle successes return `{ok: true, result: ...}`; failures return `{ok: false, unknown, error}`. Creation retains its existing session/result envelope, including unknown launch outcomes without a confirmed session. CLI fork, queue and lifecycle successes print JSON even without `--json`. With `--json`, operation failures also emit a JSON error object on stdout and return a nonzero exit status; the CLI writes its diagnostic to stderr.
+Optional fields may be omitted. Fork, queue and lifecycle successes return `{ok: true, result: ...}`; failures return `{ok: false, unknown, error}`. A session creation whose session exists but whose initial turn cannot be confirmed returns HTTP `202` and `{ok:true,status:"submitted",accepted:true,retryable:false,session,warning}`; the CLI JSON shape uses the same status fields and exits successfully. Creation without a known session remains a typed unknown/failure and is never represented as an accepted receipt. CLI fork, queue and lifecycle successes print JSON even without `--json`. With `--json`, operation failures also emit a JSON error object on stdout and return a nonzero exit status; the CLI writes its diagnostic to stderr.
 
 ## Verification boundary
 

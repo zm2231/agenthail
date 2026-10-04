@@ -151,11 +151,11 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 	output, runErr := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder", "--json"})
 	})
-	if runErr == nil || !strings.Contains(runErr.Error(), "was created but its first turn could not be confirmed") {
+	if runErr != nil {
 		t.Fatalf("err=%v", runErr)
 	}
 	var result threadCreateOutput
-	if err := json.Unmarshal([]byte(output), &result); err != nil || result.OK || !result.Unknown || result.Session == nil || result.Session.ID != "created" {
+	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.Session == nil || result.Session.ID != "created" || result.Warning == "" {
 		t.Fatalf("result=%+v decodeErr=%v output=%q", result, err, output)
 	}
 	if _, err := app.Registry.Session("created"); err != nil {
@@ -163,6 +163,10 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 	}
 	if alias, err := app.Registry.LookupAlias("builder"); err != nil || alias != "created" {
 		t.Fatalf("alias=%q err=%v", alias, err)
+	}
+	history, err := app.Registry.ListHistory(5, "created")
+	if err != nil || len(history) != 1 || history[0].Kind != "submitted" {
+		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
 
