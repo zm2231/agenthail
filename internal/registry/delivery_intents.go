@@ -174,6 +174,19 @@ func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryInt
 	return intent, tx.Commit()
 }
 
+func (r *Registry) RecordSessionCreationIntent(sessionID, message string) (*DeliveryIntent, error) {
+	if err := r.EnsureOperatorSession(); err != nil {
+		return nil, err
+	}
+	return r.RecordDeliveryIntent(DeliveryIntentInput{
+		SenderSessionID: OperatorSessionID,
+		TargetSessionID: sessionID,
+		Message:         message,
+		Status:          DeliveryIntentSubmitted,
+		Evidence:        surface.EvidenceSubmitted,
+	})
+}
+
 func (input DeliveryIntentInput) validate() error {
 	if strings.TrimSpace(input.SenderSessionID) == "" || strings.TrimSpace(input.TargetSessionID) == "" {
 		return fmt.Errorf("delivery intent requires sender and target sessions")

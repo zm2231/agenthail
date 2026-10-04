@@ -636,7 +636,7 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"submitted"`) || !strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"retryable":false`) || !strings.Contains(response.Body.String(), `"deliveryId":`) || !strings.Contains(response.Body.String(), `"id":"started"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := registry.Session("started"); err != nil {
@@ -645,6 +645,38 @@ func TestDashboardReturnsCreatedSessionWhenInitialDeliveryIsUnknown(t *testing.T
 	history, err := registry.ListHistory(5, "started")
 	if err != nil || len(history) != 1 || history[0].Kind != "submitted" {
 		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	var responseBody map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &responseBody); err != nil {
+		t.Fatal(err)
+	}
+	deliveryID, ok := responseBody["deliveryId"].(float64)
+	if !ok || deliveryID <= 0 {
+		t.Fatalf("body=%s", response.Body.String())
+	}
+	intent, err := registry.DeliveryIntent(int64(deliveryID))
+	if err != nil || intent.TargetSessionID != "started" || intent.Status != "submitted" {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDashboardRecordsDefinitiveInitialDeliveryFailure(t *testing.T) {
+	d, registry, fake, _, _ := daemonFixture(t)
+	fake.startErr = errors.New("initial message rejected")
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "codex", "message": "Build this", "cwd": t.TempDir()})
+	request := httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body))
+	request.Header.Set("Origin", "http://example.test")
+	request.Host = "example.test"
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"status":"failed"`) || strings.Contains(response.Body.String(), `"accepted":true`) || !strings.Contains(response.Body.String(), `"deliveryId":`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	problems, err := registry.ListDeliveryProblems()
+	if err != nil || len(problems) != 1 || problems[0].Status != "failed" || problems[0].SessionID != "started" {
+		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
 }
 

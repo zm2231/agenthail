@@ -14,16 +14,17 @@ import (
 )
 
 type threadCreateOutput struct {
-	OK        bool                `json:"ok"`
-	Unknown   bool                `json:"unknown,omitempty"`
-	Status    string              `json:"status,omitempty"`
-	Accepted  bool                `json:"accepted,omitempty"`
-	Retryable bool                `json:"retryable"`
-	Warning   string              `json:"warning,omitempty"`
-	Session   *surface.Session    `json:"session,omitempty"`
-	Delivery  *surface.SendResult `json:"delivery,omitempty"`
-	Alias     string              `json:"alias,omitempty"`
-	Error     string              `json:"error,omitempty"`
+	OK         bool                `json:"ok"`
+	Unknown    bool                `json:"unknown,omitempty"`
+	Status     string              `json:"status,omitempty"`
+	Accepted   bool                `json:"accepted,omitempty"`
+	Retryable  bool                `json:"retryable"`
+	Warning    string              `json:"warning,omitempty"`
+	DeliveryID int64               `json:"deliveryId,omitempty"`
+	Session    *surface.Session    `json:"session,omitempty"`
+	Delivery   *surface.SendResult `json:"delivery,omitempty"`
+	Alias      string              `json:"alias,omitempty"`
+	Error      string              `json:"error,omitempty"`
 }
 
 type threadCreateRequest struct {
@@ -80,13 +81,11 @@ func (a *App) cmdThread(args []string) error {
 	session, deliveryResult, startErr := starter.StartSession(ctx, request.options)
 	if session != nil {
 		if err := a.Registry.RegisterSession(*session); err != nil {
-			recordThreadCreateHistory(a.Registry, "submitted", session, request.message, "", err.Error())
-			return emitSubmittedThreadCreate(request, session, fmt.Sprintf("thread %s was created, but local registration failed: %s; inspect it before retrying", session.ID, err))
+			return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but local registration failed: %s; do not retry automatically", session.ID, err))
 		}
 		if request.alias != "" {
 			if err := a.Registry.SetAlias(request.alias, session.ID); err != nil {
-				recordThreadCreateHistory(a.Registry, "submitted", session, request.message, "", err.Error())
-				return emitSubmittedThreadCreate(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; inspect it before retrying", session.ID, err))
+				return emitCreateStorageFailure(request, session, fmt.Sprintf("thread %s was created, but its name could not be persisted: %s; do not retry automatically", session.ID, err))
 			}
 		}
 	}
@@ -94,26 +93,39 @@ func (a *App) cmdThread(args []string) error {
 	output := threadCreateOutput{OK: startErr == nil, Session: session, Delivery: deliveryResult, Alias: request.alias}
 	if startErr != nil {
 		if session != nil {
-			warning := fmt.Sprintf("session %s was created, but its initial turn could not be confirmed: %s; inspect it before retrying", session.ID, startErr)
-			recordThreadCreateHistory(a.Registry, "submitted", session, request.message, "", startErr.Error())
-			return emitSubmittedThreadOutput(request, output, warning)
+			intent, intentErr := a.Registry.RecordSessionCreationIntent(session.ID, request.message)
+			if intentErr != nil {
+				output.Status = "storage_failed"
+				output.Retryable = false
+				output.Error = fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr)
+				return emitThreadFailure(request, output, fmt.Errorf("%s", output.Error))
+			}
+			output.DeliveryID = intent.ID
+			if surface.IsDeliveryOutcomeUnknown(startErr) {
+				recordThreadCreateHistory(a.Registry, "submitted", session, request.message, "", startErr.Error())
+				return emitSubmittedThreadOutput(request, output, "Initial turn outcome is unresolved; no automatic retry will occur.")
+			}
+			_, _ = a.Registry.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, startErr.Error())
+			recordThreadCreateHistory(a.Registry, "failed", session, request.message, "", startErr.Error())
+			output.OK = false
+			output.Status = "failed"
+			output.Retryable = false
+			output.Error = startErr.Error()
+			return emitThreadFailure(request, output, startErr)
 		}
-		output.Unknown = surface.IsDeliveryOutcomeUnknown(startErr)
+		ambiguous := surface.IsDeliveryOutcomeUnknown(startErr)
 		output.Error = startErr.Error()
 		kind := "failed"
-		if output.Unknown {
-			kind = "unknown"
+		if ambiguous {
+			output.Error = fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 		}
 		recordThreadCreateHistory(a.Registry, kind, session, request.message, "", output.Error)
-		if request.jsonOut {
-			if err := json.NewEncoder(os.Stdout).Encode(output); err != nil {
-				return fmt.Errorf("write JSON output: %w", err)
-			}
+		output.Status = "failed"
+		output.Retryable = false
+		if ambiguous {
+			return emitThreadFailure(request, output, fmt.Errorf("%s: %w", output.Error, startErr))
 		}
-		if output.Unknown && session != nil {
-			return fmt.Errorf("thread %s was created but its first turn could not be confirmed: %w", session.ID, startErr)
-		}
-		return startErr
+		return emitThreadFailure(request, output, startErr)
 	}
 	if session == nil {
 		return fmt.Errorf("thread creation returned no session")
@@ -162,6 +174,19 @@ func emitSubmittedThreadOutput(request threadCreateRequest, output threadCreateO
 	}
 	fmt.Printf("created %s; %s\n", target, warning)
 	return nil
+}
+
+func emitCreateStorageFailure(request threadCreateRequest, session *surface.Session, message string) error {
+	return emitThreadFailure(request, threadCreateOutput{OK: false, Status: "storage_failed", Retryable: false, Session: session, Error: message, Warning: message, Alias: request.alias}, fmt.Errorf("%s", message))
+}
+
+func emitThreadFailure(request threadCreateRequest, output threadCreateOutput, err error) error {
+	if request.jsonOut {
+		if encodeErr := json.NewEncoder(os.Stdout).Encode(output); encodeErr != nil {
+			return fmt.Errorf("write JSON output: %w", encodeErr)
+		}
+	}
+	return err
 }
 
 func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
