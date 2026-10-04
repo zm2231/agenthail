@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case historyGap(String)
     case streamGap
     case streamClosed
 
@@ -14,6 +15,7 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
@@ -356,6 +358,9 @@ final class AgenthailAPI: @unchecked Sendable {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }
+                if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
+                    throw AgenthailAPIError.historyGap("Older activity is no longer retained on this Mac. Start a new session to continue from current activity.")
+                }
             }
             throw AgenthailAPIError.request(response.statusCode, message)
         }
@@ -409,6 +414,7 @@ struct ActionReceipt: Decodable {
     let result: DeliveryReceipt?
 }
 struct DeliveryReceipt: Decodable {
+    let deliveryId: Int64?
     let evidence: String?
     let status: String?
     let queueId: Int64?

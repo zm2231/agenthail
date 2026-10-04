@@ -33,6 +33,25 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.sessionStreamCursor, 2048)
     }
 
+    func testHistoryGapKeepsCurrentPageAndStopsRepeatingCursor() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        model.selectedSessionID = "demo"
+        await model.refreshSession("demo")
+        let currentItems = model.selectedDetail?.timeline?.items ?? []
+        let before = RecoveryProtocol.state.sessionReads
+        RecoveryProtocol.state.configure(historyGap: true)
+
+        await model.loadOlderActivity()
+
+        XCTAssertEqual(model.selectedDetail?.timeline?.items, currentItems)
+        XCTAssertNil(model.activityCursor)
+        XCTAssertTrue(model.olderActivityError?.contains("no longer retained") == true)
+        RecoveryProtocol.state.configure(historyGap: false)
+        await model.loadOlderActivity()
+        XCTAssertEqual(RecoveryProtocol.state.sessionReads, before + 1)
+    }
+
     @MainActor
     func testCatalogEpochResetsCursorToCurrentSnapshot() async throws {
         RecoveryProtocol.state.reset()
@@ -65,7 +84,8 @@ final class SessionRecoveryTests: XCTestCase {
         RecoveryProtocol.state.reset()
         let model = makeModel()
         try await sendQueuedInstruction(model)
-        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for the agent")
+        XCTAssertEqual(model.deliveryStatus["demo"], "Queued for demo; sends when current turn ends.")
+        XCTAssertEqual(model.deliveryIDs["demo"], 42)
         RecoveryProtocol.state.configure(queueStatus: "expired")
         await model.eventStreamConnected()
         XCTAssertEqual(model.deliveryStatus["demo"], "Instruction expired. You can review it in Inbox history.")
@@ -148,6 +168,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var evidence: String?
         private var queueFailure = false
         private var deliveryProblem = false
+        private var historyGap = false
         private var catalogEpoch: String?
         private var catalogSequence: UInt64?
         private var reads = 0
@@ -158,8 +179,8 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         var actionCount: Int { lock.withLock { actions } }
         var actionNames: [String] { lock.withLock { actionHistory } }
         var freshSnapshotReads: Int { lock.withLock { freshSnapshots } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; deliveryProblem = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
-        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, deliveryProblem: Bool? = nil) {
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; deliveryProblem = false; historyGap = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; actionHistory = []; freshSnapshots = 0 } }
+        func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil, deliveryProblem: Bool? = nil, historyGap: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
                 if let queueStatus { self.queueStatus = queueStatus }
@@ -167,6 +188,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                 if let evidence { self.evidence = evidence }
                 if let queueFailure { self.queueFailure = queueFailure }
                 if let deliveryProblem { self.deliveryProblem = deliveryProblem }
+                if let historyGap { self.historyGap = historyGap }
             }
         }
         func recordAction(_ request: URLRequest) {
@@ -182,6 +204,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                 switch path {
                 case "/api/v1/session":
                     reads += 1
+                    if olderPage && historyGap { return (409, #"{"error":{"code":"history_gap","message":"Older history is no longer retained."}}"#) }
                     var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as! [String: Any]
                     if olderPage { object["journalSeq"] = 1 }
                     return (200, String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!)
@@ -196,7 +219,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                     return (200, String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!)
                 case "/api/v1/actions":
                     actions += 1
-                    return (200, #"{"ok":true,"result":{"evidence":"queued","queueId":7}}"#)
+                    return (200, #"{"ok":true,"result":{"deliveryId":42,"evidence":"queued","queueId":7}}"#)
                 case "/api/v1/queue":
                     if queueFailure { return (503, #"{"error":{"message":"Queue unavailable"}}"#) }
                     var fields = ""

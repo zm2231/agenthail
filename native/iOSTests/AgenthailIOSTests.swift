@@ -145,7 +145,7 @@ final class AgenthailIOSTests: XCTestCase {
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "demo"
-        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, bodyRef: "body-ref")
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref")
 
         let result = await model.retainedSessionBody(for: item)
 
@@ -161,7 +161,7 @@ final class AgenthailIOSTests: XCTestCase {
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "demo"
-        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, bodyRef: "body-ref")
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref")
 
         let result = await model.retainedSessionBody(for: item)
 
@@ -176,7 +176,7 @@ final class AgenthailIOSTests: XCTestCase {
         configuration.protocolClasses = [RetainedBodyURLProtocol.self]
         let model = AgenthailIOSModel(api: AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration)))
         model.selectedSessionID = "demo"
-        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, bodyRef: "body-ref")
+        let item = TimelineItem(id: "body", kind: "toolResult", role: nil, title: "Result", text: "prefix", timestamp: nil, callId: nil, status: nil, truncated: true, truncationReason: nil, bodyRef: "body-ref")
 
         let result = await model.retainedSessionBody(for: item)
 
