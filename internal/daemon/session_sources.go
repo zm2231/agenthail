@@ -42,6 +42,8 @@ type sessionJournalPayload struct {
 	TruncationReason string                `json:"truncationReason,omitempty"`
 	BodyRef          string                `json:"bodyRef,omitempty"`
 	Reason           string                `json:"reason,omitempty"`
+	CallID           string                `json:"callId,omitempty"`
+	Attachment       *surface.Attachment   `json:"attachment,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -337,6 +339,8 @@ func (s *sessionSource) seedJournal() {
 			Version:     uint64(len(item.Text)),
 			Operation:   "upsert",
 			TurnID:      item.CallID,
+			CallID:      item.CallID,
+			Attachment:  item.Attachment,
 			Timestamp:   at,
 			Kind:        item.Kind,
 			Text:        item.Text,
@@ -345,6 +349,17 @@ func (s *sessionSource) seedJournal() {
 }
 
 func (s *sessionSource) append(event surface.StreamEvent) {
+	if event.Context != nil {
+		current := s.session
+		if refreshed, err := s.manager.registry.Session(s.session.ID); err == nil {
+			current = *refreshed
+		}
+		if provider, ok := s.adapter.(surface.ContextUsageProvider); ok {
+			if usage, err := provider.ContextUsage(s.ctx, &current); err == nil && usage != nil {
+				event.Context = usage
+			}
+		}
+	}
 	s.mu.Lock()
 	payload := s.normalizeLocked(event)
 	s.mu.Unlock()
@@ -458,5 +473,5 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	if at.IsZero() {
 		at = time.Now().UTC()
 	}
-	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Truncated: event.Truncated}
+	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated}
 }

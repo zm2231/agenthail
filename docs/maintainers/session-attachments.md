@@ -1,0 +1,5 @@
+# Session attachment contract
+
+Transcript image records are projected as timeline items with `kind: "attachment"`, `title: "Image"`, and text fallback `Image attachment`. The `attachment` object contains an opaque immutable ID, validated raster `mediaType`, and optional dimensions and byte count. Journal and SSE payloads carry this metadata and `callId`; they never carry image bytes or base64.
+
+The browser route is `GET /api/session-attachment?sessionId=<id>&id=<attachment-id>` and the bearer-protected API route is `/api/v1/session-attachment` with the same query. The route serves only an exact absolute local path or inline base64 value referenced by the addressed transcript record. It opens regular non-symlink files, validates PNG/JPEG/GIF bytes, enforces a 10 MiB decoded limit, verifies the content hash embedded in the attachment ID, and rejects URLs, SVG, malformed data, changed files, and unreferenced paths. Record lookup seeks directly to the offset encoded in the ID and reads one bounded JSONL record; it does not scan the retained journal or transcript tail.
