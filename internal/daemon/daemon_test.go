@@ -391,6 +391,147 @@ func TestAcceptedDeliveryDoesNotRelayPreviousCompletion(t *testing.T) {
 	}
 }
 
+func TestCodexCompletionReconcilesMatchingDeliveryIntent(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindCodex
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-next", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-next", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	stored, err := r.DeliveryIntent(intent.ID)
+	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
+func TestFailedCodexCompletionDoesNotReconcileDeliveryIntent(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "turn-failed", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceDelivered})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-failed", Reply: &surface.ReplyResult{Done: true, Error: "model error"}}
+	daemon.observeSession(context.Background(), fake, &from)
+	stored, err := r.DeliveryIntent(intent.ID)
+	if err != nil || stored.Status != registry.DeliveryIntentSent {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
+func TestClaudeCompletionReconcilesOnlyByInputEnvelope(t *testing.T) {
+	daemon, r, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindClaude
+	if err := r.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "sender", Surface: surface.KindClaude}); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: from.ID, ProviderKey: "user-envelope", Status: registry.DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-baseline", InputTurnID: "other-envelope", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	fake.observations[from.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "assistant-completion", InputTurnID: "user-envelope", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &from)
+	stored, err := r.DeliveryIntent(intent.ID)
+	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
+func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	_, deliveryID, err := r.QueueDeliveryWithIntent(to.ID, "deliver later", "", surface.SendOptions{SourceSessionID: from.ID})
+	if err != nil || deliveryID == 0 {
+		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
+	}
+	fake.turnID = "turn-queued"
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != registry.DeliveryIntentSent || stored.ProviderKey != "turn-queued" {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-before", Reply: &surface.ReplyResult{Done: true}}
+	daemon.observeSession(context.Background(), fake, &to)
+	if err := r.MarkDeliveryStarted(to.ID, "turn-queued", "turn-before"); err != nil {
+		t.Fatal(err)
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-queued", Reply: &surface.ReplyResult{Done: true, Text: "done"}}
+	daemon.observeSession(context.Background(), fake, &to)
+	stored, err = r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != registry.DeliveryIntentDelivered {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+}
+
+func TestQueuedTerminalFailureNotifiesSenderOnce(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	_, deliveryID, err := r.QueueDeliveryWithIntent(to.ID, "deliver later", "", surface.SendOptions{SourceSessionID: from.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	stored, err := r.DeliveryIntent(deliveryID)
+	if err != nil || stored.Status != registry.DeliveryIntentFailed || stored.NotificationQueueID == 0 {
+		t.Fatalf("intent=%+v err=%v", stored, err)
+	}
+	if count := r.QueueCount(from.ID); count != 1 {
+		t.Fatalf("sender notices=%d", count)
+	}
+}
+
+func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	if count := r.QueueCount(from.ID); count != 1 {
+		t.Fatalf("source notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+}
+
+func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	if count := r.QueueCount(from.ID); count != 0 {
+		t.Fatalf("source notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 0 {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+}
+
 func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)
@@ -1019,6 +1160,25 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 	daemon.drainMessageQueue(context.Background(), fake, &to)
 	if r.QueueCount("to") != 0 || len(fake.sent) != 1 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount("to"), fake.sent)
+	}
+}
+
+func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
+	daemon, r, _, from, to := daemonFixture(t)
+	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
+	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
+	if count := r.QueueCount(from.ID); count != 1 {
+		t.Fatalf("sender notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
 

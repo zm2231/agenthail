@@ -208,7 +208,7 @@ func TestClaudeObserveAndModelUseCompletedTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || observation.Reply.Text != "answer" {
+	if observation.ActiveTurnID != "u2" || observation.CompletedTurnID != "m1" || observation.InputTurnID != "u1" || observation.Reply.Text != "answer" {
 		t.Fatalf("observation=%+v", observation)
 	}
 	model, err := claude.Model(context.Background(), session, "")
@@ -406,6 +406,12 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 	}
 	if len(events) != 2 || events[0].Kind != "text" || events[0].Text != "answer" || events[1].Kind != "done" {
 		t.Fatalf("events=%+v", events)
+	}
+	if events[0].ProviderKey != "m1" || events[0].ID != "m1" || events[0].Operation != "append" || events[0].Version != 6 || events[0].TurnID != "u1" {
+		t.Fatalf("text event=%+v", events[0])
+	}
+	if events[1].ProviderKey != "m1" || events[1].Operation != "phase" || events[1].TurnID != "u1" {
+		t.Fatalf("done event=%+v", events[1])
 	}
 }
 

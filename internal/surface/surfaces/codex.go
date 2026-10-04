@@ -49,6 +49,8 @@ func (c *Codex) Capabilities() surface.Capabilities {
 	}
 }
 
+func (c *Codex) CatalogListComplete() bool { return false }
+
 func (c *Codex) Health(ctx context.Context) error {
 	if err := c.Ready(ctx); err != nil {
 		return fmt.Errorf("Codex session discovery is unavailable: %w", err)
@@ -918,7 +920,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			}
 			if usage, ok := c.applyContextEvent(sess, event, lastContext); ok {
 				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
+				onEvent(codexStreamEvent(event.Sequence, "context", "", usage, uuid))
 				continue
 			}
 			if uuid != "" && !codexContainsID(event.Params, uuid) {
@@ -929,11 +931,11 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			case strings.Contains(strings.ToLower(method), "agentmessage"):
 				if txt := codexEventText(event.Params); txt != "" {
 					emittedText += txt
-					onEvent(surface.StreamEvent{Kind: "text", Text: txt})
+					onEvent(codexStreamEvent(event.Sequence, "text", txt, nil, uuid))
 				}
 			case strings.Contains(strings.ToLower(method), "tool"):
 				if name := codexEventTool(event.Params); name != "" {
-					onEvent(surface.StreamEvent{Kind: "tool_use", Text: name})
+					onEvent(codexStreamEvent(event.Sequence, "tool_use", name, nil, uuid))
 				}
 			case codexCompletionMethod(method):
 				thread, readErr := c.readObservationThread(ctx, client, sess.ID)
@@ -946,14 +948,14 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				}
 				if turn != nil && turn.Assistant != "" && turn.Assistant != emittedText {
 					if emittedText == "" {
-						onEvent(surface.StreamEvent{Kind: "text", Text: turn.Assistant})
+						onEvent(codexStreamEvent(event.Sequence, "text", turn.Assistant, nil, uuid))
 					} else if strings.HasPrefix(turn.Assistant, emittedText) {
-						onEvent(surface.StreamEvent{Kind: "text", Text: strings.TrimPrefix(turn.Assistant, emittedText)})
+						onEvent(codexStreamEvent(event.Sequence, "text", strings.TrimPrefix(turn.Assistant, emittedText), nil, uuid))
 					} else {
 						return fmt.Errorf("Codex stream history exceeded the retained event buffer; use 'agenthail reply %s' for the complete response", sess.ID)
 					}
 				}
-				onEvent(surface.StreamEvent{Kind: "done"})
+				onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
 				return nil
 			}
 		}
@@ -976,6 +978,15 @@ func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid s
 	}
 	defer client.Close()
 	return c.streamManagedClient(ctx, client, sess, uuid, onEvent, timeout)
+}
+
+func codexStreamEvent(sequence int64, kind, text string, contextUsage *surface.ContextUsage, turnID string) surface.StreamEvent {
+	key := fmt.Sprintf("renderer:%d", sequence)
+	operation := "append"
+	if kind == "context" || kind == "done" {
+		operation = "upsert"
+	}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
 }
 
 func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -1033,13 +1044,15 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 			delta := strings.TrimPrefix(turn.Assistant, emitted)
 			if delta != "" {
 				emitted = turn.Assistant
-				onEvent(surface.StreamEvent{Kind: "text", Text: delta})
+				key := "managed:" + turn.ID
+				onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: turn.ID, Kind: "text", Text: delta})
 			}
 			if turn.Done {
 				if turn.Error != "" {
 					return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
 				}
-				onEvent(surface.StreamEvent{Kind: "done"})
+				key := "managed:" + turn.ID
+				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: turn.ID, Kind: "done"})
 				return nil
 			}
 		}
@@ -1207,6 +1220,14 @@ func stringList(value any, objectKey string) []string {
 }
 
 func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
+	return c.interruptTurn(ctx, sess, "")
+}
+
+func (c *Codex) InterruptTurn(ctx context.Context, sess *surface.Session, expectedTurnID string) error {
+	return c.interruptTurn(ctx, sess, expectedTurnID)
+}
+
+func (c *Codex) interruptTurn(ctx context.Context, sess *surface.Session, expectedTurnID string) error {
 	lock, err := acquireCodexWriteLock(ctx)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
@@ -1220,15 +1241,23 @@ func (c *Codex) Interrupt(ctx context.Context, sess *surface.Session) error {
 	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
-	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
+	return c.interruptActiveTurn(ctx, conn, sess.ID, expectedTurnID)
+}
+
+func (c *Codex) interruptActiveTurn(ctx context.Context, conn codexClient, threadID, expectedTurnID string) error {
+	turnID, err := c.activeTurnID(ctx, conn, threadID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)
 	}
 	if turnID == "" {
 		return fmt.Errorf("session idle; nothing to interrupt")
 	}
+	if expectedTurnID != "" && turnID != expectedTurnID {
+		return fmt.Errorf("selected turn changed before interruption; confirm the active turn again")
+	}
 	_, err = conn.Request(ctx, "turn/interrupt", map[string]any{
-		"threadId": sess.ID,
+		"threadId": threadID,
+		"turnId":   turnID,
 	}, 5*time.Second)
 	return err
 }

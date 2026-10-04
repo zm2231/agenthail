@@ -21,6 +21,73 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(result.events, 0)
     }
 
+    func testCatalogStreamDecodesItsIndependentCursorEvent() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CatalogEventStreamURLProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://mac.tailnet.ts.net")!, token: "token", session: URLSession(configuration: configuration))
+        let probe = CatalogConnectionProbe()
+        do {
+            try await api.streamCatalog(after: 41, onConnected: { await probe.markConnected() }, onEvent: { event in await probe.mark(event) })
+            XCTFail("closed catalog stream unexpectedly returned")
+        } catch AgenthailAPIError.streamClosed {
+        }
+        let result = await probe.result()
+        XCTAssertTrue(result.connected)
+        XCTAssertEqual(result.sequence, 42)
+        XCTAssertEqual(result.type, "session.upserted")
+    }
+
+    @MainActor
+    func testCatalogDeltaUpdatesKnownSessionWithoutSnapshotRead() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":42,"type":"session.upserted","data":{"session":{"id":"demo","surface":"codex","name":"Updated","cwd":"/updated","status":"busy","lastActive":"2026-10-03T12:00:00Z","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}}}"#.utf8))
+        await model.receiveCatalog(event)
+        let updated = model.snapshot?.sessions.first { $0.id == "demo" }
+        XCTAssertEqual(updated?.name, "Updated")
+        XCTAssertEqual(updated?.status, "busy")
+        XCTAssertEqual(updated?.cwd, "/updated")
+    }
+
+    @MainActor
+    func testCatalogHealthAndDuplicateEventsApplyLocally() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        model.snapshot?.surfaces = [
+            SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
+        ]
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":7,"type":"surface.health","data":{"surface":"codex","health":"unavailable","detail":"discovery failed"}}"#.utf8))
+        await model.receiveCatalog(event)
+        await model.receiveCatalog(event)
+        let surface = model.snapshot?.surfaces.first { $0.name == "codex" }
+        XCTAssertEqual(surface?.health, "unavailable")
+        XCTAssertFalse(surface?.connected ?? true)
+        XCTAssertEqual(surface?.healthDetail, "discovery failed")
+    }
+
+    @MainActor
+    func testCatalogRemovalDeletesOnlyItsSession() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        let before = model.snapshot!.sessions.count
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"session.removed","data":{"sessionId":"demo"}}"#.utf8))
+        await model.receiveCatalog(event)
+        XCTAssertNil(model.snapshot?.sessions.first { $0.id == "demo" })
+        XCTAssertEqual(model.snapshot?.totalSessions, before - 1)
+    }
+
+    @MainActor
+    func testSessionStreamRejectsEmptyItemIdentity() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+        let before = detail.timeline?.items
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"","version":1,"kind":"text","op":"upsert","ts":"2026-10-03T12:00:00Z","body":"must not replace existing rows","truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(event)
+        XCTAssertEqual(model.selectedDetail?.timeline?.items, before)
+    }
+
     @MainActor
     func testEventRefreshDoesNotRestorePreviousSelection() async {
         let probe = IOSSelectionProbe()
@@ -189,6 +256,15 @@ private actor EventConnectionProbe {
     }
 }
 
+private actor CatalogConnectionProbe {
+    private var connected = false
+    private var sequence: UInt64 = 0
+    private var type = ""
+    func markConnected() { connected = true }
+    func mark(_ event: CatalogStreamEvent) { sequence = event.seq; type = event.type }
+    func result() -> (connected: Bool, sequence: UInt64, type: String) { (connected, sequence, type) }
+}
+
 private final class EmptyEventStreamURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -204,6 +280,20 @@ private final class EmptyEventStreamURLProtocol: URLProtocol, @unchecked Sendabl
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    override func stopLoading() {}
+}
+
+private final class CatalogEventStreamURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        XCTAssertEqual(request.url?.path, "/api/v1/catalog-events")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Last-Event-ID"), "41")
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("data: {\"stream\":\"catalog\",\"seq\":42,\"type\":\"session.upserted\",\"data\":{}}\n\n".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
     override func stopLoading() {}
 }
 

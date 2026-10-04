@@ -374,6 +374,7 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	}
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID
+		observation.InputTurnID = state.completed.UserID
 		observation.Reply = &surface.ReplyResult{Text: state.completed.Assistant, UserText: state.completed.User, Done: true}
 	}
 	return observation, nil
@@ -541,11 +542,19 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 			}
 			lastText = turn.Assistant
 			if text != "" {
-				onEvent(surface.StreamEvent{Kind: "text", Text: text})
+				key := turn.MessageID
+				if key == "" {
+					key = turn.UserID
+				}
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: targetID, Kind: "text", Text: text})
 			}
 		}
 		if turn.Done {
-			onEvent(surface.StreamEvent{Kind: "done"})
+			key := turn.MessageID
+			if key == "" {
+				key = turn.UserID
+			}
+			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
 			return nil
 		}
 		if turn.Interrupted {

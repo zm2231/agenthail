@@ -193,10 +193,12 @@ struct DaemonState: Decodable, Equatable {
 struct DashboardSnapshot: Decodable {
     let updatedAt: String
     let eventCursor: UInt64?
+    let hostEpoch: String?
+    let catalogSeq: UInt64?
     let daemon: DaemonState
-    let surfaces: [SurfaceState]
-    let sessions: [SessionState]
-    let totalSessions: Int
+    var surfaces: [SurfaceState]
+    var sessions: [SessionState]
+    var totalSessions: Int
     let queue: [QueueState]
     let channels: [ChannelState]
     let relays: [RelayState]
@@ -267,7 +269,7 @@ struct SessionDetail: Decodable {
     let goal: GoalState?
     let model: String?
     let models: [ModelOption]?
-    let timeline: SessionTimeline?
+    var timeline: SessionTimeline?
     let readSource: String?
     let readError: String?
     let transcriptWarning: String?
@@ -376,10 +378,55 @@ enum AppSection: String, CaseIterable, Identifiable {
 
 struct SessionTimeline: Decodable {
     let nextBefore: Int64?
-    let items: [TimelineItem]
+    var items: [TimelineItem]
     let source: String?
     let truncated: Bool
     let unavailableReason: String?
+}
+
+struct SessionStreamItem: Decodable {
+    let itemId: String
+    let version: UInt64
+    let op: String
+    let kind: String
+    let turnId: String?
+    let ts: String
+    let body: String?
+    let truncated: Bool
+    let bodyRef: String?
+}
+
+struct SessionStreamBody: Decodable {
+    let sessionId: String
+    let bodyRef: String
+    let start: Int
+    let end: Int
+    let total: Int
+    let body: String
+    let truncated: Bool
+}
+
+struct SessionStreamEvent: Decodable {
+    let stream: String
+    let sessionId: String
+    let seq: UInt64
+    let type: String
+    let data: SessionStreamItem
+}
+
+struct CatalogStreamEvent: Decodable {
+    let stream: String
+    let seq: UInt64
+    let type: String
+    let data: CatalogStreamData
+}
+
+struct CatalogStreamData: Decodable {
+    let session: SessionState?
+    let sessionId: String?
+    let surface: String?
+    let health: String?
+    let detail: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {
@@ -392,6 +439,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let callId: String?
     let status: String?
     let truncated: Bool
+    let bodyRef: String?
 }
 
 struct SessionSearchResponse: Decodable {

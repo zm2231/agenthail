@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/peerbridge"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -79,7 +80,85 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if socket == "" {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude messaging socket is unavailable"))
 	}
+	if sender, senderSocket, found, err := c.nativeCaller(ctx, surface.SourceSessionID(ctx)); err != nil {
+		return nil, err
+	} else if found {
+		return claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, message)
+	}
 	return peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
+}
+
+func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surface.Session, bool, error) {
+	byPID := make(map[int]bool, len(ancestorPIDs))
+	for _, pid := range ancestorPIDs {
+		byPID[pid] = true
+	}
+	sessions, err := c.List(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	valid := make(map[int]surface.Session, len(sessions))
+	for _, session := range sessions {
+		if session.Transport == "uds" {
+			valid[session.PID] = session
+		}
+	}
+	var matches []surface.Session
+	for pid := range byPID {
+		record, present := c.peerRecord(pid)
+		if !present || str(record, "agenthail") == "peer-worker" {
+			continue
+		}
+		session, ok := valid[pid]
+		if !ok {
+			return nil, false, fmt.Errorf("Claude ancestor PID %d has no validated messaging endpoint", pid)
+		}
+		matches = append(matches, session)
+	}
+	if len(matches) == 0 {
+		return nil, false, nil
+	}
+	if len(matches) > 1 {
+		return nil, false, fmt.Errorf("ambiguous Claude caller ancestry matches %d sessions", len(matches))
+	}
+	return &matches[0], true, nil
+}
+
+func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session, string, bool, error) {
+	if id == "" {
+		return nil, "", false, nil
+	}
+	sessions, err := c.List(ctx)
+	if err != nil {
+		return nil, "", false, err
+	}
+	for _, session := range sessions {
+		if session.ID != id || session.Transport != "uds" {
+			continue
+		}
+		record, present := c.peerRecord(session.PID)
+		if !present || str(record, "agenthail") == "peer-worker" {
+			continue
+		}
+		socket := c.peerSocket(ctx, record)
+		if socket == "" {
+			return nil, "", false, surface.DeliveryUnavailable(fmt.Errorf("Claude sender messaging socket is unavailable"))
+		}
+		return &session, socket, true, nil
+	}
+	return nil, "", false, nil
+}
+
+func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
+	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(pid)+".json"))
+	if err != nil {
+		return nil, false
+	}
+	var record map[string]any
+	if json.Unmarshal(data, &record) != nil {
+		return nil, false
+	}
+	return record, true
 }
 
 func nativeClaudeOnly(session *surface.Session) bool {

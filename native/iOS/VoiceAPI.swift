@@ -12,6 +12,9 @@ struct VoiceState: Decodable {
     let truncated: Bool
     let occupied: Bool
     let textReceipt: String?
+    let target: RawSession?
+    let audioProvider: String?
+    let codingProvider: String?
 
     var hasCall: Bool { ["starting", "negotiating", "connected", "stopping", "unknown"].contains(phase) }
     var transcripts: [VoiceTranscript] {
@@ -63,6 +66,7 @@ struct VoiceAction: Encodable {
     var sdp: String? = nil
     var text: String? = nil
     var messageId: String? = nil
+    var targetId: String? = nil
 }
 
 @MainActor

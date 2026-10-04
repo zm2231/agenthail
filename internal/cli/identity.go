@@ -199,7 +199,7 @@ func (a *App) cmdChannel(args []string) error {
 		if len(members) == 0 {
 			return fmt.Errorf("channel #%s has no members", channelName)
 		}
-		var sent, queued, failed int
+		var sent, queued, submitted, failed int
 		for _, mid := range members {
 			sess, surf, err := a.resolveTarget(ctx, mid)
 			if err != nil {
@@ -216,12 +216,15 @@ func (a *App) cmdChannel(args []string) error {
 			if receipt.Evidence == surface.EvidenceQueued {
 				queued++
 				fmt.Printf("  [QUEUE] %s\n", a.resolveDisplay(mid))
+			} else if receipt.Evidence == surface.EvidenceSubmitted {
+				submitted++
+				fmt.Printf("  [SUBMIT] %s: %s\n", a.resolveDisplay(mid), receipt.Detail)
 			} else {
 				sent++
 				fmt.Printf("  [ OK ] %s\n", a.resolveDisplay(mid))
 			}
 		}
-		fmt.Printf("channel #%s: %d sent, %d queued, %d failed\n", channelName, sent, queued, failed)
+		fmt.Printf("channel #%s: %d sent, %d queued, %d submitted, %d failed\n", channelName, sent, queued, submitted, failed)
 		if queued > 0 {
 			if _, running := daemon.IsRunning(); !running {
 				fmt.Fprintln(os.Stderr, "warning: daemon is not running; queued channel deliveries will wait until 'agenthail daemon start'")

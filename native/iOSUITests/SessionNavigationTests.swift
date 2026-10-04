@@ -14,7 +14,7 @@ final class SessionNavigationTests: XCTestCase {
         workspace.tap()
         XCTAssertTrue(app.buttons["session-demo"].waitForExistence(timeout: 5))
         app.buttons["voice-entry"].tap()
-        XCTAssertTrue(app.navigationBars["Orchestrator"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Talk to orchestrator"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         for tab in ["Sessions", "Inbox", "Settings"] {
             XCTAssertTrue(app.tabBars.buttons[tab].isHittable, "\(tab) tab is covered by the Voice entry")

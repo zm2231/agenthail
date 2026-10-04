@@ -944,6 +944,17 @@ func (a *App) cmdSend(args []string) error {
 		}
 		return nil
 	}
+	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
+		if jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(receipt)
+		}
+		if receipt.DeliveryID != 0 {
+			fmt.Printf("delivery submitted (id %d); %s\n", receipt.DeliveryID, receipt.Detail)
+		} else {
+			fmt.Printf("delivery submitted; %s\n", receipt.Detail)
+		}
+		return nil
+	}
 	if syntheticNotion && receipt.TurnID != "" {
 		sess.ID = receipt.TurnID
 		sess.Name = syntheticNotionName
