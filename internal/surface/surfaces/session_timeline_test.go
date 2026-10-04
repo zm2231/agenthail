@@ -25,6 +25,11 @@ func timelineFixture(t *testing.T, data string) string {
 	return path
 }
 
+func TestMain(m *testing.M) {
+	transcriptPollInterval = 20 * time.Millisecond
+	os.Exit(m.Run())
+}
+
 // readTimeline reads a transcript page through the adapter's public ReadSession.
 func readTimeline(ctx context.Context, path, source string, before int64, limit int) (*surface.SessionReadResult, error) {
 	session := &surface.Session{Transcript: path}
@@ -263,7 +268,7 @@ func TestCodexSeedAndTailUseTheSameUserProjection(t *testing.T) {
 			seedUsers++
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tailUsers := 0
 	err = (&Codex{}).Stream(ctx, &surface.Session{ID: "review", Transcript: path, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
@@ -273,8 +278,8 @@ func TestCodexSeedAndTailUseTheSameUserProjection(t *testing.T) {
 				cancel()
 			}
 		}
-	}, time.Second)
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	}, 300*time.Millisecond)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatal(err)
 	}
 	if seedUsers != 1 || tailUsers != 1 {

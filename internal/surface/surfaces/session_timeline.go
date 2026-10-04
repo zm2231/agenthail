@@ -21,6 +21,10 @@ const timelineReadBudget = 16 << 20
 const timelineTextBudget = 16 << 10
 const timelineItemLimit = 200
 
+// transcriptPollInterval is how often live streams re-read their source.
+// Tests shorten it so stream windows do not dominate the suite.
+var transcriptPollInterval = 300 * time.Millisecond
+
 func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	path := session.Transcript
 	if path == "" {
@@ -205,7 +209,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(transcriptPollInterval):
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)

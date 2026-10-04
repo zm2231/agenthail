@@ -619,7 +619,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(transcriptPollInterval):
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)

@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-const initialClaudeObservationBytes = 32 * 1024 * 1024
+// initialClaudeObservationBytes bounds the transcript tail read when a Claude
+// session is first observed. Tests shrink it to exercise overlap cheaply.
+var initialClaudeObservationBytes int64 = 32 * 1024 * 1024
 
 type claudeObservationState struct {
 	offset               int64

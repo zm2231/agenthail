@@ -248,7 +248,7 @@ func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testi
 	}
 	collect := func() []surface.StreamEvent {
 		var events []surface.StreamEvent
-		err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) { events = append(events, event) }, 400*time.Millisecond)
+		err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) { events = append(events, event) }, 150*time.Millisecond)
 		if !errors.Is(err, surface.ErrStreamWindow) {
 			t.Fatalf("stream err=%v", err)
 		}
@@ -639,7 +639,17 @@ func TestClaudeStreamWaitsForNewTurnAfterCompletedBaseline(t *testing.T) {
 	}
 }
 
+// shrinkClaudeObservationWindow lets overlap tests exceed the initial
+// observation window without writing tens of megabytes.
+func shrinkClaudeObservationWindow(t *testing.T) {
+	t.Helper()
+	original := initialClaudeObservationBytes
+	initialClaudeObservationBytes = 1 << 20
+	t.Cleanup(func() { initialClaudeObservationBytes = original })
+}
+
 func TestClaudeStreamKeepsTargetTurnAcrossLongTranscriptOverlap(t *testing.T) {
+	shrinkClaudeObservationWindow(t)
 	path := writeTranscript(t, `{"type":"user","uuid":"target","message":{"content":"inspect"}}`)
 	claude := NewClaude("Default", t.TempDir())
 	if _, err := claude.Observe(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}); err != nil {
@@ -650,7 +660,7 @@ func TestClaudeStreamKeepsTargetTurnAcrossLongTranscriptOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	padding := `{"type":"system","subtype":"background"}` + "\n"
-	for written := 0; written < initialClaudeObservationBytes+(1<<20); written += len(padding) {
+	for written := int64(0); written < initialClaudeObservationBytes+(1<<20); written += int64(len(padding)) {
 		if _, err := file.WriteString(padding); err != nil {
 			file.Close()
 			t.Fatal(err)
@@ -688,13 +698,14 @@ func TestClaudeStreamKeepsTargetTurnAcrossLongTranscriptOverlap(t *testing.T) {
 }
 
 func TestClaudeStreamDoesNotCreditOlderTurnCompletionInOverlapToNewestTurn(t *testing.T) {
+	shrinkClaudeObservationWindow(t)
 	path := writeTranscript(t, `{"type":"user","uuid":"older","message":{"content":"first"}}`)
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	padding := `{"type":"system","subtype":"background"}` + "\n"
-	for written := 0; written < initialClaudeObservationBytes+(1<<20); written += len(padding) {
+	for written := int64(0); written < initialClaudeObservationBytes+(1<<20); written += int64(len(padding)) {
 		if _, err := file.WriteString(padding); err != nil {
 			file.Close()
 			t.Fatal(err)
@@ -717,7 +728,7 @@ func TestClaudeStreamDoesNotCreditOlderTurnCompletionInOverlapToNewestTurn(t *te
 	var events []surface.StreamEvent
 	err = claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "newest", func(event surface.StreamEvent) {
 		events = append(events, event)
-	}, time.Second)
+	}, 300*time.Millisecond)
 	if !errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream err=%v events=%+v", err, events)
 	}
