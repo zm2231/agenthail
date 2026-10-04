@@ -117,6 +117,67 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 	}
 }
 
+func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	transcript := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"type":"response_item","payload":{"id":"old","type":"message","role":"assistant","content":[{"type":"output_text","text":"old generation"}]}}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	oldEntry, changed, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "codex:old", Payload: []byte(`{"itemId":"old","kind":"text","role":"assistant","body":"old generation"}`)}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+	if err != nil || !changed {
+		t.Fatalf("old entry=%+v changed=%v err=%v", oldEntry, changed, err)
+	}
+	if err := reg.MarkSessionJournalSeed(from.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(t.TempDir(), "replacement.jsonl")
+	if err := os.WriteFile(replacement, []byte(`{"type":"response_item","payload":{"id":"new","type":"message","role":"assistant","content":[{"type":"output_text","text":"new generation"}]}}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, transcript); err != nil {
+		t.Fatal(err)
+	}
+	adapter := providers.NewCodex("http://127.0.0.1:1")
+	manager := newSessionSourceManager(reg)
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
+			t.Fatalf("attempt %d err=%v, want durable missing-identity failure", attempt+1, err)
+		}
+		waitForSessionSourceGone(t, manager)
+	}
+	status, seedSeq, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
+	if err != nil || status != registry.SessionJournalSeedFailed || seedSeq != oldEntry.Seq || identity != "" {
+		t.Fatalf("checkpoint status=%q seq=%d identity=%q err=%v", status, seedSeq, identity, err)
+	}
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenOld, seenNew := false, false
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		seenOld = seenOld || payload.Body == "old generation"
+		seenNew = seenNew || payload.Body == "new generation"
+	}
+	if !seenOld || seenNew {
+		t.Fatalf("journal mixed generations: old=%v new=%v page=%+v", seenOld, seenNew, page)
+	}
+}
+
 type restartingSource struct {
 	*daemonSurface
 	calls atomic.Int32

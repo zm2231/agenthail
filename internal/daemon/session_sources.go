@@ -358,7 +358,7 @@ func boundedSessionSourceReason(value string) string {
 }
 
 func (s *sessionSource) seedJournal() {
-	seedStatus, _, trustedIdentity, statusErr := s.manager.registry.SessionJournalSeedCheckpoint(s.session.ID)
+	seedStatus, seedSeq, trustedIdentity, statusErr := s.manager.registry.SessionJournalSeedCheckpoint(s.session.ID)
 	localTranscript := false
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
@@ -367,13 +367,13 @@ func (s *sessionSource) seedJournal() {
 		if !localTranscript {
 			return
 		}
-		if trustedIdentity == "" {
-			err := fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
-			s.seedErr = err
-			_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
-			s.appendSourceError(err)
-			return
-		}
+	}
+	if localTranscript && trustedIdentity == "" && seedSeq > 0 {
+		err := fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
+		s.seedErr = err
+		_ = s.manager.registry.MarkSessionJournalSeed(s.session.ID, false)
+		s.appendSourceError(err)
+		return
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
