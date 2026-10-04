@@ -544,7 +544,7 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 		default:
 		}
 		session, err := m.registry.Session(id)
-		keep := now.Sub(entry.lastUsed) <= maxIdle || (err == nil && session.Status != surface.StatusOffline && (session.Status == surface.StatusBusy || (!session.LastActive.IsZero() && now.Sub(session.LastActive) <= maxIdle)))
+		keep := keepPeerAlive(now, maxIdle, entry.lastUsed, session, err)
 		if keep {
 			continue
 		}
@@ -557,6 +557,25 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 			retired = append(retired, relay)
 		}
 	}
+	for id, relay := range m.relays {
+		if _, childPresent := m.children[id]; childPresent {
+			continue
+		}
+		select {
+		case <-relay.done:
+			delete(m.relays, id)
+			retired = append(retired, relay)
+			continue
+		default:
+		}
+		session, err := m.registry.Session(id)
+		if keepRelayAlive(now, maxIdle, relay.lastUsed, session, err) {
+			continue
+		}
+		delete(m.relays, id)
+		relay.input.Close()
+		retired = append(retired, relay)
+	}
 	m.mu.Unlock()
 	for _, entry := range retired {
 		select {
@@ -567,6 +586,20 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 		}
 		entry.cleanup()
 	}
+}
+
+func keepPeerAlive(now time.Time, maxIdle time.Duration, lastUsed time.Time, session *surface.Session, err error) bool {
+	if now.Sub(lastUsed) <= maxIdle {
+		return true
+	}
+	return err == nil && session.Status != surface.StatusOffline && (session.Status == surface.StatusBusy || (!session.LastActive.IsZero() && now.Sub(session.LastActive) <= maxIdle))
+}
+
+func keepRelayAlive(now time.Time, maxIdle time.Duration, lastUsed time.Time, session *surface.Session, err error) bool {
+	if err == nil && session.Status == surface.StatusOffline {
+		return false
+	}
+	return keepPeerAlive(now, maxIdle, lastUsed, session, err)
 }
 
 func (m *Manager) Close() {

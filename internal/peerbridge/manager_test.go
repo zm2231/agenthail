@@ -269,15 +269,22 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if manager.children["older"].process.Pid == second.process.Pid {
 		t.Fatal("dead worker reused")
 	}
-	if err := reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusIdle, LastActive: time.Now().Add(-48 * time.Hour)}); err != nil {
+	if err := reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusOffline, LastActive: time.Now().Add(-48 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if recent := manager.children["recent"]; recent != nil {
 		recent.lastUsed = time.Now().Add(-48 * time.Hour)
+		if err := recent.process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		<-recent.done
 	}
 	manager.RetireInactive(time.Now(), 24*time.Hour)
 	if manager.children["recent"] != nil {
 		t.Fatal("inactive peer was not retired")
+	}
+	if manager.relays["recent"] != nil {
+		t.Fatal("offline relay was not retired after its helper died")
 	}
 	children := manager.children
 	manager.Close()
