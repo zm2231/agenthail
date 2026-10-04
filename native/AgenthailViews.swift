@@ -208,6 +208,11 @@ struct ConversationDetailView: View {
 struct ConversationHeader: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
+    @State private var showingGoalEditor = false
+    @State private var editingBudget = false
+    @State private var settingNewGoal = false
+    @State private var goalText = ""
+    @State private var budgetText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -248,30 +253,67 @@ struct ConversationHeader: View {
 					}
 					if !goal.objective.isEmpty { Text(goal.objective).font(.callout).lineLimit(2) }
 					HStack(spacing: 12) {
-						if let elapsed = goal.timeUsedSeconds { Text("\(elapsed)s elapsed") }
+					if let elapsed = goal.timeUsedSeconds { Text("\(macGoalDuration(elapsed)) elapsed") }
 						if let tokens = goal.tokensUsed { Text("\(tokens.formatted()) tokens") }
 						if let budget = goal.tokenBudget { Text("\(budget.formatted()) budget") }
+						if let created = goal.createdAt { Text("Created \(created)") }
+						if let updated = goal.updatedAt { Text("Updated \(updated)") }
 					}
 					.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
 					if !session.isReadOnly && session.capabilities.goal {
 						HStack(spacing: 10) {
+							Button("Edit goal") { goalText = goal.objective; settingNewGoal = false; showingGoalEditor = true }
 							if goal.status == "active" { Button("Pause") { model.perform(action: "goal-pause", sessionID: session.id) } }
 							if goal.status == "paused" { Button("Resume") { model.perform(action: "goal-resume", sessionID: session.id) } }
+							Button(goal.tokenBudget == nil ? "Set budget" : "Edit budget") { budgetText = goal.tokenBudget.map(String.init) ?? ""; editingBudget = true }
 							if !goal.objective.isEmpty { Button("Clear", role: .destructive) { model.perform(action: "goal-clear", sessionID: session.id) } }
 						}
 						.controlSize(.small)
 					}
 				}
 				.padding(.top, 2)
-			}
-        }
-        .padding(24)
+			} else if !session.isReadOnly && session.capabilities.goal {
+					Button("Set goal") { goalText = ""; settingNewGoal = true; showingGoalEditor = true }
+				}
+		}
+		.padding(24)
+		.sheet(isPresented: Binding(get: { showingGoalEditor || editingBudget }, set: { if !$0 { showingGoalEditor = false; editingBudget = false } })) {
+				VStack(alignment: .leading, spacing: 16) {
+					Text(editingBudget ? "Token budget" : "Goal objective").font(.headline)
+					if editingBudget {
+						TextField("Token budget", text: $budgetText)
+							.textFieldStyle(.roundedBorder)
+					} else {
+						TextEditor(text: $goalText)
+							.frame(minHeight: 90)
+							.border(Color(nsColor: .separatorColor))
+					}
+					HStack {
+						Button("Cancel") { showingGoalEditor = false; editingBudget = false }
+						Spacer()
+						Button("Save") {
+							model.perform(action: settingNewGoal ? "goal-set" : editingBudget ? "goal-budget" : "goal-edit", sessionID: session.id, message: editingBudget ? budgetText : goalText)
+							showingGoalEditor = false; editingBudget = false; settingNewGoal = false
+						}
+						.disabled((editingBudget ? budgetText : goalText).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+					}
+				}
+				.padding(24)
+				.frame(minWidth: 360)
+		}
     }
 
     private var statusLine: String {
         let state = session.isWorking ? "Working" : session.open ? "Open" : "Ready"
         return "\(state) · \(session.queueCount) queued"
     }
+}
+
+private func macGoalDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "\(seconds)s" }
+    let minutes = seconds / 60
+    if minutes < 60 { return "\(minutes)m \(seconds % 60)s" }
+    return "\(minutes / 60)h \(minutes % 60)m"
 }
 
 struct TranscriptView: View {
