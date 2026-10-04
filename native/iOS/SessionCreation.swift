@@ -99,6 +99,7 @@ struct NewSessionSheet: View {
                     }
                 }
                 if let error = model.creationError { Section { Text(error).foregroundStyle(.red) } }
+                if let warning = model.creationWarning { Section { Text(warning).foregroundStyle(.orange) } }
             }
             .disabled(model.creatingSession)
             .navigationTitle("New session")
