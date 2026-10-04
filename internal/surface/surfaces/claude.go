@@ -535,6 +535,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if state.hasCurrent {
 		currentTurnID = state.current.UserID
 	}
+	terminalTurns := map[string]bool{}
 	for time.Now().Before(deadline) {
 		lineOffset := offset
 		completed := false
@@ -546,9 +547,16 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				return nil
 			}
 			turnID := currentTurnID
-			if str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) {
+			if str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record) {
 				currentTurnID = str(record, "uuid")
 				turnID = currentTurnID
+			}
+			done, interrupted := claudeStreamTerminal(record)
+			if interrupted {
+				if uuid != "" && turnID == uuid {
+					return fmt.Errorf("Claude turn %s was interrupted", uuid)
+				}
+				return nil
 			}
 			items := claudeTimelineItems(record)
 			if err := decorateTimelineAttachments(ctx, items, record, "claude", recordOffset); err != nil {
@@ -566,15 +574,13 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
-			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
+			if done && turnID != "" && !terminalTurns[turnID] {
+				terminalTurns[turnID] = true
 				key := stableTimelineItemID(recordOffset, line, len(items))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
-				if uuid != "" {
+				if uuid != "" && turnID == uuid {
 					completed = true
 				}
-			}
-			if uuid != "" && str(record, "type") == "assistant" && claudeTerminalInterruption(strNested(record, "message", "stop_reason")) && turnID == uuid {
-				return fmt.Errorf("Claude turn %s was interrupted", uuid)
 			}
 			return nil
 		})
@@ -604,6 +610,28 @@ func claudeRecordHasToolResult(record map[string]any) bool {
 		}
 	}
 	return str(message, "tool_use_id") != ""
+}
+
+func claudeRecordIsInterrupt(record map[string]any) bool {
+	if str(record, "type") != "user" {
+		return false
+	}
+	message, _ := record["message"].(map[string]any)
+	return isClaudeInterruptMarker(strings.TrimSpace(transcriptText(message["content"])))
+}
+
+func claudeStreamTerminal(record map[string]any) (done, interrupted bool) {
+	switch str(record, "type") {
+	case "system":
+		return str(record, "subtype") == "turn_duration", false
+	case "assistant":
+		reason := strNested(record, "message", "stop_reason")
+		return reason == "end_turn", claudeTerminalInterruption(reason)
+	case "user":
+		return false, claudeRecordIsInterrupt(record)
+	default:
+		return false, false
+	}
 }
 
 func strNested(record map[string]any, object, field string) string {
