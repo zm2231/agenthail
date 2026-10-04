@@ -6,7 +6,18 @@ import SwiftUI
 import UserNotifications
 
 private let notificationCategory = "AGENTHAIL_COMPLETION"
+private let sessionNotificationCategory = "AGENTHAIL_SESSION"
 private let openDashboardAction = "OPEN_DASHBOARD"
+private let replyAction = "REPLY"
+
+private func registerNotificationCategories(_ center: UNUserNotificationCenter) {
+    let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
+    let reply = UNTextInputNotificationAction(identifier: replyAction, title: "Reply", textInputButtonTitle: "Send", textInputPlaceholder: "Message")
+    center.setNotificationCategories([
+        UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: []),
+        UNNotificationCategory(identifier: sessionNotificationCategory, actions: [reply, open], intentIdentifiers: []),
+    ])
+}
 
 private struct NotificationState: Codable {
     let available: Bool
@@ -93,8 +104,7 @@ enum NativeCommand {
             return 64
         }
         let center = UNUserNotificationCenter.current()
-        let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
-        center.setNotificationCategories([UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: [])])
+        registerNotificationCategories(center)
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = message
@@ -103,6 +113,7 @@ enum NativeCommand {
         if let sessionID = values["session"], !sessionID.isEmpty {
             content.userInfo = ["sessionId": sessionID]
             content.threadIdentifier = sessionID
+            content.categoryIdentifier = sessionNotificationCategory
         }
         let request = UNNotificationRequest(identifier: values["identifier"] ?? UUID().uuidString, content: content, trigger: nil)
         let semaphore = DispatchSemaphore(value: 0)
@@ -261,8 +272,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         NSUpdateDynamicServices()
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
-        center.setNotificationCategories([UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: [])])
+        registerNotificationCategories(center)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         terminateDuplicateApplications()
         duplicateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -305,8 +315,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction else { return }
         let sessionID = response.notification.request.content.userInfo["sessionId"] as? String
+        if response.actionIdentifier == replyAction, let sessionID, let text = (response as? UNTextInputNotificationResponse)?.userText {
+            await MainActor.run { NotificationRoute.shared.reply(text, to: sessionID) }
+            return
+        }
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction else { return }
         await MainActor.run { NotificationRoute.shared.open(sessionID: sessionID) }
     }
 }
@@ -318,6 +332,7 @@ final class NotificationRoute: ObservableObject {
         var sessionID: String?
         var newSession = false
         var sharedText: String?
+        var reply: String?
     }
 
     static let shared = NotificationRoute()
@@ -330,6 +345,10 @@ final class NotificationRoute: ObservableObject {
 
     func share(_ text: String) {
         latest = Request(sessionID: nil, sharedText: text)
+    }
+
+    func reply(_ text: String, to sessionID: String) {
+        latest = Request(sessionID: sessionID, reply: text)
     }
 
     func open(_ link: AgenthailLink) {
@@ -368,6 +387,13 @@ private struct MenuBarLabel: View {
 
     private func handleRoute() {
         guard let request = route.claim() else { return }
+        if let text = request.reply, let sessionID = request.sessionID {
+            Task {
+                guard !(await model.reply(text, to: sessionID)) else { return }
+                NotificationRoute.shared.open(sessionID: sessionID)
+            }
+            return
+        }
         if let sessionID = request.sessionID { model.openSession(reference: sessionID) }
         NSApplication.shared.activate()
         openWindow(id: "main")

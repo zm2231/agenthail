@@ -495,9 +495,39 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func send(_ message: String, to sessionID: String, steer: Bool) {
+    func reply(_ message: String, to sessionID: String, connectionTimeout: Duration = .seconds(20)) async -> Bool {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let api else { return }
+        guard !text.isEmpty else { return true }
+        guard await awaitConnection(timeout: connectionTimeout) else {
+            restoreToComposer(text, sessionID: sessionID)
+            return false
+        }
+        return await withCheckedContinuation { continuation in
+            send(text, to: sessionID, steer: false) { continuation.resume(returning: $0) }
+        }
+    }
+
+    private func awaitConnection(timeout: Duration) async -> Bool {
+        if api != nil, snapshot != nil { return true }
+        let waiter = Task { @MainActor in
+            for await value in $snapshot.values where value != nil { return true }
+            return false
+        }
+        let timer = Task {
+            try? await Task.sleep(for: timeout)
+            waiter.cancel()
+        }
+        let connected = await waiter.value
+        timer.cancel()
+        return connected && api != nil
+    }
+
+    func send(_ message: String, to sessionID: String, steer: Bool, completion: ((Bool) -> Void)? = nil) {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let api else {
+            completion?(false)
+            return
+        }
         let action = steer ? "steer" : "send"
         let idempotencyKey: String
         if let retry = pendingSendRequests[sessionID], retry.action == action, retry.message == text {
@@ -514,10 +544,12 @@ final class AgenthailModel: ObservableObject {
                 if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
                 updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))
                 operationError = nil
+                completion?(true)
             } catch {
                 localSends[sessionID]?.removeAll { $0.id == pending.id }
                 restoreToComposer(text, sessionID: sessionID)
                 operationError = error.localizedDescription
+                completion?(false)
             }
         }
     }

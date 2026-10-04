@@ -327,7 +327,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if !GetNotificationStatus().Enabled {
 			err = fmt.Errorf("desktop notifications are not enabled")
 		} else {
-			err = Notify("Agenthail", "Notifications are working")
+			err = Notify("Agenthail", "Notifications are working", "")
 		}
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)

@@ -116,7 +116,7 @@ func OpenNotificationSettings() error {
 	return err
 }
 
-func Notify(title, message string) error {
+func Notify(title, message, sessionID string) error {
 	config, err := LoadNotificationConfig()
 	if err != nil {
 		return err
@@ -127,12 +127,16 @@ func Notify(title, message string) error {
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("desktop notifications currently support macOS only")
 	}
-	_, err = runNotificationHelper(5*time.Second,
+	args := []string{
 		"send",
 		"--title", boundedNotificationText(title, 120),
 		"--message", boundedNotificationText(message, 1200),
 		"--identifier", fmt.Sprintf("agenthail-%d", time.Now().UnixNano()),
-	)
+	}
+	if sessionID != "" {
+		args = append(args, "--session", sessionID)
+	}
+	_, err = runNotificationHelper(5*time.Second, args...)
 	return err
 }
 

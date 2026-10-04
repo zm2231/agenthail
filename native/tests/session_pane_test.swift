@@ -3,7 +3,7 @@ import Foundation
 @main
 struct SessionPaneTest {
     @MainActor
-    static func main() {
+    static func main() async {
         let model = AgenthailModel(connecting: false)
         let first = model.openPane()
         let second = model.openPane()
@@ -27,6 +27,9 @@ struct SessionPaneTest {
         second.select("C")
         check(second.selectedSessionID == "A", "a closed pane ignores selection")
         check(first.selectedSessionID == "A", "closing one pane leaves the others")
+
+        let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
+        check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }
 
     private static func check(_ condition: Bool, _ message: String) {

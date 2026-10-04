@@ -12,6 +12,7 @@ The Mac app keeps your connected conversations in one window.
 - **⌘K** opens a command palette for jumping to any session, starting a new one (⌘N), and session actions.
 - Any session can open in its own window from its context menu or the palette. Windows showing the same session share its draft.
 - A session that disappears from the host stays readable with a notice until you close it.
+- When an agent finishes, its notification opens that session. **Reply** on the notification sends your answer to the session; if it can't be sent, the app opens the session with your reply in its draft.
 - **Send to Agenthail** in any app's Services menu adds the selected text to the open session's draft, or opens the new session form with it filled in. Nothing is sent or started until you do it.
 - Links open the app from anywhere: `agenthail://session/<id or @handle>` opens a session, `agenthail://new` starts one, and `agenthail://open` brings the app forward.
 
