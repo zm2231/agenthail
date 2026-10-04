@@ -261,13 +261,14 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
     app.history.timeline = { ...(app.history.timeline || {}), items };
     const exchanges = [];
     for (const value of items) {
+      if (value.kind === "attachment") continue;
       if (value.role === "user") exchanges.push({ user: value.text });
       else if (value.role === "assistant" || value.kind === "text") {
         if (!exchanges.length || exchanges.at(-1).assistant) exchanges.push({});
@@ -963,6 +964,14 @@ function applySessionMetadata(detail, metadata, initialSeq) {
     if (Object.hasOwn(metadata, "context")) detail.context = context;
   }
 }
+function renderImageAttachment(item, session) {
+  const attachment = item.attachment;
+  const fallback = escape(item.text || "Image attachment");
+  if (!attachment?.id || !/^image\/(png|jpeg|gif|webp|avif|heic|heif)$/.test(attachment.mediaType || ""))
+    return `<div class="turn"><p>${fallback}</p></div>`;
+  const url = `/api/session-attachment?sessionId=${encodeURIComponent(session.id)}&id=${encodeURIComponent(attachment.id)}`;
+  return `<figure class="turn transcript-image"><img src="${escape(url)}" loading="lazy" decoding="async" alt="${fallback}" referrerpolicy="no-referrer"><figcaption>${fallback}</figcaption></figure>`;
+}
 function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning } = app.history || {};
   const session = app.selected;
@@ -1024,13 +1033,23 @@ function renderChat() {
     JSON.stringify(goal || null),
     Boolean(capabilities.goal),
     transcriptWarning,
+    app.history?.timeline?.items?.filter(item => item.attachment),
   ]);
   if (app.transcriptSignature === signature) return;
   const chatBody = $("#chat-body");
   const previousScrollTop = chatBody.scrollTop;
   const wasPinned =
     chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24;
-  const messages = exchanges
+  const timeline = app.history?.timeline?.items || [];
+  const messages = timeline.some(item => item.kind === "attachment")
+    ? timeline.map(item => {
+      if (item.kind === "attachment") return renderImageAttachment(item, session);
+      if (item.kind !== "text" || !item.text) return "";
+      const user = item.role === "user";
+      const content = user ? handoffMessage(item.text) : {text: item.text, label: labels[session.surface] || session.surface};
+      return renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`);
+    }).join("")
+    : exchanges
     .flatMap((exchange, index) => {
       const user = handoffMessage(exchange.user);
       const assistant = String(exchange.assistant || "");
