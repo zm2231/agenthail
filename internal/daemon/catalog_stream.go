@@ -535,16 +535,6 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 	}
 }
 
-func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time) dashboardSession {
-	alias, _ := d.Registry.ReverseAlias(session.ID)
-	open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
-	config, err := LoadDashboardConfig()
-	if err != nil {
-		config = DashboardConfig{}
-	}
-	return d.catalogSessionProjection(adapter, session, identity, observedAt, alias, d.Registry.QueueCount(session.ID), open, config)
-}
-
 func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {
 	if session.Runtime == nil {
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}

@@ -676,19 +676,6 @@ func (d *Daemon) dashboardHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func (d *Daemon) dashboardStateHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	state, err := d.dashboardState(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeDashboardJSON(w, http.StatusOK, state)
-}
-
 func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.CatalogPageRequest) (dashboardState, error) {
 	eventCursor := uint64(0)
 	if d.events != nil {

@@ -55,20 +55,6 @@ type claudeInitializeResponse struct {
 	} `json:"response"`
 }
 
-func parseClaudeRuntimeModels(data []byte, requestID string) ([]surface.ModelOption, error) {
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		if models, ok := parseClaudeRuntimeModelLine(scanner.Bytes(), requestID); ok {
-			return models, nil
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read Claude model catalog: %w", err)
-	}
-	return nil, fmt.Errorf("Claude initialize response did not contain model options")
-}
-
 func parseClaudeRuntimeModelLine(line []byte, requestID string) ([]surface.ModelOption, bool) {
 	var message claudeInitializeResponse
 	if json.Unmarshal(line, &message) != nil || message.Type != "control_response" || message.Response.RequestID != requestID {

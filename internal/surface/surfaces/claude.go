@@ -140,14 +140,6 @@ func toCse(bridgeID string) string {
 	return "cse_" + s
 }
 
-func projectDir(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects", strings.ReplaceAll(cwd, "/", "-"))
-}
-
 func (c *Claude) transcriptPath(s *surface.Session) string {
 	return c.resolveTranscript(s, s.ID)
 }

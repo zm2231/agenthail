@@ -244,11 +244,6 @@ func (c *Codex) listThreadItems(ctx context.Context, conn codexClient, threadID,
 	return items, nil
 }
 
-func codexTurnStatus(value any) surface.SessionStatus {
-	status, _, _ := codexTurnState(value)
-	return status
-}
-
 func codexTurnState(value any) (surface.SessionStatus, bool, string) {
 	if object, ok := value.(map[string]any); ok {
 		value = object["type"]
