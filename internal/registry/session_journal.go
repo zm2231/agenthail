@@ -1,9 +1,12 @@
 package registry
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -158,6 +161,13 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			return SessionJournalEntry{}, false, err
 		}
 		if found {
+			existingBody, existingBodyFound, err := sessionJournalBody(tx, existing)
+			if err != nil {
+				return SessionJournalEntry{}, false, err
+			}
+			if sameSessionJournalContent(existing, input, existingBody, existingBodyFound) {
+				return existing, false, tx.Commit()
+			}
 			if existing.BodyRef != "" && existing.BodyRef != input.BodyRef {
 				if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref=?`, input.SessionID, existing.BodyRef); err != nil {
 					return SessionJournalEntry{}, false, err
@@ -175,7 +185,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 			if err := trimSessionJournal(tx, input.SessionID, retention); err != nil {
 				return SessionJournalEntry{}, false, err
 			}
-			return input, false, tx.Commit()
+			return input, true, tx.Commit()
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO session_journal(session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref) VALUES(?,?,?,?,?,?,?,?)`, input.SessionID, input.Seq, input.Kind, input.ProviderKey, input.Payload, input.ObservedAt.Format(time.RFC3339Nano), input.Bytes, input.BodyRef); err != nil {
@@ -191,6 +201,46 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 		return SessionJournalEntry{}, false, err
 	}
 	return input, true, tx.Commit()
+}
+
+func sameSessionJournalContent(existing, input SessionJournalEntry, existingBody []byte, existingBodyFound bool) bool {
+	if existing.Kind != input.Kind || !sameSessionJournalPayload(existing.Payload, input.Payload) {
+		return false
+	}
+	if (existing.BodyRef == "") != (input.BodyRef == "") {
+		return false
+	}
+	if existing.BodyRef != "" && !existingBodyFound {
+		return false
+	}
+	return bytes.Equal(existingBody, input.FullBody)
+}
+
+func sameSessionJournalPayload(existing, input []byte) bool {
+	if bytes.Equal(existing, input) {
+		return true
+	}
+	var existingObject, inputObject map[string]any
+	if json.Unmarshal(existing, &existingObject) != nil || json.Unmarshal(input, &inputObject) != nil {
+		return false
+	}
+	delete(existingObject, "bodyRef")
+	delete(inputObject, "bodyRef")
+	return reflect.DeepEqual(existingObject, inputObject)
+}
+
+func sessionJournalBody(q interface{ QueryRow(string, ...any) *sql.Row }, entry SessionJournalEntry) ([]byte, bool, error) {
+	if entry.BodyRef == "" {
+		return nil, true, nil
+	}
+	var body []byte
+	if err := q.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, entry.SessionID, entry.BodyRef).Scan(&body); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return body, true, nil
 }
 
 func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int) (SessionJournalWindow, error) {
