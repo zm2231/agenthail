@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1353,5 +1354,41 @@ func TestCodexDesktopStreamDerivesIdentityWhenJoiningMidTurn(t *testing.T) {
 	empty := &codexDesktopStreamState{}
 	if _, ok := empty.textEvent("unbound", ""); ok {
 		t.Fatal("emitted unbound Desktop fragment")
+	}
+}
+
+func TestCodexDesktopLiveImageItemUsesOpaqueStableAttachmentReference(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(testPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "input.png")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	codex := NewCodex("")
+	state := &codexDesktopStreamState{turnID: "turn-image"}
+	event := codexEvent{Sequence: 11, Params: map[string]any{
+		"threadId": "thread-image",
+		"turnId":   "turn-image",
+		"item": map[string]any{
+			"id": "user-image-1", "type": "userMessage",
+			"content": []any{map[string]any{"type": "image", "source": map[string]any{"type": "path", "path": path}}},
+		},
+	}}
+	events := state.itemEvents(context.Background(), codex, "thread-image", event)
+	if len(events) != 1 || events[0].Kind != "attachment" || events[0].Attachment == nil {
+		t.Fatalf("events=%+v", events)
+	}
+	if !strings.HasPrefix(events[0].Attachment.ID, "live-attachment:thread-image:user-image-1:0:") || events[0].Text != "Image attachment" {
+		t.Fatalf("attachment=%+v", events[0].Attachment)
+	}
+	encoded, _ := json.Marshal(events[0])
+	if strings.Contains(string(encoded), base64.StdEncoding.EncodeToString(data)) || strings.Contains(string(encoded), string(data)) {
+		t.Fatal("live event carried image bytes")
+	}
+	attachment, got, err := codex.ReadAttachment(context.Background(), &surface.Session{ID: "thread-image"}, events[0].Attachment.ID)
+	if err != nil || attachment.ID != events[0].Attachment.ID || string(got) != string(data) {
+		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(got), err)
 	}
 }

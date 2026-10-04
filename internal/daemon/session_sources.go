@@ -335,6 +335,11 @@ func (s *sessionSource) seedJournal() {
 		if s.session.Surface == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
 			providerKey = item.ID
 		}
+		if item.Text != "" && item.Kind != "done" {
+			s.mu.Lock()
+			s.appendBodies[providerKey] = item.Text
+			s.mu.Unlock()
+		}
 		s.append(surface.StreamEvent{
 			Role:        item.Role,
 			Title:       item.Title,
@@ -477,8 +482,8 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 	}
 	body := event.Text
 	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
-		s.appendBodies[providerKey] += body
-		body = s.appendBodies[providerKey]
+		body = appendSessionBody(s.appendBodies[providerKey], body, event.Version)
+		s.appendBodies[providerKey] = body
 		op = "upsert"
 	}
 	at := event.Timestamp
@@ -486,4 +491,23 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 		at = time.Now().UTC()
 	}
 	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated}
+}
+
+func appendSessionBody(current, incoming string, version uint64) string {
+	if incoming == "" {
+		return current
+	}
+	if current == "" {
+		return incoming
+	}
+	if current == incoming || strings.HasPrefix(current, incoming) || strings.HasPrefix(incoming, current) {
+		if strings.HasPrefix(incoming, current) {
+			return incoming
+		}
+		return current
+	}
+	if version > 0 && version <= uint64(len(current)) && strings.Contains(current, incoming) {
+		return current
+	}
+	return current + incoming
 }

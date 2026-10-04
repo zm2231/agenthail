@@ -36,7 +36,50 @@ func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id stri
 	return readTranscriptAttachment(ctx, s, id, "claude")
 }
 func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
+	if attachment, data, ok := c.readLiveAttachment(ctx, s, id); ok {
+		return attachment, data, nil
+	}
 	return readTranscriptAttachment(ctx, s, id, "codex")
+}
+
+func (c *Codex) rememberLiveAttachment(ctx context.Context, sessionID, itemID string, index int, ref attachmentReference) (*surface.Attachment, error) {
+	data, err := readAttachmentReference(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	media, width, height, err := validateAttachment(data)
+	if err != nil {
+		return nil, err
+	}
+	id := "live-attachment:" + sessionID + ":" + itemID + ":" + strconv.Itoa(index) + ":" + hashBytes(data)
+	attachment := surface.Attachment{ID: id, MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}
+	c.attachmentMu.Lock()
+	if c.attachments == nil {
+		c.attachments = map[string]liveAttachment{}
+	}
+	c.attachments[sessionID+"\x00"+id] = liveAttachment{meta: attachment, data: append([]byte(nil), data...)}
+	c.attachmentMu.Unlock()
+	return &attachment, nil
+}
+
+func (c *Codex) readLiveAttachment(ctx context.Context, session *surface.Session, id string) (*surface.Attachment, []byte, bool) {
+	if session == nil || !strings.HasPrefix(id, "live-attachment:") {
+		return nil, nil, false
+	}
+	select {
+	case <-ctx.Done():
+		return nil, nil, false
+	default:
+	}
+	c.attachmentMu.Lock()
+	attachment, ok := c.attachments[session.ID+"\x00"+id]
+	c.attachmentMu.Unlock()
+	if !ok {
+		return nil, nil, false
+	}
+	data := append([]byte(nil), attachment.data...)
+	meta := attachment.meta
+	return &meta, data, true
 }
 
 func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, source string) (*surface.Attachment, []byte, error) {

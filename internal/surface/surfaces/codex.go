@@ -28,6 +28,13 @@ type Codex struct {
 	runtimeMu    sync.Mutex
 	contextMu    sync.Mutex
 	contextState map[string]*codexContextState
+	attachmentMu sync.Mutex
+	attachments  map[string]liveAttachment
+}
+
+type liveAttachment struct {
+	meta surface.Attachment
+	data []byte
 }
 
 func NewCodex(remoteURL string) *Codex {
@@ -38,7 +45,7 @@ func NewCodex(remoteURL string) *Codex {
 	if !strings.Contains(remoteURL, "://") {
 		remoteURL = "ws://127.0.0.1:" + remoteURL
 	}
-	return &Codex{desktopURL: remoteURL, managed: managed}
+	return &Codex{desktopURL: remoteURL, managed: managed, attachments: map[string]liveAttachment{}}
 }
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
@@ -959,7 +966,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 					}
 				}
 			case uuid == "" && strings.Contains(strings.ToLower(method), "item"):
-				if itemEvent, ok := desktopState.itemEvent(event); ok {
+				for _, itemEvent := range desktopState.itemEvents(ctx, c, sess.ID, event) {
 					onEvent(itemEvent)
 				}
 			case codexCompletionMethod(method):
@@ -1109,6 +1116,41 @@ func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEve
 		result.Final = true
 	}
 	return result, true
+}
+
+func (s *codexDesktopStreamState) itemEvents(ctx context.Context, c *Codex, sessionID string, event codexEvent) []surface.StreamEvent {
+	item := codexEventItem(event.Params)
+	if item == nil {
+		return nil
+	}
+	var events []surface.StreamEvent
+	if itemEvent, ok := s.itemEvent(event); ok {
+		events = append(events, itemEvent)
+	}
+	turnID := s.turnID
+	if eventTurnID := codexEventTurnID(event.Params); eventTurnID != "" {
+		turnID = eventTurnID
+	}
+	if turnID == "" {
+		return events
+	}
+	itemID := codexEventItemID(item)
+	if itemID == "" {
+		return events
+	}
+	role := "assistant"
+	if strings.Contains(strings.ToLower(str(item, "type")), "user") {
+		role = "user"
+	}
+	for index, ref := range codexEventImageReferences(event.Params) {
+		attachment, err := c.rememberLiveAttachment(ctx, sessionID, itemID, index, ref)
+		if err != nil {
+			continue
+		}
+		key := codexDesktopStreamKey(turnID, "attachment", itemID+":"+strconv.Itoa(index))
+		events = append(events, surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: turnID, Kind: "attachment", Role: role, Title: "Image", Text: "Image attachment", Attachment: attachment})
+	}
+	return events
 }
 
 func (s *codexDesktopStreamState) finalEvent(turnID string, turn *codexTurn) (surface.StreamEvent, bool) {
