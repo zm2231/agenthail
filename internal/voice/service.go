@@ -302,6 +302,8 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		return s.selectTarget(ctx, a.TargetID, true)
 	case "delegate":
 		return s.delegate(ctx, a)
+	case "target-interrupt":
+		return s.interruptTarget(ctx, a)
 	case "start":
 		if v.Session == nil {
 			return errors.New("prepare the operator first")
@@ -511,6 +513,43 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	attemptID, targetID, turnID := v.AttemptID, target.Session.ID, receipt.TurnID
 	go s.watchDelegation(attemptID, a.MessageID, targetID, turnID)
 	return s.save()
+}
+
+func (s *Service) interruptTarget(ctx context.Context, a Action) error {
+	v := &s.state.State
+	if a.AttemptID != v.AttemptID || v.Phase != "connected" || v.Target == nil || s.target == nil {
+		return errors.New("select a connected target call before interrupting it")
+	}
+	target, err := s.target(ctx, v.Target.ID)
+	if err != nil {
+		return err
+	}
+	if target == nil || target.Session == nil || target.Adapter == nil || target.Session.ID != v.Target.ID {
+		return errors.New("selected target is no longer available")
+	}
+	if err := surface.EnsureWritableSession(ctx, target.Adapter, target.Session); err != nil {
+		return err
+	}
+	capabilities := surface.EffectiveCapabilities(target.Session, target.Adapter.Capabilities())
+	if capabilities.ReadOnly {
+		return errors.New(capabilities.ReadOnlyReason)
+	}
+	if !capabilities.Interrupt {
+		return errors.New("selected target does not support interruption")
+	}
+	observation, err := target.Adapter.Observe(ctx, target.Session)
+	if err != nil {
+		return fmt.Errorf("confirm selected target turn: %w", err)
+	}
+	if observation == nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID == "" {
+		return errors.New("selected target has no confirmed active turn to interrupt")
+	}
+	if err := target.Adapter.Interrupt(ctx, target.Session); err != nil {
+		return err
+	}
+	v.Message = "Interrupt requested for " + target.Session.Name + " turn " + observation.ActiveTurnID + "."
+	s.state.State.Events = append(s.state.State.Events, Event{Method: "voice/target/interrupt", Params: map[string]any{"targetId": target.Session.ID, "turnId": observation.ActiveTurnID}})
+	return nil
 }
 
 func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string) {

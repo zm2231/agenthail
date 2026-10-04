@@ -36,10 +36,13 @@ type fixtureProvider struct {
 }
 
 type targetFixture struct {
-	session surface.Session
-	sent    []string
-	stream  func(func(surface.StreamEvent))
-	turnID  string
+	session      surface.Session
+	sent         []string
+	stream       func(func(surface.StreamEvent))
+	turnID       string
+	observation  *surface.TurnObservation
+	interrupts   int
+	capabilities surface.Capabilities
 }
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
@@ -54,6 +57,9 @@ func (f *targetFixture) Resolve(_ context.Context, id string) (*surface.Session,
 	return &copy, nil
 }
 func (f *targetFixture) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
+	if f.observation != nil {
+		return f.observation, nil
+	}
 	return &surface.TurnObservation{Status: surface.StatusIdle}, nil
 }
 func (f *targetFixture) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
@@ -95,12 +101,16 @@ func (f *targetFixture) Model(context.Context, *surface.Session, string) (string
 	return "", surface.ErrUnsupported
 }
 func (f *targetFixture) Interrupt(context.Context, *surface.Session) error {
-	return surface.ErrUnsupported
+	f.interrupts++
+	return nil
 }
 func (f *targetFixture) Steer(context.Context, *surface.Session, string) error {
 	return surface.ErrUnsupported
 }
 func (f *targetFixture) Capabilities() surface.Capabilities {
+	if f.capabilities.Interrupt {
+		return f.capabilities
+	}
 	return surface.Capabilities{Send: true, Stream: true}
 }
 
@@ -472,6 +482,37 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 		t.Fatalf("return response=%+v", p.toolCalls)
 	}
 	p.mu.Unlock()
+}
+
+func TestTargetInterruptRequiresConfirmedSelectedTurn(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}, capabilities: surface.Capabilities{Send: true, Stream: true, Interrupt: true}, observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-a"}}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		return &Target{Session: resolved, Adapter: target}, nil
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "target-interrupt", AttemptID: "call-a"})
+	if target.interrupts != 1 || !strings.Contains(s.View("phone").Message, "turn-a") {
+		t.Fatalf("interrupts=%d state=%+v", target.interrupts, s.View("phone"))
+	}
+	target.observation = &surface.TurnObservation{Status: surface.StatusBusy}
+	if _, err := s.Apply(context.Background(), "phone", Action{Action: "target-interrupt", AttemptID: "call-a"}); err == nil || target.interrupts != 1 {
+		t.Fatalf("unconfirmed target was interrupted: err=%v interrupts=%d", err, target.interrupts)
+	}
+	target.observation = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-b"}
+	target.capabilities = surface.Capabilities{Send: true, Stream: true}
+	if _, err := s.Apply(context.Background(), "phone", Action{Action: "target-interrupt", AttemptID: "call-a"}); err == nil || target.interrupts != 1 {
+		t.Fatalf("unsupported target was interrupted: err=%v interrupts=%d", err, target.interrupts)
+	}
 }
 
 func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {

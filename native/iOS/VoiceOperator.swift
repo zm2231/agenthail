@@ -287,6 +287,19 @@ final class VoiceOperatorModel: ObservableObject {
         catch { if !closed, generation == current { self.error = error.localizedDescription } }
     }
 
+    func interruptTarget() async {
+        guard let api, !closed, !working, state?.phase == "connected", state?.occupied != true, state?.target != nil else { return }
+        working = true
+        defer { working = false }
+        let current = generation
+        do {
+            let next = try await api.action(VoiceAction(action: "target-interrupt", attemptId: state?.attemptId))
+            if !closed, generation == current { state = next }
+        } catch {
+            if !closed, generation == current { self.error = error.localizedDescription }
+        }
+    }
+
     func startNewConversation() async {
         guard let api, canStartNewConversation else { return }
         working = true; error = nil; generation += 1
@@ -321,6 +334,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmInterrupt = false
+    @State private var confirmTargetInterrupt = false
     @State private var confirmNewConversation = false
     @State private var showKeyboard = false
     @State private var showDetails = false
@@ -469,6 +483,11 @@ struct AgenthailVoiceOperatorSheet: View {
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
             }
+            .confirmationDialog("Stop the selected session's confirmed active turn? Audio stays connected.", isPresented: $confirmTargetInterrupt) {
+                Button("Stop selected session", role: .destructive) { Task { await model.interruptTarget() } }
+            } message: {
+                Text("This does not hang up the call or stop another agent.")
+            }
             .confirmationDialog("Start a new orchestrator conversation?", isPresented: $confirmNewConversation, titleVisibility: .visible) {
                 Button("Start new conversation") {
                     followingLatest = true
@@ -518,6 +537,9 @@ struct AgenthailVoiceOperatorSheet: View {
                             if model.state?.target != nil {
                                 Button("Clear route") { model.targetID = "" }
                                     .buttonStyle(.borderless)
+                                Button("Stop selected session", role: .destructive) { confirmTargetInterrupt = true }
+                                    .buttonStyle(.borderless)
+                                    .disabled(model.working)
                             }
                         }
                     }

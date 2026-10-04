@@ -1099,7 +1099,7 @@ function voiceCallActive() {
 }
 function renderVoice() {
   const state = app.voice.state;
-  const call = $("#voice-call"), transfer = $("#voice-transfer"), hangup = $("#voice-hangup"), status = $("#voice-status"), target = $("#voice-target"), help = $("#voice-help");
+  const call = $("#voice-call"), transfer = $("#voice-transfer"), stopTarget = $("#voice-stop-target"), hangup = $("#voice-hangup"), status = $("#voice-status"), target = $("#voice-target"), help = $("#voice-help");
   if (!call || !state) return;
   const routed = state.target?.name || "Agenthail orchestrator";
   const active = voiceCallActive();
@@ -1108,6 +1108,7 @@ function renderVoice() {
   else if (state.target) target.value = state.target.id;
   call.hidden = active;
   transfer.hidden = !active;
+  stopTarget.hidden = !active || !state.target;
   hangup.hidden = !active;
   transfer.textContent = target.value.trim() ? "Transfer to session" : "Return to orchestrator";
   help.textContent = target.value.trim() ? "This routes work only to that exact existing session." : "Leave blank to use Agenthail’s normal orchestration workflow.";
@@ -1157,6 +1158,13 @@ async function startVoice() {
 }
 async function transferVoice() {
   try { await voiceRequest("transfer", { targetId: $("#voice-target").value.trim() }); }
+  catch (error) { toast(error.message); }
+}
+async function interruptVoiceTarget() {
+  const state = app.voice.state;
+  if (!state?.target || !voiceCallActive()) return;
+  if (!window.confirm(`Stop the confirmed active turn in ${state.target.name}? Audio stays connected.`)) return;
+  try { await voiceRequest("target-interrupt", { attemptId: app.voice.attemptId || state.attemptId }); }
   catch (error) { toast(error.message); }
 }
 async function hangupVoice() {
@@ -1672,6 +1680,7 @@ $("#refresh").addEventListener("click", async () => {
 $("#voice-orchestrator").addEventListener("click", () => openVoice());
 $("#voice-call").addEventListener("click", startVoice);
 $("#voice-transfer").addEventListener("click", transferVoice);
+$("#voice-stop-target").addEventListener("click", interruptVoiceTarget);
 $("#voice-hangup").addEventListener("click", hangupVoice);
 $("#voice-dialog").addEventListener("close", () => {
   if (app.voice.localAudio) hangupVoice();

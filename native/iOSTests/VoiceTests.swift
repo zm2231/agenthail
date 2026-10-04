@@ -132,6 +132,17 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
+    func testConnectedSelectedCallCanRequestTargetInterrupt() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"call-a","events":[],"occupied":false,"truncated":false,"target":{"id":"target-a","surface":"codex","name":"Build session","status":"busy","lastActive":"2026-10-03T00:00:00Z"}}"#.utf8))
+        let model = VoiceOperatorModel(api: api, audio: audio)
+        await model.refresh()
+        await model.interruptTarget()
+        XCTAssertEqual(api.actions.last?.action, "target-interrupt")
+        XCTAssertEqual(api.actions.last?.attemptId, "call-a")
+    }
+
+    @MainActor
     func testClosedScreenCannotSendTextOrInterrupt() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true

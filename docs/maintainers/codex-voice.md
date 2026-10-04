@@ -24,11 +24,13 @@ distinction between automated checks, real Codex evaluation, and phone testing.
 3. Follow [phone pairing](../native-apps.md#iphone-app): Tailscale on both devices,
    private HTTPS phone access, and a paired token with `read` and `control`
    scopes. A read-only pairing cannot start Voice.
-4. Choose **Talk to orchestrator**, enter the exact ID or unambiguous alias of
-   an existing Codex or Claude session, then choose **Call Codex Voice**. Grant
-   microphone access. **Connected** requires both the audio peer and its data
-   channel; accepting the start request alone is not a connected call.
-5. Ask the selected session a bounded request you own and intend to control.
+4. Choose **Talk to orchestrator** for the normal Agenthail workflow, or open
+   **Session details** and choose **Call this session** to prefill one exact
+   existing Codex or Claude target. Grant microphone access. **Connected**
+   requires both the audio peer and its data channel; accepting the start
+   request alone is not a connected call.
+5. Ask the orchestrator or selected session a bounded request you own and
+   intend to control.
    Inspect **Agent activity** and **Open full timeline** to verify tools,
    delivery evidence, and the actual reply.
 
@@ -101,7 +103,7 @@ existing transport; the voice layer does not emulate them.
 | Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. |
 | Mute | Stops sending microphone content without stopping the call or agent work. |
 | Hang up / leave app | Stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. It does not interrupt an agent turn. Calls do not continue in the background. |
-| Interrupt | Separate confirmed **Interrupt orchestrator turn** uses the existing native interrupt capability. It does not stop already-delegated agents. A spoken request to stop a worker is resolved to that specific worker and its capabilities. |
+| Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting its interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |
 | Approvals | Existing native approval policy remains in effect. The phone can display recorded activity but does not implement approval/question replies. A blocked native approval needs attention on the Mac. |
 | Multiple phones | One paired token owns an active call. Other devices see occupancy and cannot take over or read its negotiation SDP. |
 | Reconnect | No automatic redial or inference replay. Hang up an uncertain call, then call again. A missing phone heartbeat requests audio stop after about 40 seconds; worker turns remain. |
