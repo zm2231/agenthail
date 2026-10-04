@@ -305,22 +305,31 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		}
 	}
 	seen := map[string]bool{}
-	for _, turn := range []struct{ message, records string }{
-		{"m2", `{"type":"user","uuid":"u2","message":{"content":"second"}}
+	for _, turn := range []struct{ message, turnID, answer, records string }{
+		{"m2", "u2", "second answer", `{"type":"user","uuid":"u2","message":{"content":"second"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
 `},
-		{"m3", `{"type":"user","uuid":"u3","message":{"content":"third"}}
+		{"m3", "u3", "third answer", `{"type":"user","uuid":"u3","message":{"content":"third"}}
 {"type":"assistant","uuid":"a3","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"third answer"}]}}
 `},
 	} {
 		appendTranscript(turn.records)
 		deadline := time.After(3 * time.Second)
+		answerID := ""
 		for !seen[turn.message] {
 			select {
 			case entry := <-subscription.Entries:
 				var payload sessionJournalPayload
-				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.ItemID == turn.message+":phase:done" && payload.Kind == "done" {
-					seen[turn.message] = true
+				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.TurnID == turn.turnID {
+					if payload.Kind == "message" && payload.Role == "assistant" && payload.Body == turn.answer {
+						answerID = payload.ItemID
+					}
+					if payload.Kind == "done" {
+						if answerID == "" || answerID == payload.ItemID {
+							t.Fatalf("completion lost or overwrote answer: answer=%q done=%+v", answerID, payload)
+						}
+						seen[turn.message] = true
+					}
 				}
 			case <-deadline:
 				t.Fatalf("provider did not tail turn %s", turn.message)
