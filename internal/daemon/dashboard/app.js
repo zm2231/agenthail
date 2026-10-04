@@ -8,6 +8,7 @@ const app = {
     relays: [],
     history: [],
     attention: [],
+    deliveryProblems: [],
   },
   selected: null,
   history: null,
@@ -490,6 +491,16 @@ function renderOverview() {
         `<article class="attention-item"><div><div class="attention-target"><i></i>${escape(item.target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.requestedAction)} · ${timeAgo(item.createdAt)}</p></div><div class="operation-actions"><button class="soft-button" data-retry="${item.queueId}" type="button">Retry</button><button class="soft-button" data-cancel="${item.queueId}" type="button">Cancel</button></div></article>`,
     )
     .join("");
+  renderDeliveryProblems();
+}
+function renderDeliveryProblems() {
+  const problems = app.state.deliveryProblems || [];
+  $("#delivery-problems-panel").hidden = problems.length === 0;
+  $("#delivery-problems-list").innerHTML = problems.map(item => {
+    const session = app.state.sessions.find(session => session.id === item.sessionId);
+    const target = session ? displayName(session) : item.sessionId;
+    return `<article class="attention-item"><div><div class="attention-target">${escape(target)}</div><strong>${escape(item.reason)}</strong><p>${escape(item.message)}</p><p>${escape(item.status)} · ${timeAgo(item.at)}</p></div><div class="operation-actions"><button class="soft-button" data-delivery-dismiss="${escape(item.deliveryId)}" type="button">Dismiss</button></div></article>`;
+  }).join("");
 }
 function sessionIsCurrent(session) {
   return session.current === true;
@@ -857,6 +868,7 @@ async function load(fresh = false) {
       relays: state.relays || [],
       history: state.history || [],
       attention: state.attention || [],
+      deliveryProblems: state.deliveryProblems || [],
     };
     $("#daemon-presence").className = app.state.daemon?.running
       ? "daemon-presence online"
@@ -1104,6 +1116,7 @@ async function action(action, extra = {}) {
     action === "notion-create" ||
     action === "session-create" ||
     action === "queue-retry" ||
+    action === "delivery-dismiss" ||
     action === "queue-cancel";
   if (!app.selected && !networkAction)
     throw Error("Choose a conversation first");
@@ -1385,6 +1398,20 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-open-operations]"))
     return showView("operations");
   const retry = event.target.closest("[data-retry]");
+  const deliveryDismiss = event.target.closest("[data-delivery-dismiss]");
+  if (deliveryDismiss) {
+    deliveryDismiss.disabled = true;
+    try {
+      const deliveryId = Number(deliveryDismiss.dataset.deliveryDismiss);
+      await action("delivery-dismiss", { deliveryId });
+      app.state.deliveryProblems = app.state.deliveryProblems.filter(item => item.deliveryId !== deliveryId);
+      renderDeliveryProblems();
+    } catch (error) {
+      deliveryDismiss.disabled = false;
+      toast(friendlyError(error));
+    }
+    return;
+  }
   if (retry) {
     retry.disabled = true;
     try {
