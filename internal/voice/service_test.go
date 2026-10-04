@@ -481,6 +481,73 @@ func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
 	}
 }
 
+func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "user", Role: "user", Kind: "message", Text: "do not speak"})
+		callback(surface.StreamEvent{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x"})
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "append", Version: 4, Kind: "text", Text: "part"})
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "upsert", Version: 12, Final: true, Kind: "message", Text: "part complete"})
+		callback(surface.StreamEvent{ID: "second", Role: "assistant", Final: true, Kind: "message", Text: "second answer"})
+		callback(surface.StreamEvent{Kind: "done"})
+	}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		return &Target{Session: resolved, Adapter: target}, err
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
+	time.Sleep(100 * time.Millisecond)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var spoken []string
+	for _, params := range p.params {
+		if text, ok := params["text"].(string); ok {
+			spoken = append(spoken, text)
+		}
+	}
+	if !reflect.DeepEqual(spoken, []string{"part", " complete", "second answer"}) {
+		t.Fatalf("spoken=%v params=%+v", spoken, p.params)
+	}
+}
+
+func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
+	p := &fixtureProvider{}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "partial"})
+		callback(surface.StreamEvent{Kind: "done", Status: "cancelled"})
+	}
+	s := NewWithTargets(filepath.Join(t.TempDir(), "voice", "operator.json"), p, nil, "/fixture/agenthail", func(_ context.Context, id string) (*Target, error) {
+		resolved, err := target.Resolve(context.Background(), id)
+		return &Target{Session: resolved, Adapter: target}, err
+	}, delivery.Dispatcher{})
+	t.Cleanup(func() { s.mu.Lock(); s.state.State.Phase = "ended"; s.mu.Unlock() })
+	apply(t, s, Action{Action: "prepare"})
+	apply(t, s, Action{Action: "select", TargetID: "target-a"})
+	startFixture(t, s)
+	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
+	time.Sleep(100 * time.Millisecond)
+	v := s.View("phone")
+	failed := false
+	for _, event := range v.Events {
+		if event.Method == "voice/delegation/failed" {
+			failed = true
+		}
+	}
+	if !failed {
+		t.Fatalf("cancelled terminal did not fail delegation: %+v", v.Events)
+	}
+}
+
 func TestDelegationBlocksUncorrelatedClaudePeer(t *testing.T) {
 	p := &fixtureProvider{}
 	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, Name: "Peer", Transport: "uds"}}

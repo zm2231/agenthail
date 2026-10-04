@@ -1022,10 +1022,37 @@ func streamEventDelta(event sessionstream.Event, bodies map[string]string, versi
 	return event.Body
 }
 
+func directStreamEventDelta(event surface.StreamEvent, bodies map[string]string, versions map[string]uint64) string {
+	key := event.ID
+	if key == "" {
+		key = event.ProviderKey
+	}
+	if key == "" {
+		return event.Text
+	}
+	if prior, found := versions[key]; found && event.Version > 0 && prior > 0 && event.Version <= prior {
+		return ""
+	}
+	versions[key] = event.Version
+	previous := bodies[key]
+	if event.Operation == "append" {
+		bodies[key] = previous + event.Text
+		return event.Text
+	}
+	bodies[key] = event.Text
+	return surface.StreamEventDelta(event, previous)
+}
+
 func printSessionStreamEvent(event sessionstream.Event, bodies map[string]string, versions map[string]uint64) {
-	if event.Kind == "tool_use" {
+	if event.Kind == "tool_use" || event.Kind == "toolCall" || event.Kind == "tool_call" {
 		if text := streamEventDelta(event, bodies, versions); text != "" {
 			fmt.Printf("  -> %s\n", text)
+		}
+		return
+	}
+	if event.Kind == "tool_result" || event.Kind == "toolResult" {
+		if text := streamEventDelta(event, bodies, versions); text != "" {
+			fmt.Printf("  <- %s\n", text)
 		}
 		return
 	}
@@ -1035,6 +1062,55 @@ func printSessionStreamEvent(event sessionstream.Event, bodies map[string]string
 	if text := streamEventDelta(event, bodies, versions); text != "" {
 		fmt.Print(text)
 	}
+}
+
+func directStreamTerminalError(event surface.StreamEvent, turnID string) error {
+	if !event.Failed() {
+		return nil
+	}
+	reason := event.Status
+	if reason == "" {
+		reason = "terminal failure"
+	}
+	return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+}
+
+func streamDirectOutput(ctx context.Context, surf surface.Surface, sess *surface.Session, turnID string, timeout time.Duration) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	bodies := map[string]string{}
+	versions := map[string]uint64{}
+	var terminalErr error
+	err := surf.Stream(streamCtx, sess, turnID, func(event surface.StreamEvent) {
+		switch event.Class() {
+		case surface.StreamEventMessage:
+			if event.Role != "" && event.Role != "assistant" {
+				return
+			}
+			if text := directStreamEventDelta(event, bodies, versions); text != "" {
+				fmt.Print(text)
+			}
+		case surface.StreamEventToolCall:
+			if text := event.Text; text != "" {
+				fmt.Printf("  -> %s\n", text)
+			}
+		case surface.StreamEventToolResult:
+			if text := event.Text; text != "" {
+				fmt.Printf("  <- %s\n", text)
+			}
+		case surface.StreamEventTerminal:
+			if err := directStreamTerminalError(event, turnID); err != nil {
+				terminalErr = err
+				cancel()
+				return
+			}
+			fmt.Println()
+		}
+	}, timeout)
+	if terminalErr != nil {
+		return terminalErr
+	}
+	return err
 }
 
 func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscription, turnID string) (*surface.ReplyResult, error) {
@@ -1259,15 +1335,7 @@ func (a *App) cmdSend(args []string) error {
 		if useDaemonStream {
 			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
 		}
-		return surf.Stream(ctx, sess, receipt.TurnID, func(ev surface.StreamEvent) {
-			if ev.Kind == "text" {
-				fmt.Print(ev.Text)
-			} else if ev.Kind == "tool_use" {
-				fmt.Printf("  -> %s\n", ev.Text)
-			} else if ev.Kind == "done" {
-				fmt.Println()
-			}
-		}, timeout)
+		return streamDirectOutput(ctx, surf, sess, receipt.TurnID, timeout)
 	}
 
 	if wantReply {
@@ -1625,16 +1693,7 @@ func (a *App) cmdStream(args []string) error {
 			}
 		}
 	}
-	return surf.Stream(ctx, sess, "", func(ev surface.StreamEvent) {
-		switch ev.Kind {
-		case "text":
-			fmt.Print(ev.Text)
-		case "tool_use":
-			fmt.Printf("  -> %s\n", ev.Text)
-		case "done":
-			fmt.Println()
-		}
-	}, timeout)
+	return streamDirectOutput(ctx, surf, sess, "", timeout)
 }
 
 func (a *App) cmdCompact(args []string) error {

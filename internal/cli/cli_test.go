@@ -795,6 +795,49 @@ func TestSendStreamPreservesFragmentBytes(t *testing.T) {
 	}
 }
 
+func TestSendDirectStreamDisplaysNormalizedClaudeTimelineAndFailsTerminal(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindClaude}
+	fake := &cliSurface{
+		kind:       surface.KindClaude,
+		sessions:   map[string]surface.Session{"s": session},
+		caps:       surface.Capabilities{Send: true, Stream: true},
+		sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true},
+		streamEvents: []surface.StreamEvent{
+			{ID: "user", Role: "user", Kind: "message", Text: "do not print"},
+			{ID: "answer", Role: "assistant", Kind: "message", Text: "answer", Final: true, Version: 6},
+			{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x", CallID: "call-1"},
+			{ID: "result", Role: "user", Kind: "toolResult", Text: "contents", CallID: "call-1"},
+			{Kind: "done", Status: "cancelled"},
+		},
+	}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"claude:s", "hello", "--stream"}) })
+	if err == nil || !strings.Contains(err.Error(), "did not complete successfully: cancelled") || output != "answer  -> Read x\n  <- contents\n" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
+func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
+	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	fake := &cliSurface{
+		kind:       surface.KindCodex,
+		sessions:   map[string]surface.Session{"s": session},
+		caps:       surface.Capabilities{Send: true, Stream: true},
+		sendResult: &surface.SendResult{UUID: "turn-a", Accepted: true},
+		streamEvents: []surface.StreamEvent{
+			{ID: "managed:turn-a:text", Operation: "append", Version: 3, Kind: "text", Text: "hel"},
+			{ID: "managed:turn-a:text", Operation: "append", Version: 5, Kind: "text", Text: "lo"},
+			{ID: "managed:turn-a:text", Operation: "upsert", Version: 12, Final: true, Kind: "message", Role: "assistant", Text: "hello final"},
+			{Kind: "done"},
+		},
+	}
+	app, _ := cliFixture(t, fake)
+	output, err := captureStdout(t, func() error { return app.cmdSend([]string{"codex:s", "hello", "--stream"}) })
+	if err != nil || output != "hello final\n" {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}
+
 func TestWaitForReplyReportsTurnThatEndsWithoutCompletion(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, observations: []*surface.TurnObservation{
 		{Status: surface.StatusBusy, ActiveTurnID: "turn", CompletedTurnID: "old", Reply: &surface.ReplyResult{Text: "old", Done: true}},
