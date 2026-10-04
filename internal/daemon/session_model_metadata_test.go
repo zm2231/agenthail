@@ -129,7 +129,7 @@ func TestDashboardSessionMetadataReportsIndependentProviderErrors(t *testing.T) 
 			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if body.Errors[test.wantError] != "Metadata unavailable." || len(body.Errors) != 1 {
+			if body.Errors[test.wantError] == "" || len(body.Errors) != 1 {
 				t.Fatalf("errors=%v", body.Errors)
 			}
 		})

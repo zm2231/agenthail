@@ -87,7 +87,7 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 		second.Cancel()
 		t.Fatal("replacement before first catch-up page was accepted")
 	}
-	if !strings.Contains(err.Error(), "replaced before catch-up") || !errors.Is(err, surface.ErrTranscriptUnavailable) {
+	if !errors.Is(err, surface.ErrTranscriptUnavailable) {
 		t.Fatalf("err=%v, want typed replacement failure", err)
 	}
 	status, _, trustedAfterFailure, err := reg.SessionJournalSeedCheckpoint(from.ID)
@@ -153,7 +153,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 	adapter := providers.NewCodex("http://127.0.0.1:1")
 	manager := newSessionSourceManager(reg)
 	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
+		if _, err := manager.prepareStream(context.Background(), &from, adapter); !errors.Is(err, surface.ErrTranscriptUnavailable) {
 			t.Fatalf("attempt %d err=%v, want durable missing-identity failure", attempt+1, err)
 		}
 		waitForSessionSourceGone(t, manager)

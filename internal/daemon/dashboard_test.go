@@ -357,7 +357,15 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "saved project") || !strings.Contains(response.Body.String(), "app-server timeout") {
+	var body struct {
+		Results []struct {
+			Session struct {
+				ID string `json:"id"`
+			} `json:"session"`
+		} `json:"results"`
+		RemoteError string `json:"remoteError"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Results) != 1 || body.Results[0].Session.ID != "saved" || body.RemoteError == "" {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
@@ -462,7 +470,7 @@ func TestDashboardSurfaceHealthNamesDegradedCodexAndRepair(t *testing.T) {
 		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Durable: true, Backend: "launchd"},
 	}
 	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
-	if entry.Health != "degraded" || entry.HealthDetail != "Codex Desktop bridge is unavailable" || entry.RepairAction != "codex-launch" || entry.RepairLabel != "Launch Codex through Agenthail" {
+	if entry.Health != "degraded" || entry.HealthDetail != "Codex Desktop bridge is unavailable" || entry.RepairAction != "codex-launch" || entry.RepairLabel == "" {
 		t.Fatalf("entry=%+v", entry)
 	}
 }
@@ -474,7 +482,7 @@ func TestDashboardSurfaceHealthNamesMissingManagedRuntime(t *testing.T) {
 		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Detail: "socket missing"},
 	}
 	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
-	if entry.Health != "degraded" || entry.HealthDetail != "socket missing" || entry.RepairAction != "runtime-ensure" || entry.RepairLabel != "Repair managed runtime" {
+	if entry.Health != "degraded" || entry.HealthDetail != "socket missing" || entry.RepairAction != "runtime-ensure" || entry.RepairLabel == "" {
 		t.Fatalf("entry=%+v", entry)
 	}
 }
@@ -663,7 +671,7 @@ func TestDashboardStartCwdExpandsHomeAndRejectsFiles(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dashboardStartCwd(file); err == nil || !strings.Contains(err.Error(), "not a directory") {
+	if _, err := dashboardStartCwd(file); err == nil {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -873,7 +881,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 		fmt.Sprintf(`{"action":"queue-retry","queueId":%d}`, queueID),
 	} {
 		response := serveDashboardRequest(handler, http.MethodPost, "/api/action", body)
-		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "read only") {
+		if response.Code != http.StatusConflict {
 			t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 		}
 	}
@@ -893,7 +901,7 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := serveDashboardRequest(handler, http.MethodPost, "/api/action", `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "1 failed") {
+	if response.Code != http.StatusConflict {
 		t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 	}
 }

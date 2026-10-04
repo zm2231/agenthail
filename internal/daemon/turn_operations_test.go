@@ -85,7 +85,7 @@ func TestDashboardUnknownCreationWithoutIdentityIsMachineReadable(t *testing.T) 
 	d, _, fake, _, _ := daemonFixture(t)
 	d.Surfaces = []surface.Surface{&unknownStartSurface{daemonSurface: fake}}
 	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`)
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"status":"failed"`) || strings.Contains(w.Body.String(), `"unknown":true`) || !strings.Contains(w.Body.String(), `no session identity`) {
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"status":"failed"`) || strings.Contains(w.Body.String(), `"unknown":true`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

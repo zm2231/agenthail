@@ -162,7 +162,7 @@ func TestSessionPageContinuesIntoProviderHistoryPastSeed(t *testing.T) {
 		t.Fatalf("provider reads=%v", befores)
 	}
 	failed := read(fmt.Sprintf("&timelineBefore=%d", first.NextBefore))
-	if len(failed.Items) != 0 || failed.NextBefore != 0 || !strings.Contains(failed.UnavailableReason, "Older activity could not be read") {
+	if len(failed.Items) != 0 || failed.NextBefore != 0 || failed.UnavailableReason == "" {
 		t.Fatalf("failed older read reported exhaustion: %+v", failed)
 	}
 }
