@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,6 +24,97 @@ type sourceCountingSurface struct {
 	events    chan surface.StreamEvent
 	items     []surface.TimelineItem
 	streamErr error
+}
+
+func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	transcript := filepath.Join(t.TempDir(), "session.jsonl")
+	initial := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-old"}}
+{"type":"response_item","payload":{"id":"old","type":"message","role":"assistant","content":[{"type":"output_text","text":"old generation"}]}}
+`
+	if err := os.WriteFile(transcript, []byte(initial), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
+	if err := reg.RegisterSession(from); err != nil {
+		reg.Close()
+		t.Fatal(err)
+	}
+	adapter := providers.NewCodex("http://127.0.0.1:1")
+	manager := newSessionSourceManager(reg)
+	first, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err != nil {
+		reg.Close()
+		t.Fatal(err)
+	}
+	status, _, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
+	if err != nil || status != registry.SessionJournalSeeded || identity == "" {
+		first.Cancel()
+		reg.Close()
+		t.Fatalf("checkpoint status=%q identity=%q err=%v", status, identity, err)
+	}
+	first.Cancel()
+	waitForSessionSourceGone(t, manager)
+	if err := reg.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rotated := filepath.Join(t.TempDir(), "replacement.jsonl")
+	replacement := `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-new"}}
+{"type":"response_item","payload":{"id":"new","type":"message","role":"assistant","content":[{"type":"output_text","text":"new generation"}]}}
+`
+	if err := os.WriteFile(rotated, []byte(replacement), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(rotated, transcript); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, err = registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	manager = newSessionSourceManager(reg)
+	second, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err == nil {
+		second.Cancel()
+		t.Fatal("replacement before first catch-up page was accepted")
+	}
+	if !strings.Contains(err.Error(), "replaced before catch-up") || !errors.Is(err, surface.ErrTranscriptUnavailable) {
+		t.Fatalf("err=%v, want typed replacement failure", err)
+	}
+	status, _, trustedAfterFailure, err := reg.SessionJournalSeedCheckpoint(from.ID)
+	if err != nil || status != registry.SessionJournalSeedFailed || trustedAfterFailure != identity {
+		t.Fatalf("failed checkpoint status=%q identity=%q err=%v, want preserved %q", status, trustedAfterFailure, err, identity)
+	}
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Body == "new generation" {
+			t.Fatalf("replacement item was published: %+v", payload)
+		}
+	}
+
+	third, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err == nil {
+		third.Cancel()
+		t.Fatal("failed retry trusted replacement identity was bypassed")
+	}
+	status, _, retryIdentity, checkpointErr := reg.SessionJournalSeedCheckpoint(from.ID)
+	if checkpointErr != nil || status != registry.SessionJournalSeedFailed || retryIdentity != identity {
+		t.Fatalf("retry checkpoint status=%q identity=%q err=%v", status, retryIdentity, checkpointErr)
+	}
 }
 
 type restartingSource struct {
