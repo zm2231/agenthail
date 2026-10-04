@@ -55,7 +55,6 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 		remote.TranscriptOffset = local.TranscriptOffset
 		remote.TranscriptOffsetSet = local.TranscriptOffsetSet
 		remote.CodexUsesEventUsers = local.CodexUsesEventUsers
-		remote.CodexUsesEventUsersSet = local.CodexUsesEventUsersSet
 		return remote, nil
 	}
 	failure := codexNativeReadFailure(remoteErr)
@@ -123,13 +122,9 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			if turnID := codexRecordTurnID(record); turnID != "" {
 				currentTurnID = turnID
 			}
-			if !session.CodexUsesEventUsersSet {
-				usesEventUsers, modeErr := codexTranscriptUsesEventUsers(ctx, path, offset)
-				if modeErr != nil {
-					return modeErr
-				}
-				session.CodexUsesEventUsers = usesEventUsers
-				session.CodexUsesEventUsersSet = true
+			payload, _ := record["payload"].(map[string]any)
+			if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
+				session.CodexUsesEventUsers = true
 			}
 			items := codexTimelineItems(record)
 			if session.CodexUsesEventUsers && str(record, "type") == "response_item" && hasUserTimelineItem(items) {
@@ -315,7 +310,6 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		}
 	}
 	result.CodexUsesEventUsers = usesEventUsers
-	result.CodexUsesEventUsersSet = source == "codex"
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem

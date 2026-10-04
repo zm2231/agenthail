@@ -247,7 +247,6 @@ func (s *sessionSource) run() {
 		current.TranscriptOffset = s.session.TranscriptOffset
 		current.TranscriptOffsetSet = s.session.TranscriptOffsetSet
 		current.CodexUsesEventUsers = s.session.CodexUsesEventUsers
-		current.CodexUsesEventUsersSet = s.session.CodexUsesEventUsersSet
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
@@ -360,7 +359,6 @@ func (s *sessionSource) seedJournal() {
 		s.session.TranscriptOffset = read.TranscriptOffset
 		s.session.TranscriptOffsetSet = true
 		s.session.CodexUsesEventUsers = read.CodexUsesEventUsers
-		s.session.CodexUsesEventUsersSet = read.CodexUsesEventUsersSet
 	} else if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok && provider.RequiresLocalTranscript(&s.session) {
 		err := fmt.Errorf("Codex local transcript is unavailable")
 		s.seedErr = err
