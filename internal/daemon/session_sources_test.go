@@ -436,8 +436,32 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	}
 	defer subscription.Cancel()
 	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
-	if err != nil || len(window.Entries) != 2 {
+	if err != nil || len(window.Entries) < 2 {
 		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	seedBodies := map[string]string{"seed": "user", "seed answer": "assistant"}
+	seenSeed := map[string]bool{}
+	var seedThrough uint64
+	for _, entry := range window.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if role, ok := seedBodies[payload.Body]; ok && payload.Role == role {
+			if seenSeed[payload.Body] {
+				t.Fatalf("duplicate seed record body=%q window=%+v", payload.Body, window)
+			}
+			seenSeed[payload.Body] = true
+			if entry.Seq > seedThrough {
+				seedThrough = entry.Seq
+			}
+		}
+	}
+	if len(seenSeed) != len(seedBodies) {
+		t.Fatalf("seed prefix missing: seen=%v window=%+v", seenSeed, window)
+	}
+	if seedThrough == 0 {
+		t.Fatalf("seed checkpoint missing: %+v", window.Entries[:2])
 	}
 	time.Sleep(100 * time.Millisecond)
 	appendTranscript := func(records string) {
@@ -469,6 +493,9 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		for !seen[turn.message] {
 			select {
 			case entry := <-subscription.Entries:
+				if entry.Seq <= seedThrough {
+					continue
+				}
 				var payload sessionJournalPayload
 				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.TurnID == turn.turnID {
 					if payload.Kind == "message" && payload.Role == "assistant" && payload.Body == turn.answer {
