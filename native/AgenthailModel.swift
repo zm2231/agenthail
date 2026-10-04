@@ -37,6 +37,7 @@ final class AgenthailModel: ObservableObject {
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadedAt: Date?
     private var detailReloadPending = false
+    private var detailReloadOwner: UUID?
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -163,8 +164,12 @@ final class AgenthailModel: ObservableObject {
         guard selectedSessionID == id else { return }
         detailReloadPending = true
         guard detailReloadTask == nil else { return }
+        let owner = UUID()
+        detailReloadOwner = owner
         detailReloadTask = Task {
-            defer { detailReloadTask = nil }
+            defer {
+                if detailReloadOwner == owner { detailReloadTask = nil }
+            }
             while detailReloadPending, !Task.isCancelled, selectedSessionID == id {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, selectedSessionID == id else { return }
@@ -472,14 +477,14 @@ final class AgenthailModel: ObservableObject {
         } else {
             lastEventID = max(lastEventID, event.id)
         }
+        if let entityID = event.entityId, entityID == selectedSessionID {
+            scheduleDetailReload(entityID)
+        }
         refreshTask?.cancel()
         refreshTask = Task {
             try? await Task.sleep(for: .milliseconds(180))
             if Task.isCancelled { return }
             _ = await refresh()
-            if let entityID = event.entityId, entityID == selectedSessionID {
-                scheduleDetailReload(entityID)
-            }
             if OperationsRefreshPolicy.reloadOperations(for: event.type) {
                 await loadOperations()
             } else if operationsVisible && OperationsRefreshPolicy.reloadAudit(for: event.type) {
