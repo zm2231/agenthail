@@ -361,7 +361,7 @@ func TestSessionSourceSeedAndLiveAttachmentShareOneSSEIdentity(t *testing.T) {
 	if err := json.Unmarshal(window.Entries[0].Payload, &seed); err != nil {
 		t.Fatal(err)
 	}
-	if seed.ProviderKey != "codex:turn-image:attachment:user-image-1:0" || seed.Attachment == nil || seed.Attachment.ID != "live-attachment:"+from.ID+":"+attachmentHash {
+	if seed.ProviderKey != "codex:turn-image:attachment:user-image-1:0" || seed.Attachment == nil || seed.Attachment.ID != attachmentID {
 		t.Fatalf("seed=%+v", seed)
 	}
 	adapter.events <- surface.StreamEvent{ID: seed.ItemID, ProviderKey: seed.ProviderKey, Version: 2, Operation: "upsert", TurnID: "turn-image", Kind: "attachment", Role: "user", Text: "Image attachment", Attachment: seed.Attachment}
@@ -798,61 +798,6 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 	}
 	if payload.ProviderKey != "codex:turn-1:assistant:item-1" || payload.Body != "hahaha" || payload.Version != 2 {
 		t.Fatalf("payload=%+v", payload)
-	}
-}
-
-func TestSessionSourceCapturesProviderCursorBeforeSeedAndKeepsEventsDuringSeed(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	from.Surface = surface.KindCodex
-	adapter := &seedBarrierSurface{
-		sourceCountingSurface: &sourceCountingSurface{daemonSurface: fake, items: []surface.TimelineItem{{ID: "codex:turn-1:assistant:item-1", Kind: "text", Role: "assistant", Text: "Hello"}}},
-		readStarted:           make(chan struct{}),
-		release:               make(chan struct{}),
-	}
-	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
-	type subscriptionResult struct {
-		subscription sessionSourceSubscription
-		err          error
-	}
-	result := make(chan subscriptionResult, 1)
-	go func() {
-		subscription, err := manager.subscribe(&from, adapter)
-		result <- subscriptionResult{subscription: subscription, err: err}
-	}()
-	select {
-	case <-adapter.readStarted:
-	case <-time.After(time.Second):
-		t.Fatal("seed did not start")
-	}
-	close(adapter.release)
-	var subscription sessionSourceSubscription
-	select {
-	case resultValue := <-result:
-		if resultValue.err != nil {
-			t.Fatal(resultValue.err)
-		}
-		subscription = resultValue.subscription
-	case <-time.After(time.Second):
-		t.Fatal("source did not finish seeding")
-	}
-	defer subscription.Cancel()
-	deadline := time.After(time.Second)
-	for {
-		select {
-		case <-subscription.Entries:
-			page, pageErr := reg.ReadSessionJournalPage(from.ID, 0, 10)
-			if pageErr != nil || len(page.Entries) != 1 {
-				continue
-			}
-			var payload sessionJournalPayload
-			if json.Unmarshal(page.Entries[0].Payload, &payload) == nil && payload.Body == "Hello world" {
-				return
-			}
-		case <-deadline:
-			page, pageErr := reg.ReadSessionJournalPage(from.ID, 0, 10)
-			t.Fatalf("event arriving during seed was not retained page=%+v err=%v", page, pageErr)
-		}
 	}
 }
 

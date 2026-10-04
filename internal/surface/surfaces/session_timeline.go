@@ -32,8 +32,8 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 	return surface.BoundSessionRead(session, page), nil
 }
 
-// ReadSession serves exchanges from the native app-server first and falls back to the bounded
-// local transcript page when that read fails; timeline items always come from the local transcript.
+// ReadSession uses the local transcript for Desktop content and the managed app-server for
+// managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before, request.Limit)
 	if err != nil {
@@ -43,12 +43,19 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 	if request.Before > 0 {
 		return local, nil
 	}
+	if !c.managed {
+		return local, nil
+	}
 	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
 	if remoteErr == nil {
 		remote.Items = local.Items
 		remote.NextBefore = local.NextBefore
 		remote.Truncated = local.Truncated
 		remote.UnavailableReason = local.UnavailableReason
+		remote.TranscriptOffset = local.TranscriptOffset
+		remote.TranscriptOffsetSet = local.TranscriptOffsetSet
+		remote.CodexUsesEventUsers = local.CodexUsesEventUsers
+		remote.CodexUsesEventUsersSet = local.CodexUsesEventUsersSet
 		return remote, nil
 	}
 	failure := codexNativeReadFailure(remoteErr)
@@ -58,6 +65,169 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 		local.Warning = failure + " Showing the local transcript instead."
 	}
 	return local, nil
+}
+
+func completeJSONLEnd(ctx context.Context, file *os.File, end int64) (int64, error) {
+	if end == 0 {
+		return 0, nil
+	}
+	const chunkSize int64 = 64 << 10
+	remaining := int64(maxCodexTranscriptRecordBytes)
+	position := end
+	for position > 0 && remaining > 0 {
+		readSize := minInt64(chunkSize, position)
+		if readSize > remaining {
+			readSize = remaining
+		}
+		start := position - readSize
+		data := make([]byte, readSize)
+		if _, err := file.ReadAt(data, start); err != nil && err != io.EOF {
+			return 0, err
+		}
+		if index := bytes.LastIndexByte(data, '\n'); index >= 0 {
+			return start + int64(index+1), nil
+		}
+		position = start
+		remaining -= readSize
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+	}
+	return 0, nil
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+	path := codexTranscriptPath(session)
+	if path == "" {
+		return fmt.Errorf("Codex local transcript is unavailable")
+	}
+	offset := session.TranscriptOffset
+	deadline := time.Now().Add(timeout)
+	currentTurnID := ""
+	for time.Now().Before(deadline) {
+		lineOffset := offset
+		next, err := scanAppendedJSONL(ctx, path, offset, maxCodexTranscriptRecordBytes, func(line []byte) error {
+			var record map[string]any
+			if json.Unmarshal(line, &record) != nil {
+				return nil
+			}
+			if turnID := codexRecordTurnID(record); turnID != "" {
+				currentTurnID = turnID
+			}
+			if !session.CodexUsesEventUsersSet {
+				usesEventUsers, modeErr := codexTranscriptUsesEventUsers(ctx, path, offset)
+				if modeErr != nil {
+					return modeErr
+				}
+				session.CodexUsesEventUsers = usesEventUsers
+				session.CodexUsesEventUsersSet = true
+			}
+			items := codexTimelineItems(record)
+			if session.CodexUsesEventUsers && str(record, "type") == "response_item" && hasUserTimelineItem(items) {
+				lineOffset += int64(len(line))
+				return nil
+			}
+			if len(items) == 0 {
+				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
+					emitCodexTranscriptItem(session, uuid, record, line, lineOffset, 0, *opaque, currentTurnID, onEvent)
+				}
+				lineOffset += int64(len(line))
+				return nil
+			}
+			if err := decorateTimelineAttachments(ctx, items, record, "codex", lineOffset); err != nil {
+				return err
+			}
+			for index, item := range items {
+				emitCodexTranscriptItem(session, uuid, record, line, lineOffset, index, item, currentTurnID, onEvent)
+			}
+			lineOffset += int64(len(line))
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		offset = next
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("stream timed out after %s", timeout)
+}
+
+func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[string]any, line []byte, offset int64, index int, item surface.TimelineItem, currentTurnID string, onEvent func(surface.StreamEvent)) {
+	turnID := codexRecordTurnID(record)
+	if turnID == "" {
+		turnID = currentTurnID
+	}
+	if uuid != "" && turnID != "" && turnID != uuid {
+		return
+	}
+	key := codexTranscriptItemKey(record, item, index)
+	if key == "" || item.Kind == "event" {
+		key = codexTranscriptFallbackKey(offset, line, index)
+	}
+	at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+	operation := "upsert"
+	if item.Kind == "done" {
+		operation = "phase"
+	}
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Timestamp: at, Kind: item.Kind, Text: item.Text})
+}
+
+func codexRecordTurnID(record map[string]any) string {
+	payload, _ := record["payload"].(map[string]any)
+	for _, value := range []string{str(payload, "turn_id"), str(payload, "turnId"), str(record, "turn_id"), str(record, "turnId")} {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func hasUserTimelineItem(items []surface.TimelineItem) bool {
+	for _, item := range items {
+		if item.Role == "user" {
+			return true
+		}
+	}
+	return false
+}
+
+func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
+	payload, _ := record["payload"].(map[string]any)
+	typ := str(payload, "type")
+	if typ == "task_complete" || typ == "task_completed" || typ == "task_cancelled" || typ == "task_canceled" || typ == "task_aborted" || typ == "turn_completed" || typ == "turn_aborted" || typ == "interrupted" {
+		return &surface.TimelineItem{Kind: "done", Title: "Turn complete", Status: typ}
+	}
+	if typ == "" || (str(record, "type") != "response_item" && str(record, "type") != "event_msg") {
+		return nil
+	}
+	switch typ {
+	case "message", "agent_message", "reasoning", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "web_search_call", "user_message", "token_count":
+		return nil
+	}
+	text := typ + ": " + timelineValue(payload)
+	truncated := false
+	if len(text) > timelineTextBudget {
+		truncated = true
+		text = text[:timelineTextBudget]
+		for !utf8.ValidString(text) {
+			text = text[:len(text)-1]
+		}
+		text += "…"
+	}
+	return &surface.TimelineItem{Kind: "event", Role: str(payload, "role"), Title: "Codex activity", Text: text, Truncated: truncated, TruncationReason: "timeline text limit"}
 }
 
 func codexNativeReadFailure(err error) string {
@@ -102,6 +272,12 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		}
 		end = before
 	}
+	completeEnd, err := completeJSONLEnd(ctx, file, end)
+	if err != nil {
+		return nil, err
+	}
+	result.TranscriptOffset = completeEnd
+	result.TranscriptOffsetSet = true
 	start := max(int64(0), end-timelineReadBudget)
 	windowStart := start
 	data := make([]byte, end-start)
@@ -125,20 +301,21 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		data = nil
 	}
 	lines := bytes.SplitAfter(data, []byte{'\n'})
-	responseUsers := map[string]bool{}
+	usesEventUsers := false
 	if source == "codex" {
 		for _, line := range lines {
 			var record map[string]any
-			if json.Unmarshal(line, &record) != nil || str(record, "type") != "response_item" || str(record, "timestamp") == "" {
+			if json.Unmarshal(line, &record) != nil {
 				continue
 			}
-			for _, item := range codexTimelineItems(record) {
-				if item.Role == "user" {
-					responseUsers[str(record, "timestamp")+"\x00"+item.Text] = true
-				}
+			payload, _ := record["payload"].(map[string]any)
+			if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
+				usesEventUsers = true
 			}
 		}
 	}
+	result.CodexUsesEventUsers = usesEventUsers
+	result.CodexUsesEventUsersSet = source == "codex"
 	offset := start + int64(len(data))
 	budget := 512 << 10
 	var groups [][]surface.TimelineItem
@@ -163,11 +340,16 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 			items = claudeTimelineItems(record)
 		} else {
 			items = codexTimelineItems(record)
+			if len(items) == 0 {
+				if opaque := codexOpaqueTimelineItem(record); opaque != nil {
+					items = []surface.TimelineItem{*opaque}
+				}
+			}
 		}
 		if err := decorateTimelineAttachments(ctx, items, record, source, offset); err != nil {
 			return nil, err
 		}
-		if source == "codex" && str(record, "type") == "event_msg" && len(items) == 1 && items[0].Role == "user" && responseUsers[str(record, "timestamp")+"\x00"+items[0].Text] {
+		if source == "codex" && usesEventUsers && str(record, "type") == "response_item" && hasUserTimelineItem(items) {
 			continue
 		}
 		if len(items) == 0 {
@@ -178,10 +360,17 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 				items[i].ID = stableTimelineItemID(offset, line, i)
 			} else if source == "codex" {
 				items[i].ID = codexTranscriptItemKey(record, items[i], i)
+				if items[i].Kind == "event" {
+					items[i].ID = codexTranscriptFallbackKey(offset, line, i)
+				}
 			}
 			if items[i].ID == "" {
-				digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
-				items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+				if source == "codex" {
+					items[i].ID = codexTranscriptFallbackKey(offset, line, i)
+				} else {
+					digest := fmt.Sprintf("%x", sha256.Sum256(line))[:12]
+					items[i].ID = fmt.Sprintf("%d-%s-%d", offset, digest, i)
+				}
 			}
 			items[i].Timestamp = str(record, "timestamp")
 		}
@@ -252,6 +441,10 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		result.Items = append(result.Items, groups[i]...)
 	}
 	return result, nil
+}
+
+func codexTranscriptFallbackKey(offset int64, line []byte, index int) string {
+	return fmt.Sprintf("codex:transcript:%d:%x:%d", offset, sha256.Sum256(line), index)
 }
 
 func codexTranscriptItemKey(record map[string]any, item surface.TimelineItem, index int) string {
@@ -352,10 +545,41 @@ func timelineValue(value any) string {
 		return ""
 	}
 	if text, ok := value.(string); ok {
+		if strings.HasPrefix(strings.ToLower(text), "data:image/") && strings.Contains(strings.ToLower(text), ";base64,") {
+			return "[inline image data omitted]"
+		}
 		return text
 	}
-	data, _ := json.MarshalIndent(value, "", "  ")
+	data, _ := json.MarshalIndent(redactInlineImageData(value, false), "", "  ")
 	return string(data)
+}
+
+func redactInlineImageData(value any, imageContext bool) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		isImage := imageContext || strings.Contains(strings.ToLower(str(typed, "type")), "image")
+		out := make(map[string]any, len(typed))
+		for key, child := range typed {
+			lower := strings.ToLower(key)
+			if isImage && (lower == "data" || lower == "bytes" || lower == "base64") {
+				out[key] = "[inline image data omitted]"
+				continue
+			}
+			out[key] = redactInlineImageData(child, isImage)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, child := range typed {
+			out[index] = redactInlineImageData(child, imageContext)
+		}
+		return out
+	case string:
+		if strings.HasPrefix(strings.ToLower(typed), "data:image/") && strings.Contains(strings.ToLower(typed), ";base64,") {
+			return "[inline image data omitted]"
+		}
+	}
+	return value
 }
 
 func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
@@ -520,6 +744,12 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 			}
 		}
 		return items
+	}
+	if str(record, "type") == "event_msg" {
+		switch str(payload, "type") {
+		case "task_complete", "task_completed", "task_cancelled", "task_canceled", "task_aborted", "turn_completed", "turn_aborted", "interrupted":
+			return []surface.TimelineItem{{Kind: "done", Title: "Turn complete", Status: str(payload, "type")}}
+		}
 	}
 	if str(record, "type") != "response_item" {
 		return nil
