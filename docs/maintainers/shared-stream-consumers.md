@@ -31,8 +31,10 @@ The journal payload is the consumer protocol. `itemId`, `providerKey`,
 `final`, `truncated`, and `bodyRef` remain intact. A seed record may carry a
 turn only when the provider supplies an explicit turn identity. `callId` is a
 tool/call correlation field and is never promoted to `turnId`. `kind=done` is
-the only successful turn-terminal event; `kind=source-error` is a terminal
-source failure. A body
+the only turn-terminal event; it is unsuccessful when its `status` is
+`failed`, `error`, `cancelled`, or `canceled` (for example a Claude interrupt
+marker), and consumers return that as an error rather than completion.
+`kind=source-error` is a terminal source failure. A body
 reference is surfaced as a reference, not dereferenced through a provider
 read. Stable item identity and version are used for deduplication during
 replay. A journal upsert contains the current body for that stable item; a
@@ -49,9 +51,10 @@ daemon path is returned to the caller; it must not silently fall back to a
 second provider reader. With no daemon, the existing bounded provider path is
 retained for offline use.
 
-Voice delegation uses the same source subscription and no longer calls
-`surface.Stream` for the target. The voice operator remains a separate Codex
-realtime audio plane; only target-session journal entries matching the delivery
+Voice delegation uses the same source subscription; it reads the target's
+provider stream directly only when no daemon session stream is available, with
+the same terminal and per-item deduplication rules. The voice operator remains
+a separate Codex realtime audio plane; only target-session journal entries matching the delivery
 turn are appended to it. Cancellation releases the source subscription and
 does not interrupt the target unless the existing explicit stop path requests
 that action.
