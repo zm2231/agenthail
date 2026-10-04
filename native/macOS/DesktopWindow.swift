@@ -677,6 +677,27 @@ struct TranscriptView: View {
                 ProgressView().controlSize(.small)
             }
         }
+        .overlay(alignment: .top) {
+            if model.detailStale {
+                HStack(spacing: 6) {
+                    if !model.detailRefreshFailed {
+                        ProgressView().controlSize(.mini)
+                        Text("Updating…")
+                    } else {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text("Couldn't refresh · showing last loaded")
+                    }
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(DesktopPalette.text2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(DesktopPalette.raised, in: Capsule())
+                .overlay(Capsule().stroke(DesktopPalette.line))
+                .padding(.top, 8)
+                .transition(.opacity)
+            }
+        }
     }
 
     private var olderControl: some View {

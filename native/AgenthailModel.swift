@@ -19,6 +19,8 @@ final class AgenthailModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     @Published var selectedSessionID: String?
     @Published var detail: SessionDetail?
+    @Published private(set) var detailStale = false
+    @Published private(set) var detailRefreshFailed = false
     @Published var devices: [DeviceState] = []
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
@@ -58,6 +60,8 @@ final class AgenthailModel: ObservableObject {
     private var sessionCursor: UInt64 = 0
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadedAt: Date?
+    private var detailCache: [String: SessionDetail] = [:]
+    private var detailCacheOrder: [String] = []
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
     private var drafts: [String: String] = [:]
@@ -169,7 +173,9 @@ final class AgenthailModel: ObservableObject {
         selectionGeneration &+= 1
         detailAppliedGeneration = detailRequestGeneration
         UserDefaults.standard.set(id, forKey: "lastSelectedSessionID")
-        detail = nil
+        detail = detailCache[id]
+        detailStale = detail != nil
+        detailRefreshFailed = false
         detailLoadedAt = nil
         detailReloadPending = false
         detailReloadTask?.cancel()
@@ -195,6 +201,9 @@ final class AgenthailModel: ObservableObject {
                 olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
             detail = loaded
+            detailStale = false
+            detailRefreshFailed = false
+            cacheDetail(loaded, for: id)
             if let items = loaded.timeline?.items, let sends = localSends[id] {
                 localSends[id] = LocalSend.reconcile(sends, with: items)
             }
@@ -202,6 +211,16 @@ final class AgenthailModel: ObservableObject {
         } catch {
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
             operationError = error.localizedDescription
+            if detailStale { detailRefreshFailed = true }
+        }
+    }
+
+    private func cacheDetail(_ loaded: SessionDetail, for id: String) {
+        detailCache[id] = loaded
+        detailCacheOrder.removeAll { $0 == id }
+        detailCacheOrder.append(id)
+        while detailCacheOrder.count > 16 {
+            detailCache.removeValue(forKey: detailCacheOrder.removeFirst())
         }
     }
 
@@ -304,7 +323,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     func loadOlder() async {
-        guard let api, let id = selectedSessionID, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
+        guard let api, let id = selectedSessionID, !detailStale, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
         let selection = selectionGeneration
         loadingOlder = true
         defer { loadingOlder = false }
@@ -341,6 +360,7 @@ final class AgenthailModel: ObservableObject {
         detailReloadTask = nil
         detailReloadPending = false
         detail = nil
+        detailStale = false
         if let current = selectedSessionID { drafts[current] = composer }
         composer = ""
         selectedSessionID = nil
