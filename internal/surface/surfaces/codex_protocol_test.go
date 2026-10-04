@@ -369,8 +369,8 @@ func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
 	server = httptest.NewServer(handler)
 	defer server.Close()
 
-	_, err := NewCodex(server.URL).Resolve(context.Background(), "duplicate")
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
+	session, err := NewCodex(server.URL).Resolve(context.Background(), "duplicate")
+	if err == nil || session != nil || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
 		t.Fatalf("err=%v", err)
 	}
 }

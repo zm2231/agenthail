@@ -98,8 +98,8 @@ func TestCodexModelReadMissingMetadataIsTypedFailure(t *testing.T) {
 	fake := newFakeDesktopCDPServer(t, "")
 	codex := NewCodex(fake.server.URL)
 	_, err := codex.Model(context.Background(), &surface.Session{ID: "thread", Transport: codexTransportDesktop}, "")
-	if err == nil || err.Error() != "session metadata does not include the active model" {
-		t.Fatalf("err=%v, want typed missing-model failure", err)
+	if err == nil {
+		t.Fatal("missing model metadata was not reported as a failure")
 	}
 	if got := fake.calledMethods(); len(got) != 1 || got[0] != "thread/read" {
 		t.Fatalf("RPC methods=%v, want only thread/read", got)

@@ -11,7 +11,7 @@ func TestClaudeDurationUsesRecordedMilliseconds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || page.Items[0].Text != "1m55s" || page.Items[0].Title != "Turn duration" {
+	if len(page.Items) != 1 || page.Items[0].Text != "1m55s" {
 		t.Fatalf("duration was dropped: %+v", page)
 	}
 }

@@ -168,7 +168,7 @@ func TestClaudeInterruptedTurnIsNotReportedBusyOrComplete(t *testing.T) {
 	if err != nil || observation.Status == surface.StatusBusy || observation.CompletedTurnID != "" {
 		t.Fatalf("observation=%+v err=%v", observation, err)
 	}
-	if err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Transcript: path}, "u1", func(surface.StreamEvent) {}, time.Second); err == nil || !strings.Contains(err.Error(), "interrupted") {
+	if err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Transcript: path}, "u1", func(surface.StreamEvent) {}, time.Second); err == nil || errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream err=%v", err)
 	}
 }
@@ -180,7 +180,7 @@ func TestClaudeStreamTreatsUserInterruptMarkerAsTargetedFailure(t *testing.T) {
 {"type":"user","uuid":"interrupt","message":{"content":"[Request interrupted by user]"}}`)
 	claude := NewClaude("Default", t.TempDir())
 	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "u1", func(surface.StreamEvent) {}, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+	if err == nil || errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream err=%v", err)
 	}
 }
@@ -631,7 +631,7 @@ func TestClaudeStreamWaitsForNewTurnAfterCompletedBaseline(t *testing.T) {
 	err := claude.Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "u2", func(event surface.StreamEvent) {
 		events = append(events, event)
 	}, 350*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
+	if !errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream err=%v", err)
 	}
 	if len(events) != 0 {

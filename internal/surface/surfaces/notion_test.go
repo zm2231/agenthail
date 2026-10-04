@@ -41,7 +41,7 @@ func TestNotionObservationIsUnknownWithoutAProvenLifecycleState(t *testing.T) {
 func TestNotionMalformedConfiguredSpaceFailsWithoutPanic(t *testing.T) {
 	notion := NewNotion("not-a-uuid", "user")
 	_, err := notion.Send(context.Background(), &surface.Session{ID: "new"}, "message")
-	if err == nil || !strings.Contains(err.Error(), "AGENTHAIL_NOTION_SPACE must be a UUID") {
+	if err == nil || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "AGENTHAIL_NOTION_SPACE") {
 		t.Fatalf("err=%v", err)
 	}
 }

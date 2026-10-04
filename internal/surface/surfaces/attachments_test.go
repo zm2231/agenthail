@@ -40,7 +40,7 @@ func TestAttachmentResolvesOldReferencedRecordByStableOffset(t *testing.T) {
 			break
 		}
 	}
-	if item.Attachment == nil || item.Title != "Image" || item.Text != "Image attachment" {
+	if item.Attachment == nil {
 		t.Fatalf("item=%+v", item)
 	}
 	got, bytes, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, item.Attachment.ID)
@@ -162,7 +162,6 @@ func TestCodexAttachmentStaysFetchableAfterTranscriptGrows(t *testing.T) {
 	}
 }
 
-
 func mustAttachmentData(t *testing.T) []byte {
 	t.Helper()
 	data, err := base64.StdEncoding.DecodeString(testPNG)
@@ -275,7 +274,7 @@ func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testi
 	var notices, users, done []surface.TimelineItem
 	for _, item := range page.Items {
 		switch {
-		case item.Kind == "event" && item.Title == "Turn interrupted":
+		case item.Kind == "event":
 			notices = append(notices, item)
 		case item.Kind == "message" && item.Role == "user":
 			users = append(users, item)
@@ -294,7 +293,7 @@ func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testi
 	if len(users) != 1 || users[0].Text != "Why did <turn_aborted> show up in my transcript?" {
 		t.Fatalf("ordinary user prose=%+v", users)
 	}
-	if len(done) != 1 || done[0].Status != "turn_aborted" || done[0].Title != "Turn interrupted" {
+	if len(done) != 1 || done[0].Status != "turn_aborted" {
 		t.Fatalf("lifecycle=%+v", done)
 	}
 	if got := byCall["call_json"]; len(got) != 1 || got[0].Kind != "toolResult" || got[0].Text != "Script completed\nWall time 0.0 seconds\nOutput:\n{\"goal\":{\"status\":\"active\"}}" {

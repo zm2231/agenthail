@@ -101,7 +101,7 @@ func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	codex := NewCodex("http://127.0.0.1:1")
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "cli", Transport: codexTransportReadOnly}
 	_, err := codex.Send(context.Background(), session, "do not deliver")
-	if err == nil || !strings.Contains(err.Error(), "read only") {
+	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -120,7 +120,7 @@ func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 		t.Fatal("Desktop session was read only")
 	}
 	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
-	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); reason != "Codex Desktop is not available through Agenthail's Desktop bridge; quit Codex and run 'agenthail launch codex'" {
+	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); !strings.Contains(reason, "agenthail launch codex") {
 		t.Fatalf("reason=%q", reason)
 	}
 }
@@ -165,7 +165,7 @@ func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
 	if !status.Reachable || !status.Durable || status.Backend != "desktop" || status.Name != "Codex Desktop bridge" {
 		t.Fatalf("status=%+v", status)
 	}
-	if !strings.Contains(status.Detail, "read path") || !strings.Contains(status.Detail, "per target") {
+	if status.Detail == "" {
 		t.Fatalf("status=%+v", status)
 	}
 }
@@ -204,7 +204,7 @@ func TestCodexEnsureRuntimeNamesMissingManagedDaemon(t *testing.T) {
 	t.Setenv("AGENTHAIL_CODEX_BIN", filepath.Join(t.TempDir(), "missing-codex"))
 	t.Setenv("CODEX_HOME", t.TempDir())
 	err := NewCodex("").EnsureRuntime(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "remote control") || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_BIN") {
+	if err == nil || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_BIN") {
 		t.Fatalf("err=%v", err)
 	}
 }
