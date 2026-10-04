@@ -245,18 +245,24 @@ func TestClaudeStreamTreatsUserInterruptMarkerAsTargetedFailure(t *testing.T) {
 }
 
 func TestClaudeStreamDoesNotDuplicateTurnDurationCompletion(t *testing.T) {
-	path := writeTranscript(t, `
-{"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"one"}}`)
+	session := seededClaudeStreamSession(t, path, "")
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		file, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+		defer file.Close()
+		file.WriteString(`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
 {"type":"system","subtype":"turn_duration","content":"done"}
 {"type":"user","uuid":"u2","message":{"content":"two"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
-{"type":"system","subtype":"turn_duration","content":"done"}`)
+{"type":"system","subtype":"turn_duration","content":"done"}
+`)
+	}()
 	claude := NewClaude("Default", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := map[string]int{}
-	err := claude.Stream(ctx, &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}, "", func(event surface.StreamEvent) {
+	err := claude.Stream(ctx, session, "", func(event surface.StreamEvent) {
 		if event.Kind == "done" {
 			done[event.TurnID]++
 			if len(done) == 2 {
@@ -266,6 +272,53 @@ func TestClaudeStreamDoesNotDuplicateTurnDurationCompletion(t *testing.T) {
 	}, time.Second)
 	if err != context.Canceled || done["u1"] != 1 || done["u2"] != 1 {
 		t.Fatalf("stream err=%v done=%v", err, done)
+	}
+}
+
+func seededClaudeStreamSession(t *testing.T, path, transport string) *surface.Session {
+	t.Helper()
+	seed, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	if err != nil || !seed.TranscriptOffsetSet || seed.TranscriptIdentity == "" {
+		t.Fatalf("seed=%+v err=%v", seed, err)
+	}
+	return &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transport: transport, Transcript: path, HasLocal: true, TranscriptOffset: seed.TranscriptOffset, TranscriptOffsetSet: true, TranscriptIdentity: seed.TranscriptIdentity}
+}
+
+func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testing.T) {
+	var history strings.Builder
+	for turn := 1; turn <= 30; turn++ {
+		fmt.Fprintf(&history, `{"type":"user","uuid":"u%d","message":{"content":"question number %d"}}`+"\n", turn, turn)
+		fmt.Fprintf(&history, `{"type":"assistant","uuid":"a%d","message":{"id":"m%d","stop_reason":"end_turn","content":[{"type":"text","text":"answer number %d"}]}}`+"\n", turn, turn, turn)
+	}
+	path := writeTranscript(t, history.String())
+	session := seededClaudeStreamSession(t, path, "")
+	appended := `{"type":"user","uuid":"between","message":{"content":"written between seed and tail"}}` + "\n"
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(appended); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	claude := NewClaude("Default", t.TempDir())
+	if _, err := claude.Observe(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	collect := func() []surface.StreamEvent {
+		var events []surface.StreamEvent
+		err := claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) { events = append(events, event) }, 400*time.Millisecond)
+		if !errors.Is(err, surface.ErrStreamWindow) {
+			t.Fatalf("stream err=%v", err)
+		}
+		return events
+	}
+	events := collect()
+	if len(events) != 1 || events[0].Text != "written between seed and tail" {
+		t.Fatalf("first window replayed history or missed the handoff gap: %+v", events)
+	}
+	if again := collect(); len(again) != 0 {
+		t.Fatalf("restarted window re-emitted events: %+v", again)
 	}
 }
 
@@ -465,11 +518,7 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"one"}}`)
 	claude := NewClaude("Default", t.TempDir())
-	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transport: "uds", Transcript: path, HasLocal: true}
-	seed, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
-	if err != nil || len(seed.Items) != 1 {
-		t.Fatalf("seed=%+v err=%v", seed, err)
-	}
+	session := seededClaudeStreamSession(t, path, "uds")
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		file, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
@@ -478,7 +527,7 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	}()
 	var events []surface.StreamEvent
 	streamContext, cancel := context.WithCancel(context.Background())
-	err = claude.Stream(streamContext, session, "", func(event surface.StreamEvent) {
+	err := claude.Stream(streamContext, session, "", func(event surface.StreamEvent) {
 		events = append(events, event)
 		if event.Kind == "done" {
 			cancel()
@@ -487,11 +536,12 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	if err != context.Canceled {
 		t.Fatalf("stream err=%v", err)
 	}
-	if len(events) < 3 || events[len(events)-2].Kind != "message" || events[len(events)-2].Text != "answer" || events[len(events)-1].Kind != "done" {
+	if len(events) != 2 || events[0].Kind != "message" || events[0].Text != "answer" || events[0].TurnID != "u1" || events[1].Kind != "done" {
 		t.Fatalf("events=%+v", events)
 	}
-	if events[0].ID != seed.Items[0].ID {
-		t.Fatalf("seed/live identity mismatch: seed=%q live=%q", seed.Items[0].ID, events[0].ID)
+	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	if err != nil || len(page.Items) != 2 || page.Items[1].ID != events[0].ID {
+		t.Fatalf("page/live identity mismatch: page=%+v live=%q err=%v", page, events[0].ID, err)
 	}
 }
 

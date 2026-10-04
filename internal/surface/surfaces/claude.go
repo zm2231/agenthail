@@ -511,10 +511,18 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if err != nil {
 		return err
 	}
-	// The overlap covers records written between page seeding and tail startup;
-	// stable record keys make replay idempotent in the journal.
-	offset := max(int64(0), state.offset-initialClaudeObservationBytes)
-	if offset > 0 {
+	identity := transcriptFileIdentity(state.fileInfo)
+	offset := state.offset
+	if uuid != "" {
+		// A targeted wait looks back so a turn submitted before the tail started is still found;
+		// events outside that turn are filtered below.
+		offset = max(int64(0), state.offset-initialClaudeObservationBytes)
+	} else if sess.TranscriptOffsetSet && sess.TranscriptOffset <= state.offset && identity != "" && sess.TranscriptIdentity == identity {
+		// The session source resumes at its seed or previous window boundary, so records written
+		// in between are delivered once without replaying history the seed bounded away.
+		offset = sess.TranscriptOffset
+	}
+	if uuid != "" && offset > 0 {
 		file, openErr := os.Open(path)
 		if openErr != nil {
 			return openErr
@@ -600,6 +608,11 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
+		if uuid == "" {
+			sess.TranscriptOffset = offset
+			sess.TranscriptOffsetSet = true
+			sess.TranscriptIdentity = identity
+		}
 		if completed {
 			return nil
 		}
