@@ -31,6 +31,7 @@ var (
 	sessionSeedRetryDelay          = 2 * time.Second
 	sessionSeedRetryMaxDelay       = time.Minute
 	sessionSnapshotRefreshInterval = 5 * time.Second
+	ErrSessionSourceManagerClosed  = errors.New("session source manager is closed")
 )
 
 type sessionJournalPayload struct {
@@ -61,6 +62,7 @@ type sessionSourceManager struct {
 	mu       sync.Mutex
 	sources  map[string]*sessionSource
 	running  sync.WaitGroup
+	closed   bool
 }
 
 type sessionSource struct {
@@ -104,6 +106,10 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 		return sessionSourceSubscription{}, fmt.Errorf("session source requires session and adapter")
 	}
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return sessionSourceSubscription{}, ErrSessionSourceManagerClosed
+	}
 	source := m.sources[session.ID]
 	start := false
 	if source == nil {
@@ -141,6 +147,10 @@ func (m *sessionSourceManager) holdSource(session *surface.Session, adapter surf
 		return nil, nil, fmt.Errorf("session source holder is required")
 	}
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, nil, ErrSessionSourceManagerClosed
+	}
 	source := m.sources[session.ID]
 	start := false
 	if source == nil {
@@ -220,6 +230,12 @@ func (s *sessionSource) stop() {
 
 func (m *sessionSourceManager) shutdown() {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		m.running.Wait()
+		return
+	}
+	m.closed = true
 	for id, source := range m.sources {
 		source.cancel()
 		delete(m.sources, id)
