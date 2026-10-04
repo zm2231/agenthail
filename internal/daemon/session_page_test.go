@@ -19,6 +19,24 @@ type coldPageSurface struct {
 	started   chan struct{}
 }
 
+func TestDashboardSnapshotCacheRejectsPreviousHostEpoch(t *testing.T) {
+	d, reg, _, _, _ := daemonFixture(t)
+	epoch, seq, err := reg.CatalogState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := &dashboardServer{state: dashboardState{HostEpoch: "previous-epoch", CatalogSeq: seq}, stateAt: time.Now()}
+	response := httptest.NewRecorder()
+	d.dashboardStateCached(dashboard, response, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	var state dashboardState
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if state.HostEpoch != epoch {
+		t.Fatalf("cached previous epoch: %+v, want %s", state, epoch)
+	}
+}
+
 func (s *coldPageSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	s.readCalls.Add(1)
 	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "seeded-item", Kind: "text", Role: "assistant", BodyRef: "seed-ref", Text: "seeded from provider"}}}, nil

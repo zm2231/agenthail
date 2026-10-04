@@ -412,10 +412,10 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	_, catalogSeq, catalogErr := d.Registry.CatalogState()
+	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
-	if catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+	if catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		state := dashboard.state
 		dashboard.stateMu.Unlock()
 		d.writeDashboardSnapshot(w, r, state)
