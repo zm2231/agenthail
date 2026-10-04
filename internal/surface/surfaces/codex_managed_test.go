@@ -381,6 +381,7 @@ func TestManagedCodexProviderIdentityFlowsIntoLaunchReceipt(t *testing.T) {
 		LaunchID:    "agenthail-launch",
 		ThreadID:    session.ID,
 		Cwd:         session.Cwd,
+		Runtime:     surface.LauncherTMUX,
 		TmuxSession: "agenthail-launch",
 		TmuxPane:    "%7",
 	}
