@@ -43,7 +43,6 @@ type sessionJournalPayload struct {
 	TruncationReason string                `json:"truncationReason,omitempty"`
 	BodyRef          string                `json:"bodyRef,omitempty"`
 	Reason           string                `json:"reason,omitempty"`
-	CallID           string                `json:"callId,omitempty"`
 	Attachment       *surface.Attachment   `json:"attachment,omitempty"`
 }
 
