@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -111,6 +112,70 @@ func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
 	}
 	if count := r.QueueCount("sender"); count != 1 {
 		t.Fatalf("sender notice count=%d", count)
+	}
+}
+
+func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplayAndReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, first, "sender", "target")
+	options := surface.SendOptions{SourceSessionID: "sender"}
+	queueID, err := first.QueueRelayMessageWithOptions("target", "relay body", "relay:7:turn-1", 1, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryID, err := queuedDeliveryIntentID(first.db, queueID)
+	if err != nil || deliveryID == 0 {
+		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
+	}
+	if replayID, err := first.QueueRelayMessageWithOptions("target", "relay body", "relay:7:turn-1", 1, options); err != nil || replayID != queueID {
+		t.Fatalf("replayID=%d queueID=%d err=%v", replayID, queueID, err)
+	}
+	if _, err := first.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := first.DeliveryIntent(deliveryID)
+	if err != nil || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || intent.NotificationQueueID == 0 {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	window, err := first.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+	var payload struct {
+		DeliveryID      int64  `json:"deliveryId"`
+		SessionID       string `json:"sessionId"`
+		SourceSessionID string `json:"sourceSessionId"`
+	}
+	if err := json.Unmarshal(window.Events[0].Payload, &payload); err != nil || payload.DeliveryID != deliveryID || payload.SessionID != "target" || payload.SourceSessionID != "sender" {
+		t.Fatalf("payload=%+v err=%v", payload, err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	if replayID, err := second.QueueRelayMessageWithOptions("target", "relay body", "relay:7:turn-1", 1, options); err != nil || replayID != queueID {
+		t.Fatalf("reopen replayID=%d queueID=%d err=%v", replayID, queueID, err)
+	}
+	if _, err := second.ExpireMessages(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if count := second.QueueCount("sender"); count != 1 {
+		t.Fatalf("sender notices=%d", count)
+	}
+	window, err = second.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+		t.Fatalf("reopened events=%+v err=%v", window, err)
 	}
 }
 

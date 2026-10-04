@@ -498,6 +498,40 @@ func TestQueuedTerminalFailureNotifiesSenderOnce(t *testing.T) {
 	}
 }
 
+func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	if count := r.QueueCount(from.ID); count != 1 {
+		t.Fatalf("source notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+}
+
+func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
+	daemon, r, fake, from, to := daemonFixture(t)
+	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
+	daemon.drainMessageQueue(context.Background(), fake, &to)
+	if count := r.QueueCount(from.ID); count != 0 {
+		t.Fatalf("source notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(window.Events) != 0 {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+}
+
 func TestMobileCompletionNotificationDoesNotExposeSessionDisplay(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	d, r, fake, from, _ := daemonFixture(t)
