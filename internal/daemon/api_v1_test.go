@@ -3,6 +3,10 @@ package daemon
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,7 +21,10 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
+
+const apiTestPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
 func TestAPIV1PairsAuthenticatesAndRevokesDevice(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -385,6 +392,65 @@ func TestAPIV1SessionAttachmentAuthenticatedReadScopeReachesSessionLookup(t *tes
 	handler.ServeHTTP(response, request)
 	assertAPIV1Error(t, response, http.StatusNotFound, "session_not_found")
 }
+
+func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testing.T) {
+	d, registry, _, from, _ := daemonFixture(t)
+	transcript := filepath.Join(t.TempDir(), "claude.jsonl")
+	imagePath := filepath.Join(t.TempDir(), "image.png")
+	imageBytes, err := base64.StdEncoding.DecodeString(apiTestPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(imagePath, imageBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"path","path":` + quoteJSON(imagePath) + `}}]}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Surface, from.Transcript = surface.KindClaude, transcript
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	claude := surfaces.NewClaude("", t.TempDir())
+	d.Surfaces = []surface.Surface{claude}
+	read, err := claude.ReadSession(context.Background(), &from, surface.SessionReadRequest{Limit: 20})
+	if err != nil || len(read.Items) != 1 || read.Items[0].Attachment == nil {
+		t.Fatalf("read=%+v err=%v", read, err)
+	}
+	id := read.Items[0].Attachment.ID
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil))
+	assertAPIV1Error(t, unauthorized, http.StatusUnauthorized, "unauthorized")
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+id, nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || !bytes.Equal(response.Body.Bytes(), imageBytes) {
+		t.Fatalf("status=%d content-type=%q body=%d", response.Code, response.Header().Get("Content-Type"), response.Body.Len())
+	}
+	oversize := bytes.Repeat([]byte{0x01}, 10<<20+1)
+	encoded := base64.StdEncoding.EncodeToString(oversize)
+	overPath := filepath.Join(t.TempDir(), "oversize.jsonl")
+	overLine := `{"type":"user","uuid":"u2","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + encoded + `"}}]}}` + "\n"
+	if err := os.WriteFile(overPath, []byte(overLine), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Transcript = overPath
+	if err := registry.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(oversize)
+	overID := "attachment:0:0:" + hex.EncodeToString(hash[:])
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=from&id="+overID, nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusRequestEntityTooLarge, "attachment_too_large")
+}
+
+func quoteJSON(value string) string { data, _ := json.Marshal(value); return string(data) }
 
 func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
