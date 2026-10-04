@@ -1150,7 +1150,7 @@ function renderContextUsage(context) {
     details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);
   indicator.title = details.join(". ");
 }
-async function action(action, extra = {}) {
+async function action(action, extra = {}, idempotencyKey = crypto.randomUUID()) {
   const networkAction =
     action.startsWith("channel-") ||
     action.startsWith("relay-") ||
@@ -1163,7 +1163,7 @@ async function action(action, extra = {}) {
     throw Error("Choose a conversation first");
   const response = await fetch("/api/action", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ action, sessionId: app.selected?.id, ...extra }),
   });
   if (!response.ok) throw Error(await response.text());
