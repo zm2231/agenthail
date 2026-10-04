@@ -16,6 +16,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var finishedUnseen: Set<String> = []
     @Published private(set) var snapshotLoadedAt: Date?
     @Published var newSessionVisible = false
+    @Published var newSessionMessage: String?
     @Published var paletteVisible = false
     @Published private(set) var creationOptions: SessionCreationOptions?
     @Published var searchQuery = ""
@@ -194,6 +195,15 @@ final class AgenthailModel: ObservableObject {
     func refreshCachedDetail(_ detail: SessionDetail, for id: String) {
         guard detailCache[id] != nil else { return }
         detailCache[id] = detail
+    }
+
+    func receiveSharedText(_ text: String) {
+        if let session = mainPane.selectedSession, mainPane.removedSession == nil, !session.isReadOnly, session.capabilities.send {
+            draft(for: session.id).restore(text)
+        } else {
+            newSessionMessage = text
+            newSessionVisible = true
+        }
     }
 
     func draft(for sessionID: String) -> ComposerDraft {

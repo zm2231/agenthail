@@ -100,6 +100,10 @@ struct NewSessionSheet: View {
         .padding(20)
         .frame(width: 520)
         .task {
+            if let shared = model.newSessionMessage {
+                message = shared
+                model.newSessionMessage = nil
+            }
             await model.loadCreationOptions()
             if folder.isEmpty { folder = model.mainPane.selectedSession.flatMap { $0.checkout?.path ?? $0.cwd } ?? folders.first ?? "" }
             selectDefaultLauncher()

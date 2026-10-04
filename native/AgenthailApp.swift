@@ -247,7 +247,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
         NotificationRoute.shared.open(link)
     }
 
+    @MainActor
+    @objc func sendToAgenthail(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        guard let text = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            error.pointee = "There is no text to send." as NSString
+            return
+        }
+        NotificationRoute.shared.share(text)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.servicesProvider = self
+        NSUpdateDynamicServices()
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
@@ -306,6 +317,7 @@ final class NotificationRoute: ObservableObject {
         let id = UUID()
         var sessionID: String?
         var newSession = false
+        var sharedText: String?
     }
 
     static let shared = NotificationRoute()
@@ -314,6 +326,10 @@ final class NotificationRoute: ObservableObject {
 
     func open(sessionID: String?) {
         latest = Request(sessionID: sessionID)
+    }
+
+    func share(_ text: String) {
+        latest = Request(sessionID: nil, sharedText: text)
     }
 
     func open(_ link: AgenthailLink) {
@@ -356,6 +372,7 @@ private struct MenuBarLabel: View {
         NSApplication.shared.activate()
         openWindow(id: "main")
         if request.newSession { model.newSessionVisible = true }
+        if let text = request.sharedText { model.receiveSharedText(text) }
     }
 }
 

@@ -52,6 +52,12 @@ cat >"$OUTPUT/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>APP_VERSION</string>
   <key>CFBundleVersion</key><string>APP_BUILD</string>
+  <key>NSServices</key><array><dict>
+    <key>NSMenuItem</key><dict><key>default</key><string>Send to Agenthail</string></dict>
+    <key>NSMessage</key><string>sendToAgenthail</string>
+    <key>NSPortName</key><string>Agenthail</string>
+    <key>NSSendTypes</key><array><string>public.utf8-plain-text</string></array>
+  </dict></array>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>com.agenthail.app</string>
     <key>CFBundleURLSchemes</key><array><string>agenthail</string></array>
