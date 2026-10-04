@@ -198,7 +198,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     func receiveSharedText(_ text: String) {
-        if let session = mainPane.selectedSession, mainPane.removedSession == nil, !session.isReadOnly, session.capabilities.send {
+        if !newSessionVisible, let session = mainPane.selectedSession, mainPane.removedSession == nil, !session.isReadOnly, session.capabilities.send {
             draft(for: session.id).restore(text)
         } else {
             newSessionMessage = text

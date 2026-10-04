@@ -100,15 +100,19 @@ struct NewSessionSheet: View {
         .padding(20)
         .frame(width: 520)
         .task {
-            if let shared = model.newSessionMessage {
-                message = shared
-                model.newSessionMessage = nil
-            }
+            takeSharedMessage()
             await model.loadCreationOptions()
             if folder.isEmpty { folder = model.mainPane.selectedSession.flatMap { $0.checkout?.path ?? $0.cwd } ?? folders.first ?? "" }
             selectDefaultLauncher()
         }
         .onChange(of: agent) { selectDefaultLauncher() }
+        .onChange(of: model.newSessionMessage) { takeSharedMessage() }
+    }
+
+    private func takeSharedMessage() {
+        guard let shared = model.newSessionMessage else { return }
+        model.newSessionMessage = nil
+        message = message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? shared : "\(message)\n\n\(shared)"
     }
 
     private func selectDefaultLauncher() {
