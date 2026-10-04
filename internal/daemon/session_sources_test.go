@@ -210,6 +210,23 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	}
 }
 
+func TestSessionSourceNormalizesGoalUpdatesAndClears(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(registry)
+	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	budget := int64(500)
+	updated := source.normalizeLocked(surface.StreamEvent{ID: "goal:1", ProviderKey: "goal:1", Kind: "goal", Operation: "replace", Goal: &surface.GoalState{Objective: "verify", Status: surface.GoalStatusPaused, TimeUsedSeconds: 12, TokensUsed: 34, TokenBudget: &budget}})
+	encoded, err := json.Marshal(updated)
+	if err != nil || updated.Goal == nil || updated.Goal.Status != surface.GoalStatusPaused || *updated.Goal.TokenBudget != 500 || !strings.Contains(string(encoded), `"goal"`) {
+		t.Fatalf("updated=%+v encoded=%s err=%v", updated, encoded, err)
+	}
+	cleared := source.normalizeLocked(surface.StreamEvent{ID: "goal:2", ProviderKey: "goal:2", Kind: "goal", Operation: "replace"})
+	clearedJSON, err := json.Marshal(cleared)
+	if err != nil || !strings.Contains(string(clearedJSON), `"goal":null`) {
+		t.Fatalf("cleared=%+v json=%s err=%v", cleared, clearedJSON, err)
+	}
+}
+
 func TestSessionSourceSeedsBoundedTimelineBeforeStreaming(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{

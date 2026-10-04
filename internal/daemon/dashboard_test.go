@@ -42,6 +42,50 @@ type sessionPageReadProbe struct {
 	readCalls    atomic.Int32
 }
 
+type goalControlSurface struct {
+	*daemonSurface
+	updates []surface.GoalUpdate
+}
+
+func (s *goalControlSurface) UpdateGoal(_ context.Context, _ *surface.Session, update surface.GoalUpdate) error {
+	s.updates = append(s.updates, update)
+	return nil
+}
+
+func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
+	d, registry, fake, from, _ := daemonFixture(t)
+	fake.caps.Goal = true
+	adapter := &goalControlSurface{daemonSurface: fake}
+	d = New(registry, []surface.Surface{adapter})
+	request := func(action, message string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"action": action, "sessionId": from.ID, "message": message})
+		response := httptest.NewRecorder()
+		d.dashboardActionHandler(response, httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body)))
+		return response
+	}
+	if response := request("goal-edit", "keep paused"); response.Code != http.StatusOK {
+		t.Fatalf("goal-edit status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(adapter.updates) != 1 || adapter.updates[0].Objective == nil || *adapter.updates[0].Objective != "keep paused" || adapter.updates[0].Status != nil {
+		t.Fatalf("goal-edit update=%+v", adapter.updates)
+	}
+	if response := request("goal-budget", ""); response.Code != http.StatusOK || !adapter.updates[1].ClearTokenBudget {
+		t.Fatalf("blank budget status=%d updates=%+v", response.Code, adapter.updates)
+	}
+	if response := request("goal-budget", "-1"); response.Code != http.StatusBadRequest {
+		t.Fatalf("negative budget status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestDashboardGoalControlsRenderTypedStatusAndUsageActions(t *testing.T) {
+	source := string(dashboardJS)
+	for _, required := range []string{"goal-edit", "goal-pause", "goal-resume", "goal-budget", "Clear budget", "usageLimited", "budgetLimited", "Complete"} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("dashboard goal integration missing %q", required)
+		}
+	}
+}
+
 func (p *sessionPageReadProbe) ContextUsage(context.Context, *surface.Session) (*surface.ContextUsage, error) {
 	p.contextCalls.Add(1)
 	return &surface.ContextUsage{UsedTokens: 150000, ContextWindow: 200000, CompactionCount: 2}, nil
