@@ -4,65 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 )
-
-func codexTranscriptUsesEventUsers(ctx context.Context, path string, end int64) (bool, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-	if end == 0 {
-		info, statErr := file.Stat()
-		if statErr != nil {
-			return false, statErr
-		}
-		end = info.Size()
-	}
-	reader := bufio.NewReaderSize(file, 64*1024)
-	var offset int64
-	for offset < end {
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		var line []byte
-		for {
-			part, readErr := reader.ReadSlice('\n')
-			if int64(len(line)+len(part)) > maxCodexTranscriptRecordBytes {
-				return false, fmt.Errorf("transcript record exceeds %d bytes", maxCodexTranscriptRecordBytes)
-			}
-			line = append(line, part...)
-			if readErr != bufio.ErrBufferFull {
-				if readErr != nil && readErr != io.EOF {
-					return false, readErr
-				}
-				break
-			}
-		}
-		if len(line) == 0 {
-			break
-		}
-		offset += int64(len(line))
-		if offset > end {
-			break
-		}
-		var record map[string]any
-		if json.Unmarshal(line, &record) == nil {
-			payload, _ := record["payload"].(map[string]any)
-			if str(record, "type") == "event_msg" && str(payload, "type") == "user_message" {
-				return true, nil
-			}
-		}
-		if len(line) == 0 || offset >= end {
-			break
-		}
-	}
-	return false, nil
-}
 
 func readRecentJSONLLines(ctx context.Context, path string, limit int, byteLimit int64, recordLimit int) ([][]byte, int64, error) {
 	file, err := os.Open(path)

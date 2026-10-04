@@ -248,14 +248,24 @@ func (s *sessionSource) run() {
 		current.StreamCursorSet = s.streamCursorSet
 		current.TranscriptOffset = s.session.TranscriptOffset
 		current.TranscriptOffsetSet = s.session.TranscriptOffsetSet
-		current.CodexUsesEventUsers = s.session.CodexUsesEventUsers
-		current.CodexUsesEventUsersSet = s.session.CodexUsesEventUsersSet
+		current.TranscriptIdentity = s.session.TranscriptIdentity
+		current.CodexPendingEventUser = s.session.CodexPendingEventUser
+		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
+		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
+		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && current.TranscriptIdentity == s.session.TranscriptIdentity && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
+			s.session.TranscriptOffset = current.TranscriptOffset
+			s.session.TranscriptOffsetSet = true
+			s.session.TranscriptIdentity = current.TranscriptIdentity
+			s.session.CodexPendingEventUser = current.CodexPendingEventUser
+			s.session.CodexPendingEventTurn = current.CodexPendingEventTurn
+			s.session.CodexCurrentTurnID = current.CodexCurrentTurnID
+		}
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
 			break
 		}
-		if streamErr != nil && s.ctx.Err() == nil {
+		if streamErr != nil && !errors.Is(streamErr, surface.ErrStreamWindow) && s.ctx.Err() == nil {
 			s.appendSourceError(streamErr)
 		}
 		s.mu.Lock()
@@ -367,8 +377,10 @@ func (s *sessionSource) seedJournal() {
 	if read.TranscriptOffsetSet {
 		s.session.TranscriptOffset = read.TranscriptOffset
 		s.session.TranscriptOffsetSet = true
-		s.session.CodexUsesEventUsers = read.CodexUsesEventUsers
-		s.session.CodexUsesEventUsersSet = read.CodexUsesEventUsersSet
+		s.session.CodexPendingEventUser = read.CodexPendingEventUser
+		s.session.CodexPendingEventTurn = read.CodexPendingEventTurn
+		s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
+		s.session.TranscriptIdentity = read.TranscriptIdentity
 	} else if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok && provider.RequiresLocalTranscript(&s.session) {
 		err := fmt.Errorf("Codex local transcript is unavailable")
 		s.seedErr = err

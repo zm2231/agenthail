@@ -242,6 +242,42 @@ func TestSessionSourcePersistsStreamFailureAsReset(t *testing.T) {
 	}
 }
 
+func TestSessionSourceDoesNotJournalNormalStreamWindow(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		streamErr:     surface.ErrStreamWindow,
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	time.Sleep(50 * time.Millisecond)
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range window.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Kind == "source-error" {
+			t.Fatalf("normal stream window journaled source error: %+v", payload)
+		}
+	}
+}
+
 func TestSessionSourceSeedsJournalBeforeSubscribeReturns(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{
@@ -481,23 +517,32 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	}
 	defer subscription.Cancel()
 	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
-	if err != nil {
+	if err != nil || len(window.Entries) < 2 {
 		t.Fatalf("seed window=%+v err=%v", window, err)
 	}
-	seedBodies := map[string]string{}
-	seedCounts := map[string]int{}
+	seedBodies := map[string]string{"seed": "user", "seed answer": "assistant"}
+	seenSeed := map[string]bool{}
+	var seedThrough uint64
 	for _, entry := range window.Entries {
 		var payload sessionJournalPayload
 		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Kind == "message" {
-			seedBodies[payload.Role] = payload.Body
-			seedCounts[payload.Role]++
+		if role, ok := seedBodies[payload.Body]; ok && payload.Role == role {
+			if seenSeed[payload.Body] {
+				t.Fatalf("duplicate seed record body=%q window=%+v", payload.Body, window)
+			}
+			seenSeed[payload.Body] = true
+			if entry.Seq > seedThrough {
+				seedThrough = entry.Seq
+			}
 		}
 	}
-	if seedBodies["user"] != "seed" || seedBodies["assistant"] != "seed answer" || seedCounts["user"] != 1 || seedCounts["assistant"] != 1 {
-		t.Fatalf("seed bodies=%+v window=%+v", seedBodies, window)
+	if len(seenSeed) != len(seedBodies) {
+		t.Fatalf("seed prefix missing: seen=%v window=%+v", seenSeed, window)
+	}
+	if seedThrough == 0 {
+		t.Fatalf("seed checkpoint missing: %+v", window.Entries[:2])
 	}
 	time.Sleep(100 * time.Millisecond)
 	appendTranscript := func(records string) {
@@ -529,6 +574,9 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		for !seen[turn.message] {
 			select {
 			case entry := <-subscription.Entries:
+				if entry.Seq <= seedThrough {
+					continue
+				}
 				var payload sessionJournalPayload
 				if err := json.Unmarshal(entry.Payload, &payload); err == nil && payload.TurnID == turn.turnID {
 					if payload.Kind == "message" && payload.Role == "assistant" && payload.Body == turn.answer {

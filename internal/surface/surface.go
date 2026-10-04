@@ -26,25 +26,27 @@ const (
 )
 
 type Session struct {
-	ID                     string        `json:"id"`
-	Surface                SurfaceKind   `json:"surface"`
-	Name                   string        `json:"name"`
-	Cwd                    string        `json:"cwd"`
-	PID                    int           `json:"pid"`
-	Status                 SessionStatus `json:"status"`
-	Transcript             string        `json:"transcript"`
-	HasLocal               bool          `json:"hasLocal"`
-	Source                 string        `json:"source,omitempty"`
-	Transport              string        `json:"transport,omitempty"`
-	ConfiguredModel        string        `json:"configuredModel,omitempty"`
-	LastActive             time.Time     `json:"lastActive"`
-	Runtime                *Runtime      `json:"runtime,omitempty"`
-	StreamCursor           uint64        `json:"-"`
-	StreamCursorSet        bool          `json:"-"`
-	TranscriptOffset       int64         `json:"-"`
-	TranscriptOffsetSet    bool          `json:"-"`
-	CodexUsesEventUsers    bool          `json:"-"`
-	CodexUsesEventUsersSet bool          `json:"-"`
+	ID                    string        `json:"id"`
+	Surface               SurfaceKind   `json:"surface"`
+	Name                  string        `json:"name"`
+	Cwd                   string        `json:"cwd"`
+	PID                   int           `json:"pid"`
+	Status                SessionStatus `json:"status"`
+	Transcript            string        `json:"transcript"`
+	HasLocal              bool          `json:"hasLocal"`
+	Source                string        `json:"source,omitempty"`
+	Transport             string        `json:"transport,omitempty"`
+	ConfiguredModel       string        `json:"configuredModel,omitempty"`
+	LastActive            time.Time     `json:"lastActive"`
+	Runtime               *Runtime      `json:"runtime,omitempty"`
+	StreamCursor          uint64        `json:"-"`
+	StreamCursorSet       bool          `json:"-"`
+	TranscriptOffset      int64         `json:"-"`
+	TranscriptOffsetSet   bool          `json:"-"`
+	TranscriptIdentity    string        `json:"-"`
+	CodexPendingEventUser bool          `json:"-"`
+	CodexPendingEventTurn string        `json:"-"`
+	CodexCurrentTurnID    string        `json:"-"`
 }
 
 type SessionSearchResult struct {
@@ -493,6 +495,8 @@ func truncate(s string, n int) string {
 func TruncateString(s string, n int) string { return truncate(s, n) }
 
 var ErrUnsupported = errUnsupported{}
+
+var ErrStreamWindow = errors.New("stream window elapsed")
 
 type errUnsupported struct{}
 

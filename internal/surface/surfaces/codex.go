@@ -866,7 +866,18 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 		return c.streamManaged(ctx, sess, uuid, onEvent, timeout)
 	}
 	if !sess.TranscriptOffsetSet {
-		return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
+		read, err := c.ReadSession(ctx, sess, surface.SessionReadRequest{Limit: timelineItemLimit})
+		if err != nil {
+			return err
+		}
+		if read == nil || !read.TranscriptOffsetSet {
+			return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
+		}
+		sess.TranscriptOffset = read.TranscriptOffset
+		sess.TranscriptOffsetSet = true
+		sess.CodexPendingEventUser = read.CodexPendingEventUser
+		sess.CodexPendingEventTurn = read.CodexPendingEventTurn
+		sess.CodexCurrentTurnID = read.CodexCurrentTurnID
 	}
 	return c.streamTranscript(ctx, sess, uuid, onEvent, timeout)
 }

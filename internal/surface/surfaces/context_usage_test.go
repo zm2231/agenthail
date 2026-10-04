@@ -190,6 +190,26 @@ func TestCodexContextUsageUsesLatestContextSnapshot(t *testing.T) {
 	}
 }
 
+func TestCodexContextUsageResetsWhenTranscriptIsReplacedAtSamePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	writeTestTranscript(t, path, codexTokenRecord("2026-07-16T04:29:00Z", 100, 100))
+	adapter := NewCodex("")
+	session := &surface.Session{ID: "019f6930-0000-7000-8000-000000000000", Surface: surface.KindCodex, Transcript: path}
+	usage, err := adapter.ContextUsage(context.Background(), session)
+	if err != nil || usage == nil || usage.UsedTokens != 100 {
+		t.Fatalf("initial usage=%+v err=%v", usage, err)
+	}
+	replacement := filepath.Join(t.TempDir(), "replacement.jsonl")
+	writeTestTranscript(t, replacement, codexTokenRecord("2026-07-16T04:30:00Z", 200, 200))
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	usage, err = adapter.ContextUsage(context.Background(), session)
+	if err != nil || usage == nil || usage.UsedTokens != 200 {
+		t.Fatalf("replacement usage=%+v err=%v", usage, err)
+	}
+}
+
 func TestCodexContextUsageTracksRapidCompactions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "codex.jsonl")
 	writeTestTranscript(t, path,

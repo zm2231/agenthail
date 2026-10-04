@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -157,6 +158,44 @@ func TestCodexLiveAttachmentUsesExactTranscriptReferenceAfterRestart(t *testing.
 	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), session, liveID)
 	if err != nil || attachment == nil || string(data) != string(mustAttachmentData(t)) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(data), err)
+	}
+}
+
+func TestCodexLiveAttachmentKeepsOffsetAfterMalformedPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"event_msg","payload":{"type":"user_message","message":"look","images":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
+	content := "not-json\n" + line
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seedID string
+	for _, item := range page.Items {
+		if item.Kind == "attachment" {
+			seedID = item.Attachment.ID
+			break
+		}
+	}
+	if seedID == "" {
+		t.Fatalf("seed=%+v", page.Items)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var liveID string
+	err = (&Codex{}).Stream(ctx, &surface.Session{ID: "malformed-prefix", Transcript: path, TranscriptOffsetSet: true}, "", func(event surface.StreamEvent) {
+		if event.Kind == "attachment" {
+			liveID = event.Attachment.ID
+			cancel()
+		}
+	}, time.Second)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if liveID != seedID {
+		t.Fatalf("seed attachment=%q live attachment=%q", seedID, liveID)
 	}
 }
 
