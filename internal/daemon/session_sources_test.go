@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1030,10 +1031,38 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(registry)
 	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
-	first := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
-	second := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
+	first := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "one"})
+	second := source.normalizeLocked(surface.StreamEvent{Kind: "event", Text: "two"})
 	if first.ItemID == "" || first.ProviderKey == "" || second.ItemID == "" || first.ItemID == second.ItemID {
 		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+}
+
+func TestSessionSourceKeepsMetadataStateInOneJournalRow(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source.append(surface.StreamEvent{ID: "visible", ProviderKey: "visible", Operation: "upsert", Kind: "message", Role: "assistant", Text: "keep me"})
+	for index := 1; index <= 50; index++ {
+		source.append(surface.StreamEvent{Kind: "context", Context: &surface.ContextUsage{UsedTokens: int64(index)}})
+		source.append(surface.StreamEvent{ID: fmt.Sprintf("goal:%d", index), Version: uint64(index), Operation: "replace", Kind: "goal", Goal: &surface.GoalState{Objective: "verify", TokensUsed: int64(index)}})
+	}
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]int{}
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		kinds[payload.Kind]++
+		if payload.Kind == "context" && (payload.Context == nil || payload.Context.UsedTokens != int64(50)) {
+			t.Fatalf("context row=%+v", payload)
+		}
+	}
+	if len(page.Entries) != 3 || kinds["message"] != 1 || kinds["context"] != 1 || kinds["goal"] != 1 {
+		t.Fatalf("journal rows=%d kinds=%v", len(page.Entries), kinds)
 	}
 }
 

@@ -155,6 +155,52 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 
 // MarkCatalogDiscoveryFailure preserves the last discovered rows while making
 // the failed observation visible to snapshot readers and catalog subscribers.
+func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint string) (CatalogEvent, bool, error) {
+	if sessionID == "" || nextFingerprint == "" {
+		return CatalogEvent{}, false, fmt.Errorf("catalog session id and projection fingerprint are required")
+	}
+	var session map[string]any
+	if err := json.Unmarshal([]byte(nextFingerprint), &session); err != nil {
+		return CatalogEvent{}, false, fmt.Errorf("catalog projection fingerprint must be a JSON object: %w", err)
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	defer tx.Rollback()
+	var fingerprint, observedAt string
+	var generation, misses, discoveryFailures int64
+	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,observed_at FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&fingerprint, &generation, &misses, &discoveryFailures, &observedAt)
+	if err == sql.ErrNoRows || (err == nil && (fingerprint != priorFingerprint || fingerprint == nextFingerprint)) {
+		return CatalogEvent{}, false, nil
+	}
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	lastObserved, err := time.Parse(time.RFC3339Nano, observedAt)
+	if err != nil {
+		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
+	}
+	generation++
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, nextFingerprint, generation, sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	session["observedAt"] = lastObserved
+	session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: lastObserved, Stale: misses > 0 || discoveryFailures > 0}
+	envelope, err := json.Marshal(map[string]any{"session": session})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	event, created, err := r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", sessionID, generation), Type: "session.upserted", EntityID: sessionID, Payload: envelope})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return event, created, nil
+}
+
 func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason string, observedAt time.Time) ([]CatalogEvent, error) {
 	if err := r.EnsureCatalogState(); err != nil {
 		return nil, err

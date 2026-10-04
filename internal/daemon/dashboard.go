@@ -1111,12 +1111,10 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 			defer cancel()
 			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Agent: surface.SurfaceKind(request.Surface), Cwd: cwd, Message: request.Message, Model: request.Model, Name: request.Name})
-			startWarning := ""
-			if launchErr != nil {
+			startErr := launchErr
+			if launchErr != nil && launchResult.Session == nil {
 				var acceptedErr surface.LaunchAcceptedError
 				switch {
-				case launchResult.Session != nil:
-					startWarning = fmt.Sprintf("session was created, but its initial turn did not confirm: %s; check the session before retrying", launchErr)
 				case errors.As(launchErr, &acceptedErr):
 					writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "submitted", "accepted": true, "retryable": false, "launcher": request.Launcher, "warning": launchErr.Error()})
 					return
@@ -1160,11 +1158,13 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 			}
-			if startWarning != "" {
-				writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "submitted", "accepted": true, "retryable": false, "launcher": request.Launcher, "location": location, "sessionId": session.ID, "warning": startWarning})
+			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
+			if launchResult.Session != nil {
+				d.writeStartedSessionOutcome(w, session, alias, request.Message, launchResult.Sent, startErr, launchFields)
 				return
 			}
-			writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location, "sessionId": session.ID})
+			launchFields["ok"] = true
+			writeDashboardJSON(w, http.StatusCreated, launchFields)
 			return
 		}
 		adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
@@ -1207,63 +1207,33 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if session != nil {
 			session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
-				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but local registration failed: %s; do not retry automatically", registerErr))
+				writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but local registration failed: %s; do not retry automatically", registerErr), nil)
 				return
 			}
 			if alias != "" {
 				if aliasErr := d.Registry.SetAlias(alias, session.ID); aliasErr != nil {
-					writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr))
+					writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its name could not be persisted: %s; do not retry automatically", aliasErr), nil)
 					return
 				}
 			}
-		}
-		if startErr != nil {
-			sessionID := ""
-			if session != nil {
-				sessionID = session.ID
-			}
-			if session != nil {
-				intent, intentErr := d.Registry.RecordSessionCreationIntent(sessionID, request.Message)
-				if intentErr != nil {
-					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: sessionID, Message: request.Message, Error: fmt.Sprintf("%s; durable delivery intent failed: %s", startErr, intentErr)})
-					writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr))
-					return
-				}
-				if surface.IsDeliveryOutcomeUnknown(startErr) {
-					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
-					writeSubmittedSession(w, session, intent.ID, submittedSessionDetail(session, alias))
-					return
-				}
-				_, _ = d.Registry.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, startErr.Error())
-				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
-				writeInitialSessionFailure(w, session, intent.ID, startErr.Error())
-				return
-			}
-			unknown := surface.IsDeliveryOutcomeUnknown(startErr)
-			kind := "failed"
-			if unknown {
-				kind = "unknown"
-			}
-			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, SessionID: sessionID, Message: request.Message, Error: startErr.Error()})
-			writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "error": func() string {
-				if unknown {
-					return fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
-				}
-				return startErr.Error()
-			}()})
+			d.writeStartedSessionOutcome(w, session, alias, request.Message, sent, startErr, nil)
 			return
 		}
-		result := ""
-		if sent != nil {
-			result = sent.UUID
+		if startErr == nil {
+			startErr = errors.New("session starter returned no session")
 		}
-		if result != "" {
-			if runtimeErr := d.Registry.MarkDeliveryStarted(session.ID, result, ""); runtimeErr != nil {
-				_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: request.Message, Result: result, Error: runtimeErr.Error()})
+		unknown := surface.IsDeliveryOutcomeUnknown(startErr)
+		kind := "failed"
+		if unknown {
+			kind = "unknown"
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: request.Message, Error: startErr.Error()})
+		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "error": func() string {
+			if unknown {
+				return fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 			}
-		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: request.Message, Result: result})
-		writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "session": session, "result": sent})
+			return startErr.Error()
+		}()})
 		return
 	}
 	if request.Action == "notion-create" {
@@ -1853,6 +1823,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		}
 	}
 	sessionRead, sessionReadErr := d.readJournalPage(session.ID, uint64(timelineBefore), limit)
+	if sessionReadErr == nil && sessionRead.JournalSeq > 0 && !effective.Stream && timelineBefore == 0 {
+		d.sources.refresh(session, adapter)
+	}
 	if sessionReadErr == nil && sessionRead.JournalSeq == 0 && timelineBefore == 0 {
 		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
 		seedErr := d.sources.seed(seedCtx, session, adapter)
@@ -2055,7 +2028,45 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func writeSubmittedSession(w http.ResponseWriter, session *surface.Session, deliveryID int64, detail string) {
+func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
+	if startErr != nil {
+		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, message)
+		if intentErr != nil {
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: fmt.Sprintf("%s; durable delivery intent failed: %s", startErr, intentErr)})
+			writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr), extra)
+			return
+		}
+		if surface.IsDeliveryOutcomeUnknown(startErr) {
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "submitted", SessionID: session.ID, Message: message, Error: startErr.Error()})
+			writeSubmittedSession(w, session, intent.ID, submittedSessionDetail(session, alias), extra)
+			return
+		}
+		_, _ = d.Registry.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, startErr.Error())
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
+		writeInitialSessionFailure(w, session, intent.ID, startErr.Error(), extra)
+		return
+	}
+	result := ""
+	if sent != nil {
+		result = sent.UUID
+	}
+	if result != "" {
+		if runtimeErr := d.Registry.MarkDeliveryStarted(session.ID, result, ""); runtimeErr != nil {
+			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "runtime-error", SessionID: session.ID, Message: message, Result: result, Error: runtimeErr.Error()})
+		}
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "sent", SessionID: session.ID, Message: message, Result: result})
+	writeSessionCreateJSON(w, http.StatusCreated, map[string]any{"ok": true, "session": session, "result": sent}, extra)
+}
+
+func writeSessionCreateJSON(w http.ResponseWriter, status int, body, extra map[string]any) {
+	for key, value := range extra {
+		body[key] = value
+	}
+	writeDashboardJSON(w, status, body)
+}
+
+func writeSubmittedSession(w http.ResponseWriter, session *surface.Session, deliveryID int64, detail string, extra map[string]any) {
 	body := map[string]any{
 		"ok":        true,
 		"status":    "submitted",
@@ -2067,7 +2078,7 @@ func writeSubmittedSession(w http.ResponseWriter, session *surface.Session, deli
 	if deliveryID > 0 {
 		body["deliveryId"] = deliveryID
 	}
-	writeDashboardJSON(w, http.StatusAccepted, body)
+	writeSessionCreateJSON(w, http.StatusAccepted, body, extra)
 }
 
 func submittedSessionDetail(session *surface.Session, alias string) string {
@@ -2080,22 +2091,22 @@ func submittedSessionDetail(session *surface.Session, alias string) string {
 	return "Submitted to " + target + "."
 }
 
-func writeInitialSessionFailure(w http.ResponseWriter, session *surface.Session, deliveryID int64, message string) {
+func writeInitialSessionFailure(w http.ResponseWriter, session *surface.Session, deliveryID int64, message string, extra map[string]any) {
 	body := map[string]any{"ok": false, "status": "failed", "retryable": false, "session": session, "error": message}
 	if deliveryID > 0 {
 		body["deliveryId"] = deliveryID
 	}
-	writeDashboardJSON(w, http.StatusBadGateway, body)
+	writeSessionCreateJSON(w, http.StatusBadGateway, body, extra)
 }
 
-func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, warning string) {
-	writeDashboardJSON(w, http.StatusInternalServerError, map[string]any{
+func writeCreateStorageFailure(w http.ResponseWriter, session *surface.Session, warning string, extra map[string]any) {
+	writeSessionCreateJSON(w, http.StatusInternalServerError, map[string]any{
 		"ok":        false,
 		"status":    "storage_failed",
 		"retryable": false,
 		"session":   session,
 		"error":     warning,
-	})
+	}, extra)
 }
 
 func writeAcceptedLaunch(w http.ResponseWriter, launcher string, location *surface.Location, warning string) {

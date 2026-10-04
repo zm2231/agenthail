@@ -70,6 +70,10 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The session stream cursor is no longer retained."}, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
 	}
+	d.writeSessionStream(w, r, flusher, sessionID, after, window, subscription.Entries)
+}
+
+func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, entries <-chan registry.SessionJournalEntry) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
@@ -95,7 +99,7 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		select {
 		case <-r.Context().Done():
 			return
-		case entry, open := <-subscription.Entries:
+		case entry, open := <-entries:
 			if !open {
 				return
 			}
