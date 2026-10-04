@@ -545,7 +545,9 @@ struct SessionScreen: View {
                 }
             }
             .sheet(isPresented: $showingInfo) {
-                if let detail { SessionInspector(model: model, session: session, detail: detail) }
+                if let liveDetail = model.selectedDetail, liveDetail.session.id == session.id {
+                    SessionInspector(model: model, session: session, initialDetail: liveDetail)
+                }
             }
             .sheet(isPresented: $showingVoice) {
                 AgenthailVoiceOperatorSheet(targetID: session.id) { _ in }
@@ -926,13 +928,17 @@ struct SessionSummary: View {
 struct SessionInspector: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
-    let detail: SessionDetail
+    let initialDetail: SessionDetail
     @Environment(\.dismiss) private var dismiss
     @State private var showingModels = false
+    private var detail: SessionDetail {
+        guard let liveDetail = model.selectedDetail, liveDetail.session.id == session.id else { return initialDetail }
+        return liveDetail
+    }
     var body: some View {
         NavigationStack {
             List {
-                Section("Session") {
+                Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
@@ -942,6 +948,8 @@ struct SessionInspector: View {
                     if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
                     if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
+                } header: {
+                    Text("Session").accessibilityIdentifier("session-inspector-anchor")
                 }
                 Section("Context") {
                     if let context = detail.context {
@@ -976,6 +984,38 @@ struct SessionInspector: View {
                         if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
                         if let value = goal.createdAt { LabeledContent("Created", value: value) }
                         if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
+                    }
+                }
+                if let runs = detail.claudeRuns, !runs.isEmpty {
+                    Section("Claude runs") {
+                        ForEach(runs) { run in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(run.jobId).font(.body.weight(.medium)).textSelection(.enabled)
+                                if let state = run.providerState, !state.isEmpty { LabeledContent("Provider state", value: state) }
+                                if let type = run.runType, !type.isEmpty { LabeledContent("Run type", value: type) }
+                                if let updated = run.updatedAt, !updated.isEmpty { LabeledContent("Updated", value: updated) }
+                                if !run.recordPath.isEmpty { Text(run.recordPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
+                if let links = detail.claudeSubagents, !links.isEmpty {
+                    Section("Claude subagents") {
+                        ForEach(links) { link in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
+                            }
+                        }
+                    }
+                }
+                if let errors = detail.metadataErrors, !errors.isEmpty {
+                    Section("Metadata warnings") {
+                        ForEach(errors.keys.sorted(), id: \.self) { key in
+                            if let message = errors[key] {
+                                LabeledContent(key, value: message)
+                            }
+                        }
                     }
                 }
                 Section("Controls") {

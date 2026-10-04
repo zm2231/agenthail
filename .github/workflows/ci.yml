@@ -35,6 +35,7 @@ jobs:
         run: |
           node scripts/test-session-journal.mjs
           node scripts/test-dashboard-idempotency.mjs
+          node scripts/test-dashboard-timeline.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Race tests
@@ -132,7 +133,9 @@ jobs:
           cache: npm
           cache-dependency-path: sidecar/package-lock.json
       - name: Install and upgrade test
-        run: scripts/test-install-upgrade.sh
+        run: |
+          scripts/test-pkg-component-plist.sh
+          scripts/test-install-upgrade.sh
 
   package:
     runs-on: macos-15

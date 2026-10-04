@@ -22,6 +22,15 @@ struct MetadataOverlayTest {
         let reloaded = overlay.apply(to: bare)
         check(reloaded.context?.usedTokens == 700 && reloaded.goal?.objective == "Streamed" && reloaded.model == "gpt-5", "a reload without metadata keeps every field")
 
+        let observed = try JSONDecoder().decode(SessionMetadata.self, from: Data(#"{"claudeRuns":[{"recordPath":"/runs/1.json","jobId":"job-1","providerState":"running"}],"claudeSubagents":[{"parentSessionId":"s","agentId":"helper","transcriptPath":"/t/helper.jsonl"}],"errors":{"goal":"unavailable"}}"#.utf8))
+        overlay.absorb(observed)
+        let withRuns = overlay.apply(to: bare)
+        check(withRuns.claudeRuns?.first?.jobId == "job-1" && withRuns.claudeSubagents?.first?.agentId == "helper" && withRuns.metadataErrors?["goal"] == "unavailable" && withRuns.model == "gpt-5", "Claude runs, subagents, and warnings come from metadata")
+        check(overlay.apply(to: bare).goal?.objective == "Streamed", "metadata observations keep streamed fields")
+        overlay.metadataFailed()
+        let failed = overlay.apply(to: bare)
+        check(failed.claudeRuns == nil && failed.claudeSubagents == nil && failed.metadataErrors == nil && failed.model == "gpt-5", "a failed metadata load clears observations only")
+
         var older = MetadataOverlay()
         older.absorb(context: legacy.context, goal: legacy.goal, model: legacy.model, models: legacy.models)
         let fromLegacy = older.apply(to: legacy)

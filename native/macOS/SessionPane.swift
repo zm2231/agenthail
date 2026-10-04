@@ -240,9 +240,9 @@ final class SessionPane: ObservableObject, Identifiable {
         guard !closed, let api = model.api else { return }
         let selection = selectionGeneration
         metadataTask = Task {
-            guard let loaded = try? await api.sessionMetadata(id: id) else { return }
+            let loaded = try? await api.sessionMetadata(id: id)
             guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil else { return }
-            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
+            if let loaded { metadata.absorb(loaded) } else { metadata.metadataFailed() }
             applyMetadata(to: id)
         }
     }

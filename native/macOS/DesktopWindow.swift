@@ -1459,6 +1459,7 @@ struct DetailsTab: View {
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }
             GoalSection(model: model, pane: pane, session: session)
+            ClaudeObservationsSection(detail: pane.detail)
         }
     }
 

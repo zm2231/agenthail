@@ -87,9 +87,14 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["Call this session"].exists)
         let inbox = app.buttons["Session inbox"]
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
+        let inspectorAnchor = app.staticTexts["session-inspector-anchor"]
+        XCTAssertTrue(inspectorAnchor.waitForExistence(timeout: 5))
+        let inspector = app.scrollViews.allElementsBoundByIndex.first { $0.identifier != "session-timeline" }
+        XCTAssertNotNil(inspector)
+        guard let inspector else { return }
         for _ in 0..<5 {
-            if waitUntilHittable(inbox, timeout: 0.5) { break }
-            app.scrollViews["session-timeline"].swipeUp()
+            if waitUntilHittable(inbox, timeout: 2) { break }
+            inspector.swipeUp()
         }
         XCTAssertTrue(waitUntilHittable(inbox, timeout: 2))
         inbox.tap()
@@ -102,6 +107,19 @@ final class SessionNavigationTests: XCTestCase {
         app.buttons["inbox-session-1"].tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Session inbox"].exists)
+    }
+
+    func testClaudeMetadataAppearsInSessionDetails() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-inspector", "--preview-metadata"]
+        app.launch()
+
+        for _ in 0..<5 { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Claude runs"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["job-1"].exists)
+        XCTAssertTrue(app.staticTexts["Claude subagents"].exists)
+        XCTAssertTrue(app.staticTexts["agent-1"].exists)
+        XCTAssertTrue(app.staticTexts["/Users/demo/.claude/agents/agent-1.jsonl"].exists)
     }
 
     func testExpiredInstructionsAreOnlyInHistory() {

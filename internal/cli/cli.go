@@ -22,6 +22,7 @@ import (
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -33,16 +34,17 @@ type SurfaceEntry struct {
 }
 
 type App struct {
-	Registry                *registry.Registry
-	Surfaces                []SurfaceEntry
-	DefaultTimeout          time.Duration
-	Version                 string
-	Revision                string
-	BuiltAt                 string
-	catalogDaemonRunning    func() bool
-	daemonServiceLoaded     func() bool
-	update                  *updateDeps
-	daemonSessionPageReader func() (sessionPageReader, error)
+	Registry                  *registry.Registry
+	Surfaces                  []SurfaceEntry
+	DefaultTimeout            time.Duration
+	Version                   string
+	Revision                  string
+	BuiltAt                   string
+	catalogDaemonRunning      func() bool
+	daemonServiceLoaded       func() bool
+	update                    *updateDeps
+	daemonSessionPageReader   func() (sessionPageReader, error)
+	daemonSessionStreamReader func() (sessionStreamReader, error)
 }
 
 func (a *App) Run(args []string) error {
@@ -685,7 +687,9 @@ type listCatalogMetadataView struct {
 }
 
 type listCatalogFreshness struct {
+	Generation        uint64    `json:"generation"`
 	ObservedAt        time.Time `json:"observedAt"`
+	Stale             bool      `json:"stale"`
 	UnavailableReason string    `json:"unavailableReason,omitempty"`
 }
 
@@ -720,7 +724,7 @@ func listCatalogMetadata(snapshot registry.CatalogSnapshot) listCatalogMetadataV
 		metadata.Surfaces = append(metadata.Surfaces, listCatalogSurface{Surface: string(record.Surface), Health: record.Health, Detail: record.Detail, ObservedAt: record.ObservedAt})
 	}
 	for _, record := range snapshot.Sessions {
-		metadata.Freshness[record.Session.ID] = listCatalogFreshness{ObservedAt: record.ObservedAt, UnavailableReason: record.UnavailableReason}
+		metadata.Freshness[record.Session.ID] = listCatalogFreshness{Generation: record.Freshness.Generation, ObservedAt: record.Freshness.ObservedAt, Stale: record.Freshness.Stale, UnavailableReason: record.UnavailableReason}
 	}
 	return metadata
 }
@@ -979,6 +983,125 @@ func (a *App) ensureWritableTarget(ctx context.Context, session *surface.Session
 	return nil
 }
 
+func (a *App) prepareDaemonSessionStream(ctx context.Context, adapter surface.Surface, session *surface.Session) (sessionstream.Subscription, error) {
+	page, err := a.readSessionPage(ctx, adapter, session, surface.SessionReadRequest{Limit: 1})
+	if err != nil {
+		return sessionstream.Subscription{}, fmt.Errorf("capture active daemon stream cursor: %w", err)
+	}
+	if page.UnavailableReason != "" {
+		return sessionstream.Subscription{}, fmt.Errorf("active daemon session source unavailable: %s", page.UnavailableReason)
+	}
+	var reader sessionStreamReader
+	if a.daemonSessionStreamReader != nil {
+		reader, err = a.daemonSessionStreamReader()
+	} else {
+		reader, err = newDaemonSessionStreamClient()
+	}
+	if err != nil {
+		return sessionstream.Subscription{}, fmt.Errorf("open active daemon session stream: %w", err)
+	}
+	if reader == nil {
+		return sessionstream.Subscription{}, errors.New("open active daemon session stream: reader is unavailable")
+	}
+	return reader.OpenSessionStream(ctx, session, page.JournalSeq)
+}
+
+func streamEventDelta(event sessionstream.Event, bodies map[string]string, versions map[string]uint64) string {
+	if event.ItemID == "" {
+		return event.Body
+	}
+	if prior, found := versions[event.ItemID]; found && ((event.Version > 0 && prior > 0 && event.Version <= prior) || (event.Version == 0 && bodies[event.ItemID] == event.Body)) {
+		return ""
+	}
+	versions[event.ItemID] = event.Version
+	previous := bodies[event.ItemID]
+	bodies[event.ItemID] = event.Body
+	if strings.HasPrefix(event.Body, previous) {
+		return strings.TrimPrefix(event.Body, previous)
+	}
+	return event.Body
+}
+
+func printSessionStreamEvent(event sessionstream.Event, bodies map[string]string, versions map[string]uint64) {
+	if event.Kind == "tool_use" {
+		if text := streamEventDelta(event, bodies, versions); text != "" {
+			fmt.Printf("  -> %s\n", text)
+		}
+		return
+	}
+	if !event.SpokenAssistantContent() {
+		return
+	}
+	if text := streamEventDelta(event, bodies, versions); text != "" {
+		fmt.Print(text)
+	}
+}
+
+func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscription, turnID string) (*surface.ReplyResult, error) {
+	bodies := map[string]string{}
+	versions := map[string]uint64{}
+	var latest string
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case event, ok := <-subscription.Events:
+			if !ok {
+				return nil, fmt.Errorf("session stream ended before turn %s completed", turnID)
+			}
+			if event.Kind == "source-error" {
+				return nil, fmt.Errorf("session source failed: %s", event.Reason)
+			}
+			if event.TurnID != turnID {
+				continue
+			}
+			if event.SpokenAssistantContent() {
+				if prior := bodies[event.ItemID]; event.Version == 0 || event.Version > versions[event.ItemID] {
+					if event.ItemID != "" && strings.HasPrefix(event.Body, prior) {
+						bodies[event.ItemID] = event.Body
+					} else if event.ItemID != "" {
+						bodies[event.ItemID] = event.Body
+					}
+					versions[event.ItemID] = event.Version
+					latest = event.Body
+				}
+			}
+			if event.Terminal() {
+				if event.Failed() {
+					return nil, fmt.Errorf("turn %s did not complete successfully: %s", turnID, event.Reason)
+				}
+				return &surface.ReplyResult{Text: latest, Done: true, Source: "daemon-journal"}, nil
+			}
+		}
+	}
+}
+
+func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.Subscription, turnID string, timeout time.Duration) error {
+	bodies := map[string]string{}
+	versions := map[string]uint64{}
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for stream after %s: %w", timeout, ctx.Err())
+		case event, ok := <-subscription.Events:
+			if !ok {
+				return fmt.Errorf("session stream ended before turn %s completed", turnID)
+			}
+			if event.Kind == "source-error" {
+				return fmt.Errorf("session source failed: %s", event.Reason)
+			}
+			if event.TurnID != turnID {
+				continue
+			}
+			if event.Kind == "done" {
+				fmt.Println()
+				return nil
+			}
+			printSessionStreamEvent(event, bodies, versions)
+		}
+	}
+}
+
 func (a *App) cmdSend(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 2 {
@@ -1037,7 +1160,17 @@ func (a *App) cmdSend(args []string) error {
 		return fmt.Errorf("%s does not support stream", surf.Name())
 	}
 	baseline := ""
-	if wantReply {
+	var daemonStream sessionstream.Subscription
+	useDaemonStream := a.daemonIsRunning() && (wantStream || wantReply)
+	if useDaemonStream {
+		daemonStream, err = a.prepareDaemonSessionStream(ctx, surf, sess)
+		if err != nil {
+			return err
+		}
+		if daemonStream.Cancel != nil {
+			defer daemonStream.Cancel()
+		}
+	} else if wantReply {
 		observation, observeErr := surf.Observe(ctx, sess)
 		if observeErr != nil {
 			return fmt.Errorf("establish reply cursor before send: %w", observeErr)
@@ -1113,6 +1246,9 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	if wantStream {
+		if useDaemonStream {
+			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
+		}
 		return surf.Stream(ctx, sess, receipt.TurnID, func(ev surface.StreamEvent) {
 			if ev.Kind == "text" {
 				fmt.Print(ev.Text)
@@ -1125,7 +1261,12 @@ func (a *App) cmdSend(args []string) error {
 	}
 
 	if wantReply {
-		reply, err := waitForReply(ctx, surf, sess, baseline, receipt.TurnID, timeout)
+		var reply *surface.ReplyResult
+		if useDaemonStream {
+			reply, err = consumeSessionReply(ctx, daemonStream, receipt.TurnID)
+		} else {
+			reply, err = waitForReply(ctx, surf, sess, baseline, receipt.TurnID, timeout)
+		}
 		if err != nil {
 			return err
 		}
@@ -1416,7 +1557,12 @@ func (a *App) cmdStream(args []string) error {
 	if len(positional) != 1 {
 		return fmt.Errorf("usage: agenthail stream <target>")
 	}
-	ctx := context.Background()
+	timeout, err := commandTimeout(args, 10*time.Minute)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
 	if err != nil {
 		return err
@@ -1424,9 +1570,50 @@ func (a *App) cmdStream(args []string) error {
 	if !surf.Capabilities().Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
 	}
-	timeout, err := commandTimeout(args, 10*time.Minute)
-	if err != nil {
-		return err
+	if a.daemonIsRunning() {
+		page, err := a.readSessionPage(ctx, surf, sess, surface.SessionReadRequest{Limit: 1})
+		if err != nil {
+			return fmt.Errorf("read active daemon stream cursor: %w", err)
+		}
+		if page.UnavailableReason != "" {
+			return fmt.Errorf("active daemon session source unavailable: %s", page.UnavailableReason)
+		}
+		var reader sessionStreamReader
+		if a.daemonSessionStreamReader != nil {
+			reader, err = a.daemonSessionStreamReader()
+		} else {
+			reader, err = newDaemonSessionStreamClient()
+		}
+		if err != nil {
+			return fmt.Errorf("open active daemon session stream: %w", err)
+		}
+		if reader == nil {
+			return errors.New("open active daemon session stream: reader is unavailable")
+		}
+		subscription, err := reader.OpenSessionStream(ctx, sess, 0)
+		if err != nil {
+			return err
+		}
+		defer subscription.Cancel()
+		bodies := map[string]string{}
+		versions := map[string]uint64{}
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case event, ok := <-subscription.Events:
+				if !ok {
+					return errors.New("daemon session stream ended")
+				}
+				if event.Kind == "source-error" {
+					return fmt.Errorf("session source failed: %s", event.Reason)
+				}
+				if event.Seq <= page.JournalSeq {
+					continue
+				}
+				printSessionStreamEvent(event, bodies, versions)
+			}
+		}
 	}
 	return surf.Stream(ctx, sess, "", func(ev surface.StreamEvent) {
 		switch ev.Kind {

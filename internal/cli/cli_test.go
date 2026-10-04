@@ -30,6 +30,7 @@ type cliSurface struct {
 	observations  []*surface.TurnObservation
 	observeErr    error
 	sendResult    *surface.SendResult
+	sendErr       error
 	reply         *surface.ReplyResult
 	replyWait     bool
 	sendWait      bool
@@ -227,6 +228,9 @@ func (f *cliSurface) Observe(context.Context, *surface.Session) (*surface.TurnOb
 }
 func (f *cliSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
 	if f.sendWait {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -965,7 +969,9 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 				Health string `json:"health"`
 			} `json:"surfaces"`
 			Freshness map[string]struct {
+				Generation uint64    `json:"generation"`
 				ObservedAt time.Time `json:"observedAt"`
+				Stale      bool      `json:"stale"`
 			} `json:"freshness"`
 		} `json:"catalog"`
 	}
@@ -980,6 +986,9 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	}
 	if got := document.Catalog.Freshness["catalog-root"].ObservedAt; !got.Equal(observedAt) {
 		t.Fatalf("root freshness=%s want=%s", got, observedAt)
+	}
+	if got := document.Catalog.Freshness["catalog-root"]; got.Generation != 1 || got.Stale {
+		t.Fatalf("root freshness=%+v", got)
 	}
 }
 

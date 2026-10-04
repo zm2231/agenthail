@@ -105,23 +105,28 @@ type dashboardSession struct {
 }
 
 type dashboardState struct {
-	UpdatedAt        time.Time                  `json:"updatedAt"`
-	EventCursor      uint64                     `json:"eventCursor"`
-	HostEpoch        string                     `json:"hostEpoch"`
-	CatalogSeq       uint64                     `json:"catalogSeq"`
-	Daemon           map[string]any             `json:"daemon"`
-	Surfaces         []dashboardSurface         `json:"surfaces"`
-	Sessions         []dashboardSession         `json:"sessions"`
-	TotalSessions    int                        `json:"totalSessions"`
-	NextCursor       string                     `json:"nextCursor,omitempty"`
-	Queue            []dashboardQueue           `json:"queue"`
-	Channels         []dashboardChannel         `json:"channels"`
-	Relays           []dashboardRelay           `json:"relays"`
-	History          []dashboardHistory         `json:"history"`
-	Attention        []dashboardAttention       `json:"attention"`
-	DeliveryProblems []registry.DeliveryProblem `json:"deliveryProblems"`
-	CodexRecentHours int                        `json:"codexRecentHours"`
-	BusyDelivery     string                     `json:"busyDelivery"`
+	UpdatedAt          time.Time                  `json:"updatedAt"`
+	EventCursor        uint64                     `json:"eventCursor"`
+	HostEpoch          string                     `json:"hostEpoch"`
+	CatalogSeq         uint64                     `json:"catalogSeq"`
+	Daemon             map[string]any             `json:"daemon"`
+	Surfaces           []dashboardSurface         `json:"surfaces"`
+	Sessions           []dashboardSession         `json:"sessions"`
+	TotalSessions      int                        `json:"totalSessions"`
+	NextCursor         string                     `json:"nextCursor,omitempty"`
+	Queue              []dashboardQueue           `json:"queue"`
+	Channels           []dashboardChannel         `json:"channels"`
+	Relays             []dashboardRelay           `json:"relays"`
+	History            []dashboardHistory         `json:"history"`
+	Attention          []dashboardAttention       `json:"attention"`
+	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
+	CodexRecentHours   int                        `json:"codexRecentHours"`
+	BusyDelivery       string                     `json:"busyDelivery"`
+	catalogPageApplied bool
+	catalogPageFilter  string
+	catalogPageOffset  int
+	catalogPageLimit   int
+	catalogPageHasMore bool
 }
 
 type dashboardAttention struct {
@@ -424,10 +429,19 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	page, pageErr := catalogPageRequestFromHTTP(r)
+	if pageErr != nil {
+		code := "invalid_catalog_page"
+		if strings.Contains(pageErr.Error(), "cursor") {
+			code = "invalid_cursor"
+		}
+		writeAPIError(w, http.StatusBadRequest, code, pageErr.Error())
+		return
+	}
 	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
-	if catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+	if page == nil && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		state := dashboard.state
 		dashboard.stateMu.Unlock()
 		d.writeDashboardSnapshot(w, r, state)
@@ -437,8 +451,18 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 	dashboard.stateMu.Unlock()
 	refreshCtx, cancel := context.WithTimeout(r.Context(), dashboardRefreshBudget)
 	defer cancel()
-	state, err := d.dashboardState(refreshCtx)
+	var state dashboardState
+	var err error
+	if page == nil {
+		state, err = d.dashboardState(refreshCtx)
+	} else {
+		state, err = d.dashboardState(refreshCtx, *page)
+	}
 	if err != nil {
+		if page != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		if hadPrevious {
 			stale := previous
 			stale.Daemon = cloneDashboardDaemon(stale.Daemon)
@@ -450,15 +474,33 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	dashboard.stateMu.Lock()
-	dashboard.state = state
-	dashboard.stateAt = time.Now()
-	dashboard.cachedVersion = version
-	dashboard.stateMu.Unlock()
+	if page == nil {
+		dashboard.stateMu.Lock()
+		dashboard.state = state
+		dashboard.stateAt = time.Now()
+		dashboard.cachedVersion = version
+		dashboard.stateMu.Unlock()
+	}
 	d.writeDashboardSnapshot(w, r, state)
 }
 
 func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, state dashboardState) {
+	if state.catalogPageApplied {
+		if raw := r.URL.Query().Get("cursor"); raw != "" {
+			decoded, err := base64.RawURLEncoding.DecodeString(raw)
+			var cursor catalogPageCursor
+			if err != nil || json.Unmarshal(decoded, &cursor) != nil || cursor.Epoch != state.HostEpoch || cursor.Seq != state.CatalogSeq || cursor.Filter != state.catalogPageFilter || cursor.Offset != state.catalogPageOffset || !cursor.UpdatedAt.Equal(state.UpdatedAt) {
+				writeAPIError(w, http.StatusConflict, "catalog_changed", "Reload the catalog before continuing.")
+				return
+			}
+		}
+		if state.catalogPageHasMore {
+			encoded, _ := json.Marshal(catalogPageCursor{Epoch: state.HostEpoch, Seq: state.CatalogSeq, UpdatedAt: state.UpdatedAt, Offset: state.catalogPageOffset + state.catalogPageLimit, Filter: state.catalogPageFilter})
+			state.NextCursor = base64.RawURLEncoding.EncodeToString(encoded)
+		}
+		writeDashboardJSON(w, http.StatusOK, state)
+		return
+	}
 	scope := r.URL.Query().Get("scope")
 	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
 		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use all, recent, current, or running.")
@@ -498,7 +540,7 @@ func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, 
 				writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The catalog page cursor is invalid.")
 				return
 			}
-			if cursor.Epoch != state.HostEpoch || cursor.Seq != state.CatalogSeq || !cursor.UpdatedAt.Equal(state.UpdatedAt) {
+			if cursor.Epoch != state.HostEpoch || cursor.Seq != state.CatalogSeq {
 				writeAPIError(w, http.StatusConflict, "catalog_changed", "Reload the catalog before continuing.")
 				return
 			}
@@ -527,6 +569,39 @@ type catalogPageCursor struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	Offset    int       `json:"offset"`
 	Filter    string    `json:"filter"`
+}
+
+func catalogPageRequestFromHTTP(r *http.Request) (*registry.CatalogPageRequest, error) {
+	rawLimit := r.URL.Query().Get("limit")
+	if rawLimit == "" {
+		if r.URL.Query().Get("cursor") != "" {
+			return nil, fmt.Errorf("a page cursor requires a limit")
+		}
+		return nil, nil
+	}
+	limit, err := strconv.Atoi(rawLimit)
+	if err != nil || limit < 1 || limit > 200 {
+		return nil, fmt.Errorf("use a limit between 1 and 200")
+	}
+	scope := r.URL.Query().Get("scope")
+	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
+		return nil, fmt.Errorf("use all, recent, current, or running")
+	}
+	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	filter := scope + "\x00" + projectID + "\x00" + query
+	request := &registry.CatalogPageRequest{Scope: scope, ProjectID: projectID, Query: query, Limit: limit, CodexRecentHours: 24}
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		var cursor catalogPageCursor
+		if err != nil || json.Unmarshal(decoded, &cursor) != nil || cursor.Offset < 0 || cursor.Filter != filter || cursor.UpdatedAt.IsZero() {
+			return nil, fmt.Errorf("the catalog page cursor is invalid")
+		}
+		request.Offset = cursor.Offset
+		request.Now = cursor.UpdatedAt
+	} else {
+		request.Now = time.Now().UTC()
+	}
+	return request, nil
 }
 
 func cloneDashboardDaemon(input map[string]any) map[string]any {
@@ -615,18 +690,33 @@ func (d *Daemon) dashboardStateHandler(w http.ResponseWriter, r *http.Request) {
 	writeDashboardJSON(w, http.StatusOK, state)
 }
 
-func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
+func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.CatalogPageRequest) (dashboardState, error) {
 	eventCursor := uint64(0)
 	if d.events != nil {
 		eventCursor = d.events.cursor()
 	}
-	catalogSnapshot, err := d.Registry.CatalogSnapshot()
-	if err != nil {
-		return dashboardState{}, fmt.Errorf("read catalog state: %w", err)
-	}
 	config, err := LoadDashboardConfig()
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("load dashboard config: %w", err)
+	}
+	var catalogSnapshot registry.CatalogSnapshot
+	var page *registry.CatalogPage
+	if len(pageRequest) > 0 {
+		request := pageRequest[0]
+		request.CodexRecentHours = config.CodexRecentHours
+		loaded, err := d.Registry.CatalogSnapshotPage(request)
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read catalog page: %w", err)
+		}
+		catalogSnapshot = loaded.CatalogSnapshot
+		if loaded.TotalMatching > 0 || len(loaded.Surfaces) > 0 {
+			page = &loaded
+		}
+	} else {
+		catalogSnapshot, err = d.Registry.CatalogSnapshot()
+		if err != nil {
+			return dashboardState{}, fmt.Errorf("read catalog state: %w", err)
+		}
 	}
 	now := time.Now()
 	counts, err := d.Registry.QueueCounts()
@@ -666,6 +756,14 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		return dashboardState{}, fmt.Errorf("read delivery problems: %w", err)
 	}
 	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
+	if page != nil {
+		state.catalogPageApplied = true
+		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query
+		state.catalogPageOffset = page.Offset
+		state.catalogPageLimit = page.Limit
+		state.catalogPageHasMore = page.HasMore
+		state.UpdatedAt = pageRequest[0].Now.UTC()
+	}
 	for _, item := range queue {
 		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
 	}
@@ -747,16 +845,22 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		state.Sessions = append(state.Sessions, entry)
 	}
 	sort.Slice(state.Surfaces, func(i, j int) bool { return state.Surfaces[i].Name < state.Surfaces[j].Name })
-	sort.Slice(state.Sessions, func(i, j int) bool {
-		if state.Sessions[i].Status == surface.StatusBusy && state.Sessions[j].Status != surface.StatusBusy {
-			return true
-		}
-		if state.Sessions[j].Status == surface.StatusBusy && state.Sessions[i].Status != surface.StatusBusy {
-			return false
-		}
-		return state.Sessions[i].LastActive.After(state.Sessions[j].LastActive)
-	})
-	state.TotalSessions = len(state.Sessions)
+	if page == nil {
+		sort.Slice(state.Sessions, func(i, j int) bool {
+			if state.Sessions[i].Status == surface.StatusBusy && state.Sessions[j].Status != surface.StatusBusy {
+				return true
+			}
+			if state.Sessions[j].Status == surface.StatusBusy && state.Sessions[i].Status != surface.StatusBusy {
+				return false
+			}
+			return state.Sessions[i].LastActive.After(state.Sessions[j].LastActive)
+		})
+	}
+	if page != nil {
+		state.TotalSessions = page.TotalMatching
+	} else {
+		state.TotalSessions = len(state.Sessions)
+	}
 	return state, nil
 }
 

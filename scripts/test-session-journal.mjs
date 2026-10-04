@@ -61,7 +61,7 @@ problemContext.imageItems = [
   problemContext.imageItem,
   {id: 'a1', kind: 'message', role: 'assistant', text: 'After image'},
 ];
-const timelineHTML = vm.runInContext('renderImageTimeline(imageItems, imageSession)', problemContext);
+const timelineHTML = vm.runInContext('renderTimeline(imageItems, imageSession)', problemContext);
 assert.ok(timelineHTML.indexOf('Before image') < timelineHTML.indexOf('<img'));
 assert.ok(timelineHTML.indexOf('<img') < timelineHTML.indexOf('After image'));
 assert.ok(timelineHTML.includes('data-role="user"') && timelineHTML.includes('data-role="agent"'));
@@ -171,7 +171,6 @@ for (const status of ['active', 'paused', 'blocked', 'usageLimited', 'budgetLimi
   assert.equal(attention.includes('Needs you'), ['blocked', 'usageLimited', 'budgetLimited'].includes(status));
   if (attention) assert.ok(attention.includes('role="status"'));
 }
-assert.ok(source.includes('${renderGoalAttention(goal)}${toolRows.join'), 'goal attention remains outside collapsed conversation settings');
 vm.runInContext('renderContextUsage({usedTokens:404508, contextWindow:0})', usageContext);
 assert.equal(indicator.hidden, false);
 assert.match(indicator.textContent, /405k tokens/);

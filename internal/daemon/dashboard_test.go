@@ -93,11 +93,16 @@ func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
 }
 
 func TestDashboardGoalControlsRenderTypedStatusAndUsageActions(t *testing.T) {
-	source := string(dashboardJS)
-	for _, required := range []string{"goal-edit", "goal-pause", "goal-resume", "goal-budget", "Clear budget", "usageLimited", "budgetLimited", "Complete"} {
-		if !strings.Contains(source, required) {
-			t.Fatalf("dashboard goal integration missing %q", required)
-		}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	script := filepath.Join("..", "..", "scripts", "test-dashboard-timeline.mjs")
+	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("dashboard goal rendering failed: %v\n%s", err, output)
 	}
 }
 
@@ -971,29 +976,16 @@ func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
 }
 
 func TestDashboardUsesNeutralDeliveryDetailsAndLogicalIdempotency(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		`pendingIdempotency: new Map()`,
-		`logicalAction("send", "send", sendPayload)`,
-		`logicalAction("session-create", createAction, values)`,
-		`headers: { "content-type": "application/json", "Idempotency-Key": idempotencyKey }`,
-		`${status} to ${target}.`,
-		`response.status === "submitted" ? "Submitted" : "Sent"`,
-		`clearLogicalRequest("session-create")`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard is missing %q", fragment)
-		}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is unavailable")
 	}
-	for _, stale := range []string{
-		"Accepted by Claude's socket",
-		"Launch submitted; location is still being resolved.",
-		"Conversation created. Delivery could not be confirmed. Check it before retrying.",
-		"response.accepted ?",
-	} {
-		if strings.Contains(source, stale) {
-			t.Fatalf("dashboard retains stale delivery copy %q", stale)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	script := filepath.Join("..", "..", "scripts", "test-dashboard-idempotency.mjs")
+	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("dashboard delivery behavior failed: %v\n%s", err, output)
 	}
 }
 
