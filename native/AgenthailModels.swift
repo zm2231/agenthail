@@ -356,6 +356,20 @@ struct GoalState: Decodable {
     let createdAt: String?
     let updatedAt: String?
 
+    var displayStatus: String {
+        switch status {
+        case "active": return "Active"
+        case "paused": return "Paused"
+        case "blocked", "usageLimited", "budgetLimited": return "Needs you"
+        case "complete": return "Complete"
+        default: return status.capitalized
+        }
+    }
+
+    var needsAttention: Bool {
+        ["blocked", "usageLimited", "budgetLimited"].contains(status)
+    }
+
     enum CodingKeys: String, CodingKey {
         case objective, status, timeUsedSeconds, tokensUsed, tokenBudget, createdAt, updatedAt
     }

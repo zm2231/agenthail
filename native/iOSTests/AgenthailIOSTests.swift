@@ -7,6 +7,17 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(formatGoalDuration(125), "2m 5s")
         XCTAssertEqual(formatGoalDuration(3720), "1h 2m")
     }
+
+    func testGoalStatusesRequiringAttentionShowNeedsYou() throws {
+        for status in ["blocked", "usageLimited", "budgetLimited"] {
+            let goal = try JSONDecoder().decode(GoalState.self, from: Data("{\"objective\":\"Ship\",\"status\":\"\(status)\"}".utf8))
+            XCTAssertEqual(goal.displayStatus, "Needs you")
+            XCTAssertTrue(goal.needsAttention)
+        }
+        let active = try JSONDecoder().decode(GoalState.self, from: Data(#"{"objective":"Ship","status":"active"}"#.utf8))
+        XCTAssertEqual(active.displayStatus, "Active")
+        XCTAssertFalse(active.needsAttention)
+    }
     func testContextStateUsesTokensWhenWindowIsUnknownOrExceeded() throws {
         let unknown = try JSONDecoder().decode(ContextState.self, from: Data(#"{"usedTokens":250000,"contextWindow":0,"compacting":false,"compactionCount":0,"contextWindowSource":"unknown"}"#.utf8))
         XCTAssertNil(unknown.fraction)
