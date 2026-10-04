@@ -45,12 +45,16 @@ func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	output, err := captureStdout(t, func() error { return app.Run([]string{"whoami"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"whoami", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "unresolved: no caller session binding") || strings.Contains(output, "other") {
-		t.Fatalf("output=%q", output)
+	var got whoamiResult
+	if err := json.Unmarshal([]byte(output), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Resolved || got.Session != "" || got.Reason == "" || strings.Contains(output, "other") {
+		t.Fatalf("whoami=%+v output=%q", got, output)
 	}
 }
 

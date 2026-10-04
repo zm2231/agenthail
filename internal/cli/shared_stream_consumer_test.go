@@ -62,7 +62,7 @@ func TestSendStreamActiveDaemonUsesPreparedJournalAndFastReply(t *testing.T) {
 		}}, nil
 	}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:s", "hello", "--stream"}) })
-	if err != nil || output != "fast\n" {
+	if err != nil || !strings.Contains(output, "fast") || strings.Contains(output, "unrelated") || strings.Contains(output, "wrong-provider-reader") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 }

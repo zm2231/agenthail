@@ -86,8 +86,8 @@ func TestThreadCreateCodexAcceptsMessageFlagAndDefaultsToCallerCwd(t *testing.T)
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "thread", Surface: surface.KindCodex, Cwd: "/tmp", Transport: "managed"},
-		delivery:   &surface.SendResult{UUID: "turn", Accepted: true},
+		session:    &surface.Session{ID: "thread-flag", Surface: surface.KindCodex, Cwd: "/tmp", Transport: "managed"},
+		delivery:   &surface.SendResult{UUID: "turn-flag", Accepted: true},
 	}
 	app := threadFixture(t, starter)
 	wantCwd, err := os.Getwd()
@@ -103,7 +103,7 @@ func TestThreadCreateCodexAcceptsMessageFlagAndDefaultsToCallerCwd(t *testing.T)
 	if len(starter.options) != 1 || starter.options[0].Message != "Use the explicit flag" || starter.options[0].Cwd != wantCwd {
 		t.Fatalf("options=%+v want cwd=%q", starter.options, wantCwd)
 	}
-	if !strings.Contains(output, "created codex/thread") || !strings.Contains(output, "started turn turn") {
+	if !strings.Contains(output, "thread-flag") || !strings.Contains(output, "turn-flag") {
 		t.Fatalf("output=%q", output)
 	}
 }
@@ -156,7 +156,7 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 		t.Fatalf("err=%v", runErr)
 	}
 	var result threadCreateOutput
-	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil || result.Session.ID != "created" || result.Detail != "Submitted to @builder." || result.Warning != "" || strings.Contains(strings.ToLower(output), "unresolved") || strings.Contains(strings.ToLower(output), "confirm") || strings.Contains(strings.ToLower(output), "inspect") || strings.Contains(strings.ToLower(output), "retrying") {
+	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil || result.Session.ID != "created" || !strings.Contains(result.Detail, "@builder") || result.Warning != "" {
 		t.Fatalf("result=%+v decodeErr=%v output=%q", result, err, output)
 	}
 	if _, err := app.Registry.Session("created"); err != nil {

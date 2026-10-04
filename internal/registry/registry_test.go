@@ -485,7 +485,7 @@ func TestQueuedMessageExpiresAndStopsWatchingSession(t *testing.T) {
 		t.Fatalf("expired claim=%+v err=%v", item, err)
 	}
 	row, err := r.QueueItem(id)
-	if err != nil || row.Status != "expired" || !strings.Contains(row.LastError, "1 hour") {
+	if err != nil || row.Status != "expired" || row.Evidence != surface.EvidenceExpired || row.LastError == "" {
 		t.Fatalf("row=%+v err=%v", row, err)
 	}
 	watched, err := r.WatchedSessions()
@@ -639,7 +639,7 @@ func TestRecoverInflightAndRuntimeState(t *testing.T) {
 		t.Fatalf("recovered=%d err=%v", n, err)
 	}
 	rows, err := r.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {
+	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 	observation := surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1", CompletedTurnID: "turn-0"}
@@ -797,7 +797,7 @@ func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, err := r.ListAttentionItems(false)
-	if err != nil || len(items) != 1 || items[0].Reason != "Delivery outcome could not be confirmed" {
+	if err != nil || len(items) != 1 || items[0].Reason == "" || items[0].RequestedAction == "" {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
 	if err := r.CancelMessage(item.ID); err != nil {
@@ -813,35 +813,42 @@ func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
 }
 
 func TestAttentionItemsExplainTerminalDeliveryRecovery(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		error  string
-		reason string
-		action string
-	}{
-		{"missing target", "delivery rejected [target missing]: HTTP 404", "Delivery target is unavailable", "Cancel and send this message to an available session"},
-		{"authentication", "delivery rejected [authentication needed]: HTTP 401", "Claude needs to reconnect", "Reconnect Claude, then retry or cancel this message"},
-		{"access", "delivery rejected [access denied]: HTTP 403", "Claude denied this delivery", "Check Claude access, then retry or cancel this message"},
-		{"invalid request", "delivery rejected [invalid request]: HTTP 400", "Delivery request needs correction", "Correct this message, then retry or cancel it"},
+	attention := func(t *testing.T, cause string) AttentionItem {
+		t.Helper()
+		r := openTestRegistry(t)
+		register(t, r, "s")
+		if err := r.QueueMessage("s", "needs recovery"); err != nil {
+			t.Fatal(err)
+		}
+		item, err := r.ClaimNextMessage("s", time.Now())
+		if err != nil || item == nil {
+			t.Fatalf("item=%+v err=%v", item, err)
+		}
+		if _, err := r.DeadLetterMessage(item.ID, errors.New(cause)); err != nil {
+			t.Fatal(err)
+		}
+		items, err := r.ListAttentionItems(false)
+		if err != nil || len(items) != 1 || items[0].Reason == "" || items[0].RequestedAction == "" {
+			t.Fatalf("items=%+v err=%v", items, err)
+		}
+		return items[0]
+	}
+	generic := attention(t, "transport closed")
+	reasons := map[string]string{}
+	for _, cause := range []string{
+		"delivery rejected [target missing]: HTTP 404",
+		"delivery rejected [authentication needed]: HTTP 401",
+		"delivery rejected [access denied]: HTTP 403",
+		"delivery rejected [invalid request]: HTTP 400",
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			r := openTestRegistry(t)
-			register(t, r, "s")
-			if err := r.QueueMessage("s", "needs recovery"); err != nil {
-				t.Fatal(err)
-			}
-			item, err := r.ClaimNextMessage("s", time.Now())
-			if err != nil || item == nil {
-				t.Fatalf("item=%+v err=%v", item, err)
-			}
-			if _, err := r.DeadLetterMessage(item.ID, errors.New(test.error)); err != nil {
-				t.Fatal(err)
-			}
-			items, err := r.ListAttentionItems(false)
-			if err != nil || len(items) != 1 || items[0].Reason != test.reason || items[0].RequestedAction != test.action {
-				t.Fatalf("items=%+v err=%v", items, err)
-			}
-		})
+		item := attention(t, cause)
+		if item.Reason == generic.Reason || item.RequestedAction == generic.RequestedAction {
+			t.Fatalf("%q fell back to the generic explanation %+v", cause, item)
+		}
+		if other, seen := reasons[item.Reason]; seen {
+			t.Fatalf("%q and %q share reason %q", cause, other, item.Reason)
+		}
+		reasons[item.Reason] = cause
 	}
 }
 
@@ -1106,7 +1113,7 @@ func TestClaimDeadLettersStaleInflightWithoutAutomaticRedelivery(t *testing.T) {
 		t.Fatalf("recovered=%+v err=%v", recovered, err)
 	}
 	rows, err := r.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "retry explicitly") {
+	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,13 +40,17 @@ func TestDashboardRemoteStatusDispatchesMultiwordCommand(t *testing.T) {
 	}
 	app := &App{}
 	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"dashboard", "remote", "status", "--tailscale", script})
+		return app.Run([]string{"dashboard", "remote", "status", "--json", "--tailscale", script})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "remote dashboard access: off") || strings.Contains(output, "opened dashboard") {
-		t.Fatalf("output=%q", output)
+	var status struct {
+		Enabled *bool  `json:"enabled"`
+		DNSName string `json:"dnsName"`
+	}
+	if err := json.Unmarshal([]byte(output), &status); err != nil || status.Enabled == nil || *status.Enabled || status.DNSName != "agent.tailnet.ts.net" {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
