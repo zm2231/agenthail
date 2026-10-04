@@ -441,8 +441,13 @@ func TestCatalogQueueProjectionReconcilesAfterStaleDiscoveryWrite(t *testing.T) 
 		t.Fatal(err)
 	}
 	d.publishCatalogQueueCounts()
-	if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: stale.Session, HostProject: stale.HostProject, Checkout: stale.Checkout, ObservedAt: time.Now(), ProjectionFingerprint: stale.ProjectionFingerprint}, registry.CatalogEvent{DedupeKey: "session.upserted:" + to.ID, Type: "session.upserted", EntityID: to.ID, Payload: []byte(`{"session":{}}`)}); err != nil {
-		t.Fatal(err)
+	if _, _, err := reg.RecordCatalogSession(registry.CatalogSessionState{Session: stale.Session, HostProject: stale.HostProject, Checkout: stale.Checkout, ObservedAt: time.Now(), ProjectionFingerprint: stale.ProjectionFingerprint}, registry.CatalogEvent{DedupeKey: "session.upserted:" + to.ID, Type: "session.upserted", EntityID: to.ID, Payload: []byte(`{"session":{}}`)}); err == nil {
+		t.Fatal("stale discovery projection was accepted")
+	} else {
+		var conflict *registry.CatalogQueueProjectionConflict
+		if !errors.As(err, &conflict) || conflict.QueueCount != 1 {
+			t.Fatalf("unexpected stale discovery error: %v", err)
+		}
 	}
 	d.publishCatalogQueueCounts()
 	var projection dashboardSession
