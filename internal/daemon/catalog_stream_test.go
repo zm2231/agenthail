@@ -3,18 +3,40 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type boundedCatalogSurface struct{ *daemonSurface }
+
+type blockingObserveSurface struct {
+	*daemonSurface
+	entered chan struct{}
+	release <-chan struct{}
+}
+
+func (s *blockingObserveSurface) Observe(ctx context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	select {
+	case s.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return s.daemonSurface.Observe(ctx, session)
+}
 
 func (boundedCatalogSurface) CatalogListComplete() bool { return false }
 
@@ -58,6 +80,332 @@ func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
 			}
 			break
 		}
+	}
+}
+
+func TestActiveCatalogSubscriberReceivesTerminalDeliveryProblem(t *testing.T) {
+	d, store, fake, sender, target := daemonFixture(t)
+	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
+		t.Fatal(err)
+	}
+	reader, closeStream := openAuthorizedCatalogStream(t, d)
+	defer closeStream()
+	fake.sendErr = surface.DeliveryTerminal(fmt.Errorf("target rejected input"), surface.DeliveryInvalidRequest)
+	d.drainMessageQueue(context.Background(), fake, &target)
+	event := receiveCatalogSSE(t, reader)
+	if event.Type != "delivery.problem" {
+		t.Fatalf("event=%+v", event)
+	}
+}
+
+func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T) {
+	d, store, _, sender, target := daemonFixture(t)
+	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "expiry", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
+		t.Fatal(err)
+	}
+	_, events, cancel, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	if _, err := store.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
+	}
+	event := receiveCatalogEvent(t, events)
+	if event.Type != "delivery.problem" {
+		t.Fatalf("event=%+v", event)
+	}
+	if _, err := store.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
+	}
+	ensureNoCatalogEvent(t, events)
+}
+
+func TestCatalogScanDrainsDeliveryProblemExpiredByQueueCount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	store, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	sender := surface.Session{ID: "sender", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	target := surface.Session{ID: "target", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	for _, session := range []surface.Session{sender, target} {
+		if err := store.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release := make(chan struct{})
+	fake := &blockingObserveSurface{daemonSurface: &daemonSurface{sessions: map[string]surface.Session{sender.ID: sender, target.ID: target}, observations: map[string]*surface.TurnObservation{}, accepted: true}, entered: make(chan struct{}, 1), release: release}
+	d := New(store, []surface.Surface{fake})
+	if _, err := store.AddRoute(sender.ID, target.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	queueID, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "queue-count", surface.SendOptions{SourceSessionID: sender.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, events, cancel, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if count := store.QueueCount(target.ID); count != 0 {
+		t.Fatalf("queue count=%d", count)
+	}
+	done := make(chan struct{})
+	go func() {
+		d.scanAndRelay(context.Background())
+		close(done)
+	}()
+	event := receiveCatalogEvent(t, events)
+	if event.Type != "delivery.problem" {
+		t.Fatalf("event=%+v", event)
+	}
+	select {
+	case <-fake.entered:
+	case <-time.After(time.Second):
+		t.Fatal("provider observation did not begin")
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("scan did not finish after provider observation released")
+	}
+}
+
+func TestActiveCatalogSubscriberReceivesTerminalRelayProblemAndReconnectsWithoutReplay(t *testing.T) {
+	d, store, fake, sender, target := daemonFixture(t)
+	if _, err := store.AddRoute(sender.ID, target.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	_, events, cancel, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.fireRelays(&sender, "relay-turn", 0, "forwarded reply")
+	fake.sendErr = surface.DeliveryTerminal(fmt.Errorf("target rejected input"), surface.DeliveryInvalidRequest)
+	d.drainMessageQueue(context.Background(), fake, &target)
+	first := receiveCatalogEvent(t, events)
+	if first.Type != "delivery.problem" {
+		t.Fatalf("first=%+v", first)
+	}
+	cancel()
+	window, resumed, stop, err := d.catalog.subscribe(first.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if len(window.Events) != 0 {
+		t.Fatalf("replayed=%+v", window.Events)
+	}
+	if _, created, err := d.catalog.publish(registry.CatalogEvent{DedupeKey: "session:sender:after-problem", Type: "session.upserted", EntityID: sender.ID, Payload: []byte(`{"id":"sender"}`)}); err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	next := receiveCatalogEvent(t, resumed)
+	if next.Seq != first.Seq+1 || next.Type != "session.upserted" {
+		t.Fatalf("first=%+v next=%+v", first, next)
+	}
+}
+
+func TestActiveCatalogSubscriberReceivesReplyForwardFailureOnce(t *testing.T) {
+	d, store, _, sender, target := daemonFixture(t)
+	routeID, err := store.AddRoute(sender.ID, target.ID, ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, events, cancel, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	route := registry.RouteRow{ID: routeID, FromSession: sender.ID, ToSession: target.ID, Pattern: ".*", Active: true}
+	d.dropRelay(sender.ID, route, "reply-turn", "reply body", "target surface unavailable")
+	first := receiveCatalogEvent(t, events)
+	if first.Type != "delivery.problem" {
+		t.Fatalf("first=%+v", first)
+	}
+	d.dropRelay(sender.ID, route, "reply-turn", "reply body", "target surface unavailable")
+	ensureNoCatalogEvent(t, events)
+}
+
+func TestCatalogHubClosesStaleSubscribersAndRecoversAfterJournalGap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog-gap.db")
+	store, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	d := New(store, nil)
+	_, stale, cancel, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	appendCatalogGapFixture(t, path, catalogStreamReplayLimit+1)
+	if err := d.catalog.flushCommitted(); err == nil {
+		t.Fatal("catalog journal gap did not report an error")
+	}
+	if _, open := <-stale; open {
+		t.Fatal("stale subscriber remained open after catalog journal gap")
+	}
+	staleWindow, _, stopStale, err := d.catalog.subscribe(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopStale()
+	if !staleWindow.Gap {
+		t.Fatalf("stale replay window=%+v", staleWindow)
+	}
+	window, events, stop, err := d.catalog.subscribe(staleWindow.LatestSeq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if window.Gap || len(window.Events) != 0 {
+		t.Fatalf("reconnected window=%+v", window)
+	}
+	if _, created, err := store.AppendCatalogEvent(registry.CatalogEvent{DedupeKey: "gap:next", Type: "session.upserted", EntityID: "to", Payload: []byte(`{"id":"to"}`)}); err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
+	}
+	next := receiveCatalogEvent(t, events)
+	if next.Seq != staleWindow.LatestSeq+1 || next.EntityID != "to" {
+		t.Fatalf("latest=%d next=%+v", staleWindow.LatestSeq, next)
+	}
+}
+
+func receiveCatalogEvent(t *testing.T, events <-chan registry.CatalogEvent) registry.CatalogEvent {
+	t.Helper()
+	select {
+	case event, open := <-events:
+		if !open {
+			t.Fatal("catalog subscriber closed")
+		}
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("catalog subscriber did not receive an event")
+		return registry.CatalogEvent{}
+	}
+}
+
+func ensureNoCatalogEvent(t *testing.T, events <-chan registry.CatalogEvent) {
+	t.Helper()
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected catalog event=%+v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func openAuthorizedCatalogStream(t *testing.T, d *Daemon) (*bufio.Reader, func()) {
+	t.Helper()
+	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "secret"}))
+	ctx, cancel := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/catalog-events?after=0", nil)
+	if err != nil {
+		server.Close()
+		cancel()
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer secret")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		server.Close()
+		cancel()
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		server.Close()
+		cancel()
+		t.Fatalf("status=%d", response.StatusCode)
+	}
+	return bufio.NewReader(response.Body), func() {
+		cancel()
+		response.Body.Close()
+		server.Close()
+	}
+}
+
+func receiveCatalogSSE(t *testing.T, reader *bufio.Reader) catalogStreamEnvelope {
+	t.Helper()
+	result := make(chan catalogStreamEnvelope, 1)
+	go func() {
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var event catalogStreamEnvelope
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil {
+				result <- event
+			}
+			return
+		}
+	}()
+	select {
+	case event := <-result:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("catalog SSE subscriber did not receive an event")
+		return catalogStreamEnvelope{}
+	}
+}
+
+func appendCatalogGapFixture(t *testing.T, path string, count int) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement, err := tx.Prepare(`INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at) VALUES(?,?,?,?,?)`)
+	if err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	defer statement.Close()
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	for index := 0; index < count; index++ {
+		if _, err := statement.Exec(fmt.Sprintf("gap:%d", index), "session.upserted", "from", []byte(`{"id":"from"}`), createdAt); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM catalog_events WHERE seq NOT IN (SELECT seq FROM catalog_events ORDER BY seq DESC LIMIT ?)`, catalogStreamReplayLimit); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }
 

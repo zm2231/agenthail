@@ -73,13 +73,13 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		observeRetry:      map[string]observeRetry{},
 		notificationArmed: map[string]bool{},
 		events:            newEventHub(reg),
-		catalog:           newCatalogHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
 	}
 	if err := reg.EnsureCatalogState(); err != nil {
 		d.log.Printf("catalog state: %s", err)
 	}
+	d.catalog = newCatalogHub(reg)
 	return d
 }
 
