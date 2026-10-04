@@ -127,3 +127,63 @@ func TestToolResultImageIsMetadataOnlyAndKeepsCallID(t *testing.T) {
 		t.Fatalf("attachment=%+v", page.Items[1])
 	}
 }
+func TestCodexLiveAttachmentSurvivesReaderRestartFromTranscript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	line := `{"type":"event_msg","payload":{"type":"user_message","message":"look","images":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	session := &surface.Session{ID: "thread-image", Transcript: path}
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var transcriptID string
+	for _, item := range page.Items {
+		if item.Attachment != nil {
+			transcriptID = item.Attachment.ID
+			break
+		}
+	}
+	if transcriptID == "" {
+		t.Fatalf("page=%+v", page)
+	}
+	digest := strings.TrimPrefix(transcriptID[strings.LastIndex(transcriptID, ":"):], ":")
+	liveID := liveAttachmentID(session.ID, digest)
+	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), session, liveID)
+	if err != nil || attachment == nil || attachment.ID != liveID || string(data) != string(mustAttachmentData(t)) {
+		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(data), err)
+	}
+	if _, _, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "other", Transcript: path}, liveID); !errors.Is(err, ErrAttachmentNotFound) {
+		t.Fatalf("cross-session err=%v", err)
+	}
+}
+
+func TestCodexLiveAttachmentCacheIsBounded(t *testing.T) {
+	data := append(mustAttachmentData(t), make([]byte, 8<<20)...)
+	codex := NewCodex("")
+	for index := 0; index < 3; index++ {
+		path := filepath.Join(t.TempDir(), "image.png")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := codex.rememberLiveAttachment(context.Background(), "thread-image", "item", index, attachmentReference{Path: path}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	codex.attachmentMu.Lock()
+	bytes := codex.attachmentBytes
+	codex.attachmentMu.Unlock()
+	if bytes > maxLiveAttachmentCacheBytes {
+		t.Fatalf("cache bytes=%d limit=%d", bytes, maxLiveAttachmentCacheBytes)
+	}
+}
+
+func mustAttachmentData(t *testing.T) []byte {
+	t.Helper()
+	data, err := base64.StdEncoding.DecodeString(testPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}

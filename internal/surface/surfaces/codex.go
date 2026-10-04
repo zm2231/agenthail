@@ -19,16 +19,28 @@ import (
 )
 
 type Codex struct {
-	desktopURL   string
-	managed      bool
-	bridgeMu     sync.Mutex
-	bridgeTarget string
-	bridgeErr    error
-	bridgeRetry  time.Time
-	runtimeMu    sync.Mutex
-	contextMu    sync.Mutex
-	contextState map[string]*codexContextState
+	desktopURL      string
+	managed         bool
+	bridgeMu        sync.Mutex
+	bridgeTarget    string
+	bridgeErr       error
+	bridgeRetry     time.Time
+	runtimeMu       sync.Mutex
+	contextMu       sync.Mutex
+	contextState    map[string]*codexContextState
+	attachmentMu    sync.Mutex
+	attachments     map[string]liveAttachment
+	attachmentOrder []string
+	attachmentBytes int64
 }
+
+type liveAttachment struct {
+	key  string
+	meta surface.Attachment
+	data []byte
+}
+
+const maxLiveAttachmentCacheBytes int64 = 16 << 20
 
 func NewCodex(remoteURL string) *Codex {
 	managed := remoteURL == "" || !strings.Contains(remoteURL, "://")
@@ -38,7 +50,7 @@ func NewCodex(remoteURL string) *Codex {
 	if !strings.Contains(remoteURL, "://") {
 		remoteURL = "ws://127.0.0.1:" + remoteURL
 	}
-	return &Codex{desktopURL: remoteURL, managed: managed}
+	return &Codex{desktopURL: remoteURL, managed: managed, attachments: map[string]liveAttachment{}}
 }
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
@@ -940,7 +952,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			case strings.Contains(strings.ToLower(method), "agentmessage"):
 				if txt := codexEventText(event.Params); txt != "" {
 					if uuid == "" {
-						if textEvent, ok := desktopState.textEvent(txt, codexEventItemID(event.Params)); ok {
+						if textEvent, ok := desktopState.textEvent(event.Sequence, txt, codexEventItemID(event.Params)); ok {
 							onEvent(textEvent)
 						}
 					} else {
@@ -959,7 +971,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 					}
 				}
 			case uuid == "" && strings.Contains(strings.ToLower(method), "item"):
-				if itemEvent, ok := desktopState.itemEvent(event); ok {
+				for _, itemEvent := range desktopState.itemEvents(ctx, c, sess.ID, event) {
 					onEvent(itemEvent)
 				}
 			case codexCompletionMethod(method):
@@ -977,7 +989,7 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				}
 				if turn != nil {
 					if uuid == "" {
-						if finalEvent, ok := desktopState.finalEvent(turnID, turn); ok {
+						if finalEvent, ok := desktopState.finalEvent(event.Sequence, turnID, turn); ok {
 							onEvent(finalEvent)
 						}
 					} else {
@@ -1026,7 +1038,7 @@ func (s *codexDesktopStreamState) observe(event codexEvent) {
 	s.textByItem = make(map[string]string)
 }
 
-func (s *codexDesktopStreamState) textEvent(text, itemID string) (surface.StreamEvent, bool) {
+func (s *codexDesktopStreamState) textEvent(sequence int64, text, itemID string) (surface.StreamEvent, bool) {
 	if s.turnID == "" {
 		return surface.StreamEvent{}, false
 	}
@@ -1040,7 +1052,7 @@ func (s *codexDesktopStreamState) textEvent(text, itemID string) (surface.Stream
 		s.assistantKey = codexDesktopStreamKey(s.turnID, "assistant", "")
 	}
 	s.textByItem[s.assistantKey] += text
-	return surface.StreamEvent{ID: s.assistantKey, ProviderKey: s.assistantKey, Version: uint64(len(s.textByItem[s.assistantKey])), Operation: "append", TurnID: s.turnID, Kind: "text", Text: text}, true
+	return surface.StreamEvent{ID: s.assistantKey, ProviderKey: s.assistantKey, Cursor: uint64(sequence), Version: uint64(len(s.textByItem[s.assistantKey])), Operation: "append", TurnID: s.turnID, Kind: "text", Text: text}, true
 }
 
 func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, callID, body string) (surface.StreamEvent, bool) {
@@ -1057,7 +1069,7 @@ func (s *codexDesktopStreamState) toolEvent(sequence int64, name, itemID, callID
 	if callID == "" {
 		callID = itemID
 	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: "upsert", TurnID: s.turnID, CallID: callID, Kind: "toolCall", Title: name, Text: body}, true
+	return surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(sequence), Version: 1, Operation: "upsert", TurnID: s.turnID, CallID: callID, Kind: "toolCall", Title: name, Text: body}, true
 }
 
 func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEvent, bool) {
@@ -1104,14 +1116,49 @@ func (s *codexDesktopStreamState) itemEvent(event codexEvent) (surface.StreamEve
 			callID = itemID
 		}
 	}
-	result := surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(body)), Operation: "upsert", TurnID: turnID, CallID: callID, Kind: kind, Role: role, Title: str(item, "name"), Text: body, Status: str(item, "status")}
+	result := surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(event.Sequence), Version: uint64(len(body)), Operation: "upsert", TurnID: turnID, CallID: callID, Kind: kind, Role: role, Title: str(item, "name"), Text: body, Status: str(item, "status")}
 	if kind == "text" && str(item, "phase") == "final_answer" {
 		result.Final = true
 	}
 	return result, true
 }
 
-func (s *codexDesktopStreamState) finalEvent(turnID string, turn *codexTurn) (surface.StreamEvent, bool) {
+func (s *codexDesktopStreamState) itemEvents(ctx context.Context, c *Codex, sessionID string, event codexEvent) []surface.StreamEvent {
+	item := codexEventItem(event.Params)
+	if item == nil {
+		return nil
+	}
+	var events []surface.StreamEvent
+	if itemEvent, ok := s.itemEvent(event); ok {
+		events = append(events, itemEvent)
+	}
+	turnID := s.turnID
+	if eventTurnID := codexEventTurnID(event.Params); eventTurnID != "" {
+		turnID = eventTurnID
+	}
+	if turnID == "" {
+		return events
+	}
+	itemID := codexEventItemID(item)
+	if itemID == "" {
+		return events
+	}
+	role := "assistant"
+	if strings.Contains(strings.ToLower(str(item, "type")), "user") {
+		role = "user"
+	}
+	for index, ref := range codexEventImageReferences(event.Params) {
+		attachment, err := c.rememberLiveAttachment(ctx, sessionID, itemID, index, ref)
+		if err != nil {
+			continue
+		}
+		key := codexDesktopStreamKey(turnID, "attachment", itemID+":"+strconv.Itoa(index))
+		events = append(events, surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(event.Sequence), Version: 1, Operation: "upsert", TurnID: turnID, Kind: "attachment", Role: role, Title: "Image", Text: "Image attachment", Attachment: attachment})
+	}
+	return events
+}
+
+func (s *codexDesktopStreamState) finalEvent(sequence int64, turnID string, turn *codexTurn) (surface.StreamEvent, bool) {
 	if turnID == "" {
 		return surface.StreamEvent{}, false
 	}
@@ -1123,7 +1170,7 @@ func (s *codexDesktopStreamState) finalEvent(turnID string, turn *codexTurn) (su
 	if assistant.ID == "" && s.assistantKey != "" {
 		key = s.assistantKey
 	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(assistant.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: assistant.Text}, true
+	return surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(sequence), Version: uint64(len(assistant.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: assistant.Text}, true
 }
 
 func (s *codexDesktopStreamState) doneEvent(sequence int64, turnID string) (surface.StreamEvent, bool) {
@@ -1174,7 +1221,7 @@ func codexStreamEvent(sequence int64, kind, text string, contextUsage *surface.C
 	if kind == "context" || kind == "done" {
 		operation = "upsert"
 	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(sequence), Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
 }
 
 func codexAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {

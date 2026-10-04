@@ -68,6 +68,7 @@ type sessionSource struct {
 	nextID        uint64
 	holders       map[string]int
 	appendBodies  map[string]string
+	appendCursors map[string]uint64
 	anonymous     uint64
 	sourceVersion uint64
 }
@@ -99,7 +100,7 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 			return sessionSourceSubscription{}, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -130,7 +131,7 @@ func (m *sessionSourceManager) hold(session *surface.Session, adapter surface.Su
 			return nil, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}}
+		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
 		m.sources[session.ID] = source
 		start = true
 	}
@@ -343,6 +344,18 @@ func (s *sessionSource) seedJournal() {
 		if s.session.Surface == surface.KindCodex && strings.HasPrefix(item.ID, "codex:") {
 			providerKey = item.ID
 		}
+		if item.Text != "" && item.Kind != "done" {
+			s.mu.Lock()
+			s.appendBodies[providerKey] = item.Text
+			s.mu.Unlock()
+		}
+		if s.session.Surface == surface.KindCodex && item.Attachment != nil {
+			if digest, ok := transcriptAttachmentDigest(item.Attachment.ID); ok {
+				attachment := *item.Attachment
+				attachment.ID = "live-attachment:" + s.session.ID + ":" + digest
+				item.Attachment = &attachment
+			}
+		}
 		s.append(surface.StreamEvent{
 			Role:        item.Role,
 			Title:       item.Title,
@@ -366,6 +379,17 @@ func (s *sessionSource) seedJournal() {
 	}
 }
 
+func transcriptAttachmentDigest(id string) (string, bool) {
+	parts := strings.Split(id, ":")
+	if len(parts) != 4 || parts[0] != "attachment" || len(parts[3]) != 64 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(parts[3]); err != nil {
+		return "", false
+	}
+	return parts[3], true
+}
+
 func (s *sessionSource) append(event surface.StreamEvent) {
 	if event.Context != nil {
 		current := s.session
@@ -379,7 +403,21 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 	}
 	s.mu.Lock()
+	providerKey := event.ProviderKey
+	if strings.HasPrefix(providerKey, "renderer:") {
+		providerKey = s.epoch + ":" + providerKey
+	}
+	if event.Cursor > 0 && providerKey != "" && event.Cursor <= s.appendCursors[providerKey] {
+		s.mu.Unlock()
+		return
+	}
 	payload := s.normalizeLocked(event)
+	if event.Cursor > 0 && providerKey != "" {
+		if s.appendCursors == nil {
+			s.appendCursors = map[string]uint64{}
+		}
+		s.appendCursors[providerKey] = event.Cursor
+	}
 	s.mu.Unlock()
 	encoded, err := json.Marshal(payload)
 	if err != nil {

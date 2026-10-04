@@ -294,6 +294,61 @@ liveObserved:
 	}
 }
 
+func TestSessionSourceSeedAndLiveAttachmentShareOneSSEIdentity(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	attachmentHash := strings.Repeat("a", 64)
+	attachmentID := "attachment:0:1:" + attachmentHash
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent),
+		items: []surface.TimelineItem{{
+			ID: "codex:turn-image:attachment:user-image-1:0", Kind: "attachment", Role: "user", Text: "Image attachment",
+			Attachment: &surface.Attachment{ID: attachmentID, MediaType: "image/png", Width: 1, Height: 1, Bytes: 68},
+		}},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	select {
+	case <-adapter.started:
+	case <-time.After(time.Second):
+		t.Fatal("source did not start")
+	}
+	window, err := reg.SessionJournalAfter(from.ID, 0, 10)
+	if err != nil || len(window.Entries) != 1 {
+		t.Fatalf("seed window=%+v err=%v", window, err)
+	}
+	var seed sessionJournalPayload
+	if err := json.Unmarshal(window.Entries[0].Payload, &seed); err != nil {
+		t.Fatal(err)
+	}
+	if seed.ProviderKey != "codex:turn-image:attachment:user-image-1:0" || seed.Attachment == nil || seed.Attachment.ID != "live-attachment:"+from.ID+":"+attachmentHash {
+		t.Fatalf("seed=%+v", seed)
+	}
+	adapter.events <- surface.StreamEvent{ID: seed.ItemID, ProviderKey: seed.ProviderKey, Version: 2, Operation: "upsert", TurnID: "turn-image", Kind: "attachment", Role: "user", Text: "Image attachment", Attachment: seed.Attachment}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case entry := <-subscription.Entries:
+			var payload sessionJournalPayload
+			if json.Unmarshal(entry.Payload, &payload) == nil && payload.Version == 2 {
+				window, err = reg.SessionJournalAfter(from.ID, 0, 10)
+				if err != nil || len(window.Entries) != 1 || payload.Attachment == nil || payload.Attachment.ID != seed.Attachment.ID {
+					t.Fatalf("live window=%+v payload=%+v err=%v", window, payload, err)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("live attachment was not published")
+		}
+	}
+}
+
 func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
@@ -673,6 +728,42 @@ func TestSessionSourceSeedOverlapDoesNotRepublishOrAdvanceJournal(t *testing.T) 
 	changed, err := registry.SessionJournalAfter(from.ID, 0, 10)
 	if err != nil || changed.LatestSeq != seeded.LatestSeq+1 || len(changed.Entries) != 1 {
 		t.Fatalf("changed=%+v err=%v", changed, err)
+	}
+}
+
+func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		items: []surface.TimelineItem{{
+			ID:        "codex:turn-1:assistant:item-1",
+			Kind:      "text",
+			Role:      "assistant",
+			Text:      "ha",
+			Timestamp: "2026-10-04T00:00:00Z",
+		}},
+	}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: adapter, epoch: "epoch", ctx: context.Background(), appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source.seedJournal()
+
+	for _, event := range []surface.StreamEvent{
+		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 10, Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
+		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 9, Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
+		{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 11, Version: 2, Operation: "append", Kind: "text", Role: "assistant", Text: "ha"},
+	} {
+		source.append(event)
+	}
+
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ProviderKey != "codex:turn-1:assistant:item-1" || payload.Body != "hahaha" || payload.Version != 2 {
+		t.Fatalf("payload=%+v", payload)
 	}
 }
 
