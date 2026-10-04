@@ -208,6 +208,32 @@ enum NativeCommand {
 
 private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var duplicateTimer: Timer?
+    weak var model: AgenthailModel?
+
+    @MainActor
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard let model else { return nil }
+        let menu = NSMenu()
+        for section in SessionMenuSection.build(model) {
+            if menu.numberOfItems > 0 { menu.addItem(.separator()) }
+            let header = NSMenuItem(title: section.title, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for session in section.sessions {
+                let item = NSMenuItem(title: SessionMenuSection.label(session), action: #selector(openSession(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = session.id
+                menu.addItem(item)
+            }
+        }
+        return menu
+    }
+
+    @MainActor
+    @objc private func openSession(_ item: NSMenuItem) {
+        guard let sessionID = item.representedObject as? String else { return }
+        NotificationRoute.shared.open(sessionID: sessionID)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let center = UNUserNotificationCenter.current()
@@ -329,30 +355,39 @@ private enum MenuBarArtwork {
     }()
 }
 
+struct SessionMenuSection: Identifiable {
+    let title: String
+    let sessions: [SessionState]
+    var id: String { title }
+
+    @MainActor
+    static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
+        let attention = model.attentionSessionIDs
+        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention, now: Date())
+        let others = model.knownSessions
+            .filter { !attention.contains($0.id) }
+            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        return [
+            SessionMenuSection(title: "Needs you", sessions: Array(tree.needsYou.prefix(limit))),
+            SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).prefix(limit))),
+            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !$0.isWorking }.prefix(limit)))
+        ].filter { !$0.sessions.isEmpty }
+    }
+
+    static func label(_ session: SessionState) -> String {
+        "\(session.title)  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
+    }
+}
+
 private struct AgenthailMenuContent: View {
     @ObservedObject var model: AgenthailModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: model.attentionSessionIDs, now: Date())
-        let working = model.knownSessions.filter { $0.isWorking && !model.attentionSessionIDs.contains($0.id) }.sorted { SessionTree.activity($0) > SessionTree.activity($1) }
-        let recent = model.knownSessions
-            .filter { !$0.isWorking && !model.attentionSessionIDs.contains($0.id) }
-            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
         Label(model.isConnected ? "Connected" : "Agenthail isn't running", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-        if !tree.needsYou.isEmpty {
-            Section("Needs you") {
-                ForEach(tree.needsYou.prefix(5)) { session in sessionItem(session) }
-            }
-        }
-        if !working.isEmpty {
-            Section("Working") {
-                ForEach(working.prefix(5)) { session in sessionItem(session) }
-            }
-        }
-        if !recent.isEmpty {
-            Section("Recent") {
-                ForEach(recent.prefix(5)) { session in sessionItem(session) }
+        ForEach(SessionMenuSection.build(model)) { section in
+            Section(section.title) {
+                ForEach(section.sessions) { session in sessionItem(session) }
             }
         }
         Divider()
@@ -378,7 +413,7 @@ private struct AgenthailMenuContent: View {
             model.mainPane.select(session.id)
             open()
         } label: {
-            Text("\(session.title)  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))")
+            Text(SessionMenuSection.label(session))
         }
     }
 
@@ -417,6 +452,7 @@ private struct AgenthailMenuBarApp: App {
             AgenthailMenuContent(model: model)
         } label: {
             MenuBarLabel(model: model)
+                .onAppear { appDelegate.model = model }
         }
         .menuBarExtraStyle(.menu)
     }
