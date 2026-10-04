@@ -7,19 +7,19 @@ import (
 )
 
 type PendingLaunch struct {
-	ID        int64
-	Launcher  string
-	Agent     surface.SurfaceKind
-	Cwd, Name string
-	Location  surface.Location
+	ID               int64
+	Launcher         string
+	Agent            surface.SurfaceKind
+	Cwd, Name, Alias string
+	Location         surface.Location
 }
 
-func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKind, cwd, name string, location surface.Location) (int64, error) {
+func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKind, cwd, name, alias string, location surface.Location) (int64, error) {
 	b, err := json.Marshal(location)
 	if err != nil {
 		return 0, err
 	}
-	result, err := r.db.Exec(`INSERT INTO launcher_pending(launcher,agent,cwd,name,location) VALUES(?,?,?,?,?)`, string(launcher), string(agent), cwd, name, b)
+	result, err := r.db.Exec(`INSERT INTO launcher_pending(launcher,agent,cwd,name,alias,location) VALUES(?,?,?,?,?,?)`, string(launcher), string(agent), cwd, name, alias, b)
 	if err != nil {
 		return 0, err
 	}
@@ -27,7 +27,7 @@ func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKin
 }
 
 func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
-	rows, err := r.db.Query(`SELECT id,launcher,agent,cwd,name,location FROM launcher_pending ORDER BY id`)
+	rows, err := r.db.Query(`SELECT id,launcher,agent,cwd,name,alias,location FROM launcher_pending ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
 		var item PendingLaunch
 		var launcher, agent string
 		var location []byte
-		if err := rows.Scan(&item.ID, &launcher, &agent, &item.Cwd, &item.Name, &location); err != nil {
+		if err := rows.Scan(&item.ID, &launcher, &agent, &item.Cwd, &item.Name, &item.Alias, &location); err != nil {
 			return nil, err
 		}
 		item.Launcher = launcher

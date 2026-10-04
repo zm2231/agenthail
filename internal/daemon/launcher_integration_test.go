@@ -3,8 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,11 +15,13 @@ import (
 )
 
 type launcherFixture struct {
-	id        string
-	agents    []surface.SurfaceKind
-	result    surface.LaunchResult
-	locations map[string]surface.Location
-	launches  int
+	id               string
+	agents           []surface.SurfaceKind
+	result           surface.LaunchResult
+	locations        map[string]surface.Location
+	launches         int
+	locateContextErr error
+	launchErr        error
 }
 
 func (l *launcherFixture) ID() string                               { return l.id }
@@ -24,9 +29,14 @@ func (l *launcherFixture) Agents() []surface.SurfaceKind            { return l.a
 func (l *launcherFixture) Available(context.Context) (bool, string) { return true, "fixture" }
 func (l *launcherFixture) Launch(context.Context, surface.LaunchRequest) (surface.LaunchResult, error) {
 	l.launches++
+	if l.launchErr != nil {
+		return surface.LaunchResult{}, l.launchErr
+	}
 	return l.result, nil
 }
-func (l *launcherFixture) Locate(context.Context, []surface.Session) map[string]surface.Location {
+
+func (l *launcherFixture) Locate(ctx context.Context, _ []surface.Session) map[string]surface.Location {
+	l.locateContextErr = ctx.Err()
 	return l.locations
 }
 
@@ -61,11 +71,15 @@ func TestSessionCreateTerminalLocationPersistsPendingWithoutGuessingID(t *testin
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindClaude
 	d.Surfaces = []surface.Surface{fake}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	location := &surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, result: surface.LaunchResult{Location: location}}
 	d.SetLaunchers([]surface.Launcher{launcher})
 	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`)))
+	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(fmt.Sprintf(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","cwd":%q,"alias":"builder"}`, cwd))))
 	if w.Code != http.StatusCreated || strings.Contains(w.Body.String(), `"sessionId"`) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -73,8 +87,14 @@ func TestSessionCreateTerminalLocationPersistsPendingWithoutGuessingID(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].Location.Workspace != location.Workspace {
+	if len(pending) != 1 || pending[0].Location.Workspace != location.Workspace || pending[0].Alias != "builder" {
 		t.Fatalf("pending=%+v", pending)
+	}
+	launcher.locations = map[string]surface.Location{"created": {Workspace: "workspace-1", Surface: "surface-1"}}
+	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, Cwd: cwd, Status: surface.StatusIdle}})
+	alias, err := r.ReverseAlias("created")
+	if err != nil || alias != "builder" {
+		t.Fatalf("alias=%q err=%v", alias, err)
 	}
 }
 
@@ -88,6 +108,19 @@ func TestSessionCreateRejectsUnsupportedAdvancedOptionsBeforeLaunch(t *testing.T
 	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"claude-bg","message":"hello","worktree":"/tmp/w"}`)))
 	if w.Code != http.StatusBadRequest || launcher.launches != 0 {
 		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
+	}
+}
+
+func TestSessionCreateReportsAcceptedUnresolvedLaunchWithoutRetrySignal(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, launchErr: surface.LaunchAcceptedError{Launcher: surface.LauncherCMUX, Err: errors.New("malformed output")}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := httptest.NewRecorder()
+	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`)))
+	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"accepted":true`) || !strings.Contains(w.Body.String(), `"retryable":false`) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -109,6 +142,29 @@ func TestLocateLaunchedSessionRejectsUndiscoveredID(t *testing.T) {
 	}
 }
 
+func TestPendingCorrelationFiltersAgentAndCwd(t *testing.T) {
+	d, r, _, _, _ := daemonFixture(t)
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{
+		"codex":  {Workspace: "workspace-1", Surface: "surface-1"},
+		"claude": {Workspace: "workspace-1", Surface: "surface-1"},
+	}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", surface.Location{Workspace: "workspace-1"}); err != nil {
+		t.Fatal(err)
+	}
+	d.correlatePendingLaunches(context.Background(), []surface.Session{
+		{ID: "codex", Surface: surface.KindCodex, Cwd: "/repo"},
+		{ID: "claude", Surface: surface.KindClaude, Cwd: "/other"},
+	})
+	pending, err := r.PendingLaunches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending=%+v", pending)
+	}
+}
+
 func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindClaude
@@ -117,7 +173,7 @@ func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 	fullLocation := surface.Location{Workspace: "workspace-1", Surface: "surface-1"}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{"created": fullLocation}}
 	d.SetLaunchers([]surface.Launcher{launcher})
-	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", location); err != nil {
+	if _, err := r.RecordPendingLaunch(surface.LauncherCMUX, surface.KindClaude, "/repo", "Created", "", location); err != nil {
 		t.Fatal(err)
 	}
 	d.correlatePendingLaunches(context.Background(), []surface.Session{{ID: "created", Surface: surface.KindClaude, Cwd: "/repo", Status: surface.StatusIdle}})
@@ -134,5 +190,35 @@ func TestWorkspaceOnlyLaunchCorrelationUsesDiscoveredLocation(t *testing.T) {
 	}
 	if created.Runtime == nil || created.Runtime.Location == nil || *created.Runtime.Location != fullLocation {
 		t.Fatalf("created runtime=%+v", created.Runtime)
+	}
+}
+
+func TestCatalogDiscoveryUsesFreshLocateContextAndPreservesTerminalRuntime(t *testing.T) {
+	d, r, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	session := surface.Session{ID: "hand-started", Surface: surface.KindClaude, Cwd: "/repo", Status: surface.StatusIdle}
+	fake.sessions = map[string]surface.Session{session.ID: session}
+	d.Surfaces = []surface.Surface{fake}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}, locations: map[string]surface.Location{session.ID: {Workspace: "workspace-1", Surface: "surface-1"}}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	d.discoverCatalog(context.Background())
+	if launcher.locateContextErr != nil {
+		t.Fatalf("Locate context err=%v", launcher.locateContextErr)
+	}
+	want := &surface.Runtime{Launcher: surface.LauncherCMUX, Location: &surface.Location{Workspace: "workspace-1", Surface: "surface-1"}, Focusable: true}
+	stored, err := r.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Runtime == nil || stored.Runtime.Launcher != want.Launcher || stored.Runtime.Location == nil || *stored.Runtime.Location != *want.Location || stored.Runtime.Focusable != want.Focusable {
+		t.Fatalf("first discovery runtime=%+v", stored.Runtime)
+	}
+	d.discoverCatalog(context.Background())
+	stored, err = r.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Runtime == nil || stored.Runtime.Launcher != want.Launcher || stored.Runtime.Location == nil || *stored.Runtime.Location != *want.Location || !stored.Runtime.Focusable {
+		t.Fatalf("second discovery runtime=%+v", stored.Runtime)
 	}
 }

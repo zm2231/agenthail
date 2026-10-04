@@ -3,6 +3,7 @@ package surface
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -123,6 +124,31 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 		t.Fatalf("intent permissions = %v, %v", info, err)
 	}
 	_ = os.Remove(match[1])
+}
+
+func TestCMUXMalformedAcceptedOutputCleansIntentAndReturnsAcceptedError(t *testing.T) {
+	launcher := newCMUX().(*processLauncher)
+	var args []string
+	launcher.run = func(_ context.Context, _ string, got ...string) ([]byte, error) {
+		args = append([]string(nil), got...)
+		return []byte("not-json"), nil
+	}
+	_, err := launcher.Launch(context.Background(), LaunchRequest{Agent: KindClaude, Cwd: "/tmp/project", Message: "hello"})
+	var acceptedErr LaunchAcceptedError
+	if !errors.As(err, &acceptedErr) || acceptedErr.Launcher != LauncherCMUX {
+		t.Fatalf("err=%v", err)
+	}
+	commandIndex := slices.Index(args, "--command")
+	if commandIndex < 0 || commandIndex+1 >= len(args) {
+		t.Fatalf("cmux command argument missing: %#v", args)
+	}
+	match := regexp.MustCompile(`launcher-exec '([^']+)'`).FindStringSubmatch(args[commandIndex+1])
+	if len(match) != 2 {
+		t.Fatalf("cmux command = %q", args[commandIndex+1])
+	}
+	if _, statErr := os.Stat(match[1]); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("intent remains after accepted parse failure: %v", statErr)
+	}
 }
 
 func TestCMUXLocateRequiresLivePID(t *testing.T) {

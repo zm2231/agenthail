@@ -22,7 +22,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 9
+	schemaVersion   = 10
 	queueMessageTTL = time.Hour
 )
 
@@ -128,6 +128,9 @@ func (r *Registry) migrate() error {
 		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
 			return err
 		}
+	}
+	if err := r.ensureColumn("launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
 	}
 	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
@@ -279,6 +282,7 @@ CREATE TABLE IF NOT EXISTS launcher_pending (
 	agent TEXT NOT NULL,
 	cwd TEXT NOT NULL DEFAULT '',
 	name TEXT NOT NULL DEFAULT '',
+	alias TEXT NOT NULL DEFAULT '',
 	location BLOB NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -425,6 +429,37 @@ func (r *Registry) RegisterSession(s surface.Session) error {
 	defer tx.Rollback()
 	if err := registerSessionTx(tx, s); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID int64, alias string) error {
+	if pendingID <= 0 {
+		return fmt.Errorf("pending launch id is required")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := registerSessionTx(tx, s); err != nil {
+		return err
+	}
+	if alias != "" {
+		if err := replaceAliasTx(tx, alias, s.ID); err != nil {
+			return err
+		}
+	}
+	result, err := tx.Exec(`DELETE FROM launcher_pending WHERE id=?`, pendingID)
+	if err != nil {
+		return err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted != 1 {
+		return fmt.Errorf("pending launch %d was not found", pendingID)
 	}
 	return tx.Commit()
 }
@@ -592,13 +627,20 @@ func (r *Registry) ReplaceAlias(name, sessionID string) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := replaceAliasTx(tx, name, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func replaceAliasTx(tx *sql.Tx, name, sessionID string) error {
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, name, sessionID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error) {

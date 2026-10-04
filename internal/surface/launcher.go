@@ -55,6 +55,17 @@ type Focuser interface {
 	Focus(context.Context, Location) error
 }
 
+type LaunchAcceptedError struct {
+	Launcher string
+	Err      error
+}
+
+func (e LaunchAcceptedError) Error() string {
+	return fmt.Sprintf("%s launch was accepted but its location could not be resolved: %v", e.Launcher, e.Err)
+}
+
+func (e LaunchAcceptedError) Unwrap() error { return e.Err }
+
 type RuntimeTransportUnavailableError struct{ Launcher string }
 
 func (e RuntimeTransportUnavailableError) Error() string {
