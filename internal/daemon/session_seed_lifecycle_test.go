@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,17 +120,21 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedPage, err := reg.ReadSessionJournalPage(from.ID, 0, 20)
+	seedPage, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first.Cancel()
 	waitForSessionSourceGone(t, manager)
-	if err := appendFile(t, transcript, `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-restart"}}
-{"type":"event_msg","payload":{"type":"user_message","message":"after restart"}}
-{"type":"response_item","payload":{"id":"restart-user","type":"message","role":"user","content":[{"type":"input_text","text":"after restart"}]}}
-{"type":"response_item","payload":{"id":"restart-answer","type":"message","role":"assistant","content":[{"type":"output_text","text":"restart answer"}]}}
-`); err != nil {
+	var missed strings.Builder
+	fmt.Fprintln(&missed, `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-restart"}}`)
+	fmt.Fprintln(&missed, `{"type":"event_msg","payload":{"type":"user_message","message":"after restart"}}`)
+	fmt.Fprintln(&missed, `{"type":"response_item","payload":{"id":"restart-user","type":"message","role":"user","content":[{"type":"input_text","text":"after restart"}]}}`)
+	fmt.Fprintln(&missed, `{"type":"response_item","payload":{"id":"restart-answer","type":"message","role":"assistant","content":[{"type":"output_text","text":"restart answer"}]}}`)
+	for index := 0; index < 43; index++ {
+		fmt.Fprintf(&missed, `{"type":"response_item","payload":{"id":"gap-%02d","type":"message","role":"assistant","content":[{"type":"output_text","text":"gap-%02d"}]}}`+"\n", index, index)
+	}
+	if err := appendFile(t, transcript, missed.String()); err != nil {
 		t.Fatal(err)
 	}
 	second, err := manager.prepareStream(context.Background(), &from, adapter)
@@ -136,7 +142,7 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 		t.Fatal(err)
 	}
 	defer second.Cancel()
-	page, err := reg.ReadSessionJournalPage(from.ID, 0, 20)
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +162,12 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 	for _, body := range []string{"seed request", "seed answer"} {
 		if seen[body] != 1 {
 			t.Fatalf("reseed duplicated body %q count=%d seed=%+v page=%+v", body, seen[body], seedPage, page)
+		}
+	}
+	for index := 0; index < 43; index++ {
+		body := fmt.Sprintf("gap-%02d", index)
+		if seen[body] != 1 {
+			t.Fatalf("offline interval body %q count=%d page=%+v", body, seen[body], page)
 		}
 	}
 }
