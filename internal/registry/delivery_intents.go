@@ -57,6 +57,87 @@ type DeliveryIntent struct {
 	UpdatedAt           time.Time
 }
 
+type DeliveryProblem struct {
+	DeliveryID      int64                `json:"deliveryId"`
+	SessionID       string               `json:"sessionId"`
+	SourceSessionID string               `json:"sourceSessionId"`
+	Message         string               `json:"message"`
+	Reason          string               `json:"reason"`
+	Status          DeliveryIntentStatus `json:"status"`
+	At              time.Time            `json:"at"`
+}
+
+func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
+	rows, err := r.db.Query(`
+		SELECT id,target_session_id,sender_session_id,message,failure,status,updated_at
+		FROM delivery_intents
+		WHERE status IN (?,?) AND COALESCE(dismissed_at,'')=''
+		ORDER BY updated_at DESC, id DESC
+		LIMIT 50`, DeliveryIntentFailed, DeliveryIntentExpired)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	problems := make([]DeliveryProblem, 0, 50)
+	for rows.Next() {
+		var problem DeliveryProblem
+		var status, updatedAt string
+		if err := rows.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt); err != nil {
+			return nil, err
+		}
+		problem.Message = boundedIntentMessage(problem.Message)
+		problem.Status = DeliveryIntentStatus(status)
+		problem.At, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
+		if err != nil {
+			return nil, fmt.Errorf("parse delivery problem timestamp: %w", err)
+		}
+		problems = append(problems, problem)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return problems, nil
+}
+
+func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var targetSessionID, status string
+	var dismissedAt sql.NullString
+	if err := tx.QueryRow(`SELECT target_session_id,status,dismissed_at FROM delivery_intents WHERE id=?`, id).Scan(&targetSessionID, &status, &dismissedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return false, sql.ErrNoRows
+		}
+		return false, err
+	}
+	if status != string(DeliveryIntentFailed) && status != string(DeliveryIntentExpired) {
+		return false, fmt.Errorf("delivery %d is not a failure", id)
+	}
+	if dismissedAt.Valid && dismissedAt.String != "" {
+		return false, tx.Commit()
+	}
+	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status IN (?,?) AND COALESCE(dismissed_at,'')=''`, id, DeliveryIntentFailed, DeliveryIntentExpired); err != nil {
+		return false, err
+	}
+	payload, err := json.Marshal(map[string]any{"deliveryId": id})
+	if err != nil {
+		return false, err
+	}
+	if _, _, err := appendCatalogEventTx(tx, CatalogEvent{
+		DedupeKey: fmt.Sprintf("delivery.dismissed:%d", id),
+		Type:      "delivery.dismissed",
+		EntityID:  targetSessionID,
+		Payload:   payload,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
 func (r *Registry) RecordDeliveryIntent(input DeliveryIntentInput) (*DeliveryIntent, error) {
 	if err := input.validate(); err != nil {
 		return nil, err
