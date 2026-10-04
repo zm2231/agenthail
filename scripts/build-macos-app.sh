@@ -52,7 +52,7 @@ cat >"$OUTPUT/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>APP_VERSION</string>
   <key>CFBundleVersion</key><string>APP_BUILD</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>NSUserNotificationAlertStyle</key><string>alert</string>
 </dict></plist>
@@ -79,20 +79,14 @@ cp "$MENU_ICON_2X_SOURCE" "$OUTPUT/Contents/Resources/AgenthailMenuBarIcon@2x.pn
 
 cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 "$ROOT/scripts/codesign-with-retry.sh" --force --options runtime --sign "$IDENTITY" "$OUTPUT/Contents/Resources/agenthail"
-/usr/bin/swiftc -parse-as-library -O -target "${ARCH}-apple-macos13.0" \
-	"$ROOT/native/AgenthailApp.swift" \
-	"$ROOT/native/DuplicateApplicationPolicy.swift" \
-	"$ROOT/native/ResponsivePairLayout.swift" \
-	"$ROOT/native/StatusRefreshPolicy.swift" \
-	"$ROOT/native/AgenthailModels.swift" \
-	"$ROOT/native/TurnSettings.swift" \
-	"$ROOT/native/AgenthailAPI.swift" \
-	"$ROOT/native/SessionSelection.swift" \
-	"$ROOT/native/EventRetryBackoff.swift" \
-	"$ROOT/native/OperationsRefreshPolicy.swift" \
-	"$ROOT/native/AgenthailModel.swift" \
-	"$ROOT/native/AgenthailViews.swift" \
-	-o "$OUTPUT/Contents/MacOS/Agenthail"
+SWIFT_ARCH="$ARCH"
+[ "$SWIFT_ARCH" = "amd64" ] && SWIFT_ARCH="x86_64"
+SWIFT_BIN="$(swift build --package-path "$ROOT/native" -c release --arch "$SWIFT_ARCH" --show-bin-path)"
+swift build --package-path "$ROOT/native" -c release --arch "$SWIFT_ARCH" --product AgenthailMac >/dev/null
+cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
+for bundle in "$SWIFT_BIN"/*.bundle; do
+	cp -R "$bundle" "$OUTPUT/Contents/Resources/"
+done
 "$ROOT/scripts/codesign-with-retry.sh" --force --deep --options runtime --sign "$IDENTITY" "$OUTPUT"
 codesign --verify --deep --strict --verbose=2 "$OUTPUT"
 echo "$OUTPUT"
