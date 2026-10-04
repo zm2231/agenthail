@@ -109,6 +109,8 @@ jobs:
           "$RUNNER_TEMP/goal-editor-state-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SpotlightIndex.swift native/tests/spotlight_index_test.swift -o "$RUNNER_TEMP/spotlight-index-test"
           "$RUNNER_TEMP/spotlight-index-test"
+          swiftc -parse-as-library native/macOS/ComposerDrop.swift native/tests/composer_drop_test.swift -o "$RUNNER_TEMP/composer-drop-test"
+          "$RUNNER_TEMP/composer-drop-test"
       - name: Mac app build
         run: swift build --package-path native -c release --product AgenthailMac
       - name: Installer lint

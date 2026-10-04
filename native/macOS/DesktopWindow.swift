@@ -1105,6 +1105,7 @@ struct ComposerView: View {
     let session: SessionState
     @AppStorage("followUpDefault") private var followUpDefault = FollowUpAction.queue.rawValue
     @FocusState private var focused: Bool
+    @State private var dropTargeted = false
 
     private var followUp: FollowUpAction { FollowUpAction(rawValue: followUpDefault) ?? .queue }
     @ObservedObject private var draft: ComposerDraft
@@ -1185,8 +1186,14 @@ struct ComposerView: View {
                     .padding(.bottom, 8)
                 }
                 .background(DesktopPalette.raised, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line))
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+                .dropDestination(for: URL.self) { urls, _ in
+                    guard let dropped = ComposerDrop.text(for: urls) else { return false }
+                    draft.text = ComposerDrop.insert(dropped, into: draft.text)
+                    focused = true
+                    return true
+                } isTargeted: { dropTargeted = $0 }
             }
             if let error = model.operationError {
                 Text(error)
