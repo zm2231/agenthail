@@ -488,7 +488,7 @@ func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
 		callback(surface.StreamEvent{ID: "user", Role: "user", Kind: "message", Text: "do not speak"})
 		callback(surface.StreamEvent{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x"})
 		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "append", Version: 4, Kind: "text", Text: "part"})
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "upsert", Version: 12, Final: true, Kind: "message", Text: "part complete"})
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "upsert", Version: 13, Final: true, Kind: "message", Text: "part complete"})
 		callback(surface.StreamEvent{ID: "second", Role: "assistant", Final: true, Kind: "message", Text: "second answer"})
 		callback(surface.StreamEvent{Kind: "done"})
 	}
@@ -503,15 +503,33 @@ func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
 	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
 	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
 	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.After(time.Second)
+	for {
+		p.mu.Lock()
+		spokenCount := 0
+		for _, params := range p.params {
+			if _, ok := params["text"].(string); ok {
+				spokenCount++
+			}
+		}
+		p.mu.Unlock()
+		if spokenCount >= 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("direct delegation did not speak three items")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	var spoken []string
 	for _, params := range p.params {
 		if text, ok := params["text"].(string); ok {
 			spoken = append(spoken, text)
 		}
 	}
+	p.mu.Unlock()
 	if !reflect.DeepEqual(spoken, []string{"part", " complete", "second answer"}) {
 		t.Fatalf("spoken=%v params=%+v", spoken, p.params)
 	}
@@ -535,16 +553,23 @@ func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
 	observeFixture(t, s, p, Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
 	apply(t, s, Action{Action: "connected", AttemptID: "call-a"})
 	apply(t, s, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	time.Sleep(100 * time.Millisecond)
-	v := s.View("phone")
-	failed := false
-	for _, event := range v.Events {
-		if event.Method == "voice/delegation/failed" {
-			failed = true
+	deadline := time.After(time.Second)
+	for {
+		v := s.View("phone")
+		failed := false
+		for _, event := range v.Events {
+			if event.Method == "voice/delegation/failed" {
+				failed = true
+			}
 		}
-	}
-	if !failed {
-		t.Fatalf("cancelled terminal did not fail delegation: %+v", v.Events)
+		if failed {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("cancelled terminal did not fail delegation: %+v", v.Events)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
