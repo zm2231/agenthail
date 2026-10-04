@@ -55,22 +55,24 @@ type sessionSourceManager struct {
 }
 
 type sessionSource struct {
-	seeded        chan struct{}
-	seedErr       error
-	manager       *sessionSourceManager
-	session       surface.Session
-	adapter       surface.Surface
-	epoch         string
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.Mutex
-	subscribers   map[uint64]chan registry.SessionJournalEntry
-	nextID        uint64
-	holders       map[string]int
-	appendBodies  map[string]string
-	appendCursors map[string]uint64
-	anonymous     uint64
-	sourceVersion uint64
+	seeded          chan struct{}
+	seedErr         error
+	manager         *sessionSourceManager
+	session         surface.Session
+	adapter         surface.Surface
+	epoch           string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	subscribers     map[uint64]chan registry.SessionJournalEntry
+	nextID          uint64
+	holders         map[string]int
+	appendBodies    map[string]string
+	appendCursors   map[string]uint64
+	streamCursor    uint64
+	streamCursorSet bool
+	anonymous       uint64
+	sourceVersion   uint64
 }
 
 type sessionSourceSubscription struct {
@@ -208,6 +210,12 @@ func (m *sessionSourceManager) shutdown() {
 }
 
 func (s *sessionSource) run() {
+	if reader, ok := s.adapter.(surface.StreamCursorReader); ok {
+		if cursor, err := reader.StreamCursor(s.ctx, &s.session); err == nil {
+			s.streamCursor = cursor
+			s.streamCursorSet = true
+		}
+	}
 	s.seedJournal()
 	close(s.seeded)
 	if !surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream {
@@ -221,6 +229,8 @@ func (s *sessionSource) run() {
 		if refreshed, refreshErr := s.manager.registry.Session(s.session.ID); refreshErr == nil {
 			current = *refreshed
 		}
+		current.StreamCursor = s.streamCursor
+		current.StreamCursorSet = s.streamCursorSet
 		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
 		if errors.Is(streamErr, surface.ErrUnsupported) {
 			<-s.ctx.Done()
@@ -526,6 +536,9 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJourna
 		op = "append"
 	}
 	body := event.Text
+	if providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") && op == "upsert" && body != "" {
+		s.appendBodies[providerKey] = body
+	}
 	if op == "append" && providerKey != "" && !strings.HasPrefix(event.ProviderKey, "renderer:") {
 		s.appendBodies[providerKey] += body
 		body = s.appendBodies[providerKey]

@@ -39,6 +39,8 @@ type Session struct {
 	ConfiguredModel string        `json:"configuredModel,omitempty"`
 	LastActive      time.Time     `json:"lastActive"`
 	Runtime         *Runtime      `json:"runtime,omitempty"`
+	StreamCursor    uint64        `json:"-"`
+	StreamCursorSet bool          `json:"-"`
 }
 
 type SessionSearchResult struct {
@@ -52,6 +54,10 @@ type SessionSearcher interface {
 
 type ReadinessChecker interface {
 	Ready(ctx context.Context) error
+}
+
+type StreamCursorReader interface {
+	StreamCursor(context.Context, *Session) (uint64, error)
 }
 
 func IsReadOnlySession(session *Session) bool {

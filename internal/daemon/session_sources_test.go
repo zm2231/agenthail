@@ -77,6 +77,40 @@ func TestSessionSourceJournalsToolResultAttachmentMetadataWithoutBytes(t *testin
 	}
 }
 
+type seedBarrierSurface struct {
+	*sourceCountingSurface
+	readStarted chan struct{}
+	release     chan struct{}
+}
+
+func (s *seedBarrierSurface) StreamCursor(context.Context, *surface.Session) (uint64, error) {
+	select {
+	case <-s.readStarted:
+		return 8, nil
+	default:
+		return 7, nil
+	}
+}
+
+func (s *seedBarrierSurface) ReadSession(ctx context.Context, _ *surface.Session, _ surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	close(s.readStarted)
+	select {
+	case <-s.release:
+		return &surface.SessionReadResult{Items: append([]surface.TimelineItem(nil), s.items...)}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *seedBarrierSurface) Stream(ctx context.Context, session *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
+	if !session.StreamCursorSet || session.StreamCursor != 7 {
+		return errors.New("stream did not receive the pre-seed cursor barrier")
+	}
+	onEvent(surface.StreamEvent{ID: "codex:turn-1:assistant:item-1", ProviderKey: "codex:turn-1:assistant:item-1", Cursor: 8, Version: 6, Operation: "append", Kind: "text", Role: "assistant", Text: " world"})
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
@@ -764,6 +798,61 @@ func TestSessionSourceSeedHandoffPreservesPrefixAndSuppressesDesktopReplay(t *te
 	}
 	if payload.ProviderKey != "codex:turn-1:assistant:item-1" || payload.Body != "hahaha" || payload.Version != 2 {
 		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestSessionSourceCapturesProviderCursorBeforeSeedAndKeepsEventsDuringSeed(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	from.Surface = surface.KindCodex
+	adapter := &seedBarrierSurface{
+		sourceCountingSurface: &sourceCountingSurface{daemonSurface: fake, items: []surface.TimelineItem{{ID: "codex:turn-1:assistant:item-1", Kind: "text", Role: "assistant", Text: "Hello"}}},
+		readStarted:           make(chan struct{}),
+		release:               make(chan struct{}),
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	type subscriptionResult struct {
+		subscription sessionSourceSubscription
+		err          error
+	}
+	result := make(chan subscriptionResult, 1)
+	go func() {
+		subscription, err := manager.subscribe(&from, adapter)
+		result <- subscriptionResult{subscription: subscription, err: err}
+	}()
+	select {
+	case <-adapter.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("seed did not start")
+	}
+	close(adapter.release)
+	var subscription sessionSourceSubscription
+	select {
+	case resultValue := <-result:
+		if resultValue.err != nil {
+			t.Fatal(resultValue.err)
+		}
+		subscription = resultValue.subscription
+	case <-time.After(time.Second):
+		t.Fatal("source did not finish seeding")
+	}
+	defer subscription.Cancel()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case <-subscription.Entries:
+			page, pageErr := reg.ReadSessionJournalPage(from.ID, 0, 10)
+			if pageErr != nil || len(page.Entries) != 1 {
+				continue
+			}
+			var payload sessionJournalPayload
+			if json.Unmarshal(page.Entries[0].Payload, &payload) == nil && payload.Body == "Hello world" {
+				return
+			}
+		case <-deadline:
+			page, pageErr := reg.ReadSessionJournalPage(from.ID, 0, 10)
+			t.Fatalf("event arriving during seed was not retained page=%+v err=%v", page, pageErr)
+		}
 	}
 }
 

@@ -130,25 +130,12 @@ func TestToolResultImageIsMetadataOnlyAndKeepsCallID(t *testing.T) {
 func TestCodexLiveAttachmentSurvivesReaderRestartFromTranscript(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	line := `{"type":"event_msg","payload":{"type":"user_message","message":"look","images":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
-	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+	content := line + strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 220)
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 	session := &surface.Session{ID: "thread-image", Transcript: path}
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var transcriptID string
-	for _, item := range page.Items {
-		if item.Attachment != nil {
-			transcriptID = item.Attachment.ID
-			break
-		}
-	}
-	if transcriptID == "" {
-		t.Fatalf("page=%+v", page)
-	}
-	digest := strings.TrimPrefix(transcriptID[strings.LastIndex(transcriptID, ":"):], ":")
+	digest := hashBytes(mustAttachmentData(t))
 	liveID := liveAttachmentID(session.ID, digest)
 	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), session, liveID)
 	if err != nil || attachment == nil || attachment.ID != liveID || string(data) != string(mustAttachmentData(t)) {
