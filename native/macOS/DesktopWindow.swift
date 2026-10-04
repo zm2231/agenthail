@@ -488,6 +488,7 @@ struct ConnectionFooter: View {
             }
             .buttonStyle(.plain)
             .help("Settings ⌘,")
+            .accessibilityLabel("Settings")
         }
         .font(.system(size: 11.5))
         .foregroundStyle(DesktopPalette.text2)
@@ -1455,21 +1456,7 @@ struct DetailsTab: View {
                 if let branch = session.checkout?.branch ?? session.checkout?.detachedHead { detailRow("Branch", branch, monospaced: true) }
                 if let path = session.checkout?.path ?? session.cwd { detailRow("Checkout", (path as NSString).abbreviatingWithTildeInPath, monospaced: true) }
             }
-            if let goal = pane.detail?.goal, !goal.objective.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        SidebarCaption("Goal").padding(.horizontal, -8)
-                        Spacer()
-                        Text(goal.status.capitalized)
-                            .font(.system(size: 11))
-                            .foregroundStyle(DesktopPalette.text2)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(DesktopPalette.selection, in: Capsule())
-                    }
-                    Text(goal.objective)
-                }
-            }
+            GoalSection(model: model, pane: pane, session: session)
         }
     }
 
