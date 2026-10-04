@@ -264,3 +264,31 @@ func TestSessionJournalMigrationNormalizesRetainedBodyBytes(t *testing.T) {
 		t.Fatal("old body remained after normalized retention pruned it")
 	}
 }
+
+func TestSessionJournalPageExposesProviderHistoryBoundaryUntilPruned(t *testing.T) {
+	reg := openTestRegistry(t)
+	register(t, reg, "s")
+	retention := SessionJournalRetention{Count: 2, Bytes: 4096}
+	if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: "a", Payload: []byte(`{"itemId":"a"}`)}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 9); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 3); err != nil {
+		t.Fatal(err)
+	}
+	page, err := reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || page.HistoryBefore != 9 || page.NextBefore != 0 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	for _, key := range []string{"b", "c"} {
+		if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: key, Payload: []byte(`{"itemId":"` + key + `"}`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err = reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || page.HistoryBefore != 0 {
+		t.Fatalf("pruned journal still exposed provider boundary: %+v err=%v", page, err)
+	}
+}

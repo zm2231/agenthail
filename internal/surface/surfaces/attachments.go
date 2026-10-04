@@ -316,6 +316,14 @@ func codexAttachmentReferences(record map[string]any) []attachmentReference {
 			out = appendAttachmentReference(out, b)
 		}
 	}
+	if _, images, ok := codexTypedToolOutput(payload["output"]); ok && images > 0 {
+		outputs, _ := payload["output"].([]any)
+		for _, v := range outputs {
+			if b, _ := v.(map[string]any); str(b, "type") == "input_image" {
+				out = appendAttachmentReference(out, b)
+			}
+		}
+	}
 	return out
 }
 func appendAttachmentReference(out []attachmentReference, value any) []attachmentReference {

@@ -1822,7 +1822,15 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 			return
 		}
 	}
-	sessionRead, sessionReadErr := d.readJournalPage(session.ID, uint64(timelineBefore), limit)
+	var sessionRead *surface.SessionReadResult
+	var sessionReadErr error
+	if historyBefore, provider := decodeProviderHistoryCursor(timelineBefore); provider {
+		historyCtx, cancel := context.WithTimeout(r.Context(), operationTimeout)
+		sessionRead, sessionReadErr = d.readProviderHistoryPage(historyCtx, session, adapter, historyBefore, limit)
+		cancel()
+	} else {
+		sessionRead, sessionReadErr = d.readJournalPage(session.ID, uint64(timelineBefore), limit)
+	}
 	if sessionReadErr == nil && sessionRead.JournalSeq > 0 && !effective.Stream && timelineBefore == 0 {
 		d.sources.refresh(session, adapter)
 	}

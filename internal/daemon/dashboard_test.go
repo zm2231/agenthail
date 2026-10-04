@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,6 +55,7 @@ type sessionPageReadProbe struct {
 	modelCalls   atomic.Int32
 	modelsCalls  atomic.Int32
 	readCalls    atomic.Int32
+	release      chan struct{}
 }
 
 type goalControlSurface struct {
@@ -120,9 +122,14 @@ func (p *sessionPageReadProbe) Models(context.Context) ([]surface.ModelOption, e
 	return []surface.ModelOption{{ID: "should-not-be-read"}}, nil
 }
 
-func (p *sessionPageReadProbe) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+func (p *sessionPageReadProbe) ReadSession(ctx context.Context, _ *surface.Session, _ surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	p.readCalls.Add(1)
-	return nil, errors.New("provider session read must not be used")
+	select {
+	case <-p.release:
+		return &surface.SessionReadResult{Items: []surface.TimelineItem{}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
@@ -130,25 +137,47 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "warm-item", Payload: []byte(`{"itemId":"warm-item","version":1,"op":"upsert","kind":"text","role":"assistant","body":"journal"}`)}, registrypkg.SessionJournalRetention{Count: 8, Bytes: 4096}); err != nil {
 		t.Fatal(err)
 	}
-	probe := &sessionPageReadProbe{daemonSurface: fake}
+	probe := &sessionPageReadProbe{daemonSurface: fake, release: make(chan struct{})}
 	probe.caps.Model = true
 	d := New(registry, []surface.Surface{probe})
-	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	defer d.sources.shutdown()
+	defer close(probe.release)
+	const viewers = 5
+	var wait sync.WaitGroup
+	responses := make([]*httptest.ResponseRecorder, viewers)
+	started := time.Now()
+	for index := range viewers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			responses[index] = httptest.NewRecorder()
+			d.dashboardSessionHandler(responses[index], httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil))
+		}()
 	}
-	var body struct {
-		Timeline surface.SessionTimeline `json:"timeline"`
+	wait.Wait()
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("blocked provider delayed warm journal pages by %s", elapsed)
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
+	for _, response := range responses {
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		var body struct {
+			Timeline surface.SessionTimeline `json:"timeline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Timeline.Source != "journal" || len(body.Timeline.Items) != 1 || body.Timeline.Items[0].Text != "journal" {
+			t.Fatalf("timeline=%+v", body.Timeline)
+		}
 	}
-	if body.Timeline.Source != "journal" || len(body.Timeline.Items) != 1 || body.Timeline.Items[0].Text != "journal" {
-		t.Fatalf("timeline=%+v", body.Timeline)
+	time.Sleep(50 * time.Millisecond)
+	if got := probe.contextCalls.Load() + probe.modelCalls.Load() + probe.modelsCalls.Load(); got != 0 {
+		t.Fatalf("metadata reads=%d (context=%d model=%d models=%d)", got, probe.contextCalls.Load(), probe.modelCalls.Load(), probe.modelsCalls.Load())
 	}
-	if got := probe.contextCalls.Load() + probe.modelCalls.Load() + probe.modelsCalls.Load() + probe.readCalls.Load(); got != 0 {
-		t.Fatalf("provider reads=%d (context=%d model=%d models=%d session=%d)", got, probe.contextCalls.Load(), probe.modelCalls.Load(), probe.modelsCalls.Load(), probe.readCalls.Load())
+	if got := probe.readCalls.Load(); got > 1 {
+		t.Fatalf("background session reads=%d for %d viewers, want one shared source", got, viewers)
 	}
 }
 

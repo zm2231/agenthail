@@ -281,7 +281,8 @@ func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 	payload, _ := record["payload"].(map[string]any)
 	typ := str(payload, "type")
 	if typ == "task_complete" || typ == "task_completed" || typ == "task_cancelled" || typ == "task_canceled" || typ == "task_aborted" || typ == "turn_completed" || typ == "turn_aborted" || typ == "interrupted" {
-		return &surface.TimelineItem{Kind: "done", Title: "Turn complete", Status: typ}
+		done := codexDoneItem(typ)
+		return &done
 	}
 	if typ == "" || (str(record, "type") != "response_item" && str(record, "type") != "event_msg") {
 		return nil
@@ -629,6 +630,77 @@ func codexTranscriptExchanges(records []transcriptRecord) ([]surface.Exchange, [
 	return exchanges, offsets
 }
 
+const (
+	codexTurnAbortedOpen  = "<turn_aborted>"
+	codexTurnAbortedClose = "</turn_aborted>"
+)
+
+func codexDoneItem(status string) surface.TimelineItem {
+	title := "Turn complete"
+	switch status {
+	case "task_cancelled", "task_canceled", "task_aborted", "turn_aborted", "interrupted":
+		title = "Turn interrupted"
+	}
+	return surface.TimelineItem{Kind: "done", Title: title, Status: status}
+}
+
+func codexInterruptionNotice(payload map[string]any) (surface.TimelineItem, bool) {
+	if str(payload, "role") != "user" {
+		return surface.TimelineItem{}, false
+	}
+	blocks, _ := payload["content"].([]any)
+	if len(blocks) != 1 {
+		return surface.TimelineItem{}, false
+	}
+	block, _ := blocks[0].(map[string]any)
+	if str(block, "type") != "input_text" {
+		return surface.TimelineItem{}, false
+	}
+	text := strings.TrimSpace(str(block, "text"))
+	if !strings.HasPrefix(text, codexTurnAbortedOpen) || !strings.HasSuffix(text, codexTurnAbortedClose) {
+		return surface.TimelineItem{}, false
+	}
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(text, codexTurnAbortedOpen), codexTurnAbortedClose))
+	if strings.Contains(inner, codexTurnAbortedOpen) || strings.Contains(inner, codexTurnAbortedClose) {
+		return surface.TimelineItem{}, false
+	}
+	return surface.TimelineItem{Kind: "event", Title: "Turn interrupted", Text: inner}, true
+}
+
+func codexTypedToolOutput(value any) (string, int, bool) {
+	blocks, ok := value.([]any)
+	if !ok || len(blocks) == 0 {
+		return "", 0, false
+	}
+	var text strings.Builder
+	images := 0
+	for _, raw := range blocks {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			return "", 0, false
+		}
+		switch str(block, "type") {
+		case "input_text":
+			part, ok := block["text"].(string)
+			if !ok {
+				return "", 0, false
+			}
+			if text.Len() > 0 && !strings.HasSuffix(text.String(), "\n") && part != "" {
+				text.WriteString("\n")
+			}
+			text.WriteString(part)
+		case "input_image":
+			if _, ok := attachmentReferenceFromValue(block); !ok {
+				return "", 0, false
+			}
+			images++
+		default:
+			return "", 0, false
+		}
+	}
+	return text.String(), images, true
+}
+
 func timelineValue(value any) string {
 	if value == nil {
 		return ""
@@ -837,7 +909,7 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	if str(record, "type") == "event_msg" {
 		switch str(payload, "type") {
 		case "task_complete", "task_completed", "task_cancelled", "task_canceled", "task_aborted", "turn_completed", "turn_aborted", "interrupted":
-			return []surface.TimelineItem{{Kind: "done", Title: "Turn complete", Status: str(payload, "type")}}
+			return []surface.TimelineItem{codexDoneItem(str(payload, "type"))}
 		}
 	}
 	if str(record, "type") != "response_item" {
@@ -847,6 +919,9 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 	messageAttachmentCount := 0
 	switch str(payload, "type") {
 	case "message":
+		if notice, ok := codexInterruptionNotice(payload); ok {
+			return []surface.TimelineItem{notice}
+		}
 		item.Kind = "message"
 		item.Role = str(payload, "role")
 		item.Title = item.Role
@@ -877,6 +952,14 @@ func codexTimelineItems(record map[string]any) []surface.TimelineItem {
 		item.Kind = "toolResult"
 		item.Title = "Tool result"
 		item.CallID = str(payload, "call_id")
+		if text, images, ok := codexTypedToolOutput(payload["output"]); ok {
+			item.Text = text
+			items := []surface.TimelineItem{item}
+			for i := 0; i < images; i++ {
+				items = append(items, surface.TimelineItem{Kind: "attachment", Role: item.Role, Title: "Image", Text: "Image attachment", CallID: item.CallID})
+			}
+			return items
+		}
 		item.Text = timelineValue(payload["output"])
 	case "reasoning":
 		item.Kind = "reasoning"

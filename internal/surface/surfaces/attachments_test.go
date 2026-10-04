@@ -288,3 +288,63 @@ func TestClaudeUnsupportedImageSourceKeepsLaterAttachmentAligned(t *testing.T) {
 		t.Fatalf("aligned attachment bytes=%d err=%v", len(data), err)
 	}
 }
+
+func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	image := "data:image/png;base64," + testPNG
+	lines := []string{
+		`{"timestamp":"2026-10-04T08:09:57.401Z","type":"response_item","payload":{"type":"message","id":"msg_abort","role":"user","content":[{"type":"input_text","text":"<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>"}]}}`,
+		`{"timestamp":"2026-10-04T08:09:57.404Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-1","reason":"interrupted"}}`,
+		`{"timestamp":"2026-10-04T08:10:00.000Z","type":"response_item","payload":{"type":"message","id":"msg_prose","role":"user","content":[{"type":"input_text","text":"Why did <turn_aborted> show up in my transcript?"}]}}`,
+		`{"timestamp":"2026-10-04T08:10:01.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","id":"ctco_json","call_id":"call_json","output":[{"type":"input_text","text":"Script completed\nWall time 0.0 seconds\nOutput:\n"},{"type":"input_text","text":"{\"goal\":{\"status\":\"active\"}}"}]}}`,
+		`{"timestamp":"2026-10-04T08:10:02.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","id":"ctco_image","call_id":"call_image","output":[{"type":"input_text","text":"screenshot"},{"type":"input_image","image_url":"` + image + `"}]}}`,
+		`{"timestamp":"2026-10-04T08:10:03.000Z","type":"response_item","payload":{"type":"function_call_output","id":"fco_mixed","call_id":"call_mixed","output":[{"type":"input_text","text":"kept"},{"type":"input_audio","data":"AAAA"}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byCall := map[string][]surface.TimelineItem{}
+	var notices, users, done []surface.TimelineItem
+	for _, item := range page.Items {
+		switch {
+		case item.Kind == "event" && item.Title == "Turn interrupted":
+			notices = append(notices, item)
+		case item.Kind == "message" && item.Role == "user":
+			users = append(users, item)
+		case item.Kind == "done":
+			done = append(done, item)
+		case item.CallID != "":
+			byCall[item.CallID] = append(byCall[item.CallID], item)
+		}
+		if strings.Contains(item.Text, testPNG) {
+			t.Fatalf("inline image bytes leaked: %+v", item)
+		}
+	}
+	if len(notices) != 1 || strings.Contains(notices[0].Text, "<turn_aborted>") || !strings.HasPrefix(notices[0].Text, "The user interrupted") {
+		t.Fatalf("interruption notice=%+v", notices)
+	}
+	if len(users) != 1 || users[0].Text != "Why did <turn_aborted> show up in my transcript?" {
+		t.Fatalf("ordinary user prose=%+v", users)
+	}
+	if len(done) != 1 || done[0].Status != "turn_aborted" || done[0].Title != "Turn interrupted" {
+		t.Fatalf("lifecycle=%+v", done)
+	}
+	if got := byCall["call_json"]; len(got) != 1 || got[0].Kind != "toolResult" || got[0].Text != "Script completed\nWall time 0.0 seconds\nOutput:\n{\"goal\":{\"status\":\"active\"}}" {
+		t.Fatalf("typed tool output=%+v", got)
+	}
+	imageItems := byCall["call_image"]
+	if len(imageItems) != 2 || imageItems[0].Text != "screenshot" || imageItems[1].Kind != "attachment" || imageItems[1].Attachment == nil {
+		t.Fatalf("tool output image=%+v", imageItems)
+	}
+	if _, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "tool-image", Transcript: path}, imageItems[1].Attachment.ID); err != nil || !bytes.Equal(data, mustAttachmentData(t)) {
+		t.Fatalf("tool output image fetch bytes=%d err=%v", len(data), err)
+	}
+	mixed := byCall["call_mixed"]
+	if len(mixed) != 1 || !strings.Contains(mixed[0].Text, `"input_audio"`) || !strings.Contains(mixed[0].Text, `"kept"`) {
+		t.Fatalf("unknown mixed output was not kept losslessly: %+v", mixed)
+	}
+}
