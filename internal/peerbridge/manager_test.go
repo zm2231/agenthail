@@ -2,6 +2,7 @@ package peerbridge
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,6 +52,9 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if err := manager.Ensure(ctx, "recent"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := reg.ReverseAlias("recent"); err != sql.ErrNoRows {
+		t.Fatalf("background registration minted handle: %v", err)
+	}
 	if err := Ensure(ctx, home, "older"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +71,9 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	receipt, err := Send(ctx, home, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "manager routed message")
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("manager send receipt=%+v err=%v", receipt, err)
+	}
+	if alias, err := reg.ReverseAlias("recent"); err != nil || alias != "recent" {
+		t.Fatalf("first send handle=%q err=%v", alias, err)
 	}
 	receipt, err = Send(ctx, home, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), strings.Repeat("x", 16<<10))
 	if err != nil || receipt == nil || !receipt.Accepted {
