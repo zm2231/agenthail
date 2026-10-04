@@ -205,6 +205,7 @@ type SendOptions struct {
 	TurnOptions
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	BusyDelivery    string `json:"busyDelivery,omitempty"`
 }
 
 type sourceSessionIDContextKey struct{}

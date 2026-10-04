@@ -51,7 +51,7 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	errs := make(chan error, 1)
 	go func() {
 		var r Ready
-		err := RunWorker(context.Background(), Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir}, parentR, readyWriter{&r, ready})
+		err := RunWorker(context.Background(), Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: socketDir, BusyDelivery: "steer"}, parentR, readyWriter{&r, ready})
 		errs <- err
 	}()
 	var r Ready
@@ -86,6 +86,10 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	}
 	if got := reg.QueueCount(s.ID); got != 1 {
 		t.Fatalf("queue count=%d", got)
+	}
+	item, err := reg.QueueItem(1)
+	if err != nil || item.BusyDelivery != "steer" {
+		t.Fatalf("worker queue mode=%q err=%v", item.BusyDelivery, err)
 	}
 	history, err := reg.ListHistory(10, s.ID)
 	if err != nil || len(history) == 0 {
@@ -258,6 +262,33 @@ func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
 	}
 	if reg.QueueCount("a") != 1 || reg.QueueCount("b") != 1 || reg.QueueCount("readonly") != 0 {
 		t.Fatal("recipient dedup or read-only gate failed")
+	}
+}
+
+func TestPeerQueueRecordsBusyDeliveryPolicyForWorkerEnvelope(t *testing.T) {
+	home := shortTempDir(t, "cp-policy-")
+	reg, err := registry.Open(filepath.Join(home, "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	target := surface.Session{ID: "target", Surface: surface.KindCodex, Status: surface.StatusBusy, Transport: "managed"}
+	if err := reg.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".agenthail"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agenthail", "dashboard.json"), []byte(`{"busyDelivery":"steer"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	msg := frame{MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(home, "sender.sock"), Message: mustJSON(messageBody{Role: "user", Content: "worker input"})}
+	if err := queueFrame(reg, Config{Home: home, SocketDir: home, Session: target}, msg, filepath.Join(home, "self.sock")); err != nil {
+		t.Fatal(err)
+	}
+	item, err := reg.QueueItem(1)
+	if err != nil || item == nil || item.BusyDelivery != "steer" {
+		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }
 

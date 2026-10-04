@@ -19,6 +19,8 @@ type fakeSurface struct {
 	observe      *surface.TurnObservation
 	observeErr   error
 	sent         []string
+	steered      []string
+	capabilities surface.Capabilities
 	compactCalls int
 }
 
@@ -57,8 +59,11 @@ func (f *fakeSurface) Compact(context.Context, *surface.Session) error {
 }
 func (*fakeSurface) Model(context.Context, *surface.Session, string) (string, error) { return "", nil }
 func (*fakeSurface) Interrupt(context.Context, *surface.Session) error               { return nil }
-func (*fakeSurface) Steer(context.Context, *surface.Session, string) error           { return nil }
-func (*fakeSurface) Capabilities() surface.Capabilities                              { return surface.Capabilities{} }
+func (f *fakeSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
+	f.steered = append(f.steered, message)
+	return nil
+}
+func (f *fakeSurface) Capabilities() surface.Capabilities { return f.capabilities }
 func (*fakeSurface) EnsureWritable(_ context.Context, session *surface.Session) error {
 	session.Transport = "managed"
 	return nil
@@ -222,6 +227,23 @@ func TestDispatcherRejectsBusyTargetWhenQueueDisabled(t *testing.T) {
 	}
 	if got := r.QueueCount("s"); got != 0 {
 		t.Fatalf("expected no queued rows, got %d", got)
+	}
+}
+
+func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "busy", Surface: surface.KindCodex, Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
+	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "interrupt with context", "", surface.SendOptions{BusyDelivery: "steer"})
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
+		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
 	}
 }
 

@@ -40,12 +40,15 @@ event as an invalidation signal and fetch the bounded session page they need.
 Agenthail does not run a second per-connection session poller or publish a
 separate `/session-stream` contract.
 
-Busy-target behavior is explicit: `send` delivers immediately when idle and queues
-when busy; `send --no-queue` refuses delayed delivery. `queue` always creates the
-durable pending item, and `agenthail daemon start` is the runnable continuation
-when the daemon is down. `steer` affects an active turn only; use `send` for an
-idle target. Read-only targets fail before dispatch. An unknown delivery outcome
-must be inspected before an explicit retry; it is never resent automatically.
+Busy-target behavior is explicit: `send` delivers immediately when idle and follows
+the persisted `busyDelivery` setting (`queue` by default, or `steer` when the
+target advertises steering) when busy. A steer-policy target without steering
+capability is queued instead. `send --no-queue` refuses delayed delivery, while
+`queue` always creates the durable pending item and `steer` is an explicit active-
+turn control. The setting is exposed by the dashboard/API settings endpoint and
+the existing dashboard settings write path. Read-only targets fail before
+dispatch. An unknown delivery outcome must be inspected before an explicit retry;
+it is never resent automatically.
 
 ## Claude background sessions
 

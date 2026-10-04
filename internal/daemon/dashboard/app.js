@@ -718,6 +718,7 @@ function renderSettings() {
   if (!app.settings) return;
   const { dashboard, remoteAccess } = app.settings;
   $("#settings-codex-hours").value = String(dashboard.codexRecentHours);
+  $("#settings-busy-delivery").value = String(dashboard.busyDelivery || "queue");
   $("#settings-listener").textContent = dashboard.listen;
   renderSurfaceHealth();
   const remoteQR = app.remoteQRVisible
@@ -1738,7 +1739,7 @@ document.addEventListener("visibilitychange", () => {
 $("#dashboard-settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value) });
+    await updateSettings({ action: "dashboard-config", codexRecentHours: Number($("#settings-codex-hours").value), busyDelivery: $("#settings-busy-delivery").value });
     await load(true);
     toast("Settings saved.");
   } catch (error) {
