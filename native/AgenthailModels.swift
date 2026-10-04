@@ -205,6 +205,7 @@ struct DashboardSnapshot: Decodable {
     let history: [HistoryState]
     let attention: [AttentionState]
     let codexRecentHours: Int
+    let busyDelivery: String?
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -216,7 +217,8 @@ struct DashboardSnapshot: Decodable {
             relays == other.relays &&
             history == other.history &&
             attention == other.attention &&
-            codexRecentHours == other.codexRecentHours
+            codexRecentHours == other.codexRecentHours &&
+            busyDelivery == other.busyDelivery
     }
 }
 

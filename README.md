@@ -104,7 +104,10 @@ agenthail history @writer 25
 agenthail search codex "quarterly planning"
 ```
 
-When an agent is already working, Agenthail holds the next message until it is ready. Use `steer` when you want to change the turn that is running now.
+When an agent is already working, Agenthail queues the next message by default. Set
+the daemon/dashboard `busyDelivery` setting to `steer` to steer busy targets that
+advertise that capability; unsupported targets remain queued. Use `steer` when you
+want an explicit active-turn control.
 If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. Messages that still cannot move after one hour expire instead of building up forever. They remain visible in the audit trail.
 
 Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.

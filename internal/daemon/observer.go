@@ -234,7 +234,12 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		}(desktopNotificationMessage, mobileNotificationMessage, session.ID, observation.CompletedTurnID)
 	}
 	canLoadDesktopQueue := session.Surface == surface.KindCodex && session.Transport == "desktop" && observation.Status == surface.SessionStatus("notLoaded")
-	if (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue {
+	steerQueued, steerQueueErr := d.Registry.PendingSteer(session.ID)
+	if steerQueueErr != nil {
+		d.log.Printf("check steer queue %s: %s", d.resolveDisplay(session.ID), steerQueueErr)
+	}
+	canSteerQueued := steerQueued && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer
+	if (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue || canSteerQueued {
 		queued := d.Registry.QueueCount(session.ID)
 		d.drainMessageQueue(ctx, adapter, session)
 		if queued > 0 {

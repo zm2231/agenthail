@@ -15,8 +15,29 @@ func TestDashboardConfigDefaultsCodexRecency(t *testing.T) {
 	if config.CodexRecentHours != defaultCodexRecentHours {
 		t.Fatalf("Codex recent hours=%d, want %d", config.CodexRecentHours, defaultCodexRecentHours)
 	}
+	if config.BusyDelivery != "queue" {
+		t.Fatalf("busy delivery=%q, want queue", config.BusyDelivery)
+	}
 	if config.RemoteAccess.Provider != "tailscale" || config.RemoteAccess.Port != defaultRemoteAccessPort {
 		t.Fatalf("remote access=%+v", config.RemoteAccess)
+	}
+}
+
+func TestDashboardConfigPersistsBusyDelivery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadDashboardConfig()
+	if err != nil || loaded.BusyDelivery != "steer" {
+		t.Fatalf("config=%+v err=%v", loaded, err)
+	}
+}
+
+func TestDashboardConfigRejectsInvalidBusyDelivery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "drop"}); err == nil {
+		t.Fatal("invalid busy delivery accepted")
 	}
 }
 

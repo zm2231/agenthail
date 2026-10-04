@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/zm2231/agenthail/internal/deliverypolicy"
 )
 
 const (
@@ -17,10 +19,11 @@ const (
 )
 
 type DashboardConfig struct {
-	Enabled          bool               `json:"enabled"`
-	Listen           string             `json:"listen"`
-	CodexRecentHours int                `json:"codexRecentHours"`
-	RemoteAccess     RemoteAccessConfig `json:"remoteAccess"`
+	Enabled          bool                `json:"enabled"`
+	Listen           string              `json:"listen"`
+	CodexRecentHours int                 `json:"codexRecentHours"`
+	BusyDelivery     deliverypolicy.Mode `json:"busyDelivery"`
+	RemoteAccess     RemoteAccessConfig  `json:"remoteAccess"`
 }
 
 func DashboardConfigPath() string {
@@ -33,7 +36,7 @@ func DashboardTokenPath() string {
 func LoadDashboardConfig() (DashboardConfig, error) {
 	data, err := os.ReadFile(DashboardConfigPath())
 	if os.IsNotExist(err) {
-		return DashboardConfig{Listen: defaultDashboardListen, CodexRecentHours: defaultCodexRecentHours, RemoteAccess: normalizeRemoteAccessConfig(RemoteAccessConfig{})}, nil
+		return DashboardConfig{Listen: defaultDashboardListen, CodexRecentHours: defaultCodexRecentHours, BusyDelivery: deliverypolicy.Queue, RemoteAccess: normalizeRemoteAccessConfig(RemoteAccessConfig{})}, nil
 	}
 	if err != nil {
 		return DashboardConfig{}, fmt.Errorf("read dashboard config: %w", err)
@@ -47,6 +50,10 @@ func LoadDashboardConfig() (DashboardConfig, error) {
 	}
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
+	}
+	config.BusyDelivery, err = deliverypolicy.Normalize(string(config.BusyDelivery))
+	if err != nil {
+		return DashboardConfig{}, err
 	}
 	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {
@@ -64,6 +71,11 @@ func SaveDashboardConfig(config DashboardConfig) error {
 	}
 	if config.CodexRecentHours == 0 {
 		config.CodexRecentHours = defaultCodexRecentHours
+	}
+	var err error
+	config.BusyDelivery, err = deliverypolicy.Normalize(string(config.BusyDelivery))
+	if err != nil {
+		return err
 	}
 	config.RemoteAccess = normalizeRemoteAccessConfig(config.RemoteAccess)
 	if err := validateCodexRecentHours(config.CodexRecentHours); err != nil {

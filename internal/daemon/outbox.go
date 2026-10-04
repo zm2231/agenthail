@@ -35,7 +35,14 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	var result *surface.SendResult
 	var sendErr error
-	if item.Model != "" || !item.TurnOptions.Empty() {
+	steered := false
+	if item.BusyDelivery == "steer" && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+		sendErr = adapter.Steer(operationCtx, session, item.Message)
+		if sendErr == nil {
+			result = &surface.SendResult{Accepted: true}
+			steered = true
+		}
+	} else if item.Model != "" || !item.TurnOptions.Empty() {
 		if sender, ok := adapter.(surface.OptionSender); ok {
 			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions})
 		} else {
@@ -57,7 +64,7 @@ func (d *Daemon) drainMessageQueue(ctx context.Context, adapter surface.Surface,
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if session.Surface != surface.KindClaude || session.Transport != "uds" {
+	if !steered && (session.Surface != surface.KindClaude || session.Transport != "uds") {
 		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}

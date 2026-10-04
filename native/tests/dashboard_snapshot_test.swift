@@ -17,7 +17,8 @@ struct DashboardSnapshotTest {
             relays: [],
             history: [],
             attention: [],
-            codexRecentHours: 5
+            codexRecentHours: 5,
+            busyDelivery: "queue"
         )
     }
 
