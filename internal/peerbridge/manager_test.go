@@ -77,20 +77,7 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	}
 	relay := manager.relays["recent"]
 	if !relay.healthy() {
-		info, lstatErr := os.Lstat(relay.socketPath)
-		t.Fatalf("new reply relay is not healthy: pid=%d path=%q done=%v paths=%v lstat=%v mode=%v", relay.process.Pid, relay.socketPath, func() bool {
-			select {
-			case <-relay.done:
-				return true
-			default:
-				return false
-			}
-		}(), relay.paths, lstatErr, func() os.FileMode {
-			if info == nil {
-				return 0
-			}
-			return info.Mode()
-		}())
+		t.Fatalf("new reply relay is not healthy: pid=%d path=%q", relay.process.Pid, relay.socketPath)
 	}
 	results := make(chan error, 4)
 	for range 4 {
