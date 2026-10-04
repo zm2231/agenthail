@@ -1920,3 +1920,7 @@ select {
   flex-wrap: wrap;
   gap: 10px;
 }
+
+.copy-output {
+  margin: 8px 0 4px;
+}

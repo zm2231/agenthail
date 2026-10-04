@@ -1011,7 +1011,8 @@ function renderTimelineItem(item, session) {
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;
     const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
-    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div></details>`;
+    const copy = kind === "toolResult" && item.text ? `<button class="soft-button copy-output" type="button" data-copy-text="${escape(item.text)}">Copy output</button>` : "";
+    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div>${copy}</details>`;
   }
   const title = item.title || "Unknown timeline item";
   const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
@@ -1168,6 +1169,17 @@ function formatGoalDuration(seconds) {
   if (minutes < 60) return `${minutes}m ${value % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
+function contextBreakdown(context) {
+  const count = (value) => Number(value).toLocaleString();
+  const window = context.windowEstimated ? "Estimated window" : context.contextWindowSource === "configured" ? "Configured window" : "Context window";
+  const rows = [["Used tokens", count(context.usedTokens || 0)], [window, context.contextWindow > 0 ? count(context.contextWindow) : "Unavailable"]];
+  for (const [label, key] of [["Input", "inputTokens"], ["Cached input", "cachedInputTokens"], ["Output", "outputTokens"], ["Reasoning output", "reasoningOutputTokens"], ["Cumulative tokens", "cumulativeTokens"]]) {
+    if (Number.isFinite(context[key])) rows.push([label, count(context[key])]);
+  }
+  rows.push(["Compactions", count(context.compactionCount || 0)]);
+  if (Number.isFinite(context.reclaimedTokens)) rows.push(["Tokens reclaimed", count(context.reclaimedTokens)]);
+  return rows;
+}
 function renderContextUsage(context) {
   const indicator = $("#context-usage");
   if (!context || (!context.contextWindow && !context.compactionCount && !context.usedTokens)) {
@@ -1201,7 +1213,8 @@ function renderContextUsage(context) {
   if (context.compactionCount) details.push(`${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`);
   if (context.preCompactTokens && context.postCompactTokens)
     details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);
-  indicator.title = details.join(". ");
+  const breakdown = contextBreakdown(context).map(([label, value]) => `${label}: ${value}`).join("\n");
+  indicator.title = details.length ? `${details.join(". ")}\n\n${breakdown}` : breakdown;
 }
 function isNetworkFailure(error) {
   return error?.networkFailure === true || error?.name === "TypeError";
@@ -1474,6 +1487,16 @@ function renderSlashMenu() {
     .join("");
 }
 document.addEventListener("click", async (event) => {
+  const copyOutput = event.target.closest("[data-copy-text]");
+  if (copyOutput) {
+    try {
+      await navigator.clipboard.writeText(copyOutput.dataset.copyText);
+      toast("Output copied.");
+    } catch (error) {
+      toast("Couldn't copy the output.");
+    }
+    return;
+  }
   const modelOption = event.target.closest("[data-model-option]");
   if (modelOption) {
     $("#message").value = `/model ${modelOption.dataset.modelOption}`;
