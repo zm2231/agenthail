@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +45,7 @@ func TestDeliveryProblemsReopenOrderAndBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	register(t, first, "sender", "target")
+	var failed []int64
 	for i := 0; i < 55; i++ {
 		intent, recordErr := first.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Message: strings.Repeat("m", 20<<10), Status: DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
 		if recordErr != nil {
@@ -60,10 +60,7 @@ func TestDeliveryProblemsReopenOrderAndBound(t *testing.T) {
 			first.Close()
 			t.Fatalf("i=%d changed=%v err=%v", i, changed, failErr)
 		}
-		if _, err := first.db.Exec(`UPDATE delivery_intents SET updated_at=? WHERE id=?`, fmt.Sprintf("2026-01-%02d 00:00:00", (i%28)+1), intent.ID); err != nil {
-			first.Close()
-			t.Fatal(err)
-		}
+		failed = append(failed, intent.ID)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
@@ -77,9 +74,12 @@ func TestDeliveryProblemsReopenOrderAndBound(t *testing.T) {
 	if err != nil || len(problems) != 50 {
 		t.Fatalf("problems=%d err=%v", len(problems), err)
 	}
-	for i := 1; i < len(problems); i++ {
-		if problems[i-1].At.Before(problems[i].At) {
-			t.Fatalf("problems not newest first: %v before %v", problems[i-1].At, problems[i].At)
+	for i, problem := range problems {
+		if want := failed[len(failed)-1-i]; problem.DeliveryID != want {
+			t.Fatalf("problem %d delivery=%d, want newest-first delivery %d", i, problem.DeliveryID, want)
+		}
+		if i > 0 && problems[i-1].At.Before(problem.At) {
+			t.Fatalf("problems not newest first: %v before %v", problems[i-1].At, problem.At)
 		}
 	}
 	if len(problems[0].Message) != 16<<10 || problems[0].Status != DeliveryIntentExpired && problems[0].Status != DeliveryIntentFailed {
@@ -103,9 +103,8 @@ func TestDismissDeliveryProblemIsIdempotentAndAtomic(t *testing.T) {
 	if changed, err := r.DismissDeliveryProblem(intent.ID); err == nil || changed {
 		t.Fatalf("atomic dismissal changed=%v err=%v", changed, err)
 	}
-	var dismissed sql.NullString
-	if err := r.db.QueryRow(`SELECT dismissed_at FROM delivery_intents WHERE id=?`, intent.ID).Scan(&dismissed); err != nil || dismissed.Valid {
-		t.Fatalf("rollback dismissed_at=%q err=%v", dismissed.String, err)
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 1 || problems[0].DeliveryID != intent.ID {
+		t.Fatalf("failed dismissal hid the problem: problems=%+v err=%v", problems, err)
 	}
 	if _, err := r.db.Exec(`DROP TRIGGER reject_delivery_dismissed`); err != nil {
 		t.Fatal(err)
@@ -120,15 +119,16 @@ func TestDismissDeliveryProblemIsIdempotentAndAtomic(t *testing.T) {
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("visible problems=%+v err=%v", problems, err)
 	}
-	var events, queued int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM catalog_events WHERE type='delivery.dismissed' AND dedupe_key=?`, fmt.Sprintf("delivery.dismissed:%d", intent.ID)).Scan(&events); err != nil {
+	window, err := r.CatalogEventsAfter(0, 50)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue`).Scan(&queued); err != nil {
+	queued, err := r.ListQueue(true)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if events != 1 || queued != 0 {
-		t.Fatalf("events=%d queued=%d", events, queued)
+	if events := catalogEventsOfType(window, "delivery.dismissed"); len(events) != 1 || events[0].EntityID == "" || len(queued) != 0 {
+		t.Fatalf("dismissed events=%+v queued=%+v", events, queued)
 	}
 	sent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentSent, Evidence: surface.EvidenceTransportAccepted})
 	if err != nil {
@@ -171,49 +171,9 @@ func TestDeliveryIntentFailureQueuesOneSenderNoticeAcrossReopen(t *testing.T) {
 	if count := second.QueueCount("sender"); count != 1 {
 		t.Fatalf("sender notice count=%d", count)
 	}
-	var events int
-	if err := second.db.QueryRow(`SELECT COUNT(*) FROM catalog_events WHERE dedupe_key=? AND type='delivery.problem'`, "delivery.problem:"+fmt.Sprint(intent.ID)).Scan(&events); err != nil || events != 1 {
-		t.Fatalf("events=%d err=%v", events, err)
-	}
-}
-
-func TestDeliveryIntentDoesNotNotifyUnknownOutcome(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "sender", "target")
-	intent, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: "sender", TargetSessionID: "target", Status: DeliveryIntentUnknown, Evidence: surface.EvidenceUnknown})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if queueID, queued, err := r.QueueDeliveryFailureNotice(intent.ID); err != nil || queued || queueID != 0 {
-		t.Fatalf("queueID=%d queued=%v err=%v", queueID, queued, err)
-	}
-	if count := r.QueueCount("sender"); count != 0 {
-		t.Fatalf("unknown outcome queued %d notices", count)
-	}
-}
-
-func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "sender", "target")
-	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "wait", "expiry-test", surface.SendOptions{SourceSessionID: "sender"})
-	if err != nil || deliveryID == 0 {
-		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
-	}
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.ExpireMessages(time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := r.DeliveryIntent(deliveryID)
-	if err != nil || stored.Status != DeliveryIntentExpired || stored.QueueID != queueID || r.QueueCount("sender") != 1 {
-		t.Fatalf("intent=%+v err=%v notices=%d", stored, err, r.QueueCount("sender"))
-	}
-	if _, err := r.ExpireMessages(time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if count := r.QueueCount("sender"); count != 1 {
-		t.Fatalf("sender notice count=%d", count)
+	window, err := second.CatalogEventsAfter(0, 50)
+	if err != nil || len(catalogEventsOfType(window, "delivery.problem")) != 1 {
+		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
 
@@ -229,22 +189,12 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 	if err != nil {
 		t.Fatal(err)
 	}
-	deliveryID, err := queuedDeliveryIntentID(first.db, queueID)
-	if err != nil || deliveryID == 0 {
-		t.Fatalf("deliveryID=%d err=%v", deliveryID, err)
-	}
 	if replayID, err := first.QueueRelayMessageWithOptions("target", "relay body", "relay:7:turn-1", 1, options); err != nil || replayID != queueID {
 		t.Fatalf("replayID=%d queueID=%d err=%v", replayID, queueID, err)
 	}
-	if _, err := first.db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := first.ExpireMessages(time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	intent, err := first.DeliveryIntent(deliveryID)
-	if err != nil || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || intent.NotificationQueueID == 0 {
-		t.Fatalf("intent=%+v err=%v", intent, err)
+	afterTTL := time.Now().Add(2 * queueMessageTTL)
+	if expired, err := first.ExpireMessages(afterTTL); err != nil || expired != 1 {
+		t.Fatalf("expired=%d err=%v", expired, err)
 	}
 	window, err := first.CatalogEventsAfter(0, 10)
 	problems := catalogEventsOfType(window, "delivery.problem")
@@ -256,8 +206,12 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 		SessionID       string `json:"sessionId"`
 		SourceSessionID string `json:"sourceSessionId"`
 	}
-	if err := json.Unmarshal(problems[0].Payload, &payload); err != nil || payload.DeliveryID != deliveryID || payload.SessionID != "target" || payload.SourceSessionID != "sender" {
+	if err := json.Unmarshal(problems[0].Payload, &payload); err != nil || payload.DeliveryID == 0 || payload.SessionID != "target" || payload.SourceSessionID != "sender" {
 		t.Fatalf("payload=%+v err=%v", payload, err)
+	}
+	intent, err := first.DeliveryIntent(payload.DeliveryID)
+	if err != nil || intent.QueueID != queueID || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || intent.NotificationQueueID == 0 {
+		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)

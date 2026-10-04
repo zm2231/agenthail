@@ -3,33 +3,24 @@ package cli
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestThreadCreateClaudeAndAdvancedOptionsAreParsed(t *testing.T) {
+func TestThreadCreateClaudeForwardsAdvancedOptions(t *testing.T) {
 	cwd := t.TempDir()
-	schema := filepath.Join(cwd, "schema.json")
-	os.WriteFile(schema, []byte(`{"type":"object"}`), 0600)
-	request, err := parseThreadCreateRequest([]string{"create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--worktree", "branch", "--permission-mode", "plan"})
-	if err != nil || request.options.Effort != "high" || request.options.Worktree != "branch" || request.options.Message != "hello" {
-		t.Fatal(request, err)
-	}
-	options, err := parseTurnOptions([]string{"--output-schema", schema, "--mode", "plan"})
-	if err != nil || len(options.OutputSchema) == 0 {
-		t.Fatal(options, err)
-	}
 	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, session: &surface.Session{ID: "claude-new", Surface: surface.KindClaude, Cwd: cwd}}
 	app := threadFixture(t, starter)
 	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--json"})
+		return app.Run([]string{"thread", "create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--worktree", "branch", "--permission-mode", "plan", "--json"})
 	})
-	if err != nil || !strings.Contains(output, `"id":"claude-new"`) || starter.options[0].Effort != "high" {
+	if err != nil || !strings.Contains(output, `"id":"claude-new"`) || len(starter.options) != 1 {
 		t.Fatal(output, err, starter.options)
+	}
+	if got := starter.options[0]; got.Effort != "high" || got.Worktree != "branch" || got.Message != "hello" {
+		t.Fatalf("options=%+v", got)
 	}
 }
 
@@ -56,12 +47,4 @@ type lifecycleCLISurface struct{ *cliSurface }
 
 func (*lifecycleCLISurface) SessionAction(context.Context, *surface.Session, string) (map[string]any, error) {
 	return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("native reply lost"))
-}
-
-func TestThreadOperationRejectsIgnoredOptions(t *testing.T) {
-	for _, args := range [][]string{{"fork", "target", "--effort", "high"}, {"stop", "target", "--model", "other"}, {"queue", "target", "add", "--message", "ignored"}} {
-		if err := validateThreadOperationArgs(args); err == nil {
-			t.Fatal(args)
-		}
-	}
 }

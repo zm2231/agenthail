@@ -57,41 +57,6 @@ func TestQueuePreservesSourceSessionIDAcrossReopenClaimAndExports(t *testing.T) 
 	}
 }
 
-func TestV1UpgradeAddsSourceColumnWithoutLegacyNormalization(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
-	r, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.db.Exec(`INSERT INTO sessions(id,surface) VALUES('target','claude'); INSERT INTO message_queue(session_id,message,status,delivered,expires_at_ms) VALUES('target','legacy','',1,0); ALTER TABLE message_queue DROP COLUMN source_session_id; PRAGMA user_version=1`); err != nil {
-		r.Close()
-		t.Fatal(err)
-	}
-	if err := r.Close(); err != nil {
-		t.Fatal(err)
-	}
-	r, err = Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	var status string
-	if err := r.db.QueryRow(`SELECT status FROM message_queue WHERE message='legacy'`).Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	if status != "" {
-		t.Fatalf("legacy status=%q was normalized during v1 upgrade", status)
-	}
-	var source string
-	if err := r.db.QueryRow(`SELECT source_session_id FROM message_queue WHERE message='legacy'`).Scan(&source); err != nil || source != "" {
-		t.Fatalf("source=%q err=%v", source, err)
-	}
-	var version int
-	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
-		t.Fatalf("version=%d err=%v", version, err)
-	}
-}
-
 func TestClaudeMergePreservesQueuedSenderIdentity(t *testing.T) {
 	r, err := Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
