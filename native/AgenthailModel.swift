@@ -347,13 +347,8 @@ final class AgenthailModel: ObservableObject {
                 _ = try await api.sendInstruction(action: "steer", sessionID: item.sessionId, message: item.message)
                 operationError = nil
             } catch {
-                do {
-                    _ = try await api.sendInstruction(action: "send", sessionID: item.sessionId, message: item.message)
-                    operationError = nil
-                } catch {
-                    restoreToComposer(item.message)
-                    operationError = "The message could not be delivered, so it is back in the composer. \(error.localizedDescription)"
-                }
+                restoreToComposer(item.message)
+                operationError = "Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(error.localizedDescription)"
             }
             _ = await refresh(fresh: true)
         }
