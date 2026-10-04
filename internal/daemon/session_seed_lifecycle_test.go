@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -168,6 +169,73 @@ func TestCodexSourceRecoversRecordsAfterSuccessfulSeedAndColdRestart(t *testing.
 		body := fmt.Sprintf("gap-%02d", index)
 		if seen[body] != 1 {
 			t.Fatalf("offline interval body %q count=%d page=%+v", body, seen[body], page)
+		}
+	}
+}
+
+type replacingTranscriptSurface struct {
+	*emptySeedSurface
+	mu      sync.Mutex
+	reads   []*surface.SessionReadResult
+	readErr error
+}
+
+func (s *replacingTranscriptSurface) RequiresLocalTranscript(*surface.Session) bool { return true }
+
+func (s *replacingTranscriptSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	if len(s.reads) == 0 {
+		return &surface.SessionReadResult{TranscriptOffsetSet: true, TranscriptIdentity: "generation-a"}, nil
+	}
+	read := s.reads[0]
+	s.reads = s.reads[1:]
+	return read, nil
+}
+
+func TestCodexCatchupRejectsSamePathTranscriptReplacement(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &replacingTranscriptSurface{
+		emptySeedSurface: &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 2)},
+		reads: []*surface.SessionReadResult{
+			{Items: []surface.TimelineItem{{ID: "seed", Kind: "message", Role: "assistant", Text: "seed"}}, TranscriptOffset: 1, TranscriptOffsetSet: true, TranscriptIdentity: "generation-a"},
+			{Items: []surface.TimelineItem{{ID: "new-page", Kind: "message", Role: "assistant", Text: "new generation"}}, NextBefore: 1, TranscriptOffset: 2, TranscriptOffsetSet: true, TranscriptIdentity: "generation-a"},
+			{Items: []surface.TimelineItem{{ID: "old-page", Kind: "message", Role: "assistant", Text: "old generation"}}, TranscriptOffset: 3, TranscriptOffsetSet: true, TranscriptIdentity: "generation-b"},
+		},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	first, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Cancel()
+	waitForSessionSourceGone(t, manager)
+	second, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err == nil || !strings.Contains(err.Error(), "replaced during catch-up") {
+		if second.Cancel != nil {
+			second.Cancel()
+		}
+		t.Fatalf("err=%v, want explicit replacement failure", err)
+	}
+	status, err := reg.SessionJournalSeedStatus(from.ID)
+	if err != nil || status != "failed" {
+		t.Fatalf("seed status=%q err=%v, want failed", status, err)
+	}
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range page.Entries {
+		var payload sessionJournalPayload
+		if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Body == "new generation" || payload.Body == "old generation" {
+			t.Fatalf("replacement page was published: %+v", payload)
 		}
 	}
 }
