@@ -378,19 +378,34 @@ func (l *processLauncher) cmuxSurfacePresent(ctx context.Context, workspace, sur
 		return false, err
 	}
 	var tree cmuxTreeInventory
-	if err := json.Unmarshal(out, &tree); err != nil || len(tree.Windows) == 0 {
+	if err := json.Unmarshal(out, &tree); err != nil || tree.Windows == nil || len(*tree.Windows) == 0 {
 		if err == nil {
 			err = errors.New("cmux tree inventory is empty")
 		}
 		return false, fmt.Errorf("invalid cmux tree inventory: %w", err)
 	}
-	for _, window := range tree.Windows {
-		for _, candidate := range window.Workspaces {
+	for _, window := range *tree.Windows {
+		if window.Workspaces == nil {
+			return false, errors.New("invalid cmux tree inventory: workspace layer is missing")
+		}
+		for _, candidate := range *window.Workspaces {
+			if candidate.ID == "" && candidate.Ref == "" {
+				return false, errors.New("invalid cmux tree inventory: workspace identity is missing")
+			}
 			if candidate.ID != workspace && candidate.Ref != workspace {
 				continue
 			}
-			for _, pane := range candidate.Panes {
-				for _, candidateSurface := range pane.Surfaces {
+			if candidate.Panes == nil {
+				return false, errors.New("invalid cmux tree inventory: pane layer is missing")
+			}
+			for _, pane := range *candidate.Panes {
+				if pane.Surfaces == nil {
+					return false, errors.New("invalid cmux tree inventory: surface layer is missing")
+				}
+				for _, candidateSurface := range *pane.Surfaces {
+					if candidateSurface.ID == "" && candidateSurface.Ref == "" {
+						return false, errors.New("invalid cmux tree inventory: surface identity is missing")
+					}
 					if candidateSurface.ID == surface || candidateSurface.Ref == surface {
 						return true, nil
 					}
@@ -403,21 +418,21 @@ func (l *processLauncher) cmuxSurfacePresent(ctx context.Context, workspace, sur
 }
 
 type cmuxTreeInventory struct {
-	Windows []cmuxTreeWindow `json:"windows"`
+	Windows *[]cmuxTreeWindow `json:"windows"`
 }
 
 type cmuxTreeWindow struct {
-	Workspaces []cmuxTreeWorkspace `json:"workspaces"`
+	Workspaces *[]cmuxTreeWorkspace `json:"workspaces"`
 }
 
 type cmuxTreeWorkspace struct {
-	ID    string         `json:"id"`
-	Ref   string         `json:"ref"`
-	Panes []cmuxTreePane `json:"panes"`
+	ID    string          `json:"id"`
+	Ref   string          `json:"ref"`
+	Panes *[]cmuxTreePane `json:"panes"`
 }
 
 type cmuxTreePane struct {
-	Surfaces []cmuxTreeSurface `json:"surfaces"`
+	Surfaces *[]cmuxTreeSurface `json:"surfaces"`
 }
 
 type cmuxTreeSurface struct {
