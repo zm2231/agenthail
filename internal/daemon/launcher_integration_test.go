@@ -124,6 +124,67 @@ func TestSessionCreateReportsAcceptedUnresolvedLaunchWithoutRetrySignal(t *testi
 	}
 }
 
+func TestSessionCreateReportsAcceptedLaunchWhenDiscoveryFails(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{&failingClaudeListSurface{daemonSurface: fake}}
+	launcher := &launcherFixture{
+		id:     surface.LauncherCMUX,
+		agents: []surface.SurfaceKind{surface.KindClaude},
+		result: surface.LaunchResult{Location: &surface.Location{Workspace: "workspace-1"}},
+	}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`))
+	req.Header.Set("Origin", "http://example.test")
+	req.Host = "example.test"
+	req.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted || launcher.launches != 1 {
+		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["ok"] != true || body["status"] != "submitted" || body["accepted"] != true || body["retryable"] != false || body["warning"] == nil {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func TestSessionCreateRejectsAliasCollisionBeforeLaunch(t *testing.T) {
+	d, r, fake, from, _ := daemonFixture(t)
+	fake.kind = surface.KindClaude
+	d.Surfaces = []surface.Surface{fake}
+	if err := r.SetAlias("builder", from.ID); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := httptest.NewRecorder()
+	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello","alias":"builder"}`)))
+	if w.Code != http.StatusBadRequest || launcher.launches != 0 {
+		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
+	}
+	owner, err := r.LookupAlias("builder")
+	if err != nil || owner != from.ID {
+		t.Fatalf("alias owner=%q err=%v", owner, err)
+	}
+}
+
+func TestSessionCreateRejectsMissingLauncherSurfaceBeforeLaunch(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	fake.kind = surface.KindCodex
+	d.Surfaces = []surface.Surface{fake}
+	launcher := &launcherFixture{id: surface.LauncherCMUX, agents: []surface.SurfaceKind{surface.KindClaude}}
+	d.SetLaunchers([]surface.Launcher{launcher})
+	w := httptest.NewRecorder()
+	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"claude","launcher":"cmux","message":"hello"}`)))
+	if w.Code != http.StatusConflict || launcher.launches != 0 {
+		t.Fatalf("status=%d launches=%d body=%s", w.Code, launcher.launches, w.Body.String())
+	}
+}
+
 func TestLocateLaunchedSessionRejectsAmbiguousLocation(t *testing.T) {
 	fake := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"a": {ID: "a"}, "b": {ID: "b"}}}
 	launcher := &launcherFixture{id: surface.LauncherCMUX, locations: map[string]surface.Location{"a": {Workspace: "w", Surface: "s"}, "b": {Workspace: "w", Surface: "s"}}}
