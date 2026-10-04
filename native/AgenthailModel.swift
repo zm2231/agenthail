@@ -55,6 +55,7 @@ final class AgenthailModel: ObservableObject {
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
     private var drafts: [String: String] = [:]
+    private let attachmentCache = NSCache<NSString, NSData>()
     private var selectionGeneration: UInt64 = 0
     private var detailRequestGeneration: UInt64 = 0
     private var detailAppliedGeneration: UInt64 = 0
@@ -241,6 +242,15 @@ final class AgenthailModel: ObservableObject {
             pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
         }
         if knownSessions.contains(where: { $0.id == id }) { selectSession(id) }
+    }
+
+    func attachmentData(sessionID: String, attachment: TimelineAttachment) async throws -> Data {
+        let key = "\(sessionID)/\(attachment.id)" as NSString
+        if let cached = attachmentCache.object(forKey: key) { return cached as Data }
+        guard let api else { throw AgenthailAPIError.invalidResponse }
+        let data = try await api.attachmentData(sessionID: sessionID, attachmentID: attachment.id)
+        attachmentCache.setObject(data as NSData, forKey: key, cost: data.count)
+        return data
     }
 
     func focusInTerminal(_ session: SessionState) {

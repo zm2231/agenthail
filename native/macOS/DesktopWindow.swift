@@ -21,6 +21,7 @@ struct DesktopWindow: View {
         }
         .background(DesktopPalette.window)
         .toolbar(removing: .sidebarToggle)
+        .environmentObject(model)
         .sheet(isPresented: $model.newSessionVisible) {
             NewSessionSheet(model: model)
         }
@@ -693,6 +694,7 @@ struct TranscriptBlock: Identifiable, Equatable {
         case assistant(String)
         case tools([TimelineItem])
         case annotation(String)
+        case image(TimelineAttachment)
     }
 
     let id: String
@@ -717,6 +719,13 @@ struct TranscriptBlock: Identifiable, Equatable {
                     continue
                 }
                 blocks.append(TranscriptBlock(id: item.id, kind: item.role == "user" ? .user(item.text) : .assistant(item.text)))
+            case "attachment":
+                flushTools()
+                if let attachment = item.attachment, attachment.isImage {
+                    blocks.append(TranscriptBlock(id: item.id, kind: .image(attachment)))
+                } else {
+                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached")))
+                }
             case "event" where item.title == "Turn duration":
                 flushTools()
                 blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)")))
@@ -751,7 +760,65 @@ struct TranscriptBlockView: View {
             Text(text)
                 .font(.system(size: 11.5))
                 .foregroundStyle(DesktopPalette.muted)
+        case .image(let attachment):
+            AttachmentImageView(attachment: attachment)
         }
+    }
+}
+
+struct AttachmentImageView: View {
+    @EnvironmentObject private var model: AgenthailModel
+    let attachment: TimelineAttachment
+    @State private var image: NSImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 520, maxHeight: 360, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line))
+                    .onTapGesture(count: 2) { open(image) }
+                    .contextMenu {
+                        Button("Open in Preview") { open(image) }
+                        Button("Copy image") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.writeObjects([image])
+                        }
+                    }
+            } else if failed {
+                Text("Image couldn't be loaded")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(DesktopPalette.muted)
+            } else {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(DesktopPalette.bubble)
+                    .frame(width: 220, height: 140)
+                    .overlay { ProgressView().controlSize(.small) }
+            }
+        }
+        .task(id: attachment.id) { await load() }
+    }
+
+    private func load() async {
+        guard let sessionID = model.selectedSessionID else { return }
+        do {
+            let data = try await model.attachmentData(sessionID: sessionID, attachment: attachment)
+            if let decoded = NSImage(data: data) { image = decoded } else { failed = true }
+        } catch {
+            if !error.isCancellation { failed = true }
+        }
+    }
+
+    private func open(_ image: NSImage) {
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("agenthail-\(attachment.id).png")
+        guard (try? png.write(to: url)) != nil else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -820,31 +887,7 @@ struct ToolRunView: View {
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
                 ForEach(calls) { call in
-                    let callFailed = call.callId.map(failedCallIDs.contains) ?? false
-                    let presentation = ToolPresentation(name: call.title, text: call.text)
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Image(systemName: presentation.symbol)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(callFailed ? DesktopPalette.red : DesktopPalette.text2)
-                            .frame(width: 14)
-                        Text(presentation.title)
-                            .foregroundStyle(callFailed ? DesktopPalette.red : DesktopPalette.text2)
-                            .lineLimit(1)
-                            .fixedSize()
-                        Text(rowSummary(presentation))
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(DesktopPalette.text)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .font(.system(size: 12))
-                    .textSelection(.enabled)
-                    .contextMenu {
-                        Button("Copy input") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(call.text, forType: .string)
-                        }
-                    }
+                    ToolCallRow(call: call, failed: call.callId.map(failedCallIDs.contains) ?? false)
                 }
             }
         }
@@ -852,10 +895,58 @@ struct ToolRunView: View {
         .overlay(alignment: .leading) { Rectangle().fill(DesktopPalette.line).frame(width: 2) }
     }
 
-    private func rowSummary(_ presentation: ToolPresentation) -> String {
+}
+
+struct ToolCallRow: View {
+    let call: TimelineItem
+    let failed: Bool
+    @State private var expanded = false
+
+    var body: some View {
+        let presentation = ToolPresentation(name: call.title, text: call.text)
+        let isCommand: Bool = { if case .command = presentation.content { return true } else { return false } }()
         let firstLine = presentation.summary.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
-        if case .command = presentation.content { return "$ " + firstLine }
-        return firstLine
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                expanded.toggle()
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: presentation.symbol)
+                        .font(.system(size: 10.5))
+                        .frame(width: 14)
+                    Text(presentation.intent ?? presentation.title)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Text(isCommand ? "$ " + firstLine : firstLine)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .foregroundStyle(presentation.intent == nil ? DesktopPalette.text : DesktopPalette.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(failed ? DesktopPalette.red : DesktopPalette.text2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            if expanded {
+                Text(presentation.summary.isEmpty ? call.text : presentation.summary)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(DesktopPalette.text)
+                    .textSelection(.enabled)
+                    .lineLimit(40)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.leading, 21)
+            }
+        }
+        .contextMenu {
+            Button("Copy input") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(call.text, forType: .string)
+            }
+        }
     }
 }
 

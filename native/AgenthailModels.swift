@@ -501,6 +501,17 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let status: String?
     let truncated: Bool
     let bodyRef: String?
+    var attachment: TimelineAttachment? = nil
+}
+
+struct TimelineAttachment: Decodable, Equatable, Hashable {
+    let id: String
+    let mediaType: String
+    let width: Int?
+    let height: Int?
+    let bytes: Int?
+
+    var isImage: Bool { mediaType.hasPrefix("image/") }
 }
 
 struct SessionSearchResponse: Decodable {

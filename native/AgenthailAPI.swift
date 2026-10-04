@@ -123,6 +123,19 @@ final class AgenthailAPI: @unchecked Sendable {
         return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
     }
 
+    func attachmentData(sessionID: String, attachmentID: String) async throws -> Data {
+        var components = URLComponents()
+        components.path = "/api/v1/session-attachment"
+        components.queryItems = [URLQueryItem(name: "sessionId", value: sessionID), URLQueryItem(name: "id", value: attachmentID)]
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        var request = authorizedRequest(path: path)
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 30
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, data: data)
+        return data
+    }
+
     func searchSessions(query: String) async throws -> SessionSearchResponse {
         var components = URLComponents()
         components.path = "/api/v1/search"
