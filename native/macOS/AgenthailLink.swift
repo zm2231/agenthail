@@ -29,6 +29,6 @@ enum AgenthailLink: Equatable {
         if session.id == reference { return true }
         guard let alias = session.alias, !alias.isEmpty else { return false }
         let bare = reference.hasPrefix("@") ? String(reference.dropFirst()) : reference
-        return alias.caseInsensitiveCompare(bare) == .orderedSame
+        return alias == bare
     }
 }

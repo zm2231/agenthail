@@ -20,7 +20,7 @@ struct AgenthailLinkTest {
         let session = SessionState(id: "019a-thread", surface: "codex", name: "", alias: "optimizer", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: false, readOnlyReason: nil, cwd: nil)
         check(AgenthailLink.matches(session, reference: "019a-thread"), "matches by id")
         check(AgenthailLink.matches(session, reference: "@optimizer"), "matches by alias with @")
-        check(AgenthailLink.matches(session, reference: "Optimizer"), "alias match ignores case")
+        check(!AgenthailLink.matches(session, reference: "Optimizer"), "alias match is exact, like the daemon")
         check(!AgenthailLink.matches(session, reference: "other"), "rejects other references")
     }
 

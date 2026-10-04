@@ -28,8 +28,8 @@ freshness/health without changing presence rows. A successful omission must
 meet the configured removal threshold before producing `session.removed`.
 
 `GET /api/v1/session?id=<id>` returns a bounded page from the session journal.
-When `id` is not a session ID, an exact handle (with or without `@`) is
-accepted; the response always carries the resolved session ID.
+When `id` is not a session ID, an exact, case-sensitive handle (with or
+without `@`) is accepted, matching CLI target resolution; the response always carries the resolved session ID.
 `GET /api/v1/session-stream?id=<id>&after=<sessionSeq>` is an SSE view over the
 same journal. `Last-Event-ID` is accepted as the same per-session cursor.
 Replay emits entries strictly after the cursor. When retention cannot satisfy a

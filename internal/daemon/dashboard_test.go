@@ -74,10 +74,12 @@ func TestDashboardSessionResolvesExactAlias(t *testing.T) {
 			t.Fatalf("%s: resolved %q", reference, body.Session.ID)
 		}
 	}
-	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=revi", nil))
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("alias prefix status=%d", response.Code)
+	for _, reference := range []string{"revi", "@Reviewer"} {
+		response := httptest.NewRecorder()
+		d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+url.QueryEscape(reference), nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s: status=%d", reference, response.Code)
+		}
 	}
 }
 
