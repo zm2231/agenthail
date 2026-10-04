@@ -111,6 +111,54 @@ func TestCodexObservationUsesTurnIDsAndCompletion(t *testing.T) {
 	}
 }
 
+func TestCodexTurnUsesFinalPhaseAndDeduplicatesReplay(t *testing.T) {
+	turn := codexTurn{AssistantItems: []codexAssistantItem{
+		{ID: "item-1", Phase: "commentary", Text: "interim"},
+		{ID: "item-1", Phase: "commentary", Text: "interim replay"},
+		{ID: "item-2", Phase: "final_answer", Text: "final"},
+		{ID: "item-2", Phase: "final_answer", Text: "final replay"},
+	}}
+	item, ok := turn.authoritativeAssistant()
+	if !ok || item.ID != "item-2" || item.Phase != "final_answer" || item.Text != "final replay" {
+		t.Fatalf("authoritative item=%+v ok=%v", item, ok)
+	}
+}
+
+func TestCodexTurnDoesNotConcatenateInterimAndFinal(t *testing.T) {
+	turn := codexTurn{AssistantItems: []codexAssistantItem{
+		{ID: "interim", Phase: "commentary", Text: "interim"},
+		{ID: "final", Phase: "final_answer", Text: "final"},
+	}}
+	item, ok := turn.authoritativeAssistant()
+	if !ok || item.Text != "final" {
+		t.Fatalf("authoritative item=%+v ok=%v", item, ok)
+	}
+	if item.Text == "interimfinal" {
+		t.Fatal("interim and final were concatenated")
+	}
+}
+
+func TestCodexCompletionAlwaysEmitsOneFullFinalForEqualityAndPrefix(t *testing.T) {
+	turn := &codexTurn{ID: "turn", AssistantItems: []codexAssistantItem{{ID: "final", Phase: "final_answer", Text: "hello"}}}
+	for name, emitted := range map[string]string{"equal": "hello", "prefix": "hel"} {
+		t.Run(name, func(t *testing.T) {
+			events := codexCompletionStreamEvents(7, turn.ID, turn, emitted)
+			if len(events) == 0 || !events[len(events)-1].Final || events[len(events)-1].Text != "hello" {
+				t.Fatalf("events=%+v", events)
+			}
+			finals := 0
+			for _, event := range events {
+				if event.Final {
+					finals++
+				}
+			}
+			if finals != 1 {
+				t.Fatalf("final events=%d events=%+v", finals, events)
+			}
+		})
+	}
+}
+
 func TestCodexObservationSkipsEmptyTerminalTurnForReply(t *testing.T) {
 	thread := &codexThread{Status: surface.StatusIdle, Turns: []codexTurn{
 		{ID: "answer", Status: surface.StatusIdle, Assistant: "actual reply", Done: true},
@@ -1142,10 +1190,10 @@ func TestCodexStreamIgnoresStaleCompletionFromSameThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if eventReads < 2 || len(events) != 2 || events[0].Text != "done" || events[1].Kind != "done" {
+	if eventReads < 2 || len(events) != 2 || events[0].Text != "done" || !events[0].Final || events[1].Kind != "done" {
 		t.Fatalf("event_reads=%d events=%+v", eventReads, events)
 	}
-	if events[0].ProviderKey != "renderer:12" || events[0].ID != "renderer:12" || events[0].Operation != "append" || events[0].TurnID != "target-turn" {
+	if events[0].ProviderKey != "codex:target-turn:assistant" || events[0].ID != "codex:target-turn:assistant" || events[0].Operation != "upsert" || events[0].TurnID != "target-turn" {
 		t.Fatalf("normalized event=%+v", events[0])
 	}
 }

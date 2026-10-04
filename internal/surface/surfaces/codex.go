@@ -875,10 +875,10 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 			if turn.Error != "" {
 				return fmt.Errorf("Codex turn %s did not complete successfully: %s", uuid, turn.Error)
 			}
-			if turn.Assistant != "" {
-				onEvent(surface.StreamEvent{Kind: "text", Text: turn.Assistant})
+			if assistant, ok := turn.authoritativeAssistant(); ok {
+				onEvent(codexAuthoritativeStreamEvent(turn.ID, assistant))
 			}
-			onEvent(surface.StreamEvent{Kind: "done"})
+			onEvent(surface.StreamEvent{ID: "codex:" + turn.ID + ":done", ProviderKey: "codex:" + turn.ID + ":done", Operation: "phase", TurnID: turn.ID, Kind: "done"})
 			return nil
 		}
 	}
@@ -946,13 +946,9 @@ func (c *Codex) Stream(ctx context.Context, sess *surface.Session, uuid string, 
 				if turn != nil && turn.Error != "" {
 					return fmt.Errorf("Codex turn %s did not complete successfully: %s", uuid, turn.Error)
 				}
-				if turn != nil && turn.Assistant != "" && turn.Assistant != emittedText {
-					if emittedText == "" {
-						onEvent(codexStreamEvent(event.Sequence, "text", turn.Assistant, nil, uuid))
-					} else if strings.HasPrefix(turn.Assistant, emittedText) {
-						onEvent(codexStreamEvent(event.Sequence, "text", strings.TrimPrefix(turn.Assistant, emittedText), nil, uuid))
-					} else {
-						return fmt.Errorf("Codex stream history exceeded the retained event buffer; use 'agenthail reply %s' for the complete response", sess.ID)
+				if turn != nil {
+					for _, streamEvent := range codexCompletionStreamEvents(event.Sequence, uuid, turn, emittedText) {
+						onEvent(streamEvent)
 					}
 				}
 				onEvent(codexStreamEvent(event.Sequence, "done", "", nil, uuid))
@@ -989,9 +985,40 @@ func codexStreamEvent(sequence int64, kind, text string, contextUsage *surface.C
 	return surface.StreamEvent{ID: key, ProviderKey: key, Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
 }
 
+func codexAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
+	return codexAuthoritativeStreamEventWithKey("codex:"+turnID+":assistant", turnID, item)
+}
+
+func codexManagedAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
+	return codexAuthoritativeStreamEventWithKey("managed:"+turnID+":text", turnID, item)
+}
+
+func codexAuthoritativeStreamEventWithKey(key, turnID string, item codexAssistantItem) surface.StreamEvent {
+	if item.ID != "" {
+		if strings.HasPrefix(key, "codex:") {
+			key += ":" + item.ID
+		}
+	}
+	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: item.Text}
+}
+
+func codexCompletionStreamEvents(sequence int64, turnID string, turn *codexTurn, emitted string) []surface.StreamEvent {
+	assistant, ok := turn.authoritativeAssistant()
+	if !ok || assistant.Text == "" {
+		return nil
+	}
+	events := make([]surface.StreamEvent, 0, 2)
+	if emitted != "" && assistant.Text != emitted && strings.HasPrefix(assistant.Text, emitted) {
+		events = append(events, codexStreamEvent(sequence, "text", strings.TrimPrefix(assistant.Text, emitted), nil, turnID))
+	}
+	events = append(events, codexAuthoritativeStreamEvent(turnID, assistant))
+	return events
+}
+
 func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	emitted := ""
 	baselineTurnID := ""
+	finalEmitted := false
 	var lastContext surface.ContextUsage
 	var nextContextPoll time.Time
 	if uuid == "" {
@@ -1040,19 +1067,32 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 				turn = latest
 			}
 		}
-		if turn != nil && strings.HasPrefix(turn.Assistant, emitted) {
-			delta := strings.TrimPrefix(turn.Assistant, emitted)
-			if delta != "" {
-				emitted = turn.Assistant
-				key := "managed:" + turn.ID
-				onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: turn.ID, Kind: "text", Text: delta})
+		if turn != nil {
+			if turn.Done && turn.Error != "" {
+				return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
+			}
+			assistant, hasAssistant := turn.authoritativeAssistant()
+			if hasAssistant && turn.Done {
+				if !finalEmitted {
+					onEvent(codexManagedAuthoritativeStreamEvent(turn.ID, assistant))
+					finalEmitted = true
+				}
+				emitted = assistant.Text
+			} else if hasAssistant && strings.HasPrefix(assistant.Text, emitted) {
+				delta := strings.TrimPrefix(assistant.Text, emitted)
+				if delta != "" {
+					emitted = assistant.Text
+					key := "managed:" + turn.ID
+					onEvent(surface.StreamEvent{ID: key + ":text", ProviderKey: key + ":text", Version: uint64(len(assistant.Text)), Operation: "append", TurnID: turn.ID, Kind: "text", Text: delta})
+				}
 			}
 			if turn.Done {
-				if turn.Error != "" {
-					return fmt.Errorf("Codex turn %s did not complete successfully: %s", turn.ID, turn.Error)
-				}
 				key := "managed:" + turn.ID
-				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: turn.ID, Kind: "done"})
+				version := uint64(len(turn.Assistant))
+				if hasAssistant {
+					version = uint64(len(assistant.Text))
+				}
+				onEvent(surface.StreamEvent{ID: key + ":done", ProviderKey: key + ":done", Version: version, Operation: "phase", TurnID: turn.ID, Kind: "done"})
 				return nil
 			}
 		}
