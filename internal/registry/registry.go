@@ -590,7 +590,7 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 }
 
 func (r *Registry) ResolveTarget(target string) (string, error) {
-	if sid, err := r.LookupAlias(target); err == nil {
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
 		return sid, nil
 	}
 	var exact string

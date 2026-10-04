@@ -465,6 +465,23 @@ func TestResolveTargetRejectsAmbiguityAndEscapesWildcards(t *testing.T) {
 	}
 }
 
+func TestResolveTargetAcceptsHandleSpelling(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "builder-session")
+	if err := r.SetAlias("builder", "builder-session"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"builder", "@builder"} {
+		got, err := r.ResolveTarget(target)
+		if err != nil || got != "builder-session" {
+			t.Fatalf("%s: got=%q err=%v", target, got, err)
+		}
+	}
+	if got, err := r.ResolveTarget("@Builder"); err == nil && got == "builder-session" {
+		t.Fatalf("handle lookup must be case-sensitive, got %q", got)
+	}
+}
+
 func TestSearchSessionsMatchesStoredNameCwdAndAlias(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "old", Surface: surface.KindCodex, Name: "Quarterly planning", Cwd: "/work/agenthail"}
