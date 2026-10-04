@@ -106,6 +106,9 @@ func TestCMUXLaunchUsesDirectArgvAndKeepsMessageOneArgument(t *testing.T) {
 		t.Fatalf("cmux command argument missing: %#v", lines)
 	}
 	command := lines[commandIndex+1]
+	if !strings.Contains(command, "AGENTHAIL_CODEX_LAUNCH_RUNTIME=cmux") {
+		t.Fatalf("cmux launch omitted runtime discriminator: %q", command)
+	}
 	match := regexp.MustCompile(`launcher-exec '([^']+)'`).FindStringSubmatch(command)
 	if len(match) != 2 {
 		t.Fatalf("unsafe cmux command = %q", command)
@@ -191,13 +194,28 @@ func TestCMUXLocateUsesAgenthailReceiptAndLiveInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-launch", ThreadID: "codex-thread", Cwd: "/work/project", Workspace: "workspace-7", Surface: "surface-9"}); err != nil {
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-launch", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherCMUX, Workspace: "workspace-7", Surface: "surface-9"}); err != nil {
 		t.Fatal(err)
 	}
 	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project"}})
 	want := map[string]Location{"codex-thread": {Workspace: "workspace-7", Surface: "surface-9"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations=%#v want=%#v", got, want)
+	}
+}
+
+func TestCMUXInventoryRejectsUnknownShape(t *testing.T) {
+	for _, payload := range []string{`{}`, `{"windows":[]}`} {
+		t.Run(payload, func(t *testing.T) {
+			launcher := newCMUX().(*processLauncher)
+			launcher.run = func(context.Context, string, ...string) ([]byte, error) {
+				return []byte(payload), nil
+			}
+			present, err := launcher.cmuxSurfacePresent(context.Background(), "workspace:7", "surface:9")
+			if err == nil || present {
+				t.Fatalf("present=%v err=%v, want typed invalid-inventory error", present, err)
+			}
+		})
 	}
 }
 
@@ -261,7 +279,7 @@ func TestTMUXCodexLaunchPassesLaunchOwnedReceiptBinding(t *testing.T) {
 	if err != nil || result.Location == nil {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	if !containsLine(got, "env") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_ID=agenthail-") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_RECEIPT=") {
+	if !containsLine(got, "env") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_ID=agenthail-") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_RECEIPT=") || !containsPrefix(got, "AGENTHAIL_CODEX_LAUNCH_RUNTIME=tmux") {
 		t.Fatalf("launch args=%#v", got)
 	}
 }
@@ -379,7 +397,7 @@ func TestTMUXLocateUsesLaunchReceiptForCodexPIDZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", TmuxSession: "agenthail-review", TmuxPane: "%1"}); err != nil {
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherTMUX, TmuxSession: "agenthail-review", TmuxPane: "%1"}); err != nil {
 		t.Fatal(err)
 	}
 	got := launcher.Locate(context.Background(), []Session{{ID: "codex-thread", Surface: KindCodex, Cwd: "/work/project", PID: 0}})
@@ -413,7 +431,7 @@ func TestTMUXLocateWaitsForCompleteReceiptAndRejectsTokenOrPaneMismatch(t *testi
 	if got := launcher.Locate(context.Background(), sessions); len(got) != 0 {
 		t.Fatalf("token-mismatched receipt correlated: %#v", got)
 	}
-	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", TmuxSession: "agenthail-review", TmuxPane: "%2"}); err != nil {
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-review", ThreadID: "codex-thread", Cwd: "/work/project", Runtime: LauncherTMUX, TmuxSession: "agenthail-review", TmuxPane: "%2"}); err != nil {
 		t.Fatal(err)
 	}
 	got := launcher.Locate(context.Background(), sessions)

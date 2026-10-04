@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +10,7 @@ import (
 
 func TestManagedCodexLaunchReceiptRoundTripsAtomically(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "launch.json")
-	receipt := ManagedCodexLaunchReceipt{LaunchID: "agenthail-1", ThreadID: "thread-1", Cwd: "/work", TmuxSession: "agenthail-1", TmuxPane: "%1"}
+	receipt := ManagedCodexLaunchReceipt{LaunchID: "agenthail-1", ThreadID: "thread-1", Cwd: "/work", Runtime: LauncherTMUX, TmuxSession: "agenthail-1", TmuxPane: "%1"}
 	if err := WriteManagedCodexLaunchReceipt(path, receipt); err != nil {
 		t.Fatal(err)
 	}
@@ -40,5 +41,24 @@ func TestReadManagedCodexLaunchReceiptRejectsMalformedAndOversizedFiles(t *testi
 				t.Fatal("ReadManagedCodexLaunchReceipt accepted invalid receipt")
 			}
 		})
+	}
+}
+
+func TestReclaimCMUXKeepsReceiptWhenInventoryCannotBeVerified(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path, err := ManagedCodexLaunchReceiptPath("agenthail-cmux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManagedCodexLaunchReceipt(path, ManagedCodexLaunchReceipt{LaunchID: "agenthail-cmux", ThreadID: "thread", Cwd: "/work", Runtime: LauncherCMUX, Workspace: "workspace:7", Surface: "surface:9"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReclaimManagedCodexCMUXLaunchReceipts(func(string, string) (bool, error) {
+		return false, errors.New("invalid inventory")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("receipt was reclaimed after unverifiable inventory: %v", err)
 	}
 }

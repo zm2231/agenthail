@@ -13,7 +13,9 @@ local PID.
 1. The launcher allocates a random launch token and a 0600 receipt path for
    the existing `agenthail codex` wrapper. tmux supplies `TMUX_PANE`; cmux
    supplies its protected `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID` variables
-   through the Agenthail-owned launcher command.
+   through the Agenthail-owned launcher command. The launcher also supplies an
+   explicit runtime discriminator; the wrapper never chooses between ambient
+   tmux and cmux variables heuristically.
 2. The wrapper starts the managed Codex app-server, asks it for a new thread,
    and receives the provider-issued thread ID. It writes that ID and the
    launch-owned token to the receipt, then starts the interactive CLI with
