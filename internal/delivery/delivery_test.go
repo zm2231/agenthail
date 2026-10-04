@@ -2,7 +2,9 @@ package delivery
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	_ "modernc.org/sqlite"
 )
 
 type fakeSurface struct {
@@ -21,6 +24,8 @@ type fakeSurface struct {
 	sent         []string
 	steered      []string
 	steerErr     error
+	beforeSend   func()
+	beforeSteer  func()
 	capabilities surface.Capabilities
 	compactCalls int
 }
@@ -38,6 +43,9 @@ func (f *fakeSurface) Observe(context.Context, *surface.Session) (*surface.TurnO
 }
 func (f *fakeSurface) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
+	if f.beforeSend != nil {
+		f.beforeSend()
+	}
 	return f.result, f.err
 }
 func (f *fakeSurface) SendWithOptions(ctx context.Context, session *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
@@ -65,6 +73,9 @@ func (*fakeSurface) Model(context.Context, *surface.Session, string) (string, er
 func (*fakeSurface) Interrupt(context.Context, *surface.Session) error               { return nil }
 func (f *fakeSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
 	f.steered = append(f.steered, message)
+	if f.beforeSteer != nil {
+		f.beforeSteer()
+	}
 	return f.steerErr
 }
 func (f *fakeSurface) Capabilities() surface.Capabilities { return f.capabilities }
@@ -325,6 +336,117 @@ func TestDispatcherAcceptedThenUnknownKeepsSameSubmittedIntent(t *testing.T) {
 	}
 	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
 		t.Fatalf("ambiguous send became a failure: problems=%+v err=%v", problems, err)
+	}
+}
+
+func TestDispatcherPersistsBeforeSendAndRetainsIDAcrossCrashBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &surface.Session{ID: "send-crash", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	var seenID int64
+	var callbackErr error
+	var reopened *registry.Registry
+	adapter := &fakeSurface{result: &surface.SendResult{UUID: "turn-after-crash", Accepted: true}}
+	adapter.beforeSend = func() {
+		reopened, callbackErr = registry.Open(path)
+		if callbackErr != nil {
+			return
+		}
+		var intent *registry.DeliveryIntent
+		intent, callbackErr = reopened.DeliveryIntent(1)
+		if callbackErr == nil {
+			seenID = intent.ID
+			if intent.Status != registry.DeliveryIntentSubmitted || intent.Message != "crash boundary" {
+				callbackErr = fmt.Errorf("provider callback saw intent %+v", intent)
+			}
+		}
+		_ = r.Close()
+	}
+	receipt, sendErr := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "crash boundary", "")
+	if reopened != nil {
+		defer reopened.Close()
+	}
+	if callbackErr != nil || sendErr != nil || receipt == nil || receipt.Status != string(registry.DeliveryIntentSubmitted) || receipt.DeliveryID != seenID {
+		t.Fatalf("callbackErr=%v sendErr=%v receipt=%+v seenID=%d", callbackErr, sendErr, receipt, seenID)
+	}
+	intent, err := reopened.DeliveryIntent(seenID)
+	if err != nil || intent.Status != registry.DeliveryIntentSubmitted {
+		t.Fatalf("post-crash intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDispatcherPersistsBeforeSteerAndTransitionsSameID(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "steer-callback", Surface: surface.KindCodex}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	var seenID int64
+	var callbackErr error
+	adapter := &fakeSurface{capabilities: surface.Capabilities{Steer: true}}
+	adapter.beforeSteer = func() {
+		intent, err := r.DeliveryIntent(1)
+		if err != nil {
+			callbackErr = err
+			return
+		}
+		seenID = intent.ID
+		if intent.Status != registry.DeliveryIntentSubmitted || intent.Message != "steer callback" {
+			callbackErr = fmt.Errorf("provider callback saw intent %+v", intent)
+		}
+	}
+	receipt, err := (Dispatcher{Registry: r}).Steer(context.Background(), adapter, session, "steer callback")
+	if callbackErr != nil || err != nil || receipt == nil || receipt.DeliveryID != seenID {
+		t.Fatalf("callbackErr=%v err=%v receipt=%+v seenID=%d", callbackErr, err, receipt, seenID)
+	}
+	intent, err := r.DeliveryIntent(receipt.DeliveryID)
+	if err != nil || intent.Status != registry.DeliveryIntentSent {
+		t.Fatalf("same-id transition intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestDispatcherQueueStorageFailureTerminalizesSubmittedIntent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "queue-storage-failure", Surface: surface.KindCodex, Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TRIGGER reject_test_queue_insert BEFORE INSERT ON message_queue WHEN NEW.message='reject queue' BEGIN SELECT RAISE(ABORT, 'queue insert rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
+	if _, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "reject queue", "", surface.SendOptions{BusyDelivery: "queue"}); err == nil {
+		t.Fatal("expected queue storage failure")
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil || len(problems) != 1 || problems[0].SessionID != session.ID || problems[0].Status != registry.DeliveryIntentFailed {
+		t.Fatalf("problems=%+v err=%v", problems, err)
+	}
+	if got := r.QueueCount(session.ID); got != 0 {
+		t.Fatalf("failed queue insert left target work queued: %d", got)
+	}
+	if got := r.QueueCount(registry.OperatorSessionID); got != 1 {
+		t.Fatalf("expected one durable failure notice, got %d", got)
 	}
 }
 

@@ -72,7 +72,15 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		d.finishQueueFailure(item, session, sendErr, now)
 		return
 	}
-	if result == nil || !result.Accepted {
+	if result == nil {
+		unknownErr := fmt.Errorf("provider returned empty delivery result")
+		if err := d.Registry.DeadLetterUnknown(item.ID, unknownErr); err != nil {
+			d.log.Printf("dead-letter uncertain queue item %d: %s", item.ID, err)
+		}
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: unknownErr.Error()})
+		return
+	}
+	if !result.Accepted {
 		busyErr := fmt.Errorf("target remained busy")
 		if err := d.Registry.NackMessage(item.ID, busyErr, now, maxDeliveryAttempts); err != nil {
 			d.log.Printf("nack queue item %d: %s", item.ID, err)
