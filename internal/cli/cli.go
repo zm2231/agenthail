@@ -1265,46 +1265,6 @@ func (a *App) cmdStream(args []string) error {
 	}, timeout)
 }
 
-func (a *App) cmdGoal(args []string) error {
-	positional := stripFlags(args)
-	if len(positional) < 1 {
-		return fmt.Errorf("usage: agenthail goal <target> [text|clear]")
-	}
-	ctx := context.Background()
-	target := positional[0]
-	sess, surf, err := a.resolveTarget(ctx, target)
-	if err != nil {
-		return err
-	}
-	if !surf.Capabilities().Goal {
-		return fmt.Errorf("%s does not support goal management", surf.Name())
-	}
-	if len(positional) == 1 {
-		goal, getErr := surf.GoalGet(ctx, sess)
-		if getErr != nil {
-			return getErr
-		}
-		if hasFlag(args, "--json") {
-			return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "goal": goal})
-		}
-		if goal == nil || goal.Objective == "" {
-			fmt.Println("(no active goal)")
-			return nil
-		}
-		fmt.Printf("%s [%s]\n", goal.Objective, goal.Status)
-		return nil
-	}
-	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
-		return err
-	}
-	action := positional[1]
-	if action == "clear" {
-		return surf.GoalClear(ctx, sess)
-	}
-	text := strings.Join(positional[1:], " ")
-	return surf.GoalSet(ctx, sess, text)
-}
-
 func (a *App) cmdCompact(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) != 1 {
