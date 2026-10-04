@@ -32,7 +32,7 @@ type restartingSource struct {
 
 func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
-	source := &sessionSource{manager: newSessionSourceManager(reg), session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: newSessionSourceManager(reg), session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "upsert", Kind: "text", Role: "assistant", Text: "The complete answer", Version: 19})
 	source.append(surface.StreamEvent{ID: "answer", ProviderKey: "answer", Operation: "phase", Kind: "done", Version: 19})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -54,7 +54,7 @@ func TestSessionSourceTurnPhasePreservesAssistantBody(t *testing.T) {
 func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(reg)
-	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
 	body := strings.Repeat("a", sessionStreamBodyBytes-1) + "é rest"
 	source.append(surface.StreamEvent{ID: "unicode", Kind: "text", Text: body})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -77,7 +77,7 @@ func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(reg)
-	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
 	body := strings.Repeat("x", sessionJournalRetentionBytes)
 	source.append(surface.StreamEvent{ID: "oversized", Kind: "text", Text: body})
 	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
@@ -415,7 +415,7 @@ func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *test
 func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(registry)
-	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	first := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
 	second := source.normalizeLocked(surface.StreamEvent{Kind: "context"})
 	if first.ItemID == "" || first.ProviderKey == "" || second.ItemID == "" || first.ItemID == second.ItemID {
@@ -426,7 +426,7 @@ func TestSessionSourceAssignsIdentityToProviderEventsWithoutOne(t *testing.T) {
 func TestSessionSourceNormalizesGoalUpdatesAndClears(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	manager := newSessionSourceManager(registry)
-	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
+	source := &sessionSource{manager: manager, session: from, adapter: fake, epoch: "epoch", appendBodies: map[string]string{}}
 	budget := int64(500)
 	updated := source.normalizeLocked(surface.StreamEvent{ID: "goal:1", ProviderKey: "goal:1", Kind: "goal", Operation: "replace", Goal: &surface.GoalState{Objective: "verify", Status: surface.GoalStatusPaused, TimeUsedSeconds: 12, TokensUsed: 34, TokenBudget: &budget}})
 	encoded, err := json.Marshal(updated)

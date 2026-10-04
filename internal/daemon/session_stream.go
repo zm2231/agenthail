@@ -42,12 +42,8 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusConflict, "stream_unsupported", "This session does not expose a live stream.")
 		return
 	}
-	canSeed := false
-	if _, ok := adapter.(surface.SessionReader); ok {
-		canSeed = true
-	}
-	if !surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream && !canSeed {
-		writeAPIError(w, http.StatusConflict, "stream_unsupported", "This session does not expose a live stream or readable journal.")
+	if !surface.EffectiveCapabilities(session, adapter.Capabilities()).Stream {
+		writeAPIError(w, http.StatusConflict, "stream_unsupported", "This session does not expose a live stream.")
 		return
 	}
 	after, err := parseSessionStreamCursor(r)
