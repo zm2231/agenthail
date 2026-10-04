@@ -43,6 +43,7 @@ func (d *Daemon) registerAPIV1(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/catalog-events", d.apiV1Guard(dashboard, "read", d.apiCatalogStreamHandler))
 	mux.HandleFunc("/api/v1/session", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSessionHandler)))
 	mux.HandleFunc("/api/v1/session-stream", d.apiV1Guard(dashboard, "read", d.apiSessionStreamHandler))
+	mux.HandleFunc("/api/v1/session-stream-body", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.sessionStreamBodyHandler)))
 	mux.HandleFunc("/api/v1/search", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardSearchHandler)))
 	mux.HandleFunc("/api/v1/models", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.dashboardModelsHandler)))
 	mux.HandleFunc("/api/v1/session-options", d.apiV1Guard(dashboard, "read", apiV1JSONHandler(d.sessionOptionsHandler)))

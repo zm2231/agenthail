@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -116,6 +117,37 @@ func parseSessionStreamCursor(r *http.Request) (uint64, error) {
 		return 0, nil
 	}
 	return strconv.ParseUint(value, 10, 64)
+}
+
+func (d *Daemon) sessionStreamBodyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET for this endpoint.")
+		return
+	}
+	id, ref := strings.TrimSpace(r.URL.Query().Get("id")), strings.TrimSpace(r.URL.Query().Get("ref"))
+	start, err := strconv.Atoi(r.URL.Query().Get("start"))
+	if err != nil || start < 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_range", "The body range is invalid.")
+		return
+	}
+	end := start + sessionStreamBodyBytes
+	if value := strings.TrimSpace(r.URL.Query().Get("end")); value != "" {
+		end, err = strconv.Atoi(value)
+		if err != nil || end < start || end-start > sessionStreamBodyBytes {
+			writeAPIError(w, http.StatusBadRequest, "invalid_range", "The body range is invalid.")
+			return
+		}
+	}
+	body, total, err := d.Registry.SessionJournalBody(id, ref, start, end)
+	if err == sql.ErrNoRows {
+		writeAPIError(w, http.StatusNotFound, "body_unavailable", "The retained body is unavailable.")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_range", "The body range is invalid.")
+		return
+	}
+	writeDashboardJSON(w, http.StatusOK, map[string]any{"sessionId": id, "bodyRef": ref, "start": start, "end": start + len(body), "total": total, "body": string(body), "truncated": start+len(body) < total})
 }
 
 func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry registry.SessionJournalEntry) error {

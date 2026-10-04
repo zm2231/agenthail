@@ -393,6 +393,17 @@ struct SessionStreamItem: Decodable {
     let ts: String
     let body: String?
     let truncated: Bool
+	let bodyRef: String?
+}
+
+struct SessionStreamBody: Decodable {
+	let sessionId: String
+	let bodyRef: String
+	let start: Int
+	let end: Int
+	let total: Int
+	let body: String
+	let truncated: Bool
 }
 
 struct SessionStreamEvent: Decodable {
@@ -428,6 +439,7 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let callId: String?
     let status: String?
     let truncated: Bool
+	let bodyRef: String?
 }
 
 struct SessionSearchResponse: Decodable {

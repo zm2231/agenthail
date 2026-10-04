@@ -44,6 +44,29 @@ func TestSessionJournalRejectsEntryBeyondByteRetention(t *testing.T) {
 	}
 }
 
+func TestSessionJournalBodyIsSessionBoundAndExpiresWithRetention(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	register(t, r, "other")
+	retention := SessionJournalRetention{Count: 1, Bytes: 1024}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "one", Payload: []byte(`{"bodyRef":"opaque"}`), BodyRef: "opaque", FullBody: []byte("abcdefghijklmnopqrstuvwxyz")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	body, total, err := r.SessionJournalBody("session", "opaque", 2, 8)
+	if err != nil || string(body) != "cdefgh" || total != 26 {
+		t.Fatalf("body=%q total=%d err=%v", body, total, err)
+	}
+	if _, _, err := r.SessionJournalBody("other", "opaque", 0, 1); err == nil {
+		t.Fatal("cross-session body read succeeded")
+	}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "two", Payload: []byte("two")}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.SessionJournalBody("session", "opaque", 0, 1); err == nil {
+		t.Fatal("trimmed body remained readable")
+	}
+}
+
 func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")

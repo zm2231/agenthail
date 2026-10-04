@@ -716,7 +716,7 @@ final class AgenthailIOSModel: ObservableObject {
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: nil, title: event.data.kind, text: event.data.body ?? "", timestamp: event.data.ts, callId: event.data.turnId, status: nil, truncated: event.data.truncated, bodyRef: event.data.bodyRef)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {
@@ -726,6 +726,11 @@ final class AgenthailIOSModel: ObservableObject {
         }
         detail.timeline = timeline
         selectedDetail = detail
+    }
+
+    func retainedSessionBody(for item: TimelineItem, start: Int = 0) async -> String? {
+        guard let api, let id = selectedSessionID, let ref = item.bodyRef else { return nil }
+        return try? await api.sessionStreamBody(id: id, ref: ref, start: start).body
     }
 
     private func receive(_ event: AgenthailEvent) async {

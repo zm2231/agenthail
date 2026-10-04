@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -15,6 +17,7 @@ import (
 const (
 	sessionJournalRetentionCount = 2048
 	sessionJournalRetentionBytes = 8 << 20
+	sessionStreamBodyBytes       = 16 << 10
 )
 
 type sessionJournalPayload struct {
@@ -27,6 +30,7 @@ type sessionJournalPayload struct {
 	TS          string `json:"ts"`
 	Body        string `json:"body,omitempty"`
 	Truncated   bool   `json:"truncated"`
+	BodyRef     string `json:"bodyRef,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -220,10 +224,34 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 	if err != nil {
 		return
 	}
+	fullBody := []byte(payload.Body)
+	if len(fullBody) > sessionStreamBodyBytes {
+		ref, err := newSessionBodyRef()
+		if err != nil {
+			return
+		}
+		payload.Body = string(fullBody[:sessionStreamBodyBytes])
+		payload.Truncated = true
+		payload.BodyRef = ref
+		encoded, err = json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: ref, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+		if err != nil {
+			return
+		}
+		s.publish(entry)
+		return
+	}
 	entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
 	if err != nil {
 		return
 	}
+	s.publish(entry)
+}
+
+func (s *sessionSource) publish(entry registry.SessionJournalEntry) {
 	s.mu.Lock()
 	for id, subscriber := range s.subscribers {
 		select {
@@ -234,6 +262,14 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 	}
 	s.mu.Unlock()
+}
+
+func newSessionBodyRef() (string, error) {
+	bytes := make([]byte, 24)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 func (s *sessionSource) normalizeLocked(event surface.StreamEvent) sessionJournalPayload {

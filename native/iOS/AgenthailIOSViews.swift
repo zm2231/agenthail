@@ -427,7 +427,7 @@ struct SessionScreen: View {
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                             if activityOnly {
-                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false).id($0.id) }
+                                ForEach(items) { IOSTimelineRow(item: $0, compactContext: false, bodyLoader: { item in await model.retainedSessionBody(for: item) }).id($0.id) }
                             } else {
                                 ForEach(TimelineGroup.make(items)) { group in
                                     CompactActivityGroup(group: group) { followingLatest = false }.id(group.id)
@@ -746,8 +746,10 @@ struct IOSMessage: View {
 struct IOSTimelineRow: View {
     let item: TimelineItem
     var compactContext = true
+	var bodyLoader: ((TimelineItem) async -> String?)? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var expanded = false
+	@State private var retainedBody: String?
 
     var body: some View {
         if compactContext, let title = TranscriptContext.title(for: item) {
@@ -794,6 +796,9 @@ struct IOSTimelineRow: View {
                     SessionTimestamp(value: item.timestamp)
                 }
                 if item.truncated { shortened }
+				if item.bodyRef != nil, retainedBody == nil, let bodyLoader {
+					Button("Load retained body") { Task { retainedBody = await bodyLoader(item) } }.font(.caption)
+				} else if let retainedBody { SessionMarkdown(text: retainedBody, readingStyle: item.kind == "reasoning") }
             }
             .padding(.vertical, 4)
         }

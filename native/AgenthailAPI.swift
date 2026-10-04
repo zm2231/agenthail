@@ -255,6 +255,16 @@ final class AgenthailAPI: @unchecked Sendable {
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
+    func sessionStreamBody(id: String, ref: String, start: Int = 0, end: Int? = nil) async throws -> SessionStreamBody {
+        var components = URLComponents()
+        components.path = "/api/v1/session-stream-body"
+        var query = [URLQueryItem(name: "id", value: id), URLQueryItem(name: "ref", value: ref), URLQueryItem(name: "start", value: String(start))]
+        if let end { query.append(URLQueryItem(name: "end", value: String(end))) }
+        components.queryItems = query
+        guard let path = components.string else { throw AgenthailAPIError.invalidResponse }
+        return try await get(path)
+    }
+
     func streamCatalog(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (CatalogStreamEvent) async -> Void) async throws {
         var components = URLComponents()
         components.path = "/api/v1/catalog-events"

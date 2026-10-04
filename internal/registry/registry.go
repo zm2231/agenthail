@@ -124,6 +124,9 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("session_journal_state", "source_epoch", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("delivery_intents", "message", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -320,6 +323,7 @@ CREATE TABLE IF NOT EXISTS session_journal (
 	payload BLOB NOT NULL,
 	observed_at TEXT NOT NULL,
 	bytes INTEGER NOT NULL,
+	body_ref TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, seq)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS session_journal_provider_key
@@ -330,6 +334,13 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	retained_bytes INTEGER NOT NULL DEFAULT 0,
 	source_epoch TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS session_journal_bodies (
+	ref TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+	body BLOB NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_journal_bodies_session ON session_journal_bodies(session_id);
 CREATE TABLE IF NOT EXISTS action_receipts (
 	idempotency_key TEXT PRIMARY KEY,
 	request_hash TEXT NOT NULL,
