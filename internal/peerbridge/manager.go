@@ -2,6 +2,7 @@ package peerbridge
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -305,6 +306,13 @@ func (m *Manager) Ensure(ctx context.Context, id string) error {
 		if session.Status == surface.StatusOffline {
 			return fmt.Errorf("sender %q is offline", id)
 		}
+		if session.Surface != surface.KindClaude {
+			if alias, aliasErr := m.registry.ReverseAlias(session.ID); aliasErr == nil && alias != "" {
+				session.Name = alias
+			} else if aliasErr != nil && !errors.Is(aliasErr, sql.ErrNoRows) {
+				return fmt.Errorf("load sender handle: %w", aliasErr)
+			}
+		}
 	}
 	if id == OperatorID {
 		if err := m.registry.RegisterSession(*session); err != nil {
@@ -399,6 +407,17 @@ func (m *Manager) Send(ctx context.Context, sourceID, targetSocket, message stri
 	}
 	if err := claudepeer.ValidateSend(sourceID, targetSocket, message); err != nil {
 		return nil, err
+	}
+	if sourceID != OperatorID {
+		session, err := m.registry.Session(sourceID)
+		if err != nil {
+			return nil, surface.DeliveryUnavailable(fmt.Errorf("load sender %q: %w", sourceID, err))
+		}
+		if session.Surface != surface.KindClaude {
+			if _, err := m.registry.ReserveGeneratedAlias(session.ID, session.Name); err != nil {
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("reserve sender handle: %w", err))
+			}
+		}
 	}
 	if err := m.Ensure(ctx, sourceID); err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("register Claude peer: %w", err))
