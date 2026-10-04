@@ -195,6 +195,45 @@ func TestReadJournalPageKeepsToolAndReasoningRolesOutOfChatExchanges(t *testing.
 	}
 }
 
+func TestDesktopStreamIdentityPreservesJournalAndPageBoundaries(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	retention := registry.SessionJournalRetention{Count: 32, Bytes: 16 << 10}
+	appendPayload := func(payload sessionJournalPayload) {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{
+			SessionID:   from.ID,
+			Kind:        payload.Kind,
+			ProviderKey: payload.ItemID,
+			Payload:     encoded,
+			ObservedAt:  time.Now(),
+		}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendPayload(sessionJournalPayload{ItemID: "user-2", Kind: "message", Role: "user", Body: "next question", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "hel", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-tool-tool-1", Kind: "tool_use", Role: "assistant", Body: "lookup", Op: "upsert", Version: 1})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-1-assistant-assistant-1", Kind: "text", Role: "assistant", Body: "authoritative answer", Op: "upsert", Version: 2})
+	appendPayload(sessionJournalPayload{ItemID: "codex-turn-2-assistant-assistant-2", Kind: "text", Role: "assistant", Body: "second answer", Op: "upsert", Version: 1})
+
+	page, err := d.readJournalPage(from.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 4 {
+		t.Fatalf("items=%+v", page.Items)
+	}
+	if page.Items[1].ID != "codex-turn-1-tool-tool-1" || page.Items[2].ID != "codex-turn-1-assistant-assistant-1" || page.Items[2].Text != "authoritative answer" {
+		t.Fatalf("first turn page items=%+v", page.Items)
+	}
+	if len(page.Exchanges) != 2 || page.Exchanges[0].User != "next question" || page.Exchanges[0].Assistant != "authoritative answer" || page.Exchanges[1].Assistant != "second answer" {
+		t.Fatalf("exchanges=%+v", page.Exchanges)
+	}
+}
+
 func TestDashboardSessionReturnsTypedHistoryGapAfterJournalPrune(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	retention := registry.SessionJournalRetention{Count: 2, Bytes: 1024}
