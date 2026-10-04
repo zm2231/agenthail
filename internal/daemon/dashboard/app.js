@@ -1065,13 +1065,14 @@ function formatGoalDuration(seconds) {
 }
 function renderContextUsage(context) {
   const indicator = $("#context-usage");
-  if (!context || (!context.contextWindow && !context.compactionCount)) {
+  if (!context || (!context.contextWindow && !context.compactionCount && !context.usedTokens)) {
     indicator.hidden = true;
     indicator.textContent = "";
     indicator.className = "";
     return;
   }
-  const percent = context.contextWindow
+  const hasWindow = context.contextWindow > 0 && !(context.windowEstimated && context.usedTokens > context.contextWindow);
+  const percent = hasWindow
     ? Math.min(999, Math.round((context.usedTokens / context.contextWindow) * 100))
     : 0;
   indicator.hidden = false;
@@ -1084,9 +1085,11 @@ function renderContextUsage(context) {
         : "context-usage";
   indicator.textContent = context.compacting
     ? "Compacting context"
-    : context.contextWindow
+    : hasWindow
       ? `Context ${compactTokenCount(context.usedTokens)} / ${compactTokenCount(context.contextWindow)} · ${percent}%`
-      : `${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`;
+      : context.usedTokens
+        ? `Context ${compactTokenCount(context.usedTokens)} tokens`
+        : `${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`;
   const details = [];
   if (context.windowEstimated) details.push("Claude context window is estimated from the active model");
   if (context.compactionCount) details.push(`${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`);
