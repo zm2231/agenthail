@@ -10,29 +10,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // ClaudeRunObservation is the provider-owned metadata available in a local
 // Claude Code background job record. Fields absent from that record remain
 // absent; this source does not infer lifecycle state from transcript text.
-type ClaudeRunObservation struct {
-	RecordPath      string    `json:"recordPath"`
-	JobID           string    `json:"jobId"`
-	SessionID       string    `json:"sessionId,omitempty"`
-	ResumeSessionID string    `json:"resumeSessionId,omitempty"`
-	RunType         string    `json:"runType,omitempty"`
-	ProviderState   string    `json:"providerState,omitempty"`
-	CreatedAt       time.Time `json:"createdAt,omitempty"`
-	UpdatedAt       time.Time `json:"updatedAt,omitempty"`
-}
-
-// ClaudeSubagentLink is a parent Claude session and its local subagent
-// transcript. The linkage is validated against both the path and transcript.
-type ClaudeSubagentLink struct {
-	ParentSessionID string `json:"parentSessionId"`
-	AgentID         string `json:"agentId"`
-	TranscriptPath  string `json:"transcriptPath"`
-}
+type ClaudeRunObservation = surface.ClaudeRunObservation
+type ClaudeSubagentLink = surface.ClaudeSubagentLink
 
 // ClaudeContextWindowObservation is the only context-window claim a Claude
 // provider may make for a session. A zero window is deliberate: it means the

@@ -1216,6 +1216,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		result, err = adapter.Model(ctx, session, request.Model)
+		if err == nil && session.Surface == surface.KindClaude {
+			if persistErr := d.Registry.RegisterSession(*session); persistErr != nil {
+				err = fmt.Errorf("persist Claude model state: %w", persistErr)
+			}
+		}
 	default:
 		http.Error(w, "unsupported dashboard action", http.StatusBadRequest)
 		return
@@ -1381,7 +1386,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	var goal *surface.GoalState
 	var model string
 	var models []surface.ModelOption
-	var contextUsageErr, goalErr, modelErr, modelsErr error
+	var claudeRuns []surface.ClaudeRunObservation
+	var claudeSubagents []surface.ClaudeSubagentLink
+	var contextUsageErr, goalErr, modelErr, modelsErr, claudeRunErr error
 	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
 		metadata.Add(1)
 		go func() {
@@ -1409,6 +1416,32 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 				models, modelsErr = lister.Models(ctx)
 			}()
 		}
+	}
+	if observer, ok := adapter.(surface.ClaudeRunObserver); ok {
+		metadata.Add(1)
+		go func() {
+			defer metadata.Done()
+			var runs []surface.ClaudeRunObservation
+			runs, claudeRunErr = observer.ObserveClaudeRuns(ctx)
+			if claudeRunErr != nil {
+				return
+			}
+			for _, run := range runs {
+				if run.SessionID == session.ID || run.ResumeSessionID == session.ID {
+					claudeRuns = append(claudeRuns, run)
+				}
+			}
+			links, linkErr := observer.ObserveClaudeSubagentLinks(ctx)
+			if linkErr != nil {
+				claudeRunErr = linkErr
+				return
+			}
+			for _, link := range links {
+				if link.ParentSessionID == session.ID {
+					claudeSubagents = append(claudeSubagents, link)
+				}
+			}
+		}()
 	}
 	metadata.Wait()
 	if sessionRead == nil {
@@ -1443,6 +1476,12 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	if modelsErr == nil && models != nil {
 		response["models"] = models
+	}
+	if claudeRunErr == nil {
+		response["claudeRuns"] = claudeRuns
+		response["claudeSubagents"] = claudeSubagents
+	} else {
+		response["claudeRunObservationUnavailable"] = "Claude job or subagent records could not be read."
 	}
 	writeDashboardJSON(w, http.StatusOK, response)
 }

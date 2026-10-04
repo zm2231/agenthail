@@ -94,6 +94,29 @@ func TestClaudeContextUsageUsesExplicitConfiguredWindow(t *testing.T) {
 	}
 }
 
+func TestClaudeContextUsageInvalidatesStaleConfiguredWindowAfterObservedModelSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	session := &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path, ConfiguredModel: "claude-opus-5-5[1m]"}
+	usage, err := adapter.ContextUsage(context.Background(), session)
+	if err != nil || usage.ContextWindow != 1_000_000 {
+		t.Fatalf("initial usage=%+v err=%v", usage, err)
+	}
+	appendTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:01:00Z","message":{"model":"claude-sonnet-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":1000,"output_tokens":500}}}`,
+	)
+	usage, err = adapter.ContextUsage(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ContextWindow != 0 || usage.ContextWindowSource != ClaudeContextWindowSourceUnknown || usage.WindowEstimated {
+		t.Fatalf("stale capacity=%+v", usage)
+	}
+}
+
 func TestClaudeContextUsageIgnoresOlderCommandAfterBoundary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "claude.jsonl")
 	writeTestTranscript(t, path,
