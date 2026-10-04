@@ -21,6 +21,9 @@ struct DesktopWindow: View {
         }
         .background(DesktopPalette.window)
         .toolbar(removing: .sidebarToggle)
+        .sheet(isPresented: $model.newSessionVisible) {
+            NewSessionSheet(model: model)
+        }
     }
 }
 
@@ -32,12 +35,12 @@ struct SessionSidebar: View {
     var body: some View {
         let tree = model.sessionTree
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 ForEach(SessionFilter.allCases) { filter in
                     Button {
                         model.sessionFilter = filter
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 4) {
                             Text(filter.rawValue)
                                 .fontWeight(model.sessionFilter == filter ? .semibold : .regular)
                                 .foregroundStyle(model.sessionFilter == filter ? DesktopPalette.text : DesktopPalette.text2)
@@ -45,12 +48,24 @@ struct SessionSidebar: View {
                                 .font(.system(size: 11))
                                 .foregroundStyle(DesktopPalette.text2)
                         }
+                        .lineLimit(1)
+                        .fixedSize()
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
                     .keyboardShortcut(KeyEquivalent(Character("\(filter.shortcut)")), modifiers: .command)
                 }
                 Spacer()
+                Button {
+                    model.newSessionVisible = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .keyboardShortcut("n", modifiers: .command)
+                .help("New session ⌘N")
+                .accessibilityLabel("New session")
             }
             .font(.system(size: 12.5))
             .padding(.horizontal, 16)
@@ -455,7 +470,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = model.selectedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, model: model.detail?.model, context: model.detail?.context, inspectorVisible: $model.inspectorVisible)
+                ConversationHeader(session: session, model: model.detail?.model, context: model.detail?.context, inspectorVisible: $model.inspectorVisible, onFocusTerminal: { model.focusInTerminal(session) })
                 TranscriptView(model: model, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         ComposerView(model: model, session: session)
@@ -482,6 +497,7 @@ struct ConversationHeader: View {
     let model: String?
     let context: ContextState?
     @Binding var inspectorVisible: Bool
+    var onFocusTerminal: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 12) {
@@ -505,6 +521,13 @@ struct ConversationHeader: View {
             Text(([session.surface.capitalized, model] + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · "))
                 .font(.system(size: 12))
                 .foregroundStyle(DesktopPalette.text2)
+            if session.runtime?.focusable == true, let host = session.runtime?.hostName {
+                Button("Open in \(host)") { onFocusTerminal() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.accentText)
+                    .help("Bring this session's terminal to the front")
+            }
             Button {
                 inspectorVisible.toggle()
             } label: {

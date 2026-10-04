@@ -15,6 +15,7 @@ struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
     let surfaces: [Surface]
     let workspaces: [String]
+    var launchers: [LauncherOption]? = nil
 }
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueueResponse: Decodable { let items: [QueueState] }
@@ -24,6 +25,7 @@ struct SessionCreationReceipt: Decodable {
     let session: RawSession?
     let sessionId: String?
     let error: String?
+    let launcher: String?
     var id: String? { session?.id ?? sessionId }
 }
 
@@ -79,6 +81,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var cwd: String? = nil
     var hostProject: HostProjectIdentity? = nil
     var checkout: CheckoutIdentity? = nil
+    var runtime: SessionRuntime? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -87,6 +90,35 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isReadOnly: Bool { readOnly == true }
+}
+
+struct SessionRuntime: Codable, Hashable {
+    struct Location: Codable, Hashable {
+        var workspace: String? = nil
+        var surface: String? = nil
+        var session: String? = nil
+        var pane: String? = nil
+    }
+
+    let launcher: String
+    var location: Location? = nil
+    var focusable: Bool? = nil
+
+    var hostName: String? {
+        switch launcher {
+        case "cmux": return "cmux"
+        case "tmux": return "tmux"
+        default: return nil
+        }
+    }
+}
+
+struct LauncherOption: Decodable, Identifiable, Hashable {
+    let id: String
+    let label: String
+    let agents: [String]
+    let available: Bool
+    let detail: String?
 }
 
 struct HostProjectIdentity: Codable, Hashable {

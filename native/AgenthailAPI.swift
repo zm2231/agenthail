@@ -107,6 +107,12 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
+    func launchSession(launcher: String?, surface: String, message: String, cwd: String) async throws -> SessionCreationReceipt {
+        var body = ["action": "session-create", "surface": surface, "message": message, "cwd": cwd]
+        if let launcher { body["launcher"] = launcher }
+        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65)
+    }
+
     func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init()) async throws -> SessionCreationReceipt {
         if surface == "codex" {
             let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings)

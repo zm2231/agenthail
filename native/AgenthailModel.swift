@@ -8,6 +8,8 @@ final class AgenthailModel: ObservableObject {
     }
     @Published private(set) var finishedUnseen: Set<String> = []
     @Published private(set) var snapshotLoadedAt: Date?
+    @Published var newSessionVisible = false
+    @Published private(set) var creationOptions: SessionCreationOptions?
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
@@ -205,6 +207,33 @@ final class AgenthailModel: ObservableObject {
         }
         next.formIntersection(current.sessions.map(\.id))
         if next != finishedUnseen { finishedUnseen = next }
+    }
+
+    func loadCreationOptions() async {
+        guard let api else { return }
+        do {
+            creationOptions = try await api.sessionOptions()
+        } catch {
+            if !error.isCancellation { operationError = error.localizedDescription }
+        }
+    }
+
+    func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> String? {
+        guard let api else { return "Agenthail isn't connected." }
+        do {
+            let receipt = try await api.launchSession(launcher: launcher, surface: agent, message: message, cwd: folder)
+            if let error = receipt.error, !receipt.ok, receipt.unknown != true { return error }
+            await refresh(fresh: true)
+            if let id = receipt.id, knownSessions.contains(where: { $0.id == id }) { selectSession(id) }
+            operationError = nil
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func focusInTerminal(_ session: SessionState) {
+        perform(action: "session-focus", sessionID: session.id)
     }
 
     func search(_ query: String) {
