@@ -185,7 +185,7 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 	events := make([]CatalogEvent, 0, len(failed))
 	for _, row := range failed {
 		generation := row.generation + 1
-		if _, err := tx.Exec(`UPDATE catalog_sessions SET discovery_failures=discovery_failures+1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
+		if _, err := tx.Exec(`UPDATE catalog_sessions SET misses=0,discovery_failures=discovery_failures+1,projection_generation=? WHERE session_id=?`, generation, row.id); err != nil {
 			return nil, err
 		}
 		lastObserved, err := time.Parse(time.RFC3339Nano, row.observedAt)
