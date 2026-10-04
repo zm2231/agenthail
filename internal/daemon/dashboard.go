@@ -80,26 +80,28 @@ type dashboardSurface struct {
 }
 
 type dashboardSession struct {
-	ID                string                `json:"id"`
-	Surface           surface.SurfaceKind   `json:"surface"`
-	Name              string                `json:"name"`
-	Cwd               string                `json:"cwd,omitempty"`
-	Alias             string                `json:"alias,omitempty"`
-	Status            surface.SessionStatus `json:"status"`
-	LastActive        time.Time             `json:"lastActive,omitempty"`
-	QueueCount        int                   `json:"queueCount"`
-	Open              bool                  `json:"open"`
-	Current           bool                  `json:"current"`
-	CurrentReason     string                `json:"currentReason,omitempty"`
-	Capabilities      surface.Capabilities  `json:"capabilities"`
-	ReadOnly          bool                  `json:"readOnly,omitempty"`
-	ReadOnlyReason    string                `json:"readOnlyReason,omitempty"`
-	Source            string                `json:"source,omitempty"`
-	Transport         string                `json:"transport,omitempty"`
-	HostProject       *catalogHostProject   `json:"hostProject,omitempty"`
-	Checkout          *catalogCheckout      `json:"checkout,omitempty"`
-	ObservedAt        time.Time             `json:"observedAt,omitempty"`
-	UnavailableReason string                `json:"unavailableReason,omitempty"`
+	ID                string                     `json:"id"`
+	Surface           surface.SurfaceKind        `json:"surface"`
+	Name              string                     `json:"name"`
+	Cwd               string                     `json:"cwd,omitempty"`
+	Alias             string                     `json:"alias,omitempty"`
+	Status            surface.SessionStatus      `json:"status"`
+	LastActive        time.Time                  `json:"lastActive,omitempty"`
+	QueueCount        int                        `json:"queueCount"`
+	Open              bool                       `json:"open"`
+	Current           bool                       `json:"current"`
+	CurrentReason     string                     `json:"currentReason,omitempty"`
+	Capabilities      surface.Capabilities       `json:"capabilities"`
+	ReadOnly          bool                       `json:"readOnly,omitempty"`
+	ReadOnlyReason    string                     `json:"readOnlyReason,omitempty"`
+	Source            string                     `json:"source,omitempty"`
+	Transport         string                     `json:"transport,omitempty"`
+	HostProject       *catalogHostProject        `json:"hostProject,omitempty"`
+	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
+	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
+	UnavailableReason string                     `json:"unavailableReason,omitempty"`
+	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
+	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 }
 
 type dashboardState struct {
@@ -730,6 +732,9 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 			observedAt = now.UTC()
 		}
 		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], false, config)
+		if record, found := catalogSessions[session.ID]; found {
+			entry.Freshness = &record.Freshness
+		}
 		if record, found := catalogSessions[session.ID]; found && record.ProjectionFingerprint != "" {
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
@@ -924,6 +929,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		DeliveryID      int64                      `json:"deliveryId"`
 		Surface         string                     `json:"surface"`
 		Cwd             string                     `json:"cwd"`
+		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
@@ -952,6 +958,80 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "session-create" {
+		if request.Launcher != "" {
+			if request.Worktree != "" || request.PermissionMode != "" || request.Approval != "" || !request.TurnOptions.Empty() {
+				http.Error(w, "launcher does not support advanced session options", http.StatusBadRequest)
+				return
+			}
+			if strings.TrimSpace(request.Message) == "" {
+				http.Error(w, "message is required", http.StatusBadRequest)
+				return
+			}
+			cwd, cwdErr := dashboardStartCwd(request.Cwd)
+			if cwdErr != nil {
+				http.Error(w, cwdErr.Error(), http.StatusBadRequest)
+				return
+			}
+			if d.transportResolver == nil {
+				http.Error(w, "launcher transport is unavailable", http.StatusConflict)
+				return
+			}
+			launcher, launchErr := d.transportResolver.Require(request.Launcher, surface.SurfaceKind(request.Surface))
+			if launchErr != nil {
+				http.Error(w, launchErr.Error(), http.StatusBadRequest)
+				return
+			}
+			available, detail := launcher.Available(r.Context())
+			if !available {
+				http.Error(w, detail, http.StatusConflict)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
+			defer cancel()
+			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Agent: surface.SurfaceKind(request.Surface), Cwd: cwd, Message: request.Message, Model: request.Model, Name: request.Name})
+			if launchErr != nil {
+				http.Error(w, launchErr.Error(), http.StatusBadGateway)
+				return
+			}
+			adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
+			if adapter == nil {
+				http.Error(w, "surface is not configured", http.StatusConflict)
+				return
+			}
+			session, location, launchErr := locateLaunchedSession(ctx, launcher, adapter, launchResult)
+			if launchErr != nil {
+				http.Error(w, launchErr.Error(), http.StatusBadGateway)
+				return
+			}
+			if session == nil {
+				pendingID, err := d.Registry.RecordPendingLaunch(request.Launcher, surface.SurfaceKind(request.Surface), cwd, request.Name, *location)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("persist pending launch: %s", err), http.StatusInternalServerError)
+					return
+				}
+				_ = pendingID
+				writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location})
+				return
+			}
+			if session.Surface == "" {
+				session.Surface = surface.SurfaceKind(request.Surface)
+				session.Cwd = cwd
+				session.Name = request.Name
+			}
+			session.Runtime = &surface.Runtime{Launcher: request.Launcher, Location: location, Focusable: location != nil}
+			if err := d.Registry.RegisterSession(*session); err != nil {
+				http.Error(w, fmt.Sprintf("register conversation: %s", err), http.StatusInternalServerError)
+				return
+			}
+			if alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"); alias != "" {
+				if err := d.Registry.SetAlias(alias, session.ID); err != nil {
+					http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
+					return
+				}
+			}
+			writeDashboardJSON(w, http.StatusCreated, map[string]any{"ok": true, "launcher": request.Launcher, "location": location, "sessionId": session.ID})
+			return
+		}
 		adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
 		starter, ok := adapter.(surface.SessionStarter)
 		if adapter == nil || !ok {
@@ -980,6 +1060,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, Owner: owner})
 		if session != nil {
+			session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
 				http.Error(w, fmt.Sprintf("register conversation: %s", registerErr), http.StatusInternalServerError)
 				return
@@ -1282,6 +1363,50 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+	if request.Action == "session-focus" {
+		if session.Runtime == nil || !session.Runtime.Focusable || session.Runtime.Location == nil {
+			http.Error(w, "session is not focusable", http.StatusConflict)
+			return
+		}
+		if d.transportResolver == nil {
+			http.Error(w, "launcher transport is unavailable", http.StatusConflict)
+			return
+		}
+		launcher, ok := d.transportResolver.Launcher(session.Runtime.Launcher)
+		focuser, focusable := launcher.(surface.Focuser)
+		if !ok || !focusable {
+			http.Error(w, "launcher cannot focus sessions", http.StatusConflict)
+			return
+		}
+		adapter := d.surfaceForKind(session.Surface)
+		if adapter == nil {
+			session.Runtime.Focusable = false
+			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
+			http.Error(w, "session surface is unavailable", http.StatusConflict)
+			return
+		}
+		located, err := adapter.List(r.Context())
+		if err != nil {
+			session.Runtime.Focusable = false
+			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
+			http.Error(w, "session location is unavailable", http.StatusConflict)
+			return
+		}
+		locations := launcher.Locate(r.Context(), located)
+		current, found := locations[session.ID]
+		if !found || current != *session.Runtime.Location {
+			session.Runtime.Focusable = false
+			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
+			http.Error(w, "session location is stale", http.StatusConflict)
+			return
+		}
+		if err := focuser.Focus(r.Context(), *session.Runtime.Location); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "launcher": session.Runtime.Launcher, "location": session.Runtime.Location, "sessionId": session.ID})
+		return
+	}
 	if request.Action == "alias" {
 		alias := strings.TrimPrefix(strings.TrimSpace(request.Alias), "@")
 		if alias == "" || strings.ContainsAny(alias, " \t\r\n/#") || len(alias) > 80 {
@@ -1296,9 +1421,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "alias": alias})
 		return
 	}
-	adapter := d.surfaceForKind(session.Surface)
-	if adapter == nil {
-		http.Error(w, "surface is not configured", http.StatusConflict)
+	adapter, transportErr := d.surfaceForSession(session)
+	if transportErr != nil {
+		http.Error(w, transportErr.Error(), http.StatusConflict)
 		return
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {

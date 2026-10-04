@@ -47,6 +47,9 @@ type SessionReader interface {
 }
 
 func ReadSession(ctx context.Context, adapter Surface, session *Session, request SessionReadRequest) (*SessionReadResult, error) {
+	if err := ValidateRuntimeTransport(session); err != nil {
+		return nil, err
+	}
 	if request.Limit < 1 {
 		request.Limit = 1
 	}
