@@ -292,6 +292,26 @@ struct RawSession: Decodable {
 struct GoalState: Decodable {
     let objective: String
     let status: String
+    let timeUsedSeconds: Int?
+    let tokensUsed: Int?
+    let tokenBudget: Int?
+    let createdAt: String?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case objective, status, timeUsedSeconds, tokensUsed, tokenBudget, createdAt, updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        objective = try container.decode(String.self, forKey: .objective)
+        status = try container.decode(String.self, forKey: .status)
+        timeUsedSeconds = try container.decodeIfPresent(Int.self, forKey: .timeUsedSeconds)
+        tokensUsed = try container.decodeIfPresent(Int.self, forKey: .tokensUsed)
+        tokenBudget = try container.decodeIfPresent(Int.self, forKey: .tokenBudget)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
 }
 
 struct DeviceState: Codable, Identifiable {

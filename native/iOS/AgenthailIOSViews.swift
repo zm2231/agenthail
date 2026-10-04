@@ -914,8 +914,16 @@ struct SessionInspector: View {
                         }
                     } label: { Label("Session inbox", systemImage: "tray") }
                 }
-                if let goal = detail.goal, !goal.objective.isEmpty {
-                    Section("Goal") { Text(goal.objective).textSelection(.enabled); LabeledContent("Status", value: goal.status) }
+                if let goal = detail.goal {
+                    Section("Goal") {
+                        if !goal.objective.isEmpty { Text(goal.objective).textSelection(.enabled) }
+                        LabeledContent("Status", value: goalStatusLabel(goal.status))
+                        if let value = goal.timeUsedSeconds { LabeledContent("Elapsed", value: formatDuration(value)) }
+                        if let value = goal.tokensUsed { LabeledContent("Tokens used", value: value.formatted()) }
+                        if let value = goal.tokenBudget { LabeledContent("Token budget", value: value.formatted()) }
+                        if let value = goal.createdAt { LabeledContent("Created", value: value) }
+                        if let value = goal.updatedAt { LabeledContent("Updated", value: value) }
+                    }
                 }
                 Section("Controls") {
                     if detail.readOnly { Label(detail.readOnlyReason, systemImage: "lock").font(.footnote) }
@@ -949,6 +957,26 @@ struct SessionInspector: View {
             }
         }
     }
+}
+
+private func goalStatusLabel(_ status: String) -> String {
+    switch status {
+    case "active": return "Active"
+    case "paused": return "Paused"
+    case "blocked": return "Blocked"
+    case "usageLimited": return "Usage limited"
+    case "budgetLimited": return "Budget limited"
+    case "complete": return "Complete"
+    default: return status.capitalized
+    }
+}
+
+private func formatDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "(seconds)s" }
+    let minutes = seconds / 60
+    let remainingSeconds = seconds % 60
+    if minutes < 60 { return "(minutes)m (remainingSeconds)s" }
+    return "(minutes / 60)h (minutes % 60)m"
 }
 
 extension ISO8601DateFormatter {
