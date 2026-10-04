@@ -26,6 +26,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var detailRefreshFailed = false
     @Published private(set) var removedSession: SessionState?
     private var selectedSnapshot: SessionState?
+    private var frozenOlderCursor: Int64?
     @Published var devices: [DeviceState] = []
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
@@ -169,6 +170,7 @@ final class AgenthailModel: ObservableObject {
         guard id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = knownSessions.first { $0.id == id }
+        frozenOlderCursor = nil
         if selectedSessionID != id {
             if let previous = selectedSessionID { drafts[previous] = composer }
             composer = drafts.removeValue(forKey: id) ?? ""
@@ -337,12 +339,18 @@ final class AgenthailModel: ObservableObject {
         detailReloadTask = nil
         detailReloadPending = false
         detailAppliedGeneration = detailRequestGeneration
+        selectionGeneration &+= 1
+        frozenOlderCursor = olderCursor
+        olderCursor = nil
+        detailStale = false
+        detailRefreshFailed = false
     }
 
     func closeRemovedSession() {
         guard removedSession != nil else { return }
         removedSession = nil
         selectedSnapshot = nil
+        frozenOlderCursor = nil
         if let current = selectedSessionID { drafts[current] = composer }
         sessionStreamTask?.cancel()
         detail = nil
@@ -407,6 +415,8 @@ final class AgenthailModel: ObservableObject {
                 selectedSnapshot = live
                 if removedSession != nil {
                     removedSession = nil
+                    olderCursor = frozenOlderCursor
+                    frozenOlderCursor = nil
                     startSessionStream(selected)
                     Task { await loadSession(selected) }
                 }
