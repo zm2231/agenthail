@@ -39,6 +39,9 @@ func (f *fakeSurface) Send(_ context.Context, _ *surface.Session, message string
 	f.sent = append(f.sent, message)
 	return f.result, f.err
 }
+func (f *fakeSurface) SendWithOptions(ctx context.Context, session *surface.Session, message string, _ surface.SendOptions) (*surface.SendResult, error) {
+	return f.Send(ctx, session, message)
+}
 func (*fakeSurface) Reply(context.Context, *surface.Session, int) (*surface.ReplyResult, error) {
 	return nil, nil
 }
@@ -236,14 +239,39 @@ func TestDispatcherSteersBusyTargetWhenPolicyRequestsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	session := &surface.Session{ID: "busy", Surface: surface.KindCodex, Status: surface.StatusBusy}
+	session := &surface.Session{ID: "busy", Name: "builder", Surface: surface.KindCodex, Status: surface.StatusBusy}
 	if err := r.RegisterSession(*session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
 	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "interrupt with context", "", surface.SendOptions{BusyDelivery: "steer"})
-	if err != nil || receipt.Evidence != surface.EvidenceDelivered || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
+	if err != nil || receipt.Evidence != surface.EvidenceDelivered || receipt.Detail != "Sent to builder." || len(adapter.steered) != 1 || r.QueueCount(session.ID) != 0 {
 		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
+	}
+}
+
+func TestDispatcherQueuesSteerPolicyWhenOptionsNeedPreserving(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "busy-options", Surface: surface.KindCodex, Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeSurface{result: &surface.SendResult{Accepted: false}, capabilities: surface.Capabilities{Steer: true}}
+	options := surface.SendOptions{BusyDelivery: "steer", Model: "model-a", TurnOptions: surface.TurnOptions{Effort: "high"}}
+	receipt, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "preserve options", "", options)
+	if err != nil || receipt.Evidence != surface.EvidenceQueued || len(adapter.steered) != 0 || r.QueueCount(session.ID) != 1 {
+		t.Fatalf("receipt=%+v err=%v steered=%v queued=%d", receipt, err, adapter.steered, r.QueueCount(session.ID))
+	}
+	item, err := r.QueueItem(receipt.QueueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Model != "model-a" || item.Effort != "high" || item.BusyDelivery != "queue" {
+		t.Fatalf("queued options were not preserved safely: %+v", item)
 	}
 }
 

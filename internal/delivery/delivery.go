@@ -182,13 +182,14 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 }
 
 func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, session *surface.Session, message, deliveryKey string, options surface.SendOptions, allowQueue bool, busyMode deliverypolicy.Mode, turnID string) (*Receipt, error) {
-	if busyMode == deliverypolicy.Steer && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+	needsOptionSender := options.Model != "" || !options.TurnOptions.Empty()
+	if busyMode == deliverypolicy.Steer && !needsOptionSender && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
 		if steerErr := adapter.Steer(ctx, session, message); steerErr != nil {
 			d.record(registry.HistoryEntry{Kind: failureKind(steerErr, "control-failed"), SessionID: session.ID, Message: message, Error: steerErr.Error()})
 			return nil, steerErr
 		}
 		d.record(registry.HistoryEntry{Kind: "control-accepted", SessionID: session.ID, SourceSessionID: options.SourceSessionID, Message: "busy steer"})
-		return &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: "sent to target"}, nil
+		return &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, Detail: d.sentDetail(session)}, nil
 	}
 	if !allowQueue {
 		d.record(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, Message: message, Error: ErrTargetBusy.Error()})
@@ -199,12 +200,28 @@ func (d Dispatcher) handleBusy(ctx context.Context, adapter surface.Surface, ses
 		d.record(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: err.Error()})
 		return nil, err
 	}
+	if needsOptionSender {
+		busyMode = deliverypolicy.Queue
+	}
 	options.BusyDelivery = string(busyMode)
 	queueID, deliveryID, err := d.Registry.QueueDeliveryWithIntent(session.ID, message, deliveryKey, options)
 	if err != nil {
 		return nil, err
 	}
 	return &Receipt{Evidence: surface.EvidenceQueued, Status: string(registry.DeliveryIntentQueued), SessionID: session.ID, TurnID: turnID, QueueID: queueID, DeliveryID: deliveryID, Detail: "target busy"}, nil
+}
+
+func (d Dispatcher) sentDetail(session *surface.Session) string {
+	target := session.Name
+	if d.Registry != nil {
+		if alias, err := d.Registry.ReverseAlias(session.ID); err == nil && alias != "" {
+			target = "@" + alias
+		}
+	}
+	if target == "" {
+		target = session.ID
+	}
+	return fmt.Sprintf("Sent to %s.", target)
 }
 
 func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, error) {
