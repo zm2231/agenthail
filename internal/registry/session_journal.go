@@ -31,6 +31,58 @@ type SessionJournalWindow struct {
 	Gap         bool
 }
 
+type SessionJournalPage struct {
+	Entries    []SessionJournalEntry
+	NextBefore uint64
+	LatestSeq  uint64
+}
+
+func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit int) (SessionJournalPage, error) {
+	if strings.TrimSpace(sessionID) == "" || limit < 1 || limit > 200 {
+		return SessionJournalPage{}, fmt.Errorf("invalid journal page request")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return SessionJournalPage{}, err
+	}
+	defer tx.Rollback()
+	var latest sql.NullInt64
+	if err := tx.QueryRow(`SELECT MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&latest); err != nil {
+		return SessionJournalPage{}, err
+	}
+	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, limit+1)
+	if err != nil {
+		return SessionJournalPage{}, err
+	}
+	defer rows.Close()
+	entries := make([]SessionJournalEntry, 0, limit+1)
+	for rows.Next() {
+		entry, err := scanSessionJournalEntry(rows)
+		if err != nil {
+			return SessionJournalPage{}, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return SessionJournalPage{}, err
+	}
+	var next uint64
+	if len(entries) > limit {
+		entries = entries[:limit]
+		next = entries[len(entries)-1].Seq
+	}
+	for left, right := 0, len(entries)-1; left < right; left, right = left+1, right-1 {
+		entries[left], entries[right] = entries[right], entries[left]
+	}
+	if err := rows.Close(); err != nil {
+		return SessionJournalPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return SessionJournalPage{}, err
+	}
+	return SessionJournalPage{Entries: entries, NextBefore: next, LatestSeq: uint64(latest.Int64)}, nil
+}
+
 func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retention SessionJournalRetention) (SessionJournalEntry, bool, error) {
 	if strings.TrimSpace(input.SessionID) == "" || strings.TrimSpace(input.Kind) == "" {
 		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry requires session and kind")

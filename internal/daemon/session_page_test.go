@@ -1,0 +1,137 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+type coldPageSurface struct {
+	*daemonSurface
+	readCalls atomic.Int32
+	started   chan struct{}
+}
+
+func (s *coldPageSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	s.readCalls.Add(1)
+	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "seeded-item", Kind: "text", Role: "assistant", BodyRef: "seed-ref", Text: "seeded from provider"}}}, nil
+}
+
+func (s *coldPageSurface) Stream(ctx context.Context, _ *surface.Session, _ string, _ func(surface.StreamEvent), _ time.Duration) error {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestDashboardSessionColdConcurrentReadsShareOneJournalSeed(t *testing.T) {
+	d, _, fake, from, _ := daemonFixture(t)
+	adapter := &coldPageSurface{daemonSurface: fake, started: make(chan struct{}, 1)}
+	d.Surfaces = []surface.Surface{adapter}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	type result struct {
+		status int
+		body   string
+	}
+	results := make(chan result, 2)
+	start := make(chan struct{})
+	for range 2 {
+		go func() {
+			<-start
+			request := httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", nil)
+			request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			results <- result{status: response.Code, body: response.Body.String()}
+		}()
+	}
+	close(start)
+	for range 2 {
+		select {
+		case got := <-results:
+			if got.status != http.StatusOK || !contains(got.body, "seeded from provider") || !contains(got.body, `"readSource":"journal"`) {
+				t.Fatalf("cold response status=%d body=%s", got.status, got.body)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("cold concurrent session reads did not complete")
+		}
+	}
+	if got := adapter.readCalls.Load(); got != 1 {
+		t.Fatalf("provider seed reads=%d, want exactly one", got)
+	}
+}
+
+func TestReadJournalPagePreservesPagingIdentityRolesAndBodyReferences(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	retention := registry.SessionJournalRetention{Count: 32, Bytes: 16 << 10}
+	for index := 1; index <= 5; index++ {
+		payload := sessionJournalPayload{
+			ItemID:  "item-" + string(rune('0'+index)),
+			Version: 1,
+			Op:      "upsert",
+			Kind:    "text",
+			Role:    "assistant",
+			Title:   "Answer",
+			Body:    "body-" + string(rune('0'+index)),
+			BodyRef: "body-ref-" + string(rune('0'+index)),
+			TS:      time.Date(2026, 10, 4, 12, index, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+		if index == 1 {
+			payload.Role = "user"
+			payload.Title = "Prompt"
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: payload.Kind, ProviderKey: payload.ItemID, Payload: encoded, BodyRef: payload.BodyRef, FullBody: []byte(payload.Body), ObservedAt: time.Unix(int64(index), 0)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, err := d.readJournalPage(from.ID, 0, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Source != "journal" || first.JournalSeq != 5 || first.NextBefore != 2 || len(first.Items) != 4 {
+		t.Fatalf("first=%+v", first)
+	}
+	for index, item := range first.Items {
+		wantID := "item-" + string(rune('2'+index))
+		if item.ID != wantID || item.Role != "assistant" || item.BodyRef != "body-ref-"+string(rune('2'+index)) {
+			t.Fatalf("item[%d]=%+v want id=%s", index, item, wantID)
+		}
+	}
+
+	second, err := d.readJournalPage(from.ID, uint64(first.NextBefore), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.JournalSeq != 5 || second.NextBefore != 0 || len(second.Items) != 1 || second.Items[0].ID != "item-1" || second.Items[0].Role != "user" || second.Items[0].BodyRef != "body-ref-1" {
+		t.Fatalf("second=%+v", second)
+	}
+	if len(second.Exchanges) != 1 || second.Exchanges[0].User != "body-1" || second.Exchanges[0].Source != "journal" {
+		t.Fatalf("exchanges=%+v", second.Exchanges)
+	}
+}
+
+func TestReadJournalPageSkipsSourceErrorsWithoutProviderFallback(t *testing.T) {
+	d, r, _, from, _ := daemonFixture(t)
+	payload := []byte(`{"itemId":"source-error","version":1,"op":"upsert","kind":"source-error","body":"private detail"}`)
+	if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "source-error", ProviderKey: "source-error", Payload: payload}, registry.SessionJournalRetention{Count: 4, Bytes: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := d.readJournalPage(from.ID, 0, 4)
+	if err != nil || result.Source != "journal" || len(result.Items) != 0 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

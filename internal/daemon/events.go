@@ -136,7 +136,7 @@ func (h *eventHub) cursor() uint64 {
 }
 
 func (d *Daemon) publishEvent(eventType, entityID string, value any) {
-	if d.dashboard != nil {
+	if d.dashboard != nil && (eventType == "state.changed" || eventType == "settings.updated" || eventType == "session.updated" || eventType == "turn.completed") {
 		d.dashboard.invalidate()
 	}
 	if d.events != nil {

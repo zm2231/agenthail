@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,6 +109,7 @@ type dashboardState struct {
 	Surfaces         []dashboardSurface   `json:"surfaces"`
 	Sessions         []dashboardSession   `json:"sessions"`
 	TotalSessions    int                  `json:"totalSessions"`
+	NextCursor       string               `json:"nextCursor,omitempty"`
 	Queue            []dashboardQueue     `json:"queue"`
 	Channels         []dashboardChannel   `json:"channels"`
 	Relays           []dashboardRelay     `json:"relays"`
@@ -230,7 +232,8 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/favicon.ico", dashboard.asset("image/png", dashboardFavicon))
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
 	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
-	mux.HandleFunc("/api/stream", dashboard.guard(d.dashboardStreamHandler))
+	mux.HandleFunc("/api/session-metadata", dashboard.guard(d.dashboardSessionMetadataHandler))
+	mux.HandleFunc("/api/session-stream", dashboard.guard(d.apiSessionStreamHandler))
 	mux.HandleFunc("/api/models", dashboard.guard(d.dashboardModelsHandler))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
@@ -409,32 +412,109 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	_, catalogSeq, catalogErr := d.Registry.CatalogState()
 	dashboard.stateMu.Lock()
-	defer dashboard.stateMu.Unlock()
 	version := dashboard.stateVersion.Load()
-	if r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
-		writeDashboardJSON(w, http.StatusOK, dashboard.state)
+	if catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+		state := dashboard.state
+		dashboard.stateMu.Unlock()
+		d.writeDashboardSnapshot(w, r, state)
 		return
 	}
+	previous, hadPrevious := dashboard.state, !dashboard.stateAt.IsZero()
+	dashboard.stateMu.Unlock()
 	refreshCtx, cancel := context.WithTimeout(r.Context(), dashboardRefreshBudget)
 	defer cancel()
 	state, err := d.dashboardState(refreshCtx)
 	if err != nil {
-		if !dashboard.stateAt.IsZero() {
-			stale := dashboard.state
+		if hadPrevious {
+			stale := previous
 			stale.Daemon = cloneDashboardDaemon(stale.Daemon)
 			stale.Daemon["stale"] = true
 			stale.Daemon["refreshError"] = err.Error()
-			writeDashboardJSON(w, http.StatusOK, stale)
+			d.writeDashboardSnapshot(w, r, stale)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	dashboard.stateMu.Lock()
 	dashboard.state = state
 	dashboard.stateAt = time.Now()
 	dashboard.cachedVersion = version
+	dashboard.stateMu.Unlock()
+	d.writeDashboardSnapshot(w, r, state)
+}
+
+func (d *Daemon) writeDashboardSnapshot(w http.ResponseWriter, r *http.Request, state dashboardState) {
+	scope := r.URL.Query().Get("scope")
+	if scope != "" && scope != "all" && scope != "recent" && scope != "current" && scope != "running" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_scope", "Use all, recent, current, or running.")
+		return
+	}
+	projectID, query := r.URL.Query().Get("projectId"), strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	rows := make([]dashboardSession, 0, len(state.Sessions))
+	for _, row := range state.Sessions {
+		if (scope == "recent" || scope == "current") && !row.Current {
+			continue
+		}
+		if scope == "running" && row.Status != surface.StatusBusy {
+			continue
+		}
+		if projectID != "" && (row.HostProject == nil || row.HostProject.ID != projectID) {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(row.Name+" "+row.Cwd+" "+row.Alias), query) {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	state.Sessions = rows
+	state.TotalSessions = len(rows)
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit < 1 || limit > 200 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_limit", "Use a limit between 1 and 200.")
+			return
+		}
+		filter := scope + "\x00" + projectID + "\x00" + query
+		offset := 0
+		if raw := r.URL.Query().Get("cursor"); raw != "" {
+			decoded, err := base64.RawURLEncoding.DecodeString(raw)
+			var cursor catalogPageCursor
+			if err != nil || json.Unmarshal(decoded, &cursor) != nil || cursor.Offset < 0 || cursor.Filter != filter {
+				writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The catalog page cursor is invalid.")
+				return
+			}
+			if cursor.Epoch != state.HostEpoch || cursor.Seq != state.CatalogSeq || !cursor.UpdatedAt.Equal(state.UpdatedAt) {
+				writeAPIError(w, http.StatusConflict, "catalog_changed", "Reload the catalog before continuing.")
+				return
+			}
+			offset = cursor.Offset
+		}
+		if offset > len(rows) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The catalog page cursor is invalid.")
+			return
+		}
+		end := min(len(rows), offset+limit)
+		state.Sessions = rows[offset:end]
+		if end < len(rows) {
+			encoded, _ := json.Marshal(catalogPageCursor{Epoch: state.HostEpoch, Seq: state.CatalogSeq, UpdatedAt: state.UpdatedAt, Offset: end, Filter: filter})
+			state.NextCursor = base64.RawURLEncoding.EncodeToString(encoded)
+		}
+	} else if r.URL.Query().Get("cursor") != "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "A page cursor requires a limit.")
+		return
+	}
 	writeDashboardJSON(w, http.StatusOK, state)
+}
+
+type catalogPageCursor struct {
+	Epoch     string    `json:"epoch"`
+	Seq       uint64    `json:"seq"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	Offset    int       `json:"offset"`
+	Filter    string    `json:"filter"`
 }
 
 func cloneDashboardDaemon(input map[string]any) map[string]any {
@@ -541,6 +621,14 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read queue counts: %w", err)
 	}
+	aliases, err := d.Registry.ListAliases()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read aliases: %w", err)
+	}
+	aliasByID := make(map[string]string, len(aliases))
+	for _, alias := range aliases {
+		aliasByID[alias.SessionID] = alias.Name
+	}
 	queue, err := d.Registry.ListQueue(false)
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read queue: %w", err)
@@ -628,7 +716,13 @@ func (d *Daemon) dashboardState(ctx context.Context) (dashboardState, error) {
 		if observedAt.IsZero() {
 			observedAt = now.UTC()
 		}
-		entry := d.catalogSessionRow(ctx, adapter, session, identity, observedAt)
+		entry := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], false, config)
+		if record, found := catalogSessions[session.ID]; found && record.ProjectionFingerprint != "" {
+			var saved dashboardSession
+			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
+				entry.Open = saved.Open
+			}
+		}
 		entry.QueueCount = counts[session.ID]
 		entry.Current, entry.CurrentReason = dashboardSessionPresence(session, entry.QueueCount, entry.Open, config.CodexRecentHours, now)
 		state.Sessions = append(state.Sessions, entry)
@@ -751,6 +845,31 @@ func claudeProcessOpen(ctx context.Context, pid int) bool {
 		return false
 	}
 	return filepath.Base(strings.TrimSpace(string(output))) == "claude"
+}
+
+func claudeOpenProcesses(ctx context.Context) map[int]bool {
+	processCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	output, err := exec.CommandContext(processCtx, "ps", "-axo", "pid=,comm=").Output()
+	if err != nil {
+		return map[int]bool{}
+	}
+	return parseClaudeOpenProcesses(string(output))
+}
+
+func parseClaudeOpenProcesses(output string) map[int]bool {
+	result := map[int]bool{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err == nil && pid > 0 && filepath.Base(strings.Join(fields[1:], " ")) == "claude" {
+			result[pid] = true
+		}
+	}
+	return result
 }
 
 func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) {
@@ -1350,8 +1469,6 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), operationTimeout)
-	defer cancel()
 	limit := 20
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
 		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed >= 4 && parsed <= 40 {
@@ -1369,80 +1486,90 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 			return
 		}
 	}
-	var metadata sync.WaitGroup
-	var sessionRead *surface.SessionReadResult
-	var sessionReadErr error
-	metadata.Add(1)
-	go func() {
-		defer metadata.Done()
-		sessionRead, sessionReadErr = surface.ReadSession(ctx, adapter, session, surface.SessionReadRequest{Limit: limit, Before: timelineBefore})
-	}()
-	var contextUsage *surface.ContextUsage
-	var goal *surface.GoalState
-	var model string
-	var models []surface.ModelOption
-	var contextUsageErr, goalErr, modelErr, modelsErr error
-	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
-		metadata.Add(1)
-		go func() {
-			defer metadata.Done()
-			contextUsage, contextUsageErr = provider.ContextUsage(ctx, session)
-		}()
-	}
-	if effective.Goal {
-		metadata.Add(1)
-		go func() {
-			defer metadata.Done()
-			goal, goalErr = adapter.GoalGet(ctx, session)
-		}()
-	}
-	if effective.Model {
-		metadata.Add(1)
-		go func() {
-			defer metadata.Done()
-			model, modelErr = adapter.Model(ctx, session, "")
-		}()
-		if lister, ok := adapter.(surface.ModelLister); ok {
-			metadata.Add(1)
-			go func() {
-				defer metadata.Done()
-				models, modelsErr = lister.Models(ctx)
-			}()
+	sessionRead, sessionReadErr := d.readJournalPage(session.ID, uint64(timelineBefore), limit)
+	if sessionReadErr == nil && sessionRead.JournalSeq == 0 && timelineBefore == 0 {
+		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
+		seedErr := d.sources.seed(seedCtx, session, adapter)
+		cancel()
+		sessionRead, sessionReadErr = d.readJournalPage(session.ID, 0, limit)
+		if sessionReadErr == nil && seedErr != nil {
+			sessionReadErr = seedErr
 		}
-	}
-	metadata.Wait()
-	if sessionRead == nil {
-		sessionRead = &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Source: "unavailable"}
-	}
-	if sessionReadErr != nil {
-		sessionRead.UnavailableReason = "Detailed activity could not be loaded. Pull to refresh to retry."
 	}
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
+	response["journalSeq"] = sessionRead.JournalSeq
 	if sessionReadErr != nil {
-		response["readError"] = sessionRead.UnavailableReason
-		response["transcriptWarning"] = "Session activity could not be refreshed. Pull to refresh to retry."
+		response["readError"] = "Session journal could not be read."
 	} else if sessionRead.UnavailableReason != "" {
 		response["readError"] = sessionRead.UnavailableReason
-		response["transcriptWarning"] = sessionRead.UnavailableReason
-	} else if sessionRead.Warning != "" {
-		response["readError"] = sessionRead.Warning
-		response["transcriptWarning"] = sessionRead.Warning
 	}
 	if r.URL.Query().Get("timeline") == "1" {
 		response["timeline"] = &surface.SessionTimeline{Items: sessionRead.Items, NextBefore: sessionRead.NextBefore, Source: sessionRead.Source, Truncated: sessionRead.Truncated, UnavailableReason: sessionRead.UnavailableReason}
 	}
-	if contextUsageErr == nil && contextUsage != nil {
-		response["context"] = contextUsage
+	writeDashboardJSON(w, http.StatusOK, response)
+}
+
+func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	if goalErr == nil && goal != nil {
-		response["goal"] = goal
+	session, err := d.Registry.Session(r.URL.Query().Get("id"))
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
 	}
-	if modelErr == nil && model != "" {
-		response["model"] = model
+	adapter := d.surfaceForKind(session.Surface)
+	if adapter == nil {
+		http.Error(w, "surface is not configured", http.StatusConflict)
+		return
 	}
-	if modelsErr == nil && models != nil {
-		response["models"] = models
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	effective := surface.EffectiveCapabilities(session, adapter.Capabilities())
+	requests := map[string]func() (any, error){}
+	if provider, ok := adapter.(surface.ContextUsageProvider); ok {
+		requests["context"] = func() (any, error) { return provider.ContextUsage(ctx, session) }
+	}
+	if effective.Goal {
+		requests["goal"] = func() (any, error) { return adapter.GoalGet(ctx, session) }
+	}
+	if effective.Model {
+		requests["model"] = func() (any, error) { return adapter.Model(ctx, session, "") }
+		if lister, ok := adapter.(surface.ModelLister); ok {
+			requests["models"] = func() (any, error) { return lister.Models(ctx) }
+		}
+	}
+	response := map[string]any{"sessionId": session.ID}
+	type metadataResult struct {
+		field string
+		value any
+		err   error
+	}
+	results := make(chan metadataResult, len(requests))
+	for field, read := range requests {
+		go func() { value, err := read(); results <- metadataResult{field: field, value: value, err: err} }()
+	}
+	errorsByField := map[string]string{}
+	for len(requests) > 0 {
+		select {
+		case result := <-results:
+			delete(requests, result.field)
+			if result.err != nil {
+				errorsByField[result.field] = "Metadata unavailable."
+			} else {
+				response[result.field] = result.value
+			}
+		case <-ctx.Done():
+			for field := range requests {
+				errorsByField[field] = "Metadata unavailable."
+			}
+			requests = nil
+		}
+	}
+	if len(errorsByField) > 0 {
+		response["errors"] = errorsByField
 	}
 	writeDashboardJSON(w, http.StatusOK, response)
 }
