@@ -529,10 +529,6 @@ struct ComposerView: View {
                     .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
-                ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
-                    DeliveryProblemBanner(problem: problem, model: model)
-                        .padding(.bottom, 8)
-                }
                 let queued = model.queuedItems(for: session.id)
                 if !queued.isEmpty {
                     QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
@@ -644,42 +640,6 @@ struct ComposerView: View {
         let steer = session.isWorking && resolvedAction(alternate: alternate) == .steer
         model.submit(model.composer, steer: steer)
         model.composer = ""
-    }
-}
-
-struct DeliveryProblemBanner: View {
-    let problem: DeliveryProblem
-    @ObservedObject var model: AgenthailModel
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(DesktopPalette.amber)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Not delivered · \(problem.reasonText)")
-                    .font(.system(size: 12.5, weight: .medium))
-                Text(PeerEnvelope(problem.message).body)
-                    .lineLimit(2)
-                    .foregroundStyle(DesktopPalette.text2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Edit and resend") { model.resendDeliveryProblem(problem) }
-                .buttonStyle(.plain)
-                .foregroundStyle(DesktopPalette.accentText)
-            Button {
-                model.dismissDeliveryProblem(problem)
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesktopPalette.text2)
-            .accessibilityLabel("Dismiss")
-        }
-        .font(.system(size: 12.5))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(DesktopPalette.warnBackground, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DesktopPalette.warnLine))
     }
 }
 
@@ -872,21 +832,14 @@ struct DeliveryTab: View {
     var body: some View {
         let queued = model.snapshot?.queue.filter { $0.sessionId == session.id && $0.status != "delivered" } ?? []
         let history = model.snapshot?.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id } ?? []
-        let problems = model.deliveryProblems(for: session.id)
         VStack(alignment: .leading, spacing: 8) {
-            if !problems.isEmpty {
-                SidebarCaption("Not delivered").padding(.horizontal, -8)
-                ForEach(problems) { problem in
-                    deliveryCard(title: problem.sessionId == session.id ? "To this session" : "To \(model.snapshot?.sessions.first { $0.id == problem.sessionId }?.title ?? "another session")", status: problem.reasonText, text: PeerEnvelope(problem.message).body, problem: true)
-                }
-            }
             if !queued.isEmpty {
                 SidebarCaption("Queued").padding(.horizontal, -8)
                 ForEach(queued) { item in
                     deliveryCard(title: item.target, status: "Queued", text: item.message, problem: false)
                 }
             }
-            if history.isEmpty && queued.isEmpty && problems.isEmpty {
+            if history.isEmpty && queued.isEmpty {
                 Text("No deliveries for this session yet.")
                     .foregroundStyle(DesktopPalette.text2)
             } else if !history.isEmpty {
