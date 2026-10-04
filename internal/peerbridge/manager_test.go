@@ -75,6 +75,37 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if alias, err := reg.ReverseAlias("recent"); err != nil || alias != "recent" {
 		t.Fatalf("first send handle=%q err=%v", alias, err)
 	}
+	relay := manager.relays["recent"]
+	if !relay.healthy() {
+		t.Fatalf("new reply relay is not healthy: pid=%d path=%q done=%v", relay.process.Pid, relay.socketPath, func() bool {
+			select {
+			case <-relay.done:
+				return true
+			default:
+				return false
+			}
+		}())
+	}
+	results := make(chan error, 4)
+	for range 4 {
+		go func() {
+			session, sessionErr := reg.Session("recent")
+			if sessionErr != nil {
+				results <- sessionErr
+				return
+			}
+			err := manager.ensureRelay(ctx, *session)
+			results <- err
+		}()
+	}
+	for range 4 {
+		if err := <-results; err != nil {
+			t.Fatalf("concurrent relay send: %v", err)
+		}
+	}
+	if manager.relays["recent"] != relay {
+		t.Fatalf("concurrent sends replaced the durable relay: before=%d after=%d path=%q paths=%d healthy=%v", relay.process.Pid, manager.relays["recent"].process.Pid, relay.socketPath, len(relay.paths), relay.healthy())
+	}
 	receipt, err = Send(ctx, home, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), strings.Repeat("x", 16<<10))
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("large manager send receipt=%+v err=%v", receipt, err)
@@ -90,9 +121,23 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if first.process.Pid == oldFirstPID {
 		t.Fatal("missing control endpoint did not replace its worker")
 	}
+	if manager.relays["recent"] != relay {
+		t.Fatal("helper replacement discarded the durable relay")
+	}
 	receipt, err = manager.Send(ctx, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "send after control repair")
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("post-repair receipt=%+v err=%v", receipt, err)
+	}
+	if err := first.process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-first.done
+	manager.RetireInactive(time.Now(), 24*time.Hour)
+	if manager.children["recent"] != nil {
+		t.Fatal("dead helper was not retired")
+	}
+	if manager.relays["recent"] != relay {
+		t.Fatal("retiring a dead helper discarded the durable relay")
 	}
 	if manager.relays["recent"] == nil {
 		t.Fatal("non-Claude sender did not get a durable reply relay")
@@ -205,7 +250,9 @@ func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
 	if err := reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusIdle, LastActive: time.Now().Add(-48 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	manager.children["recent"].lastUsed = time.Now().Add(-48 * time.Hour)
+	if recent := manager.children["recent"]; recent != nil {
+		recent.lastUsed = time.Now().Add(-48 * time.Hour)
+	}
 	manager.RetireInactive(time.Now(), 24*time.Hour)
 	if manager.children["recent"] != nil {
 		t.Fatal("inactive peer was not retired")

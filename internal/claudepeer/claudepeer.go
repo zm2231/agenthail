@@ -689,15 +689,18 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 	if (manifest.ControlDevice == 0) != (manifest.ControlInode == 0) || (manifest.SocketDevice == 0) != (manifest.SocketInode == 0) {
 		return false
 	}
-	if manifest.State == "ready" && (manifest.ControlInode == 0 || manifest.SocketInode == 0) {
-		return false
-	}
 	wantDir := filepath.Join(root, manifest.Generation)
-	if filepath.Dir(path) != wantDir || manifest.ControlPath != filepath.Join(wantDir, strconv.Itoa(manifest.PID)+".sock") || manifest.SocketPath != filepath.Join(socketDir, strconv.Itoa(manifest.PID)+".sock") {
+	if filepath.Dir(path) != wantDir || manifest.SocketPath != filepath.Join(socketDir, strconv.Itoa(manifest.PID)+".sock") {
 		return false
 	}
 	if manifest.Agenthail == "peer-relay" {
-		return manifest.RecordPath == ""
+		return manifest.State == "ready" && manifest.ControlPath == "" && manifest.ControlDevice == 0 && manifest.ControlInode == 0 && manifest.RecordPath == "" && manifest.SocketInode != 0
+	}
+	if manifest.State == "ready" && (manifest.ControlInode == 0 || manifest.SocketInode == 0) {
+		return false
+	}
+	if manifest.ControlPath != filepath.Join(wantDir, strconv.Itoa(manifest.PID)+".sock") {
+		return false
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(root)))
 	return manifest.RecordPath == filepath.Join(home, ".claude", "sessions", strconv.Itoa(manifest.PID)+".json")
