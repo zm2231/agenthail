@@ -219,7 +219,7 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 		}
 	}()
 	adapter := NewClaude("", home)
-	result, err := adapter.sendPeer(surface.WithSourceSessionID(context.Background(), "source-native"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, PID: process.Process.Pid, Transport: "uds"}, "status?")
+	result, err := adapter.Send(surface.WithSourceSessionID(context.Background(), "source-native"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, PID: process.Process.Pid, Transport: "uds"}, "status?")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}

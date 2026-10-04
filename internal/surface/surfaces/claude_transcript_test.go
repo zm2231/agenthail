@@ -126,13 +126,16 @@ func TestClaudeObserveResetsAfterSameSizeReplacement(t *testing.T) {
 	}
 }
 
-func TestScanAppendedJSONLRejectsOversizedPartialRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "transcript.jsonl")
-	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxClaudeTranscriptRecordBytes+1)), 0600); err != nil {
+func TestClaudeObserveRejectsOversizedAppendedRecord(t *testing.T) {
+	path := writeTranscript(t, `{"type":"user","uuid":"u1","message":{"content":"one"}}`)
+	claude := NewClaude("", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}
+	if _, err := claude.Observe(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := scanAppendedJSONL(context.Background(), path, 0, maxClaudeTranscriptRecordBytes, func([]byte) error { return nil }); err == nil {
-		t.Fatal("expected oversized partial record error")
+	appendTestTranscript(t, path, strings.Repeat("x", maxClaudeTranscriptRecordBytes+1))
+	if _, err := claude.Observe(context.Background(), session); err == nil {
+		t.Fatal("oversized appended record was buffered instead of rejected")
 	}
 }
 
@@ -215,7 +218,7 @@ func TestClaudeStreamDoesNotDuplicateTurnDurationCompletion(t *testing.T) {
 
 func seededClaudeStreamSession(t *testing.T, path, transport string) *surface.Session {
 	t.Helper()
-	seed, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	seed, err := readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil || !seed.TranscriptOffsetSet || seed.TranscriptIdentity == "" {
 		t.Fatalf("seed=%+v err=%v", seed, err)
 	}
@@ -380,9 +383,9 @@ func TestClaudeCompactBoundaryDoesNotConsumeFollowingCompact(t *testing.T) {
 {"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}
 {"type":"user","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}
 {"type":"user","message":{"content":"<local-command-stdout>Compacted</local-command-stdout>"}}`)
-	pending, err := claudeCompactPending(path)
-	if err != nil || !pending {
-		t.Fatalf("pending=%v err=%v", pending, err)
+	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path})
+	if err != nil || observation.Status != surface.StatusBusy {
+		t.Fatalf("second compact was not pending: observation=%+v err=%v", observation, err)
 	}
 }
 
@@ -477,7 +480,7 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 	if len(events) != 2 || events[0].Kind != "message" || events[0].Text != "answer" || events[0].TurnID != "u1" || events[1].Kind != "done" {
 		t.Fatalf("events=%+v", events)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil || len(page.Items) != 2 || page.Items[1].ID != events[0].ID {
 		t.Fatalf("page/live identity mismatch: page=%+v live=%q err=%v", page, events[0].ID, err)
 	}
@@ -642,12 +645,12 @@ func TestClaudeTranscriptPreservesMultiMegabyteUnicodeReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := writeTranscript(t, `{"type":"user","uuid":"u","message":{"content":"long"}}`+"\n"+string(record))
-	turns, err := readClaudeTurns(path)
-	if err != nil || len(turns) != 1 {
-		t.Fatalf("turns=%d err=%v", len(turns), err)
+	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
+	if err != nil || observation.CompletedTurnID != "m" || observation.Reply == nil {
+		t.Fatalf("observation=%+v err=%v", observation, err)
 	}
-	if turns[0].Assistant != reply {
-		t.Fatalf("reply_bytes=%d want=%d", len(turns[0].Assistant), len(reply))
+	if observation.Reply.Text != reply {
+		t.Fatalf("reply_bytes=%d want=%d", len(observation.Reply.Text), len(reply))
 	}
 }
 
@@ -688,11 +691,11 @@ func TestClaudeCompactPendingUsesTimestampsAcrossReorderedRecords(t *testing.T) 
 	path := writeTranscript(t, `
 {"type":"user","timestamp":"2026-07-18T08:09:58.695Z","message":{"content":"/compact"}}
 {"type":"system","subtype":"compact_boundary","timestamp":"2026-07-18T08:12:08.605Z","content":"Conversation compacted"}
-{"type":"user","timestamp":"2026-07-18T08:12:08.359Z","message":{"content":"This session is being continued from a previous conversation."}}
+{"type":"user","timestamp":"2026-07-18T08:12:08.359Z","message":{"content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
 {"type":"user","timestamp":"2026-07-18T08:09:58.696Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
-	pending, err := claudeCompactPending(path)
-	if err != nil || pending {
-		t.Fatalf("pending=%v err=%v", pending, err)
+	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path})
+	if err != nil || observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" {
+		t.Fatalf("completed compact still pending: observation=%+v err=%v", observation, err)
 	}
 }
 
@@ -701,8 +704,8 @@ func TestClaudeCompactFollowedByCompletedTurnIsNotPending(t *testing.T) {
 {"type":"user","timestamp":"2026-07-19T07:30:52.908Z","message":{"content":"/compact"}}
 {"type":"assistant","timestamp":"2026-07-19T07:43:04.867Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}
 {"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T07:43:04.906Z"}`)
-	pending, err := claudeCompactPending(path)
-	if err != nil || pending {
-		t.Fatalf("pending=%v err=%v", pending, err)
+	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Status: surface.StatusIdle, Transcript: path})
+	if err != nil || observation.Status == surface.StatusBusy || observation.ActiveTurnID != "" {
+		t.Fatalf("completed compact still pending: observation=%+v err=%v", observation, err)
 	}
 }

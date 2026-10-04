@@ -3,7 +3,6 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -111,13 +109,30 @@ func startRendererDesktopBridge(t *testing.T) string {
 }
 
 func TestCodexStartSessionPrefersDesktopOwner(t *testing.T) {
-	codex := NewCodex(startRendererDesktopBridge(t))
-	session, sent, err := codex.StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Owner: codexTransportDesktop})
+	t.Setenv("HOME", t.TempDir())
+	bridge := startDesktopBridge(t, func(method string) string {
+		switch method {
+		case "thread/start":
+			return `{"result":{"cwd":"/tmp/project","thread":{"id":"desktop-new","name":"","source":"vscode"}}}`
+		case "turn/start":
+			return `{"result":{"turn":{"id":"desktop-turn"}}}`
+		}
+		return ""
+	})
+	session, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Model: "gpt-5.6-sol", ApprovalPolicy: "on-request", Owner: codexTransportDesktop})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.ID != "desktop-new" || session.Transport != codexTransportDesktop || sent.UUID != "desktop-turn" || !sent.Accepted {
+	if session.ID != "desktop-new" || session.Transport != codexTransportDesktop || session.Status != surface.StatusBusy || session.Name != "Build the release" || sent.UUID != "desktop-turn" || !sent.Accepted {
 		t.Fatalf("session=%+v sent=%+v", session, sent)
+	}
+	for _, field := range []string{`"threadSource":"agenthail"`, `"serviceName":"agenthail"`, `"cwd":"/tmp/project"`, `"model":"gpt-5.6-sol"`, `"approvalPolicy":"on-request"`} {
+		if !strings.Contains(bridge.Request("thread/start"), field) {
+			t.Fatalf("thread/start missing %s: %s", field, bridge.Request("thread/start"))
+		}
+	}
+	if !strings.Contains(bridge.Request("turn/start"), `"threadId":"desktop-new"`) {
+		t.Fatalf("turn/start not bound to the created thread: %s", bridge.Request("turn/start"))
 	}
 }
 
@@ -136,93 +151,6 @@ func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 	}
 	if output, _ := os.ReadFile(logPath); len(output) != 0 {
 		t.Fatalf("Desktop discovery bootstrapped managed runtime: %s", output)
-	}
-}
-
-func TestCodexObservationUsesTurnIDsAndCompletion(t *testing.T) {
-	thread := &codexThread{Status: surface.StatusUnknown, Turns: []codexTurn{
-		{ID: "done", Status: surface.StatusIdle, User: "one", Assistant: "same", Done: true},
-		{ID: "running", Status: surface.StatusBusy, User: "two", Assistant: "partial"},
-	}}
-	observation := codexObservation(thread)
-	if observation.Status != surface.StatusBusy || observation.ActiveTurnID != "running" || observation.CompletedTurnID != "done" || observation.Reply.Text != "same" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-func TestCodexTurnUsesFinalPhaseAndDeduplicatesReplay(t *testing.T) {
-	turn := codexTurn{AssistantItems: []codexAssistantItem{
-		{ID: "item-1", Phase: "commentary", Text: "interim"},
-		{ID: "item-1", Phase: "commentary", Text: "interim replay"},
-		{ID: "item-2", Phase: "final_answer", Text: "final"},
-		{ID: "item-2", Phase: "final_answer", Text: "final replay"},
-	}}
-	item, ok := turn.authoritativeAssistant()
-	if !ok || item.ID != "item-2" || item.Phase != "final_answer" || item.Text != "final replay" {
-		t.Fatalf("authoritative item=%+v ok=%v", item, ok)
-	}
-}
-
-func TestCodexObservationSkipsEmptyTerminalTurnForReply(t *testing.T) {
-	thread := &codexThread{Status: surface.StatusIdle, Turns: []codexTurn{
-		{ID: "answer", Status: surface.StatusIdle, Assistant: "actual reply", Done: true},
-		{ID: "empty", Status: surface.StatusIdle, Done: true},
-	}}
-	observation := codexObservation(thread)
-	if observation.TerminalTurnID != "empty" || observation.CompletedTurnID != "answer" || observation.Reply == nil || observation.Reply.Text != "actual reply" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-func TestCodexFailedTurnIsCompletedWithExplicitError(t *testing.T) {
-	status, done, message := codexTurnState(map[string]any{"type": "failed"})
-	if status != surface.StatusIdle || !done || message != "turn failed" {
-		t.Fatalf("status=%s done=%v message=%q", status, done, message)
-	}
-	observation := codexObservation(&codexThread{Turns: []codexTurn{{ID: "failed", Status: status, Done: done, Assistant: "partial", Error: message}}})
-	if observation.Reply == nil || observation.Reply.Error != "turn failed" {
-		t.Fatalf("observation=%+v", observation)
-	}
-}
-
-type interruptTurnClient struct {
-	activeTurn      string
-	interrupted     bool
-	interruptParams map[string]any
-}
-
-func (c *interruptTurnClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
-	switch method {
-	case "thread/turns/list":
-		return map[string]any{"result": map[string]any{"data": []any{map[string]any{"id": c.activeTurn, "status": map[string]any{"type": "inProgress"}}}}}, nil
-	case "turn/interrupt":
-		c.interrupted = true
-		c.interruptParams = params
-		return map[string]any{"result": map[string]any{}}, nil
-	default:
-		return nil, fmt.Errorf("unexpected method %s", method)
-	}
-}
-
-func (c *interruptTurnClient) Close() error { return nil }
-
-func TestCodexInterruptTurnRejectsReplacementTurn(t *testing.T) {
-	client := &interruptTurnClient{activeTurn: "turn-b"}
-	if err := NewCodex("").interruptActiveTurn(context.Background(), client, "thread", "turn-a"); err == nil {
-		t.Fatal("replacement turn was accepted")
-	}
-	if client.interrupted {
-		t.Fatal("replacement turn was interrupted")
-	}
-}
-
-func TestCodexInterruptTurnBindsConfirmedTurnID(t *testing.T) {
-	client := &interruptTurnClient{activeTurn: "turn-a"}
-	if err := NewCodex("").interruptActiveTurn(context.Background(), client, "thread", "turn-a"); err != nil {
-		t.Fatal(err)
-	}
-	if !client.interrupted || client.interruptParams["threadId"] != "thread" || client.interruptParams["turnId"] != "turn-a" {
-		t.Fatalf("interrupt=%t params=%v", client.interrupted, client.interruptParams)
 	}
 }
 

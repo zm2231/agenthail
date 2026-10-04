@@ -29,7 +29,7 @@ func TestAttachmentResolvesOldReferencedRecordByStableOffset(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil || len(page.Items) == 0 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
@@ -71,21 +71,41 @@ func TestAttachmentOversizedRecordPreservesTypedTooLarge(t *testing.T) {
 
 func TestAttachmentRejectsMidRecordOffsetAndHonorsCancellation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	data, _ := base64.StdEncoding.DecodeString(testPNG)
 	line := `{"type":"user","uuid":"u1","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, "attachment:1:0:"+hashBytes(data))
+	id := firstAttachmentID(t, path, "claude")
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 || parts[1] != "0" {
+		t.Fatalf("attachment id does not reference the record offset: %q", id)
+	}
+	forged := parts[0] + ":1:" + parts[2]
+	_, _, err := NewClaude("", t.TempDir()).ReadAttachment(context.Background(), &surface.Session{Transcript: path}, forged)
 	if !errors.Is(err, ErrAttachmentNotFound) {
 		t.Fatalf("mid-record err=%v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = NewClaude("", t.TempDir()).ReadAttachment(ctx, &surface.Session{Transcript: path}, "attachment:0:0:"+hashBytes(data))
+	_, _, err = NewClaude("", t.TempDir()).ReadAttachment(ctx, &surface.Session{Transcript: path}, id)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled err=%v", err)
 	}
+}
+
+func firstAttachmentID(t *testing.T, path, source string) string {
+	t.Helper()
+	page, err := readTimeline(context.Background(), path, source, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.Kind == "attachment" && item.Attachment != nil {
+			return item.Attachment.ID
+		}
+	}
+	t.Fatalf("no attachment in %+v", page.Items)
+	return ""
 }
 
 func TestAttachmentRecordAboveLegacyTimelineWindowIsProjected(t *testing.T) {
@@ -96,7 +116,7 @@ func TestAttachmentRecordAboveLegacyTimelineWindowIsProjected(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil || len(page.Items) != 1 || page.Items[0].Attachment == nil || page.Items[0].Attachment.Bytes != int64(len(data)) {
 		t.Fatalf("items=%+v err=%v", page.Items, err)
 	}
@@ -113,7 +133,7 @@ func TestToolResultImageIsMetadataOnlyAndKeepsCallID(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil || len(page.Items) != 2 {
 		t.Fatalf("items=%+v err=%v", page.Items, err)
 	}
@@ -128,35 +148,16 @@ func TestToolResultImageIsMetadataOnlyAndKeepsCallID(t *testing.T) {
 		t.Fatalf("attachment=%+v", page.Items[1])
 	}
 }
-func TestCodexLiveAttachmentUsesExactTranscriptReferenceAfterRestart(t *testing.T) {
+func TestCodexAttachmentStaysFetchableAfterTranscriptGrows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	line := `{"type":"event_msg","payload":{"type":"user_message","message":"look","images":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"` + testPNG + `"}}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "codex", int64(len(line)), 20)
-	if err != nil || len(page.Items) == 0 || page.Items[1].Attachment == nil {
-		t.Fatalf("page=%+v err=%v", page, err)
-	}
-	offset, index, _, parseErr := parseAttachmentID(page.Items[1].Attachment.ID)
-	if parseErr != nil {
-		t.Fatal("seed attachment did not contain a durable transcript reference")
-	}
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := file.WriteString(strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 40000)); err != nil {
-		file.Close()
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	session := &surface.Session{ID: "thread-indexed", Transcript: path}
-	liveID := attachmentID(offset, index, mustAttachmentData(t))
-	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), session, liveID)
-	if err != nil || attachment == nil || string(data) != string(mustAttachmentData(t)) {
+	id := firstAttachmentID(t, path, "codex")
+	appendTestTranscript(t, path, strings.Repeat(`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"later"}]}}`+"\n", 40000))
+	attachment, data, err := NewCodex("").ReadAttachment(context.Background(), &surface.Session{ID: "thread-indexed", Transcript: path}, id)
+	if err != nil || attachment == nil || attachment.ID != id || !bytes.Equal(data, mustAttachmentData(t)) {
 		t.Fatalf("attachment=%+v bytes=%d err=%v", attachment, len(data), err)
 	}
 }
@@ -168,7 +169,7 @@ func TestCodexLiveAttachmentKeepsOffsetAfterMalformedPrefix(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 20)
+	page, err := readTimeline(context.Background(), path, "codex", 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +216,7 @@ func TestCodexInputImageURLSiblingsKeepDistinctFetchableIdentities(t *testing.T)
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 20)
+	page, err := readTimeline(context.Background(), path, "codex", 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +271,7 @@ func TestClaudeUnsupportedImageSourceKeepsLaterAttachmentAligned(t *testing.T) {
 	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "claude", 0, 20)
+	page, err := readTimeline(context.Background(), path, "claude", 0, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,7 @@ func TestCodexTranscriptNormalizesInterruptionWrapperAndTypedToolOutput(t *testi
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	page, err := readTranscriptPage(context.Background(), path, "codex", 0, 40)
+	page, err := readTimeline(context.Background(), path, "codex", 0, 40)
 	if err != nil {
 		t.Fatal(err)
 	}
