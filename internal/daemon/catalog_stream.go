@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -390,7 +391,18 @@ func (d *Daemon) correlatePendingLaunches(ctx context.Context, sessions []surfac
 				candidate := sessions[index]
 				candidate.Runtime = &surface.Runtime{Launcher: item.Launcher, Location: &locationsCopy, Focusable: true}
 				if err := d.Registry.RegisterSessionAndDeletePending(candidate, item.ID, item.Alias); err != nil {
-					d.log.Printf("correlate pending launch %d: %s", item.ID, err)
+					var aliasErr registry.AliasTakenError
+					if errors.As(err, &aliasErr) {
+						d.errorMu.Lock()
+						first := !d.pendingAliasWarns[item.ID]
+						d.pendingAliasWarns[item.ID] = true
+						d.errorMu.Unlock()
+						if first {
+							d.log.Printf("pending launch %d awaiting alias %q: %s", item.ID, item.Alias, err)
+						}
+					} else {
+						d.log.Printf("correlate pending launch %d: %s", item.ID, err)
+					}
 					continue
 				}
 				sessions[index].Runtime = candidate.Runtime

@@ -997,7 +997,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			if launchErr != nil {
 				var acceptedErr surface.LaunchAcceptedError
 				if errors.As(launchErr, &acceptedErr) {
-					writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": false, "accepted": true, "retryable": false, "launcher": request.Launcher, "error": launchErr.Error()})
+					writeDashboardJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "submitted", "accepted": true, "retryable": false, "launcher": request.Launcher, "warning": launchErr.Error()})
 					return
 				}
 				http.Error(w, launchErr.Error(), http.StatusBadGateway)

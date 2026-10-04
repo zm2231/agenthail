@@ -1697,7 +1697,7 @@ $("#new-conversation-form").addEventListener("submit", async (event) => {
     form.reset();
     toggleNewConversationForm(false);
     await load(true);
-    toast(response.unknown ? "Conversation created. Delivery could not be confirmed. Check it before retrying." : "Conversation started.");
+    toast(response.accepted ? (response.warning || "Launch submitted; location is still being resolved.") : response.unknown ? "Conversation created. Delivery could not be confirmed. Check it before retrying." : "Conversation started.");
     const sessionID = response.sessionId || response.session?.id;
     if (sessionID) await selectSession(sessionID, true);
   } catch (error) {
