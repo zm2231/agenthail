@@ -938,7 +938,7 @@ struct SessionInspector: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Session") {
+                Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
                     LabeledContent("Status", value: detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
@@ -948,6 +948,8 @@ struct SessionInspector: View {
                     if let value = detail.readSource, !value.isEmpty { LabeledContent("Activity source", value: value) }
                     if let value = detail.readError, !value.isEmpty { LabeledContent("Activity warning", value: value).foregroundStyle(.secondary) }
                     LabeledContent("Session ID", value: detail.session.id).textSelection(.enabled)
+                } header: {
+                    Text("Session").accessibilityIdentifier("session-inspector-anchor")
                 }
                 Section("Context") {
                     if let context = detail.context {
