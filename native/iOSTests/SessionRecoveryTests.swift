@@ -47,6 +47,8 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.selectedDetail?.timeline?.items, currentItems)
         XCTAssertNil(model.activityCursor)
         XCTAssertTrue(model.olderActivityError?.contains("no longer retained") == true)
+        XCTAssertTrue(model.olderActivityError?.contains("Current activity is still available here") == true)
+        XCTAssertTrue(model.olderActivityError?.contains("no new session is needed") == true)
         RecoveryProtocol.state.configure(historyGap: false)
         await model.loadOlderActivity()
         XCTAssertEqual(RecoveryProtocol.state.sessionReads, before + 1)
