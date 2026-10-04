@@ -4,8 +4,8 @@
 
 This design replaces provider reads made by session-detail and live-stream
 viewers with an Agenthail-owned, per-session journal. It also separates the
-saved session catalog from live provider discovery. Task orchestration, ZEN
-protocols and automatic replay of uncertain external actions are outside this
+saved session catalog from live provider discovery. Task orchestration, external
+control-plane protocols and automatic replay of uncertain actions are outside this
 change.
 
 ## Contracts
