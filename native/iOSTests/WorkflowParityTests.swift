@@ -157,6 +157,22 @@ final class WorkflowParityTests: XCTestCase {
     }
 
     @MainActor
+    func testFailedCreationReceiptsStayErrorsUnlessRequested() async throws {
+        ParityProtocol.state.reset(failReceipt: true)
+        let model = makeModel()
+        let created = await model.createSession(surface: "codex", message: "Build", cwd: "/project", model: "chosen")
+        XCTAssertFalse(created)
+        XCTAssertNotNil(model.creationError)
+        XCTAssertNil(model.requestedSessionID)
+
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [ParityProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: config))
+        let receipt = try await api.createSession(surface: "codex", message: "Build", cwd: "/project", model: "", failureReceipts: true)
+        XCTAssertEqual(receipt.error, "launcher busy")
+        XCTAssertEqual(receipt.accepted, true)
+    }
+
+    @MainActor
     func testCreationRetryReplaysSameLogicalRequestButEditedFormGetsNewKey() async throws {
         ParityProtocol.state.reset(fail: true)
         let model = makeModel()
@@ -217,14 +233,16 @@ private final class ParityProtocol: URLProtocol, @unchecked Sendable {
         private var unknown = false
         private var fail = false
         private var accepted = false
+        private var failReceipt = false
         private var actionKeys: [String?] = []
         var actions: [[String:Any]] { lock.withLock { records } }
         var actionIdempotencyKeys: [String?] { lock.withLock { actionKeys } }
-        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false) { lock.withLock { records = []; actionKeys = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted } }
+        func reset(unknown: Bool = false, fail: Bool = false, accepted: Bool = false, failReceipt: Bool = false) { lock.withLock { records = []; actionKeys = []; self.unknown = unknown; self.fail = fail; self.accepted = accepted; self.failReceipt = failReceipt } }
         func respond(_ body: [String:Any], idempotencyKey: String?) -> (Int,String) { lock.withLock {
             records.append(body)
             actionKeys.append(idempotencyKey)
             if fail { return (502,#"{"error":{"message":"unavailable"}}"#) }
+            if failReceipt { return (409,#"{"ok":false,"accepted":true,"retryable":false,"launcher":"tmux","error":"launcher busy"}"#) }
             if (body["action"] as? String)?.contains("create") == true {
                 if accepted { return (202, #"{"ok":true,"status":"submitted","accepted":true,"retryable":false,"launcher":"tmux","warning":"The launcher accepted the request; the conversation is not available yet."}"#) }
                 if body["surface"] as? String == "claude" {

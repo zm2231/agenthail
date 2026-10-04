@@ -269,7 +269,7 @@ final class AgenthailModel: ObservableObject {
         }
         let idempotencyKey = pendingCreation?.key
         do {
-            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey)
+            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey, failureReceipts: true)
             let decision = SessionLaunchDecision(receipt, launcher: launcher, agent: agent)
             if decision.settlesRetry {
                 pendingCreation = nil
