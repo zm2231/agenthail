@@ -397,12 +397,3 @@ func containsLine(lines []string, want string) bool {
 	}
 	return false
 }
-
-func containsPrefix(lines []string, want string) bool {
-	for _, line := range lines {
-		if strings.HasPrefix(line, want) {
-			return true
-		}
-	}
-	return false
-}

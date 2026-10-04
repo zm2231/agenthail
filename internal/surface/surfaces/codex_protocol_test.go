@@ -155,90 +155,44 @@ func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 }
 
 func TestCodexResolveExactNameUsesHistorySearch(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	searchCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
+	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/search" {
+			return `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}},"snippet":"test"}]}}`
 		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/search"`):
-				searchCalls++
-				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"Q","cwd":"/tmp","source":"vscode","status":{"type":"idle"}},"snippet":"test"}]}}`
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
+		return ""
 	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	session, err := NewCodex(server.URL).Resolve(context.Background(), "Q")
-	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || searchCalls != 1 {
-		t.Fatalf("session=%+v search_calls=%d err=%v", session, searchCalls, err)
+	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "Q")
+	if err != nil || session == nil || session.ID != "thread-1" || session.Transport != codexTransportDesktop || countMethod(bridge.Methods(), "thread/search") != 1 {
+		t.Fatalf("session=%+v methods=%v err=%v", session, bridge.Methods(), err)
 	}
 }
 
 func TestCodexResolveIDReadsThreadWithoutListing(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	readCalls := 0
-	listCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
+	const id = "019f004a-a94e-7313-a599-2db587a1f67a"
+	bridge := startDesktopBridge(t, func(method string) string {
+		switch method {
+		case "thread/loaded/list":
+			return `{"result":{"data":[]}}`
+		case "thread/read":
+			return `{"result":{"thread":{"id":"` + id + `","name":"known","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}}}`
 		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := any("")
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/loaded/list"`):
-				value = `{"result":{"data":[]}}`
-			case strings.Contains(expression, `"thread/read"`):
-				readCalls++
-				value = `{"result":{"thread":{"id":"019f004a-a94e-7313-a599-2db587a1f67a","name":"known","cwd":"/tmp","source":"vscode","status":{"type":"idle"}}}}`
-			case strings.Contains(expression, `"thread/list"`):
-				listCalls++
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
+		return ""
 	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	session, err := NewCodex(server.URL).Resolve(context.Background(), "019f004a-a94e-7313-a599-2db587a1f67a")
-	if err != nil || session == nil || session.ID != "019f004a-a94e-7313-a599-2db587a1f67a" || session.Transport != codexTransportDesktop || readCalls != 1 || listCalls != 0 {
-		t.Fatalf("session=%+v read_calls=%d list_calls=%d err=%v", session, readCalls, listCalls, err)
+	session, err := NewCodex(bridge.URL).Resolve(context.Background(), id)
+	methods := bridge.Methods()
+	if err != nil || session == nil || session.ID != id || session.Transport != codexTransportDesktop || countMethod(methods, "thread/read") != 1 || countMethod(methods, "thread/list") != 0 {
+		t.Fatalf("session=%+v methods=%v err=%v", session, methods, err)
 	}
+}
+
+func countMethod(methods []string, method string) int {
+	count := 0
+	for _, seen := range methods {
+		if seen == method {
+			count++
+		}
+	}
+	return count
 }
 
 func TestCodexEnsureWritableRefreshesDesktopSourceTransport(t *testing.T) {
@@ -335,42 +289,14 @@ func TestCodexObserveRepairsStaleManagedTransport(t *testing.T) {
 }
 
 func TestCodexResolveRejectsDuplicateExactNamesAcrossPages(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	searchCalls := 0
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
+	bridge := startDesktopBridge(t, func(method string) string {
+		if method == "thread/search" {
+			return `{"result":{"data":[{"thread":{"id":"thread-1","name":"duplicate","cwd":"/one"}},{"thread":{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}}]}}`
 		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			var value any = ""
-			switch {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "already"
-			case strings.Contains(expression, `"thread/search"`):
-				searchCalls++
-				value = `{"result":{"data":[{"thread":{"id":"thread-1","name":"duplicate","cwd":"/one"}},{"thread":{"id":"thread-2","name":"DUPLICATE","cwd":"/two"}}]}}`
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
+		return ""
 	})
-	server = httptest.NewServer(handler)
-	defer server.Close()
-
-	session, err := NewCodex(server.URL).Resolve(context.Background(), "duplicate")
+	session, err := NewCodex(bridge.URL).Resolve(context.Background(), "duplicate")
 	if err == nil || session != nil || !strings.Contains(err.Error(), "thread-1") || !strings.Contains(err.Error(), "thread-2") {
-		t.Fatalf("err=%v", err)
+		t.Fatalf("session=%+v err=%v", session, err)
 	}
 }
