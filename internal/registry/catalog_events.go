@@ -170,7 +170,7 @@ func (r *Registry) CatalogEventsAfter(after uint64, limit int) (CatalogEventWind
 	}
 	window.EarliestSeq = uint64(earliest.Int64)
 	window.LatestSeq = uint64(latest.Int64)
-	window.Gap = after > 0 && (after < window.EarliestSeq-1 || after > window.LatestSeq)
+	window.Gap = after < window.EarliestSeq-1 || after > window.LatestSeq
 	if window.Gap {
 		if err := tx.Commit(); err != nil {
 			return CatalogEventWindow{}, err

@@ -87,6 +87,9 @@ func (d *Daemon) dropRelay(sourceID string, route registry.RouteRow, completionI
 	if queued, err := d.Registry.RecordReplyForwardFailure(sourceID, route.ToSession, providerKey, text, reason); err != nil {
 		d.log.Printf("record relay failure %d: %s", route.ID, err)
 	} else if queued {
+		if err := d.catalog.flushCommitted(); err != nil {
+			d.log.Printf("publish relay delivery problem %d: %s", route.ID, err)
+		}
 		d.publishEvent("state.changed", sourceID, map[string]string{"source": "delivery-problem"})
 	}
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SessionID: route.ToSession, SourceSessionID: sourceID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})

@@ -17,88 +17,132 @@ import (
 const catalogStreamReplayLimit = 4096
 
 type catalogHub struct {
-	registry    *registry.Registry
-	mu          sync.Mutex
-	subscribers map[uint64]chan registry.CatalogEvent
-	nextID      uint64
+	registry     *registry.Registry
+	mu           sync.Mutex
+	subscribers  map[uint64]*catalogSubscriber
+	nextID       uint64
+	publishedSeq uint64
+}
+
+type catalogSubscriber struct {
+	stream chan registry.CatalogEvent
+	seq    uint64
 }
 
 func newCatalogHub(store *registry.Registry) *catalogHub {
-	return &catalogHub{registry: store, subscribers: map[uint64]chan registry.CatalogEvent{}}
+	_, latest, err := store.CatalogState()
+	if err != nil {
+		latest = 0
+	}
+	return &catalogHub{registry: store, subscribers: map[uint64]*catalogSubscriber{}, publishedSeq: latest}
 }
 
 func (h *catalogHub) publish(event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	persisted, created, err := h.registry.AppendCatalogEvent(event)
-	if err != nil || !created {
+	if err != nil {
 		return persisted, created, err
 	}
-	for id, subscriber := range h.subscribers {
-		select {
-		case subscriber <- persisted:
-		default:
-			delete(h.subscribers, id)
-			close(subscriber)
-		}
+	if err := h.flushCommittedLocked(); err != nil {
+		return persisted, created, err
 	}
-	return persisted, true, nil
+	return persisted, created, nil
 }
 
 func (h *catalogHub) publishSession(state registry.CatalogSessionState, event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	persisted, created, err := h.registry.RecordCatalogSession(state, event)
-	if err != nil || !created {
+	if err != nil {
 		return persisted, created, err
 	}
-	for id, subscriber := range h.subscribers {
-		select {
-		case subscriber <- persisted:
-		default:
-			delete(h.subscribers, id)
-			close(subscriber)
-		}
+	if err := h.flushCommittedLocked(); err != nil {
+		return persisted, created, err
 	}
-	return persisted, true, nil
+	return persisted, created, nil
 }
 
 func (h *catalogHub) publishSurface(state registry.CatalogSurfaceState, event registry.CatalogEvent) (registry.CatalogEvent, bool, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	persisted, created, err := h.registry.RecordCatalogSurface(state, event)
-	if err != nil || !created {
+	if err != nil {
 		return persisted, created, err
 	}
-	for id, subscriber := range h.subscribers {
-		select {
-		case subscriber <- persisted:
-		default:
-			delete(h.subscribers, id)
-			close(subscriber)
-		}
+	if err := h.flushCommittedLocked(); err != nil {
+		return persisted, created, err
 	}
-	return persisted, true, nil
+	return persisted, created, nil
 }
 
 func (h *catalogHub) reconcileOmissions(kind surface.SurfaceKind, seen map[string]struct{}) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	events, err := h.registry.ReconcileCatalogOmissions(kind, seen, 2)
+	_, err := h.registry.ReconcileCatalogOmissions(kind, seen, 2)
 	if err != nil {
 		return err
 	}
-	for _, event := range events {
-		for id, subscriber := range h.subscribers {
-			select {
-			case subscriber <- event:
-			default:
-				delete(h.subscribers, id)
-				close(subscriber)
-			}
-		}
+	return h.flushCommittedLocked()
+}
+
+// flushCommitted publishes journal rows only after their owning transaction
+// committed. It preserves sequence order across catalog writers that do not
+// route through the hub themselves.
+func (h *catalogHub) flushCommitted() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.flushCommittedLocked()
+}
+
+func (h *catalogHub) flushCommittedLocked() error {
+	window, err := h.registry.CatalogEventsAfter(h.publishedSeq, catalogStreamReplayLimit)
+	if err != nil {
+		return err
+	}
+	if window.Gap {
+		after := h.publishedSeq
+		h.closeSubscribersLocked()
+		h.publishedSeq = window.LatestSeq
+		return catalogJournalGapError{After: after, Earliest: window.EarliestSeq, Latest: window.LatestSeq}
+	}
+	for _, event := range window.Events {
+		h.broadcastLocked(event)
+		h.publishedSeq = event.Seq
 	}
 	return nil
+}
+
+type catalogJournalGapError struct {
+	After    uint64
+	Earliest uint64
+	Latest   uint64
+}
+
+func (e catalogJournalGapError) Error() string {
+	return fmt.Sprintf("catalog journal gap after sequence %d (retained %d through %d)", e.After, e.Earliest, e.Latest)
+}
+
+func (h *catalogHub) broadcastLocked(event registry.CatalogEvent) {
+	for id, subscriber := range h.subscribers {
+		if event.Seq <= subscriber.seq {
+			continue
+		}
+		select {
+		case subscriber.stream <- event:
+			subscriber.seq = event.Seq
+		default:
+			delete(h.subscribers, id)
+			close(subscriber.stream)
+		}
+	}
+}
+
+func (h *catalogHub) closeSubscribersLocked() {
+	for id, subscriber := range h.subscribers {
+		delete(h.subscribers, id)
+		close(subscriber.stream)
+	}
 }
 
 func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, <-chan registry.CatalogEvent, func(), error) {
@@ -111,12 +155,12 @@ func (h *catalogHub) subscribe(after uint64) (registry.CatalogEventWindow, <-cha
 	h.nextID++
 	id := h.nextID
 	stream := make(chan registry.CatalogEvent, 64)
-	h.subscribers[id] = stream
+	h.subscribers[id] = &catalogSubscriber{stream: stream, seq: window.LatestSeq}
 	cancel := func() {
 		h.mu.Lock()
 		if existing, found := h.subscribers[id]; found {
 			delete(h.subscribers, id)
-			close(existing)
+			close(existing.stream)
 		}
 		h.mu.Unlock()
 	}
