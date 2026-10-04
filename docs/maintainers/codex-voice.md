@@ -225,7 +225,7 @@ Ordinary tests do not call live models or record a microphone:
 go test ./... -race -count=1
 node --test internal/daemon/voice_peer_test.cjs
 xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS \
-  -destination 'platform=iOS Simulator,id=YOUR_TEST_DEVICE_UUID' \
+  -destination "platform=iOS Simulator,id=$(scripts/ios-simulator.sh)" \
   -parallel-testing-enabled NO \
   -only-testing:AgenthailIOSTests/VoiceTests CODE_SIGN_IDENTITY=-
 ```

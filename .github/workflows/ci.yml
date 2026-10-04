@@ -13,9 +13,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ios: ${{ steps.diff.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE" ]; then echo "ios=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(native/|scripts/(ios-simulator|test-xcodegen-project)\.sh$|\.github/workflows/ci\.yml$)'; then
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ios=false" >> "$GITHUB_OUTPUT"
+          fi
+
   verify:
     runs-on: macos-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -56,47 +76,65 @@ jobs:
           strings "$binary" | grep -F "$relay" >/dev/null
           strings "$binary" | grep -F "$release_api" >/dev/null
           strings "$binary" | grep -F "$team" >/dev/null
-      - name: Verify generated iOS project
-        run: |
-          command -v xcodegen >/dev/null || brew install xcodegen
-          scripts/test-xcodegen-project.sh
-      - name: iOS release device build
-        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
-      - name: iOS simulator tests
-        run: |
-          derived="$RUNNER_TEMP/ios-derived"
-          runtime="$(xcrun simctl list runtimes --json | jq -r '.runtimes | map(select(.isAvailable and (.identifier | contains("iOS")))) | last | .identifier')"
-          device="$(xcrun simctl list devicetypes --json | jq -r '.devicetypes | map(select(.name | startswith("iPhone"))) | first | .identifier')"
-          udid="$(xcrun simctl create Agenthail-CI "$device" "$runtime")"
-          trap 'xcrun simctl delete "$udid"' EXIT
-          xcodebuild test -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$derived" -parallel-testing-enabled NO
-          plist="$derived/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
-          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
-          test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
       - name: Native helper tests
         run: |
-          swiftc -parse-as-library native/DuplicateApplicationPolicy.swift native/tests/duplicate_application_policy_test.swift -o "$RUNNER_TEMP/duplicate-application-policy-test"
-          "$RUNNER_TEMP/duplicate-application-policy-test"
-          swiftc -parse-as-library native/SessionSelection.swift native/tests/session_selection_test.swift -o "$RUNNER_TEMP/session-selection-test"
-          "$RUNNER_TEMP/session-selection-test"
-          swiftc -parse-as-library native/EventRetryBackoff.swift native/tests/event_retry_backoff_test.swift -o "$RUNNER_TEMP/event-retry-backoff-test"
-          "$RUNNER_TEMP/event-retry-backoff-test"
-          swiftc -parse-as-library native/OperationsRefreshPolicy.swift native/tests/operations_refresh_policy_test.swift -o "$RUNNER_TEMP/operations-refresh-policy-test"
-          "$RUNNER_TEMP/operations-refresh-policy-test"
-          swiftc -parse-as-library native/StatusRefreshPolicy.swift native/tests/status_refresh_policy_test.swift -o "$RUNNER_TEMP/status-refresh-policy-test"
-          "$RUNNER_TEMP/status-refresh-policy-test"
-          swiftc -parse-as-library native/ResponsivePairLayout.swift native/tests/responsive_pair_layout_test.swift -o "$RUNNER_TEMP/responsive-pair-layout-test"
-          "$RUNNER_TEMP/responsive-pair-layout-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/tests/dashboard_snapshot_test.swift -o "$RUNNER_TEMP/dashboard-snapshot-test"
-          "$RUNNER_TEMP/dashboard-snapshot-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/tests/goal_editor_state_test.swift -o "$RUNNER_TEMP/goal-editor-state-test"
-          "$RUNNER_TEMP/goal-editor-state-test"
+          while read -r source test; do
+            swiftc -parse-as-library "native/$source.swift" "native/tests/$test.swift" -o "$RUNNER_TEMP/$test"
+            "$RUNNER_TEMP/$test"
+          done <<'EOF'
+          DuplicateApplicationPolicy duplicate_application_policy_test
+          SessionSelection session_selection_test
+          EventRetryBackoff event_retry_backoff_test
+          OperationsRefreshPolicy operations_refresh_policy_test
+          StatusRefreshPolicy status_refresh_policy_test
+          ResponsivePairLayout responsive_pair_layout_test
+          AgenthailModels dashboard_snapshot_test
+          AgenthailModels goal_editor_state_test
+          EOF
       - name: Installer lint
         run: |
           find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
           scripts/test-codesign-retry.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
+
+  ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DERIVED: ${{ github.workspace }}/../ios-derived
+    steps:
+      - uses: actions/checkout@v5
+      - name: Start simulator
+        run: |
+          udid="$(scripts/ios-simulator.sh iphone)"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+          xcrun simctl boot "$udid"
+      - name: Build for simulator tests
+        run: xcodebuild build-for-testing -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED"
+      - name: iOS simulator tests
+        run: |
+          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+          xcodebuild test-without-building -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" -derivedDataPath "$DERIVED" -parallel-testing-enabled NO
+          plist="$DERIVED/Build/Products/Debug-iphonesimulator/Agenthail.app/Info.plist"
+          test "$(plutil -extract NSCameraUsageDescription raw -o - "$plist")" = "Scan the pairing code shown by Agenthail on your Mac."
+          test "$(plutil -extract UIBackgroundModes.0 raw -o - "$plist")" = "remote-notification"
+
+  ios-release:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify generated iOS project
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          scripts/test-xcodegen-project.sh
+      - name: iOS release device build
+        run: xcodebuild build -project native/Agenthail.xcodeproj -scheme AgenthailIOS -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
 
   installer:
     runs-on: macos-latest
