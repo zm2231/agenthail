@@ -304,6 +304,31 @@ func TestReplaceAliasKeepsOneNamePerSession(t *testing.T) {
 	}
 }
 
+func TestReserveGeneratedAliasKeepsExistingHandleAndNeverSteals(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, id := range []string{"one", "two"} {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := r.ReserveGeneratedAlias("one", "Build Agent")
+	if err != nil || first != "build-agent" {
+		t.Fatalf("first=%q err=%v", first, err)
+	}
+	again, err := r.ReserveGeneratedAlias("one", "other")
+	if err != nil || again != first {
+		t.Fatalf("again=%q err=%v", again, err)
+	}
+	second, err := r.ReserveGeneratedAlias("two", "Build Agent")
+	if err != nil || second == first {
+		t.Fatalf("second=%q err=%v", second, err)
+	}
+	owner, err := r.LookupAlias(first)
+	if err != nil || owner != "one" {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+}
+
 func TestRegisterSessionMergesResumedClaudeIdentity(t *testing.T) {
 	r := openTestRegistry(t)
 	oldSession := surface.Session{ID: "old", Surface: surface.KindClaude, Transcript: "/tmp/shared.jsonl"}

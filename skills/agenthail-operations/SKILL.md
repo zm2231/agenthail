@@ -81,10 +81,12 @@ do not resend.
 The daemon registers each agent in the default Codex/Notion discovery page as
 an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
 senders register on first send to Claude. `--from` must resolve to a session
-or alias; otherwise identity comes from `AGENTHAIL_SESSION_ID`,
-`CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, then the enclosing Claude Code
-session found by process ancestry. Without identity, an operator peer
-receives replies into history. Inbound messages to read-only/offline agents
+or alias; otherwise identity is resolved in this order: `AGENTHAIL_SESSION_ID`,
+`CLAUDE_SESSION_ID`, the verified native Claude caller discovered through the
+command's process ancestry, then `CODEX_THREAD_ID`. The verified native Claude
+caller is checked before `CODEX_THREAD_ID` so an inherited parent Codex thread
+cannot override a Claude-launched command's own identity. Without identity, an
+operator peer receives replies into history. Inbound messages to read-only/offline agents
 are denied rather than silently queued. Peer histories include received
 messages, rejection reasons, and asynchronous Claude receipts.
 

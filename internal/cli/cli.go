@@ -196,9 +196,9 @@ Other:
   version [--json]              Build and revision information
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
-Sender: --from resolves a session; otherwise AGENTHAIL_SESSION_ID, CODEX_THREAD_ID,
-        or CLAUDE_SESSION_ID identifies the sender. Native Claude peers require
-        the daemon and register automatically before sending.
+Sender: --from resolves a session; otherwise identity comes from AGENTHAIL_SESSION_ID,
+        CLAUDE_SESSION_ID, the verified native Claude caller, then CODEX_THREAD_ID.
+        Native Claude peers require the daemon and register automatically before sending.
 `)
 }
 
