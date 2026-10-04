@@ -114,6 +114,9 @@ func TestSessionPageHandoffReusesSeedWithoutJournalChurn(t *testing.T) {
 func TestReadJournalPagePreservesPagingIdentityRolesAndBodyReferences(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	retention := registry.SessionJournalRetention{Count: 32, Bytes: 16 << 10}
+	if err := r.RecordSessionJournalHistoryBoundary(from.ID, 0); err != nil {
+		t.Fatal(err)
+	}
 	for index := 1; index <= 5; index++ {
 		payload := sessionJournalPayload{
 			ItemID:  "item-" + string(rune('0'+index)),

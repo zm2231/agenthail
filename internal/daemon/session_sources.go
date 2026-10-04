@@ -59,6 +59,7 @@ type sessionSourceManager struct {
 	registry *registry.Registry
 	mu       sync.Mutex
 	sources  map[string]*sessionSource
+	running  sync.WaitGroup
 }
 
 type sessionSource struct {
@@ -113,6 +114,7 @@ func (m *sessionSourceManager) subscribeContext(waitContext context.Context, ses
 		ctx, cancel := context.WithCancel(context.Background())
 		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
 		m.sources[session.ID] = source
+		m.running.Add(1)
 		start = true
 	}
 	subscription := source.subscribe("viewer")
@@ -149,6 +151,7 @@ func (m *sessionSourceManager) holdSource(session *surface.Session, adapter surf
 		ctx, cancel := context.WithCancel(context.Background())
 		source = &sessionSource{manager: m, session: *session, adapter: adapter, epoch: epoch, ctx: ctx, cancel: cancel, seeded: make(chan struct{}), subscribers: map[uint64]chan registry.SessionJournalEntry{}, holders: map[string]int{}, appendBodies: map[string]string{}, appendCursors: map[string]uint64{}}
 		m.sources[session.ID] = source
+		m.running.Add(1)
 		start = true
 	}
 	source.mu.Lock()
@@ -216,11 +219,12 @@ func (s *sessionSource) stop() {
 
 func (m *sessionSourceManager) shutdown() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for id, source := range m.sources {
 		source.cancel()
 		delete(m.sources, id)
 	}
+	m.mu.Unlock()
+	m.running.Wait()
 }
 
 func (s *sessionSource) run() {
@@ -238,6 +242,7 @@ func (s *sessionSource) run() {
 	defer func() {
 		s.closeSubscribers()
 		s.remove()
+		s.manager.running.Done()
 	}()
 	seedErr := s.seedJournal()
 	s.setSeedErr(seedErr)
@@ -456,10 +461,10 @@ func (s *sessionSource) loadSeed() error {
 	if localTranscript && read.TranscriptIdentity == "" {
 		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
-	s.appendSeedItems(read.Items)
 	if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {
 		return err
 	}
+	s.appendSeedItems(read.Items)
 	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
 }
 

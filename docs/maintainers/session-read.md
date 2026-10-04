@@ -4,13 +4,18 @@
 session journal page. `limit` is between 4 and 40; `timelineBefore` requests
 items strictly before the returned `timeline.nextBefore` cursor. Items retain
 their identity, role, title, status and retained body reference. If retention
-has pruned history needed by `timelineBefore`, the endpoint returns `409` with
+has pruned history needed by `timelineBefore`, or the journal has no older-history
+boundary, the endpoint returns `409` with
 `error.code` set to `history_gap` and the retained `earliestSeq`/`latestSeq`.
 
 `timeline.nextBefore` is opaque; clients pass it back unchanged and treat `0`
-as the end of history. The bounded seed records the provider's older-history
-boundary. When a journal page reaches the oldest journal entry and the provider
-reported older history, `nextBefore` addresses that provider history.
+as the end of history. A seed into an empty journal records the provider's
+older-history boundary. When a journal page reaches the oldest journal entry and
+the provider reported older history, `nextBefore` addresses that provider
+history; when the provider reported none, it is `0`. A journal whose oldest
+entries predate any recorded boundary keeps `nextBefore` on its oldest entry,
+and requesting it returns the `409` `history_gap` response because older
+activity is not retained.
 Requesting it reads one bounded provider page through the session's shared
 source, serialized with its seed and refresh reads, and returns those items
 with `readSource` set to the provider source and the next provider cursor. The
