@@ -1221,6 +1221,10 @@ async function action(action, extra = {}, idempotencyKey = crypto.randomUUID(), 
     throw error;
   }
 }
+function deliveryStatusLabel(result) {
+  const status = result?.result?.evidence || result?.status;
+  return status === "queued" ? "Queued" : status === "submitted" ? "Submitted" : "Sent";
+}
 async function voiceRequest(action, extra = {}) {
   const response = await fetch("/api/voice", {
     method: action ? "POST" : "GET",
@@ -1382,8 +1386,7 @@ async function send(requestedAction = "send") {
     app.drafts.delete(app.selected.id);
     resizeComposer();
     renderSlashMenu();
-    const evidence = result?.result?.evidence;
-    const status = evidence === "queued" ? "Queued" : evidence === "submitted" ? "Submitted" : "Sent";
+    const status = deliveryStatusLabel(result);
     const target = sessionTarget(app.selected);
     toast(
       composerAction === "steer"
