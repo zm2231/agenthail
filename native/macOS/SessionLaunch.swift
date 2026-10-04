@@ -3,6 +3,7 @@ import Foundation
 enum SessionLaunchOutcome: Equatable {
     case opened
     case submitted(String)
+    case halted(String)
     case failed(String)
 }
 
@@ -10,6 +11,7 @@ enum SessionLaunchDecision: Equatable {
     case open(String)
     case submitted(String)
     case unconfirmed(String?)
+    case halted(String, sessionID: String?)
     case failed(String)
 
     init(_ receipt: SessionCreationReceipt, launcher: String?, agent: String) {
@@ -18,7 +20,11 @@ enum SessionLaunchDecision: Equatable {
             return
         }
         guard receipt.ok || receipt.accepted == true else {
-            self = .failed(receipt.error ?? "The session didn't start.")
+            if receipt.retryable == false {
+                self = .halted(receipt.error ?? "The session didn't start.", sessionID: receipt.id)
+            } else {
+                self = .failed(receipt.error ?? "The session didn't start.")
+            }
             return
         }
         if let id = receipt.id, !id.isEmpty {
@@ -33,7 +39,7 @@ enum SessionLaunchDecision: Equatable {
     var settlesRetry: Bool {
         switch self {
         case .open, .submitted: return true
-        case .unconfirmed, .failed: return false
+        case .unconfirmed, .halted, .failed: return false
         }
     }
 }

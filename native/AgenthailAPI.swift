@@ -144,14 +144,28 @@ final class AgenthailAPI: @unchecked Sendable {
         if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
+        let payload: Data
         if surface == "codex" {
-            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher)
-            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
+            payload = try JSONEncoder().encode(SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher))
+        } else {
+            var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
+            if surface == "claude" { body.merge(claude.fields) { _, value in value } }
+            if let launcher { body["launcher"] = launcher }
+            payload = try JSONSerialization.data(withJSONObject: body)
         }
-        var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-        if surface == "claude" { body.merge(claude.fields) { _, value in value } }
-        if let launcher { body["launcher"] = launcher }
-        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.timeoutInterval = 65
+        request.httpBody = payload
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: idempotencyKey)
+        let (data, response) = try await session.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode),
+           let receipt = try? JSONDecoder().decode(SessionCreationReceipt.self, from: data), receipt.error != nil {
+            return receipt
+        }
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(SessionCreationReceipt.self, from: data)
     }
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {
@@ -388,6 +402,10 @@ final class AgenthailAPI: @unchecked Sendable {
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
             var message = HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+            if let data, let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty, text.count <= 500, !text.hasPrefix("{"), !text.hasPrefix("<") {
+                message = text
+            }
             if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail

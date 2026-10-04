@@ -274,6 +274,9 @@ final class AgenthailModel: ObservableObject {
             case .unconfirmed(let id):
                 if let id { await openCreatedSession(id) }
                 return .failed("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
+            case .halted(let message, let id):
+                if let id { await openCreatedSession(id) }
+                return .halted(message)
             case .failed(let message):
                 return .failed(message)
             }

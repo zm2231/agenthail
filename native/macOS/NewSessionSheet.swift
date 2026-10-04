@@ -131,6 +131,9 @@ struct NewSessionSheet: View {
             switch outcome {
             case .opened: dismiss()
             case .submitted(let note): submitted = note
+            case .halted(let failure):
+                error = failure
+                submitted = "Check the sidebar before starting it again."
             case .failed(let failure): error = failure
             }
         }
