@@ -617,6 +617,9 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 				if !ok {
 					return
 				}
+				if entry.Seq <= window.LatestSeq {
+					continue
+				}
 				event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
 				if decodeErr != nil {
 					select {

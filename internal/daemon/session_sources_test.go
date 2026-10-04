@@ -645,6 +645,37 @@ func TestSessionSourceSharesOneUpstreamAndJournalsNormalizedEvents(t *testing.T)
 	}
 }
 
+func TestPrepareStreamDropsSeedBufferAndKeepsFastPostCursorEvent(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{
+		daemonSurface: fake,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent, 1),
+		items:         []surface.TimelineItem{{ID: "seed", Kind: "text", Role: "assistant", Text: "seed"}},
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(registry)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	subscription, err := manager.prepareStream(ctx, &from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	if subscription.Cursor != 1 {
+		t.Fatalf("cursor=%d, want seed watermark 1", subscription.Cursor)
+	}
+	adapter.events <- surface.StreamEvent{ID: "reply", ProviderKey: "reply", Version: 1, Operation: "upsert", Kind: "text", Role: "assistant", TurnID: "turn-fast", Text: "fast reply"}
+	select {
+	case event := <-subscription.Events:
+		if event.Seq <= subscription.Cursor || event.Body != "fast reply" || event.TurnID != "turn-fast" {
+			t.Fatalf("event=%+v cursor=%d", event, subscription.Cursor)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("post-cursor event was dropped")
+	}
+}
+
 func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}
