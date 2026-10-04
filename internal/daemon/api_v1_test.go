@@ -376,6 +376,16 @@ func TestAPIV1RoutesRejectUnauthorizedRequestsWithTypedJSON(t *testing.T) {
 	}
 }
 
+func TestAPIV1SessionAttachmentAuthenticatedReadScopeReachesSessionLookup(t *testing.T) {
+	d, _, _, _, _ := daemonFixture(t)
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session-attachment?sessionId=missing&id=attachment:0:0:"+strings.Repeat("0", 64), nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	assertAPIV1Error(t, response, http.StatusNotFound, "session_not_found")
+}
+
 func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
 	d, r, _, _, _ := daemonFixture(t)
 	intent, err := r.RecordDeliveryIntent(registry.DeliveryIntentInput{SenderSessionID: "from", TargetSessionID: "to", Message: "delivery body", Status: registry.DeliveryIntentQueued, Evidence: surface.EvidenceQueued})
