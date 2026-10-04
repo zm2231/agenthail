@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -426,7 +427,7 @@ func (s *sessionSource) loadSeed() error {
 	}
 	streamable := surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream
 	if statusErr == nil && seedStatus == registry.SessionJournalSeeded && !localTranscript && streamable {
-		return nil
+		return s.resumeClaudeTranscript(trustedIdentity)
 	}
 	if localTranscript && trustedIdentity == "" && seedSeq > 0 {
 		return fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
@@ -466,6 +467,50 @@ func (s *sessionSource) loadSeed() error {
 	}
 	s.appendSeedItems(read.Items)
 	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
+}
+
+// resumeClaudeTranscript starts a fresh Claude source at the newest transcript record already in
+// the journal, so turns written while no source was running are delivered instead of skipped.
+// Replaying that one record is idempotent because its provider key is stable.
+func (s *sessionSource) resumeClaudeTranscript(trustedIdentity string) error {
+	if s.session.Surface != surface.KindClaude || trustedIdentity == "" || s.session.TranscriptOffsetSet {
+		return nil
+	}
+	resume := int64(-1)
+	before := uint64(0)
+	for {
+		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
+		if err != nil {
+			var gap *registry.SessionJournalHistoryGapError
+			if errors.As(err, &gap) {
+				break
+			}
+			return err
+		}
+		for _, entry := range page.Entries {
+			key, ok := strings.CutPrefix(entry.ProviderKey, "timeline:")
+			if !ok {
+				continue
+			}
+			offset, _, ok := strings.Cut(key, "-")
+			if !ok {
+				continue
+			}
+			if value, err := strconv.ParseInt(offset, 10, 64); err == nil && value > resume {
+				resume = value
+			}
+		}
+		if page.NextBefore == 0 {
+			break
+		}
+		before = page.NextBefore
+	}
+	if resume >= 0 {
+		s.session.TranscriptOffset = resume
+		s.session.TranscriptOffsetSet = true
+		s.session.TranscriptIdentity = trustedIdentity
+	}
+	return nil
 }
 
 func (s *sessionSource) setSeedErr(err error) {
