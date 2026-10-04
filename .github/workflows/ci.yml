@@ -112,7 +112,9 @@ jobs:
           cache: npm
           cache-dependency-path: sidecar/package-lock.json
       - name: Install and upgrade test
-        run: scripts/test-install-upgrade.sh
+        run: |
+          scripts/test-pkg-component-plist.sh
+          scripts/test-install-upgrade.sh
 
   package:
     runs-on: macos-15
