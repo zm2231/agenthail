@@ -972,6 +972,15 @@ function renderImageAttachment(item, session) {
   const url = `/api/session-attachment?sessionId=${encodeURIComponent(session.id)}&id=${encodeURIComponent(attachment.id)}`;
   return `<figure class="turn transcript-image"><img src="${escape(url)}" loading="lazy" decoding="async" alt="${fallback}" referrerpolicy="no-referrer"><figcaption>${fallback}</figcaption></figure>`;
 }
+function renderImageTimeline(items, session) {
+  return items.map(item => {
+    if (item.kind === "attachment") return renderImageAttachment(item, session);
+    if (!["text", "message"].includes(item.kind) || !item.text) return "";
+    const user = item.role === "user";
+    const content = user ? handoffMessage(item.text) : {text: item.text, label: labels[session.surface] || session.surface};
+    return renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`);
+  }).join("");
+}
 function renderChat() {
   const { exchanges = [], goal, model, models = [], capabilities = {}, readOnly, readOnlyReason, context, transcriptWarning } = app.history || {};
   const session = app.selected;
@@ -1042,13 +1051,7 @@ function renderChat() {
     chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24;
   const timeline = app.history?.timeline?.items || [];
   const messages = timeline.some(item => item.kind === "attachment")
-    ? timeline.map(item => {
-      if (item.kind === "attachment") return renderImageAttachment(item, session);
-      if (item.kind !== "text" || !item.text) return "";
-      const user = item.role === "user";
-      const content = user ? handoffMessage(item.text) : {text: item.text, label: labels[session.surface] || session.surface};
-      return renderMessage(content.text, user ? "user" : "agent", content.label, `${session.id}:${item.id}`);
-    }).join("")
+    ? renderImageTimeline(timeline, session)
     : exchanges
     .flatMap((exchange, index) => {
       const user = handoffMessage(exchange.user);
