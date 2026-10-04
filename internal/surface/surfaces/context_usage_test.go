@@ -24,7 +24,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.UsedTokens != 42000 || usage.ContextWindow != 200000 || usage.CompactionCount != 1 || usage.ReclaimedTokens != 108000 || usage.Compacting {
+	if usage.UsedTokens != 42000 || usage.ContextWindow != 0 || usage.WindowEstimated || usage.CompactionCount != 1 || usage.ReclaimedTokens != 108000 || usage.Compacting {
 		t.Fatalf("usage=%+v", usage)
 	}
 	appendTestTranscript(t, path, `{"type":"user","timestamp":"2026-07-16T01:02:00Z","message":{"content":"/compact"}}`)
@@ -43,7 +43,7 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usage.Compacting || usage.UsedTokens != 41000 || usage.ContextWindow != 1000000 || usage.CompactionCount != 2 {
+	if usage.Compacting || usage.UsedTokens != 41000 || usage.ContextWindow != 0 || usage.WindowEstimated || usage.CompactionCount != 2 {
 		t.Fatalf("usage=%+v", usage)
 	}
 	appendTestTranscript(t, path, `{"type":"user","timestamp":"2026-07-16T01:03:00Z","message":{"content":"<command-name>/compact</command-name><command-args></command-args>"}}`)
@@ -60,6 +60,21 @@ func TestClaudeContextUsageTracksCompactionAndAppends(t *testing.T) {
 		t.Fatal(err)
 	}
 	if usage.Compacting {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestClaudeContextUsageReturnsTokensWhenWindowIsUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	writeTestTranscript(t, path,
+		`{"type":"assistant","timestamp":"2026-07-16T01:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000,"cache_creation_input_tokens":0,"cache_read_input_tokens":249000,"output_tokens":500}}}`,
+	)
+	adapter := NewClaude("", t.TempDir())
+	usage, err := adapter.ContextUsage(context.Background(), &surface.Session{ID: "claude", Surface: surface.KindClaude, Transcript: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.UsedTokens != 250000 || usage.ContextWindow != 0 || usage.WindowEstimated {
 		t.Fatalf("usage=%+v", usage)
 	}
 }
