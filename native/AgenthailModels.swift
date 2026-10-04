@@ -107,6 +107,35 @@ struct SessionRuntime: Codable, Hashable {
     var focusable: Bool? = nil
 }
 
+struct GoalEditorState: Equatable {
+    enum Mode: Equatable {
+        case newGoal
+        case editGoal
+        case budget
+    }
+
+    private(set) var sessionID: String?
+    private(set) var mode: Mode?
+
+    mutating func begin(_ mode: Mode, sessionID: String) {
+        self.sessionID = sessionID
+        self.mode = mode
+    }
+
+    mutating func select(sessionID: String) {
+        if self.sessionID != sessionID { reset() }
+    }
+
+    mutating func reset() {
+        sessionID = nil
+        mode = nil
+    }
+
+    func canCommit(currentSessionID: String?) -> Bool {
+        mode != nil && sessionID != nil && sessionID == currentSessionID
+    }
+}
+
 struct LauncherOption: Decodable, Identifiable, Hashable {
     let id: String
     let label: String
