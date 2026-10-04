@@ -1,9 +1,11 @@
 import Foundation
 
 enum ComposerDrop {
+    private static let plain = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/._-+,:@%="))
+
     static func text(for urls: [URL]) -> String? {
-        let paths = urls.filter(\.isFileURL).map { quoted(($0.path as NSString).abbreviatingWithTildeInPath) }
-        return paths.isEmpty ? nil : paths.joined(separator: " ")
+        guard !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return nil }
+        return urls.map { word(for: $0.path) }.joined(separator: " ")
     }
 
     static func insert(_ dropped: String, into draft: String) -> String {
@@ -11,8 +13,18 @@ enum ComposerDrop {
         return draft.last?.isWhitespace == true ? draft + dropped : "\(draft) \(dropped)"
     }
 
-    private static func quoted(_ path: String) -> String {
-        guard path.contains(where: { $0.isWhitespace || "'\"`$\\".contains($0) }) else { return path }
-        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    private static func word(for path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path.hasPrefix(home + "/") {
+            return "~/" + quoted(String(path.dropFirst(home.count + 1)))
+        }
+        return quoted(path)
+    }
+
+    private static func quoted(_ text: String) -> String {
+        guard !text.isEmpty, text.unicodeScalars.allSatisfy(plain.contains) else {
+            return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+        return text
     }
 }
