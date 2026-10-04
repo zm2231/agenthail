@@ -544,7 +544,11 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	if observation == nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID == "" {
 		return errors.New("selected target has no confirmed active turn to interrupt")
 	}
-	if err := target.Adapter.Interrupt(ctx, target.Session); err != nil {
+	interrupter, ok := target.Adapter.(surface.TurnInterrupter)
+	if !ok {
+		return errors.New("selected target cannot confirm turn-specific interruption")
+	}
+	if err := interrupter.InterruptTurn(ctx, target.Session, observation.ActiveTurnID); err != nil {
 		return err
 	}
 	v.Message = "Interrupt requested for " + target.Session.Name + " turn " + observation.ActiveTurnID + "."
