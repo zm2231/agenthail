@@ -30,7 +30,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var detailLoadTask: Task<Void, Never>?
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
-    private var streamedMetadata: Set<String> = []
+    private var metadata = MetadataOverlay()
     private var closed = false
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
@@ -69,7 +69,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detailReloadPending = false
         detailReloadTask?.cancel()
         detailReloadTask = nil
-        streamedMetadata = []
+        metadata = MetadataOverlay(seed: detail)
         startSessionStream(id)
         startDetailLoad(id)
         startMetadataLoad(id)
@@ -106,17 +106,12 @@ final class SessionPane: ObservableObject, Identifiable {
                 let retained = Set(olderItems.map(\.id) + (loaded.timeline?.items.map(\.id) ?? []))
                 olderItems += (detail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
-            var merged = loaded
-            if let current = detail, current.session.id == id {
-                merged.context = loaded.context ?? current.context
-                merged.goal = loaded.goal ?? current.goal
-                merged.model = loaded.model ?? current.model
-                merged.models = loaded.models ?? current.models
-            }
+            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
+            let merged = metadata.apply(to: loaded)
             detail = merged
             detailStale = false
             detailRefreshFailed = false
-            model.detailLoaded(loaded, for: id)
+            model.detailLoaded(merged, for: id)
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
             model.operationError = error.localizedDescription
@@ -245,16 +240,18 @@ final class SessionPane: ObservableObject, Identifiable {
         guard !closed, let api = model.api else { return }
         let selection = selectionGeneration
         metadataTask = Task {
-            guard let metadata = try? await api.sessionMetadata(id: id) else { return }
-            guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil,
-                  var current = detail, current.session.id == id else { return }
-            if !streamedMetadata.contains("context"), let context = metadata.context { current.context = context }
-            if !streamedMetadata.contains("goal"), let goal = metadata.goal { current.goal = goal }
-            if let modelName = metadata.model { current.model = modelName }
-            if let models = metadata.models { current.models = models }
-            detail = current
-            model.refreshCachedDetail(current, for: id)
+            guard let loaded = try? await api.sessionMetadata(id: id) else { return }
+            guard !Task.isCancelled, !closed, selectionGeneration == selection, selectedSessionID == id, removedSession == nil else { return }
+            metadata.absorb(context: loaded.context, goal: loaded.goal, model: loaded.model, models: loaded.models)
+            applyMetadata(to: id)
         }
+    }
+
+    private func applyMetadata(to id: String) {
+        guard let current = detail, current.session.id == id else { return }
+        let merged = metadata.apply(to: current)
+        detail = merged
+        model.refreshCachedDetail(merged, for: id)
     }
 
     private func startDetailLoad(_ id: String) {
@@ -311,11 +308,9 @@ final class SessionPane: ObservableObject, Identifiable {
         guard event.stream == "session", event.sessionId == selectedSessionID else { return }
         sessionCursor = max(sessionCursor, event.seq)
         if event.data.kind == "context" || event.data.kind == "goal" {
-            guard removedSession == nil, var current = detail, current.session.id == event.sessionId else { return }
-            if event.data.kind == "context" { current.context = event.data.context } else { current.goal = event.data.goal }
-            streamedMetadata.insert(event.data.kind)
-            detail = current
-            model.refreshCachedDetail(current, for: event.sessionId)
+            guard removedSession == nil else { return }
+            if event.data.kind == "context" { metadata.stream(context: event.data.context) } else { metadata.stream(goal: event.data.goal) }
+            applyMetadata(to: event.sessionId)
             return
         }
         if let loadedAt = detailLoadedAt, let changedAt = SessionTree.parseTimestamp(event.data.ts), changedAt < loadedAt {
