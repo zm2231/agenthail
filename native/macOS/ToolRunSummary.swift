@@ -12,7 +12,7 @@ enum ToolRunSummary {
         Category(names: ["Read", "read_file", "view_image", "NotebookRead"], singular: "read 1 file", plural: "read %d files"),
         Category(names: ["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"], singular: "edited 1 file", plural: "edited %d files"),
         Category(names: ["Grep", "Glob", "LS", "ToolSearch"], singular: "searched once", plural: "searched %d times"),
-        Category(names: ["WebFetch", "WebSearch", "web_search"], singular: "made 1 web lookup", plural: "made %d web lookups"),
+        Category(names: ["WebFetch", "WebSearch", "web_search", "Web search"], singular: "made 1 web lookup", plural: "made %d web lookups"),
         Category(names: ["Agent", "Task", "spawn_agent"], singular: "started 1 subagent", plural: "started %d subagents"),
     ]
 

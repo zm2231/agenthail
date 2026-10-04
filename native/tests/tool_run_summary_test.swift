@@ -11,6 +11,7 @@ struct ToolRunSummaryTest {
         expect(ToolRunSummary.label(mixed) == "Ran 3 commands and read 2 files +2 other", ToolRunSummary.label(mixed))
         expect(ToolRunSummary.label([item("toolCall", "Edit")]) == "Edited 1 file", "single category")
         expect(ToolRunSummary.label([item("reasoning", "Thinking")]) == "Thought", "reasoning only")
+        expect(ToolRunSummary.label([item("toolCall", "Web search")]) == "Made 1 web lookup", "Codex web search")
         expect(ToolRunSummary.isFailure(item("toolResult", "Tool result", status: "error")), "error result is a failure")
         print("tool run summary tests passed")
     }

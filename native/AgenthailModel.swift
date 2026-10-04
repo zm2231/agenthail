@@ -7,6 +7,7 @@ final class AgenthailModel: ObservableObject {
         didSet { trackFinishedSessions(from: oldValue) }
     }
     @Published private(set) var finishedUnseen: Set<String> = []
+    @Published private(set) var snapshotLoadedAt: Date?
     @Published var searchQuery = ""
     @Published private(set) var searchResults: [SessionSearchItem] = []
     @Published private(set) var searching = false
@@ -52,6 +53,9 @@ final class AgenthailModel: ObservableObject {
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
     private var drafts: [String: String] = [:]
+    private var selectionGeneration: UInt64 = 0
+    private var detailRequestGeneration: UInt64 = 0
+    private var detailAppliedGeneration: UInt64 = 0
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -103,7 +107,6 @@ final class AgenthailModel: ObservableObject {
                     return
                 } catch {
                     connectionError = error.localizedDescription
-                    snapshot = nil
                     if let apiError = error as? AgenthailAPIError, case .incompatible = apiError {
                         return
                     }
@@ -123,6 +126,7 @@ final class AgenthailModel: ObservableObject {
             if snapshot?.hasSamePresentation(as: loaded) != true {
                 snapshot = loaded
             }
+            snapshotLoadedAt = Date()
             if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
                 startCatalogStream()
             }
@@ -149,6 +153,8 @@ final class AgenthailModel: ObservableObject {
         olderItems = []
         olderCursor = nil
         olderError = nil
+        selectionGeneration &+= 1
+        detailAppliedGeneration = detailRequestGeneration
         UserDefaults.standard.set(id, forKey: "lastSelectedSessionID")
         detail = nil
         detailLoadedAt = nil
@@ -161,11 +167,14 @@ final class AgenthailModel: ObservableObject {
 
     func loadSession(_ id: String) async {
         guard let api else { return }
+        detailRequestGeneration &+= 1
+        let generation = detailRequestGeneration
         do {
             let startedAt = Date()
             if selectedSessionID == id { detailLoadedAt = startedAt }
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID) else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration else { return }
+            detailAppliedGeneration = generation
             if olderItems.isEmpty {
                 olderCursor = loaded.timeline?.nextBefore
             } else {
@@ -232,6 +241,7 @@ final class AgenthailModel: ObservableObject {
 
     func loadOlder() async {
         guard let api, let id = selectedSessionID, let cursor = olderCursor, cursor > 0, !loadingOlder else { return }
+        let selection = selectionGeneration
         loadingOlder = true
         defer { loadingOlder = false }
         do {
@@ -239,7 +249,7 @@ final class AgenthailModel: ObservableObject {
             for _ in 0..<8 {
                 guard let before = next, before > 0 else { break }
                 let page = try await api.sessionDetail(id: id, includeTimeline: true, timelineBefore: before)
-                guard selectedSessionID == id else { return }
+                guard selectionGeneration == selection else { return }
                 guard let timeline = page.timeline, timeline.unavailableReason == nil else {
                     olderError = page.timeline?.unavailableReason ?? "Older activity is unavailable."
                     return
@@ -253,7 +263,7 @@ final class AgenthailModel: ObservableObject {
             }
             olderError = nil
         } catch {
-            if selectedSessionID == id, !error.isCancellation { olderError = error.localizedDescription }
+            if selectionGeneration == selection, !error.isCancellation { olderError = error.localizedDescription }
         }
     }
 

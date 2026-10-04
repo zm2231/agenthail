@@ -11,6 +11,7 @@ struct DesktopWindow: View {
                 .navigationSplitViewColumnWidth(min: 248, ideal: 264, max: 280)
         } detail: {
             ConversationPane(model: model)
+                .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .ignoresSafeArea(.container, edges: .top)
                 .inspector(isPresented: $model.inspectorVisible) {
                     SessionInspector(model: model)
@@ -401,14 +402,25 @@ extension SessionState {
 struct ConnectionFooter: View {
     @ObservedObject var model: AgenthailModel
 
+    private var offlineLabel: String {
+        guard model.snapshot != nil, let loadedAt = model.snapshotLoadedAt else { return "Agenthail isn't running" }
+        return "Offline · as of \(relativeAge(loadedAt.formatted(.iso8601)))"
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(model.isConnected ? DesktopPalette.green : DesktopPalette.amber)
                 .frame(width: 6, height: 6)
                 .accessibilityHidden(true)
-            Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : "Offline")
+            Text(model.isConnected ? "Connected · this Mac" : model.reconnecting ? "Reconnecting…" : offlineLabel)
             Spacer()
+            if !model.isConnected && !model.reconnecting {
+                Button("Start") { model.restartDaemon() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(DesktopPalette.accentText)
+                    .help("Start the Agenthail daemon")
+            }
             SettingsLink {
                 Image(systemName: "slider.horizontal.3")
             }
@@ -437,8 +449,16 @@ struct ConversationPane: View {
             }
             .background(DesktopPalette.window)
         } else {
-            ContentUnavailableView(model.isConnected ? "Select a session" : "Agenthail is not reachable", systemImage: model.isConnected ? "bubble.left.and.bubble.right" : "bolt.horizontal.circle", description: Text(model.connectionError ?? "Choose a session from the sidebar."))
-                .background(DesktopPalette.window)
+            ContentUnavailableView {
+                Label(model.isConnected ? "Select a session" : "Agenthail isn't running", systemImage: model.isConnected ? "bubble.left.and.bubble.right" : "bolt.horizontal.circle")
+            } description: {
+                Text(model.isConnected ? "Choose a session from the sidebar." : model.connectionError ?? "The app can't reach the Agenthail daemon.")
+            } actions: {
+                if !model.isConnected {
+                    Button("Start Agenthail") { model.restartDaemon() }
+                }
+            }
+            .background(DesktopPalette.window)
         }
     }
 }
