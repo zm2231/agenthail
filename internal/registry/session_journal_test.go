@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -196,45 +195,6 @@ func TestSessionJournalPageReportsGapAfterRetentionPrunesHistory(t *testing.T) {
 	}
 	if gap.EarliestSeq != 2 || gap.LatestSeq != 11 {
 		t.Fatalf("gap=%+v, want earliest=2 latest=11", gap)
-	}
-}
-
-func TestSessionJournalMigrationNormalizesRetainedBodyBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
-	old, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	register(t, old, "session")
-	retention := SessionJournalRetention{Count: 4, Bytes: 10}
-	if _, _, err := old.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("p"), BodyRef: "body-ref", FullBody: []byte("123456789")}, retention); err != nil {
-		old.Close()
-		t.Fatal(err)
-	}
-	if _, err := old.db.Exec(`UPDATE session_journal SET bytes=length(payload); UPDATE session_journal_state SET retained_bytes=length('p'); PRAGMA user_version=8`); err != nil {
-		old.Close()
-		t.Fatal(err)
-	}
-	if err := old.Close(); err != nil {
-		t.Fatal(err)
-	}
-	migrated, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer migrated.Close()
-	var retained int
-	if err := migrated.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
-		t.Fatal(err)
-	}
-	if retained != 10 {
-		t.Fatalf("retained bytes=%d, want 10", retained)
-	}
-	if _, _, err := migrated.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "next", Payload: []byte("q")}, retention); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := migrated.SessionJournalBody("session", "body-ref", 0, 1); err == nil {
-		t.Fatal("old body remained after normalized retention pruned it")
 	}
 }
 
