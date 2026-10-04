@@ -343,19 +343,34 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			observedAt := time.Now().UTC()
 			open := session.Surface == surface.KindClaude && openClaude[session.PID]
-			row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], open, config)
-			payload, err := json.Marshal(map[string]any{"session": row})
-			if err != nil {
-				continue
+			queueCount := counts[session.ID]
+			for attempt := 0; attempt < 3; attempt++ {
+				row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], queueCount, open, config)
+				payload, err := json.Marshal(map[string]any{"session": row})
+				if err != nil {
+					break
+				}
+				projection := row
+				projection.ObservedAt = time.Time{}
+				fingerprint, err := json.Marshal(projection)
+				if err != nil {
+					break
+				}
+				key := "session.upserted:" + session.ID
+				_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+				if publishErr == nil {
+					break
+				}
+				var conflict *registry.CatalogQueueProjectionConflict
+				if !errors.As(publishErr, &conflict) {
+					d.log.Printf("catalog session %s: %s", d.resolveDisplay(session.ID), publishErr)
+					break
+				}
+				queueCount = conflict.QueueCount
+				if attempt == 2 {
+					d.log.Printf("catalog session %s remained unstable while publishing queue projection", d.resolveDisplay(session.ID))
+				}
 			}
-			projection := row
-			projection.ObservedAt = time.Time{}
-			fingerprint, err := json.Marshal(projection)
-			if err != nil {
-				continue
-			}
-			key := "session.upserted:" + session.ID
-			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		}
 		complete := true
 		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
@@ -388,23 +403,34 @@ func (d *Daemon) publishCatalogQueueCounts() {
 	}
 	now := time.Now()
 	for _, record := range snapshot.Sessions {
-		var projection dashboardSession
-		if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
-			continue
-		}
 		count := counts[record.Session.ID]
-		if projection.QueueCount == count {
-			continue
-		}
-		projection.QueueCount = count
-		projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
-		fingerprint, err := json.Marshal(projection)
-		if err != nil {
-			continue
-		}
-		if err := d.catalog.updateProjection(record.Session.ID, record.ProjectionFingerprint, string(fingerprint)); err != nil {
-			d.log.Printf("catalog queue projection %s: %s", d.resolveDisplay(record.Session.ID), err)
-			return
+		for attempt := 0; attempt < 3; attempt++ {
+			var projection dashboardSession
+			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+				break
+			}
+			if projection.QueueCount == count {
+				break
+			}
+			projection.QueueCount = count
+			projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
+			fingerprint, err := json.Marshal(projection)
+			if err != nil {
+				break
+			}
+			if err := d.catalog.updateProjection(record.Session.ID, record.ProjectionFingerprint, string(fingerprint)); err == nil {
+				break
+			} else {
+				var conflict *registry.CatalogQueueProjectionConflict
+				if !errors.As(err, &conflict) {
+					d.log.Printf("catalog queue projection %s: %s", d.resolveDisplay(record.Session.ID), err)
+					break
+				}
+				count = conflict.QueueCount
+				if attempt == 2 {
+					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(record.Session.ID))
+				}
+			}
 		}
 	}
 }
