@@ -1,0 +1,184 @@
+package surfaces
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+)
+
+// ClaudeRunObservation is the provider-owned metadata available in a local
+// Claude Code background job record. Fields absent from that record remain
+// absent; this source does not infer lifecycle state from transcript text.
+type ClaudeRunObservation struct {
+	RecordPath      string    `json:"recordPath"`
+	JobID           string    `json:"jobId"`
+	SessionID       string    `json:"sessionId,omitempty"`
+	ResumeSessionID string    `json:"resumeSessionId,omitempty"`
+	RunType         string    `json:"runType,omitempty"`
+	ProviderState   string    `json:"providerState,omitempty"`
+	CreatedAt       time.Time `json:"createdAt,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt,omitempty"`
+}
+
+// ClaudeSubagentLink is a parent Claude session and its local subagent
+// transcript. The linkage is validated against both the path and transcript.
+type ClaudeSubagentLink struct {
+	ParentSessionID string `json:"parentSessionId"`
+	AgentID         string `json:"agentId"`
+	TranscriptPath  string `json:"transcriptPath"`
+}
+
+type claudeRunRecord struct {
+	Template        string `json:"template"`
+	State           string `json:"state"`
+	SessionID       string `json:"sessionId"`
+	ResumeSessionID string `json:"resumeSessionId"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
+type claudeSubagentRecord struct {
+	SessionID string `json:"sessionId"`
+	AgentID   string `json:"agentId"`
+}
+
+// ObserveClaudeRuns reads the installed Claude Code job-record producer
+// without invoking Claude Code or changing any session. It observes only
+// background records under <home>/.claude/jobs.
+func ObserveClaudeRuns(ctx context.Context, home string) ([]ClaudeRunObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home: %w", err)
+		}
+	}
+	paths, err := filepath.Glob(filepath.Join(home, ".claude", "jobs", "*", "state.json"))
+	if err != nil {
+		return nil, fmt.Errorf("discover Claude job records: %w", err)
+	}
+	sort.Strings(paths)
+	observations := make([]ClaudeRunObservation, 0, len(paths))
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		observation, err := readClaudeRunRecord(path)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
+func readClaudeRunRecord(path string) (ClaudeRunObservation, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ClaudeRunObservation{}, fmt.Errorf("read Claude job record %s: %w", path, err)
+	}
+	var record claudeRunRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return ClaudeRunObservation{}, fmt.Errorf("parse Claude job record %s: %w", path, err)
+	}
+	createdAt, err := parseClaudeRunTime(record.CreatedAt, "createdAt", path)
+	if err != nil {
+		return ClaudeRunObservation{}, err
+	}
+	updatedAt, err := parseClaudeRunTime(record.UpdatedAt, "updatedAt", path)
+	if err != nil {
+		return ClaudeRunObservation{}, err
+	}
+	jobID := filepath.Base(filepath.Dir(path))
+	return ClaudeRunObservation{
+		RecordPath:      path,
+		JobID:           jobID,
+		SessionID:       record.SessionID,
+		ResumeSessionID: record.ResumeSessionID,
+		RunType:         record.Template,
+		ProviderState:   record.State,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+	}, nil
+}
+
+func parseClaudeRunTime(value, field, path string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse Claude job record %s %s: %w", path, field, err)
+	}
+	return at, nil
+}
+
+// ObserveClaudeSubagentLinks reads the installed Claude Code subagent
+// transcript topology without invoking Claude Code or changing any session.
+func ObserveClaudeSubagentLinks(ctx context.Context, home string) ([]ClaudeSubagentLink, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home: %w", err)
+		}
+	}
+	paths, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", "*", "subagents", "agent-*.jsonl"))
+	if err != nil {
+		return nil, fmt.Errorf("discover Claude subagent transcripts: %w", err)
+	}
+	sort.Strings(paths)
+	links := make([]ClaudeSubagentLink, 0, len(paths))
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		link, err := readClaudeSubagentLink(path)
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, link)
+	}
+	return links, nil
+}
+
+func readClaudeSubagentLink(path string) (ClaudeSubagentLink, error) {
+	parentSessionID := filepath.Base(filepath.Dir(filepath.Dir(path)))
+	filename := filepath.Base(path)
+	agentID := filename[len("agent-") : len(filename)-len(".jsonl")]
+	if parentSessionID == "" || agentID == "" {
+		return ClaudeSubagentLink{}, fmt.Errorf("invalid Claude subagent transcript path %s", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return ClaudeSubagentLink{}, fmt.Errorf("open Claude subagent transcript %s: %w", path, err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
+	for scanner.Scan() {
+		var record claudeSubagentRecord
+		if json.Unmarshal(scanner.Bytes(), &record) != nil || record.SessionID == "" || record.AgentID == "" {
+			continue
+		}
+		if record.SessionID != parentSessionID || record.AgentID != agentID {
+			return ClaudeSubagentLink{}, fmt.Errorf("Claude subagent transcript %s does not match its path", path)
+		}
+		return ClaudeSubagentLink{ParentSessionID: parentSessionID, AgentID: agentID, TranscriptPath: path}, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return ClaudeSubagentLink{}, fmt.Errorf("read Claude subagent transcript %s: %w", path, err)
+	}
+	return ClaudeSubagentLink{}, fmt.Errorf("Claude subagent transcript %s has no identifying record", path)
+}
