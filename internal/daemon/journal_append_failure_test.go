@@ -1,9 +1,15 @@
 package daemon
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -153,4 +159,70 @@ func TestJournalSeedFailureThenLiveHandoffDoesNotDuplicate(t *testing.T) {
 		t.Fatalf("seed/live handoff body=%q", rows["timeline:reply"].Body)
 	}
 	requireJournalFailureEvidence(t, reg, from.ID, sourceErrors)
+}
+
+type replayingStreamSurface struct {
+	*flakySeedSurface
+	replay chan struct{}
+	calls  atomic.Int32
+}
+
+func (s *replayingStreamSurface) Stream(ctx context.Context, _ *surface.Session, _ string, onEvent func(surface.StreamEvent), _ time.Duration) error {
+	onEvent(surface.StreamEvent{ID: "replayed", ProviderKey: "replayed", Cursor: 1, Operation: "upsert", Kind: "message", Role: "assistant", Text: "must persist"})
+	if s.calls.Add(1) == 1 {
+		select {
+		case <-s.replay:
+			return surface.ErrStreamWindow
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestDaemonSessionActivityRecoversReplayAfterTransientJournalFailure(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &replayingStreamSurface{flakySeedSurface: &flakySeedSurface{daemonSurface: fake}, replay: make(chan struct{})}
+	adapter.caps.Stream = true
+	allow := rejectJournalWrites(t, reg, "replayed")
+	d := New(reg, []surface.Surface{adapter})
+	defer d.sources.shutdown()
+	subscription, err := d.sources.subscribe(&from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	waitFor(t, 5*time.Second, func() bool {
+		_, sourceErrors := journalRows(t, reg, from.ID)
+		return len(sourceErrors) > 0
+	})
+	allow()
+	close(adapter.replay)
+	readTimeline := func() surface.SessionTimeline {
+		response := httptest.NewRecorder()
+		d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+from.ID+"&timeline=1", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		var body struct {
+			Timeline surface.SessionTimeline `json:"timeline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Timeline
+	}
+	var timeline surface.SessionTimeline
+	waitFor(t, 5*time.Second, func() bool {
+		timeline = readTimeline()
+		return adapter.calls.Load() >= 2 && len(timeline.Items) > 0
+	})
+	if len(timeline.Items) != 1 || timeline.Items[0].Text != "must persist" || timeline.Items[0].Role != "assistant" {
+		t.Fatalf("session activity after replay=%+v", timeline)
+	}
+	_, sourceErrors := journalRows(t, reg, from.ID)
+	if len(sourceErrors) == 0 || !strings.Contains(sourceErrors[0], "injected journal rejection") {
+		t.Fatalf("failed append left no source-error evidence: %q", sourceErrors)
+	}
 }
