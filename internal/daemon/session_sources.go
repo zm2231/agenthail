@@ -360,7 +360,10 @@ func boundedSessionSourceReason(value string) string {
 func (s *sessionSource) seedJournal() {
 	seedStatus, statusErr := s.manager.registry.SessionJournalSeedStatus(s.session.ID)
 	if statusErr == nil && seedStatus == registry.SessionJournalSeeded {
-		return
+		provider, localTranscript := s.adapter.(surface.LocalTranscriptProvider)
+		if !localTranscript || !provider.RequiresLocalTranscript(&s.session) {
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
 	defer cancel()
