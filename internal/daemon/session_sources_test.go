@@ -51,6 +51,28 @@ func TestSessionJournalInlineBodyKeepsUTF8Boundary(t *testing.T) {
 	}
 }
 
+func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	manager := newSessionSourceManager(reg)
+	source := &sessionSource{manager: manager, session: &from, adapter: fake, epoch: "test", appendBodies: map[string]string{}, subscribers: map[uint64]chan registry.SessionJournalEntry{}}
+	body := strings.Repeat("x", sessionJournalRetentionBytes)
+	source.append(surface.StreamEvent{ID: "oversized", Kind: "text", Text: body})
+	page, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	var payload sessionJournalPayload
+	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Body == "" || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.BodyRef != "" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	if len(payload.Body) > sessionStreamBodyBytes {
+		t.Fatalf("inline preview bytes=%d, want <=%d", len(payload.Body), sessionStreamBodyBytes)
+	}
+}
+
 func (s *restartingSource) Stream(ctx context.Context, _ *surface.Session, _ string, _ func(surface.StreamEvent), _ time.Duration) error {
 	if s.calls.Add(1) == 1 {
 		return nil

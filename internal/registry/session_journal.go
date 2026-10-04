@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+type SessionJournalHistoryGapError struct {
+	EarliestSeq uint64
+	LatestSeq   uint64
+}
+
+func (e *SessionJournalHistoryGapError) Error() string {
+	return "session journal history cursor is no longer retained"
+}
+
 type SessionJournalEntry struct {
 	SessionID   string
 	Seq         uint64
@@ -46,9 +55,29 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 		return SessionJournalPage{}, err
 	}
 	defer tx.Rollback()
-	var latest sql.NullInt64
-	if err := tx.QueryRow(`SELECT MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&latest); err != nil {
+	var earliest, latest sql.NullInt64
+	if err := tx.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
 		return SessionJournalPage{}, err
+	}
+	var prunedBefore sql.NullInt64
+	if err := tx.QueryRow(`SELECT pruned_before FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&prunedBefore); err != nil && err != sql.ErrNoRows {
+		return SessionJournalPage{}, err
+	}
+	if before > 0 {
+		if !earliest.Valid || (prunedBefore.Valid && prunedBefore.Int64 > 0 && before > 1) {
+			var earliestSeq, latestSeq uint64
+			if earliest.Valid {
+				earliestSeq = uint64(earliest.Int64)
+			}
+			if latest.Valid {
+				latestSeq = uint64(latest.Int64)
+			}
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+		}
+		earliestSeq, latestSeq := uint64(earliest.Int64), uint64(latest.Int64)
+		if before < earliestSeq-1 {
+			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
+		}
 	}
 	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, limit+1)
 	if err != nil {
@@ -97,7 +126,7 @@ func (r *Registry) AppendSessionJournalEntry(input SessionJournalEntry, retentio
 	}
 	input.Payload = append([]byte(nil), input.Payload...)
 	input.FullBody = append([]byte(nil), input.FullBody...)
-	input.Bytes = len(input.Payload)
+	input.Bytes = len(input.Payload) + len(input.FullBody)
 	if input.Bytes > retention.Bytes {
 		return SessionJournalEntry{}, false, fmt.Errorf("session journal entry exceeds byte retention")
 	}
@@ -235,7 +264,14 @@ func trimSessionJournal(tx *sql.Tx, sessionID string, retention SessionJournalRe
 		if count <= retention.Count && bytes <= retention.Bytes {
 			return refreshSessionJournalState(tx, sessionID)
 		}
-		if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND seq=(SELECT seq FROM session_journal WHERE session_id=? ORDER BY seq LIMIT 1)`, sessionID, sessionID); err != nil {
+		var prunedSeq int64
+		if err := tx.QueryRow(`SELECT seq FROM session_journal WHERE session_id=? ORDER BY seq LIMIT 1`, sessionID).Scan(&prunedSeq); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM session_journal WHERE session_id=? AND seq=?`, sessionID, prunedSeq); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE session_journal_state SET pruned_before=MAX(pruned_before,?) WHERE session_id=?`, prunedSeq, sessionID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM session_journal_bodies WHERE session_id=? AND ref NOT IN (SELECT body_ref FROM session_journal WHERE session_id=? AND body_ref!='')`, sessionID, sessionID); err != nil {

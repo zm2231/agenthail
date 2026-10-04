@@ -77,7 +77,9 @@ journal; a reconnect either replays without duplicates or receives
 The catalog event stream uses the catalog cursor. An open-session view uses its
 own session stream cursor, reconnects after foregrounding, and reloads its
 bounded journal page after a typed gap. It does not poll session content while
-idle. Older activity remains a bounded, cursor-paged journal read.
+idle. Older activity remains a bounded, cursor-paged journal read. If retention
+has pruned the requested cursor, the page returns typed `history_gap` with the
+retained sequence bounds so the client can reload from the retained window.
 
 ## Error and authorization behavior
 
