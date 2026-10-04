@@ -47,6 +47,20 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.catalogStreamCursor, 2)
     }
 
+    @MainActor
+    func testUnknownSurfaceHealthRefreshesFreshSnapshotOnce() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        let initialRefresh = await model.refresh()
+        XCTAssertTrue(initialRefresh)
+        let before = RecoveryProtocol.state.freshSnapshotReads
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":1,"type":"surface.health","data":{"surface":"new-surface","health":"unavailable","detail":"discovery failed"}}"#.utf8))
+
+        await model.receiveCatalog(event)
+
+        XCTAssertEqual(RecoveryProtocol.state.freshSnapshotReads, before + 1)
+    }
+
     func testQueuedReceiptFollowsExpirationWithoutResending() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
@@ -122,9 +136,11 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
         private var catalogSequence: UInt64?
         private var reads = 0
         private var actions = 0
+        private var freshSnapshots = 0
         var sessionReads: Int { lock.withLock { reads } }
         var actionCount: Int { lock.withLock { actions } }
-        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0 } }
+        var freshSnapshotReads: Int { lock.withLock { freshSnapshots } }
+        func reset() { lock.withLock { stale = false; queueStatus = "pending"; queueHistorical = nil; evidence = nil; queueFailure = false; catalogEpoch = nil; catalogSequence = nil; reads = 0; actions = 0; freshSnapshots = 0 } }
         func configure(stale: Bool? = nil, queueStatus: String? = nil, queueHistorical: Bool? = nil, evidence: String? = nil, queueFailure: Bool? = nil) {
             lock.withLock {
                 if let stale { self.stale = stale }
@@ -135,6 +151,7 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         func configureCatalog(epoch: String, sequence: UInt64) { lock.withLock { catalogEpoch = epoch; catalogSequence = sequence } }
+        func recordFreshSnapshot() { lock.withLock { freshSnapshots += 1 } }
         func response(path: String, olderPage: Bool = false) -> (Int, String) {
             lock.withLock {
                 switch path {
@@ -168,6 +185,10 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let olderPage = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "timelineBefore" } == true
+        if request.url?.path == "/api/v1/snapshot",
+           URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "fresh" && $0.value == "1" }) == true {
+            Self.state.recordFreshSnapshot()
+        }
         let (status, body) = Self.state.response(path: request.url!.path, olderPage: olderPage)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))

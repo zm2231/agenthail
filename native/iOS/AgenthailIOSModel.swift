@@ -724,7 +724,11 @@ final class AgenthailIOSModel: ObservableObject {
             current.totalSessions = current.sessions.count
             snapshot = current
         case "surface.health":
-            guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
+            guard let name = event.data.surface, let health = event.data.health,
+                  let index = current.surfaces.firstIndex(where: { $0.name == name }) else {
+                _ = await refresh(fresh: true)
+                return
+            }
             let previous = current.surfaces[index]
             current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities)
             snapshot = current
