@@ -53,6 +53,20 @@ final class TurnSettingsFlowTests: XCTestCase {
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys, ["stable-steer-key", "stable-steer-key"])
     }
 
+    func testActionCanReplayStableLogicalKey() async throws {
+        TurnSettingsFlowProtocol.state.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
+        let api = AgenthailAPI(baseURL: URL(string: "https://fixture.invalid")!, token: "fixture", session: URLSession(configuration: configuration))
+
+        try await api.action("send", sessionID: "codex-flow", message: "Retry this normally", idempotencyKey: "stable-send-key")
+        try await api.action("send", sessionID: "codex-flow", message: "Retry this normally", idempotencyKey: "stable-send-key")
+
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actionIdempotencyKeys, ["stable-send-key", "stable-send-key"])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["sessionId"] as? String }, ["codex-flow", "codex-flow"])
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions.map { $0["message"] as? String }, ["Retry this normally", "Retry this normally"])
+    }
+
     func testActionGetsGeneratedKeyButReadsDoNot() async throws {
         TurnSettingsFlowProtocol.state.reset()
         let configuration = URLSessionConfiguration.ephemeral

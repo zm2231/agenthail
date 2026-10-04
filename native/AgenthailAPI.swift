@@ -223,7 +223,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
@@ -236,7 +236,7 @@ final class AgenthailAPI: @unchecked Sendable {
         if let toID { body["toId"] = toID }
         if let pattern { body["pattern"] = pattern }
         if let relayID { body["relayId"] = relayID }
-        let _: EmptyResponse = try await post("/api/v1/actions", body: body)
+        let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
     func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
@@ -338,8 +338,8 @@ final class AgenthailAPI: @unchecked Sendable {
         try await request(path, method: "GET", body: nil)
     }
 
-    private func post<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
-        try await request(path, method: "POST", body: body)
+    private func post<T: Decodable>(_ path: String, body: [String: Any], idempotencyKey: String? = nil) async throws -> T {
+        try await request(path, method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
     private func requestEncoded<T: Decodable, Body: Encodable>(_ path: String, method: String, body: Body, timeout: TimeInterval = 25, idempotencyKey: String? = nil) async throws -> T {
