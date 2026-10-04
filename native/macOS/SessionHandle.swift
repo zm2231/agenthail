@@ -9,7 +9,7 @@ enum SessionHandle {
     static func problem(with text: String) -> String? {
         let handle = normalized(text)
         if handle.isEmpty { return "Enter a name." }
-        if handle.count > 80 { return "Use 80 characters or fewer." }
+        if handle.utf8.count > 80 { return "That name is too long." }
         if handle.contains(where: { $0.isWhitespace || $0 == "/" || $0 == "#" }) { return "Names can't contain spaces, /, or #." }
         return nil
     }

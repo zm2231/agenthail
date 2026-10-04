@@ -12,6 +12,8 @@ struct SessionHandleTest {
         }
         check(SessionHandle.problem(with: String(repeating: "a", count: 80)) == nil, "80 characters is allowed")
         check(SessionHandle.problem(with: String(repeating: "a", count: 81)) != nil, "81 characters is refused")
+        check(SessionHandle.problem(with: String(repeating: "é", count: 40)) == nil, "80 bytes of accented letters is allowed")
+        check(SessionHandle.problem(with: String(repeating: "🚀", count: 21)) != nil, "names are limited by the daemon's 80-byte rule")
     }
 
     private static func check(_ condition: Bool, _ message: String) {
