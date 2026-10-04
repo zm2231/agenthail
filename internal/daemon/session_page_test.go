@@ -174,7 +174,7 @@ func TestDashboardSessionReturnsTypedHistoryGapAfterJournalPrune(t *testing.T) {
 		}
 	}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+from.ID+"&timeline=1&timelineBefore=3", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+from.ID+"&timeline=1&timelineBefore=2", nil)
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

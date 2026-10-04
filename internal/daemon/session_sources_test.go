@@ -65,7 +65,7 @@ func TestSessionJournalBodyBudgetKeepsPreviewWithoutDeadReference(t *testing.T) 
 	if err := json.Unmarshal(page.Entries[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Body == "" || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.BodyRef != "" {
+	if payload.Body == "" || !strings.HasPrefix(body, payload.Body) || !payload.Truncated || payload.TruncationReason != "full_body_not_retained" || payload.BodyRef != "" {
 		t.Fatalf("payload=%+v", payload)
 	}
 	if len(payload.Body) > sessionStreamBodyBytes {

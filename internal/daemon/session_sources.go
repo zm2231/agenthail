@@ -25,22 +25,23 @@ const (
 )
 
 type sessionJournalPayload struct {
-	Context     *surface.ContextUsage `json:"context,omitempty"`
-	Goal        *surface.GoalState    `json:"goal"`
-	Role        string                `json:"role,omitempty"`
-	Title       string                `json:"title,omitempty"`
-	Status      string                `json:"status,omitempty"`
-	ItemID      string                `json:"itemId"`
-	ProviderKey string                `json:"providerKey,omitempty"`
-	Version     uint64                `json:"version"`
-	Op          string                `json:"op"`
-	Kind        string                `json:"kind"`
-	TurnID      string                `json:"turnId,omitempty"`
-	TS          string                `json:"ts"`
-	Body        string                `json:"body,omitempty"`
-	Truncated   bool                  `json:"truncated"`
-	BodyRef     string                `json:"bodyRef,omitempty"`
-	Reason      string                `json:"reason,omitempty"`
+	Context          *surface.ContextUsage `json:"context,omitempty"`
+	Goal             *surface.GoalState    `json:"goal"`
+	Role             string                `json:"role,omitempty"`
+	Title            string                `json:"title,omitempty"`
+	Status           string                `json:"status,omitempty"`
+	ItemID           string                `json:"itemId"`
+	ProviderKey      string                `json:"providerKey,omitempty"`
+	Version          uint64                `json:"version"`
+	Op               string                `json:"op"`
+	Kind             string                `json:"kind"`
+	TurnID           string                `json:"turnId,omitempty"`
+	TS               string                `json:"ts"`
+	Body             string                `json:"body,omitempty"`
+	Truncated        bool                  `json:"truncated"`
+	TruncationReason string                `json:"truncationReason,omitempty"`
+	BodyRef          string                `json:"bodyRef,omitempty"`
+	Reason           string                `json:"reason,omitempty"`
 }
 
 type sessionSourceManager struct {
@@ -334,6 +335,7 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 		}
 		payload.Body = string(prefix)
 		payload.Truncated = true
+		payload.TruncationReason = "full_body_not_retained"
 		ref, refErr := newSessionBodyRef()
 		if refErr == nil {
 			payload.BodyRef = ref
@@ -351,6 +353,14 @@ func (s *sessionSource) append(event surface.StreamEvent) {
 			fullBody = nil
 		}
 		entry, _, err := s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, BodyRef: payload.BodyRef, FullBody: fullBody, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+		if errors.Is(err, registry.ErrSessionJournalEntryTooLarge) && payload.BodyRef != "" {
+			payload.BodyRef = ""
+			fullBody = nil
+			encoded, err = json.Marshal(payload)
+			if err == nil {
+				entry, _, err = s.manager.registry.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: s.session.ID, Kind: payload.Kind, ProviderKey: payload.ProviderKey, Payload: encoded, ObservedAt: time.Now().UTC()}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes})
+			}
+		}
 		if err != nil {
 			return
 		}

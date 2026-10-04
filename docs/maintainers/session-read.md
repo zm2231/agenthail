@@ -19,8 +19,9 @@ journal through that source. Provider read failures are reported separately
 from an empty transcript. Sources preserve the provider's truncation flag and
 bound inline bodies; retained body fetches remain session-scoped. Full body
 references count toward the journal byte budget. If a full body cannot fit,
-the bounded inline preview remains with `truncated: true` and no body
-reference is emitted.
+the bounded inline preview remains with `truncated: true`,
+`truncationReason: "full_body_not_retained"`, and no body reference is
+emitted.
 
 The initial-page source has a five-second handoff lease so opening its stream
 reuses the same reader instead of fetching and journaling the history twice.
