@@ -2056,8 +2056,14 @@ func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surf
 			writeSubmittedSession(w, session, intent.ID, submittedSessionDetail(session, alias), extra)
 			return
 		}
-		_, _ = d.Registry.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, startErr.Error())
+		_, noticeErr := d.Registry.FailDeliveryIntentWithNotice(intent.ID, startErr.Error())
+		if noticeErr != nil {
+			d.log.Printf("queue initial delivery failure notice for %s: %s", session.ID, noticeErr)
+		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: startErr.Error()})
+		if err := d.catalog.flushCommitted(); err != nil {
+			d.log.Printf("publish initial delivery failure: %s", err)
+		}
 		writeInitialSessionFailure(w, session, intent.ID, startErr.Error(), extra)
 		return
 	}
