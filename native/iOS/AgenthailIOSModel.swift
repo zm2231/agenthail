@@ -131,7 +131,8 @@ final class AgenthailIOSModel: ObservableObject {
     private var catalogStreamCursor: UInt64 = 0
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionMetadataTask: Task<Void, Never>?
-    private var sessionStreamCursor: UInt64 = 0
+    private(set) var sessionStreamCursor: UInt64 = 0
+    private var sessionStreamMetadataFields: Set<String> = []
     private var connectionTask: Task<Void, Never>?
     private var lastEventID: UInt64 = 0
     private var pushRelayURL: URL?
@@ -314,6 +315,7 @@ final class AgenthailIOSModel: ObservableObject {
             sessionStreamTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
+            sessionStreamMetadataFields.removeAll()
             composer = drafts[id] ?? ""
             selectedDetail = nil
             olderActivity = []
@@ -343,6 +345,9 @@ final class AgenthailIOSModel: ObservableObject {
                 olderActivity += (selectedDetail?.timeline?.items ?? []).filter { !retained.contains($0.id) }
             }
             selectedDetail = detail
+            if let journalSeq = detail.journalSeq {
+                sessionStreamCursor = journalSeq
+            }
             if olderActivity.isEmpty { activityCursor = detail.timeline?.nextBefore }
             sessionError = nil
         } catch {
@@ -403,8 +408,8 @@ final class AgenthailIOSModel: ObservableObject {
     private func applySessionMetadata(_ metadata: SessionMetadata, for id: String, requestID: UUID) {
         guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), sessionRequestID == requestID,
               var detail = selectedDetail, detail.session.id == id else { return }
-        if let context = metadata.context { detail.context = context }
-        if let goal = metadata.goal { detail.goal = goal }
+        if !sessionStreamMetadataFields.contains("context"), let context = metadata.context { detail.context = context }
+        if !sessionStreamMetadataFields.contains("goal"), let goal = metadata.goal { detail.goal = goal }
         if let model = metadata.model { detail.model = model }
         if let models = metadata.models { detail.models = models }
         selectedDetail = detail
@@ -746,6 +751,14 @@ final class AgenthailIOSModel: ObservableObject {
     func applySessionStreamEvent(_ event: SessionStreamEvent) {
         guard event.stream == "session", event.sessionId == selectedSessionID, var detail = selectedDetail, detail.session.id == event.sessionId else { return }
         sessionStreamCursor = max(sessionStreamCursor, event.seq)
+        if event.data.kind == "context" {
+            detail.context = event.data.context
+            sessionStreamMetadataFields.insert("context")
+        } else if event.data.kind == "goal" {
+            detail.goal = event.data.goal
+            sessionStreamMetadataFields.insert("goal")
+        }
+        selectedDetail = detail
         if event.data.op == "reset", event.data.kind == "source-error" {
             sessionError = event.data.reason ?? "The session source restarted."
             return

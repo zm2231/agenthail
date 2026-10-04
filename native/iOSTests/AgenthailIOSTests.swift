@@ -105,6 +105,27 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStreamUpdatesAndClearsContextAndGoalImmediately() throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+
+        let contextEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":2,"type":"item","data":{"itemId":"","version":1,"kind":"context","op":"upsert","ts":"2026-10-03T12:00:01Z","context":{"usedTokens":12,"contextWindow":100,"compacting":false,"compactionCount":0},"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(contextEvent)
+        XCTAssertEqual(model.selectedDetail?.context?.usedTokens, 12)
+
+        let goalEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":3,"type":"item","data":{"itemId":"","version":1,"kind":"goal","op":"upsert","ts":"2026-10-03T12:00:02Z","goal":{"objective":"Ship the fix","status":"active"},"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(goalEvent)
+        XCTAssertEqual(model.selectedDetail?.goal?.objective, "Ship the fix")
+
+        let clearEvent = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":4,"type":"item","data":{"itemId":"","version":2,"kind":"goal","op":"upsert","ts":"2026-10-03T12:00:03Z","goal":null,"truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(clearEvent)
+        XCTAssertNil(model.selectedDetail?.goal)
+    }
+
+    @MainActor
     func testSessionStreamSourceResetShowsTheBoundedReasonWithoutAddingTimelineActivity() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))

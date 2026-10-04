@@ -22,6 +22,17 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.snapshot?.daemon.stale, false)
     }
 
+    @MainActor
+    func testOlderPageDoesNotMoveActiveJournalCursor() async throws {
+        RecoveryProtocol.state.reset()
+        let model = makeModel()
+        model.selectedSessionID = "demo"
+        await model.refreshSession("demo")
+        XCTAssertEqual(model.sessionStreamCursor, 2048)
+        await model.loadOlderActivity()
+        XCTAssertEqual(model.sessionStreamCursor, 2048)
+    }
+
     func testQueuedReceiptFollowsExpirationWithoutResending() async throws {
         RecoveryProtocol.state.reset()
         let model = makeModel()
@@ -107,12 +118,14 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
                 if let queueFailure { self.queueFailure = queueFailure }
             }
         }
-        func response(path: String) -> (Int, String) {
+        func response(path: String, olderPage: Bool = false) -> (Int, String) {
             lock.withLock {
                 switch path {
                 case "/api/v1/session":
                     reads += 1
-                    return (200, SessionPreview.detailJSON)
+                    var object = try! JSONSerialization.jsonObject(with: Data(SessionPreview.detailJSON.utf8)) as! [String: Any]
+                    if olderPage { object["journalSeq"] = 1 }
+                    return (200, String(data: try! JSONSerialization.data(withJSONObject: object), encoding: .utf8)!)
                 case "/api/v1/snapshot":
                     var snapshot = try! JSONSerialization.jsonObject(with: Data(SessionPreview.snapshotJSON.utf8)) as! [String: Any]
                     snapshot["daemon"] = ["running": true, "stale": stale, "refreshError": "Agent catalog refresh failed"]
@@ -135,7 +148,8 @@ private final class RecoveryProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let (status, body) = Self.state.response(path: request.url!.path)
+        let olderPage = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "timelineBefore" } == true
+        let (status, body) = Self.state.response(path: request.url!.path, olderPage: olderPage)
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
