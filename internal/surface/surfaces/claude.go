@@ -57,6 +57,14 @@ func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
+func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
+	return ObserveClaudeRuns(ctx, c.home)
+}
+
+func (c *Claude) ObserveClaudeSubagentLinks(ctx context.Context) ([]surface.ClaudeSubagentLink, error) {
+	return ObserveClaudeSubagentLinks(ctx, c.home)
+}
+
 func (c *Claude) Capabilities() surface.Capabilities {
 	return surface.Capabilities{
 		Send: true, Stream: true, Reply: true, Goal: false,
@@ -483,9 +491,6 @@ func (c *Claude) Reply(ctx context.Context, sess *surface.Session, limit int) (*
 }
 
 func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
-	if sess.Transport == "uds" {
-		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
-	}
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -558,6 +563,12 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "upsert", Final: true, TurnID: targetID, Kind: "text", Text: turn.Assistant})
 			}
 			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
+			if sess.Transport == "uds" {
+				baselineUserID = turn.UserID
+				targetID = ""
+				lastText = ""
+				continue
+			}
 			return nil
 		}
 		if turn.Interrupted {
@@ -623,6 +634,7 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 		if err != nil {
 			return "", fmt.Errorf("model switch rejected: %w", err)
 		}
+		sess.ConfiguredModel = strings.TrimSpace(result)
 		return result, nil
 	}
 	path := sess.Transcript

@@ -55,7 +55,7 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "The session stream cursor is invalid.")
 		return
 	}
-	subscription, err := d.sources.subscribe(session, adapter)
+	subscription, err := d.sources.subscribeContext(r.Context(), session, adapter)
 	if err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "stream_unavailable", "The session source could not start.")
 		return
