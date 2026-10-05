@@ -106,6 +106,12 @@ struct SessionPaneTest {
             offline.send("", attachments: [picture], to: "Y") { done.resume(returning: $0) }
         }
         check(!onlyFile && offline.draft(for: "Y").text.isEmpty && offline.draft(for: "Y").attachments == [picture], "a failed attachment-only send keeps the attachment")
+        let catalog = AgenthailModel(connecting: false)
+        let codexSurface = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":true,"health":"healthy","capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true}}"#.utf8))
+        catalog.snapshot = DashboardSnapshot(updatedAt: "2026-10-04T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [codexSurface], sessions: [], totalSessions: 0, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        let healthEvent = try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"surface.health","data":{"surface":"codex","health":"degraded","detail":"bridge closed","runtime":{"name":"Codex Desktop bridge","reachable":false,"durable":false,"problem":"bridge-unavailable","detail":"bridge closed","remediation":"run the launch command"}}}"#.utf8))
+        catalog.applyCatalogEvent(healthEvent)
+        check(catalog.snapshot?.surfaces.first?.runtime?.advice.isEmpty == false && catalog.snapshot?.surfaces.first?.health == "degraded", "a streamed surface health change keeps its runtime advice")
         let disconnected = AgenthailModel(connecting: false)
         var rejected: Bool?
         disconnected.send("look", attachments: [picture], to: "Z") { rejected = !$0 }

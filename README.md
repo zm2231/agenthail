@@ -79,7 +79,7 @@ Start a writable Codex terminal conversation from any project folder:
 agenthail codex
 ```
 
-This is the only managed terminal creation path. It uses Codex remote control and remains separate from Codex Desktop's writer.
+This is the only managed terminal creation path. It uses Codex remote control and remains separate from Codex Desktop's writer. Managed terminals need the standalone Codex runtime, which Codex itself requires for its app-server daemon; install it with `curl -fsSL https://chatgpt.com/codex/install.sh | sh`. An npm, Homebrew or ChatGPT.app `codex` cannot run that daemon. Agenthail finds every Codex on the Mac automatically, and `agenthail doctor` names which ones it found and what is missing.
 
 For Codex Desktop, start it with `agenthail launch codex`. Agenthail then uses a loopback-only Desktop bridge to communicate with the app-server that already owns your conversations. Desktop conversations load through that owner before a message is sent; Agenthail does not acquire them through its managed runtime. If Codex is already open, quit it and run that command before using Desktop message controls. Agenthail never restarts Codex while conversations are attached.
 

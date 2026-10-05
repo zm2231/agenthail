@@ -1114,6 +1114,21 @@ struct SettingsView: View {
                 if let error = model.connectionError { Text(error).font(.footnote).foregroundStyle(.secondary) }
                 Button("Reconnect") { model.connect() }
             }
+            if !attentionSurfaces.isEmpty {
+                Section("Mac connections") {
+                    ForEach(attentionSurfaces) { surface in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(surface.name.capitalized).font(.headline)
+                            if surface.runtime?.advice.isEmpty ?? true, let detail = surface.healthDetail {
+                                Text(detail).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
+                                Text(line).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+            }
             Section("Notifications") {
                 LabeledContent("Status", value: model.notificationStatus)
                 if model.notificationStatus == "Enabled" {
@@ -1132,6 +1147,10 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+    }
+
+    private var attentionSurfaces: [SurfaceState] {
+        (model.snapshot?.surfaces ?? []).filter(\.needsAttention)
     }
 
     private var connectionLabel: String {

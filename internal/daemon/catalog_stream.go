@@ -297,13 +297,13 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		sessions, err := adapter.List(operationCtx)
 		cancel()
+		health := d.recordSurfaceHealth(ctx, adapter, err)
 		if err != nil {
 			observedAt := time.Now().UTC()
 			if markErr := d.catalog.markDiscoveryFailure(adapter.Name(), "catalog discovery failed", observedAt); markErr != nil {
 				d.log.Printf("catalog discovery failure state: %s", markErr)
 			}
-			payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "unavailable", "detail": "catalog discovery failed", "observedAt": observedAt.Format(time.RFC3339Nano)})
-			_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "unavailable", Detail: "catalog discovery failed", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":unavailable", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
+			d.publishSurfaceHealth(health, observedAt)
 			continue
 		}
 		ids := make([]string, 0, len(sessions))
@@ -379,10 +379,13 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		if complete {
 			_ = d.catalog.reconcileOmissions(adapter.Name(), seen)
 		}
-		observedAt := time.Now().UTC()
-		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
-		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
+		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
+}
+
+func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.Time) {
+	payload, _ := json.Marshal(map[string]any{"surface": health.Name, "health": health.Health, "detail": health.HealthDetail, "runtime": health.Runtime, "observedAt": observedAt.Format(time.RFC3339Nano)})
+	_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: surface.SurfaceKind(health.Name), Health: health.Health, Detail: health.HealthDetail, ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + health.Name + ":" + health.Health, Type: "surface.health", EntityID: health.Name, Payload: payload})
 }
 
 func (d *Daemon) publishCatalogQueueCounts() {

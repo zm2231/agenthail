@@ -32,6 +32,14 @@ struct DashboardSnapshotTest {
         var problemChange = transportOnlyChange
         problemChange.deliveryProblems = [DeliveryProblem(deliveryId: 7, sessionId: "s1", sourceSessionId: "s2", message: "Run the tests", reason: "target_not_writable", status: nil, at: "2026-10-04 12:00:00")]
         precondition(!current.hasSamePresentation(as: problemChange))
+
+        let codex = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"codex","connected":true,"health":"degraded","healthDetail":"bridge closed","capabilities":{"send":true,"stream":false,"reply":false,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false},"runtime":{"name":"Codex Desktop bridge","reachable":false,"durable":false,"problem":"bridge-unavailable","detail":"bridge closed","remediation":"run 'agenthail launch codex'","notes":[{"problem":"standalone-missing","message":"managed terminals need the standalone Codex runtime","remediation":"install the standalone Codex runtime: curl -fsSL https://chatgpt.com/codex/install.sh | sh"}]}}"#.utf8))
+        precondition(codex.needsAttention)
+        precondition(codex.runtime?.advice.count == 2)
+        precondition(codex.runtime?.advice[0].contains("agenthail launch codex") == true)
+        precondition(codex.runtime?.advice[1].contains("chatgpt.com/codex/install.sh") == true)
+        let healthy = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"claude","connected":true,"health":"healthy","capabilities":{"send":true,"stream":false,"reply":false,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}"#.utf8))
+        precondition(!healthy.needsAttention && healthy.runtime == nil)
         print("dashboard snapshot tests passed")
     }
 }

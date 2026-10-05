@@ -299,13 +299,30 @@ type HealthChecker interface {
 	Health(ctx context.Context) error
 }
 
+type RuntimeProblem string
+
+const (
+	RuntimeBridgeUnavailable RuntimeProblem = "bridge-unavailable"
+	RuntimeStandaloneMissing RuntimeProblem = "standalone-missing"
+	RuntimeStopped           RuntimeProblem = "runtime-stopped"
+	RuntimeUnsupervised      RuntimeProblem = "unsupervised"
+)
+
 type RuntimeStatus struct {
-	Name        string `json:"name"`
-	Reachable   bool   `json:"reachable"`
-	Durable     bool   `json:"durable"`
-	Backend     string `json:"backend,omitempty"`
-	Detail      string `json:"detail,omitempty"`
-	Remediation string `json:"remediation,omitempty"`
+	Name        string         `json:"name"`
+	Reachable   bool           `json:"reachable"`
+	Durable     bool           `json:"durable"`
+	Backend     string         `json:"backend,omitempty"`
+	Problem     RuntimeProblem `json:"problem,omitempty"`
+	Detail      string         `json:"detail,omitempty"`
+	Remediation string         `json:"remediation,omitempty"`
+	Notes       []RuntimeNote  `json:"notes,omitempty"`
+}
+
+type RuntimeNote struct {
+	Problem     RuntimeProblem `json:"problem"`
+	Message     string         `json:"message"`
+	Remediation string         `json:"remediation,omitempty"`
 }
 
 type RuntimeStatusProvider interface {

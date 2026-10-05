@@ -93,6 +93,21 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testCatalogHealthEventCarriesRuntimeFixes() async throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))
+        model.snapshot?.surfaces = [
+            SurfaceState(name: "codex", connected: true, error: nil, health: "healthy", healthDetail: nil, capabilities: Capabilities())
+        ]
+        let event = try JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":8,"type":"surface.health","data":{"surface":"codex","health":"healthy","detail":"managed terminals unavailable","runtime":{"name":"Codex Desktop bridge","reachable":true,"durable":true,"notes":[{"problem":"standalone-missing","message":"managed terminals unavailable","remediation":"install the standalone Codex runtime: curl -fsSL https://chatgpt.com/codex/install.sh | sh"}]}}}"#.utf8))
+        await model.receiveCatalog(event)
+        let surface = try XCTUnwrap(model.snapshot?.surfaces.first { $0.name == "codex" })
+        XCTAssertTrue(surface.needsAttention)
+        XCTAssertEqual(surface.runtime?.advice.count, 1)
+        XCTAssertTrue(surface.runtime?.advice.first?.contains("chatgpt.com/codex/install.sh") ?? false)
+    }
+
+    @MainActor
     func testCatalogQueueWatermarkUpdatesCountAndPresenceLocally() async throws {
         let model = AgenthailIOSModel(autoConnect: false)
         model.snapshot = try JSONDecoder().decode(DashboardSnapshot.self, from: Data(SessionPreview.snapshotJSON.utf8))

@@ -59,6 +59,12 @@ struct GeneralSettings: View {
                             .foregroundStyle(surface.connected ? DesktopPalette.text2 : DesktopPalette.amber)
                             .lineLimit(2)
                     }
+                    ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .textSelection(.enabled)
+                    }
                 }
                 HStack {
                     Button("Restart Agenthail") { model.restartDaemon() }

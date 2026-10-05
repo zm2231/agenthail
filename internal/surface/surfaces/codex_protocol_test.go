@@ -139,13 +139,10 @@ func TestCodexStartSessionPrefersDesktopOwner(t *testing.T) {
 func TestCodexDesktopDiscoveryNeverBootstrapsManagedRuntime(t *testing.T) {
 	root := t.TempDir()
 	logPath := filepath.Join(root, "managed-runtime.log")
-	script := filepath.Join(root, "codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	codexHome := filepath.Join(root, "codex-home")
+	installStandaloneCodex(t, codexHome, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n")
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	t.Setenv("CODEX_HOME", filepath.Join(root, "missing-codex-home"))
+	t.Setenv("CODEX_HOME", codexHome)
 	if _, err := NewCodex(startRendererDesktopBridge(t)).List(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -2262,6 +2262,7 @@ func (a *App) cmdDoctor(args []string) error {
 			if runtimeStatus.Name != "" {
 				if runtimeStatus.Reachable && !runtimeStatus.Durable && runtimeStatus.Backend == "pid" && a.isDaemonServiceLoaded() {
 					runtimeStatus.Durable = true
+					runtimeStatus.Problem = ""
 					runtimeStatus.Detail = "supervised by Agenthail across reboot"
 					runtimeStatus.Remediation = ""
 				}
@@ -2313,6 +2314,12 @@ func (a *App) cmdDoctor(args []string) error {
 				fmt.Println()
 				if result.Runtime.Remediation != "" {
 					fmt.Printf("  fix: %s\n", result.Runtime.Remediation)
+				}
+				for _, note := range result.Runtime.Notes {
+					fmt.Printf("  note: %s\n", note.Message)
+					if note.Remediation != "" {
+						fmt.Printf("    fix: %s\n", note.Remediation)
+					}
 				}
 			}
 			if result.OK {
@@ -2384,20 +2391,14 @@ func launchCodex(codex surface.Surface) error {
 	if codex == nil {
 		return fmt.Errorf("Codex surface is unavailable")
 	}
-	candidates := []string{
-		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-		"/Applications/Codex.app/Contents/MacOS/ChatGPT",
-		"/Applications/Codex.app/Contents/MacOS/Codex",
-	}
-	var exe string
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			exe = c
-			break
-		}
-	}
+	install := surfaces.DetectCodexInstallation()
+	exe := install.Desktop
 	if exe == "" {
-		return fmt.Errorf("codex binary not found (tried %s)", strings.Join(candidates, ", "))
+		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(surfaces.CodexDesktopExecutables, ", "))
+		if install.Standalone != "" {
+			message += "; use 'agenthail codex' for a managed terminal session"
+		}
+		return errors.New(message)
 	}
 
 	pid := findCodexPID()
@@ -2475,11 +2476,7 @@ func findCodexPID() int {
 	if err != nil {
 		return 0
 	}
-	return selectCodexPID(string(output), []string{
-		"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-		"/Applications/Codex.app/Contents/MacOS/ChatGPT",
-		"/Applications/Codex.app/Contents/MacOS/Codex",
-	})
+	return selectCodexPID(string(output), surfaces.CodexDesktopExecutables)
 }
 
 func selectCodexPID(output string, expectedExecutables []string) int {
