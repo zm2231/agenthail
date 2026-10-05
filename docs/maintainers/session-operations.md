@@ -24,7 +24,8 @@ newest page is returned first, text and JSON identify the source, and JSON
 includes `nextBefore`. A page holds at most `count` exchanges and the activity
 recorded alongside them, and `nextBefore` addresses the record before the oldest
 exchange on the page, so `--before <nextBefore>` reads the preceding page with
-no gap.
+no gap. Past the oldest journal entry, the cursor continues into the provider
+history recorded at seed time.
 With the daemon running, phone detail, `last`, and `reply` read the same bounded
 per-session journal page. CLI JSON includes `journalSeq`; an active-daemon read
 error does not fall back to a second provider reader. Metadata loads independently.

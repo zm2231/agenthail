@@ -48,7 +48,7 @@ func (l *processLauncher) Available(ctx context.Context) (bool, string) {
 		return false, fmt.Sprintf("%s executable is not installed", l.command)
 	}
 	if l.id == LauncherCMUX {
-		for _, args := range [][]string{{"new-workspace", "--help"}, {"sessions", "list", "--help"}, {"select-workspace", "--help"}, {"focus-panel", "--help"}} {
+		for _, args := range [][]string{{"new-workspace", "--help"}, {"sessions", "list", "--help"}, {"tree", "--help"}, {"select-workspace", "--help"}, {"focus-panel", "--help"}} {
 			out, err := l.run(ctx, path, args...)
 			if err != nil || len(bytes.TrimSpace(out)) == 0 {
 				return false, fmt.Sprintf("cmux command %q is unavailable", strings.Join(args[:len(args)-1], " "))
@@ -62,11 +62,27 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	if err := validateLaunchRequest(request, l.agents); err != nil {
 		return LaunchResult{}, err
 	}
-	argv := agentArgv(request)
+	argv, err := agentArgv(request)
+	if err != nil {
+		return LaunchResult{}, err
+	}
 	if l.id == LauncherCMUX {
+		launchID := ""
+		receiptPath := ""
+		if request.Agent == KindCodex {
+			launchID = "agenthail-" + uuid.NewString()
+			var err error
+			receiptPath, err = ManagedCodexLaunchReceiptPath(launchID)
+			if err != nil {
+				return LaunchResult{}, err
+			}
+		}
 		command, intentPath, err := writeLauncherIntent(request.Cwd, argv)
 		if err != nil {
 			return LaunchResult{}, err
+		}
+		if receiptPath != "" {
+			command = withLauncherEnvironment(command, "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath, "AGENTHAIL_CODEX_LAUNCH_RUNTIME="+LauncherCMUX)
 		}
 		args := []string{"new-workspace", "--json", "--cwd", request.Cwd, "--command", command}
 		if request.Name != "" {
@@ -74,6 +90,9 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 		}
 		out, runErr := l.run(ctx, l.command, args...)
 		if runErr != nil {
+			if launchCommandStarted(runErr) {
+				return LaunchResult{}, LaunchAcceptedError{Launcher: l.id, Err: fmt.Errorf("%s launch outcome is unresolved: %w: %s", l.id, runErr, strings.TrimSpace(string(out)))}
+			}
 			_ = os.Remove(intentPath)
 			return LaunchResult{}, fmt.Errorf("%s launch: %w: %s", l.id, runErr, strings.TrimSpace(string(out)))
 		}
@@ -86,6 +105,15 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	}
 
 	sessionName := "agenthail-" + uuid.NewString()
+	receiptPath := ""
+	if request.Agent == KindCodex {
+		var receiptErr error
+		receiptPath, receiptErr = ManagedCodexLaunchReceiptPath(sessionName)
+		if receiptErr != nil {
+			return LaunchResult{}, receiptErr
+		}
+		argv = managedCodexLaunchArgv(argv, sessionName, receiptPath, LauncherTMUX)
+	}
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", request.Cwd, "-P", "-F", "#{session_name} #{pane_id}"}
 	if request.Name != "" {
 		args = append(args, "-n", request.Name)
@@ -95,13 +123,43 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	args = append(args, argv...)
 	out, err := l.run(ctx, l.command, args...)
 	if err != nil {
+		if launchCommandStarted(err) {
+			return LaunchResult{Location: &Location{Session: sessionName}}, LaunchAcceptedError{Launcher: l.id, Err: fmt.Errorf("%s launch outcome is unresolved: %w: %s", l.id, err, strings.TrimSpace(string(out)))}
+		}
 		return LaunchResult{}, fmt.Errorf("%s launch: %w: %s", l.id, err, strings.TrimSpace(string(out)))
 	}
 	result, parseErr := parseLaunchResult(l.id, out)
 	if parseErr != nil {
-		return LaunchResult{}, parseErr
+		return LaunchResult{}, LaunchAcceptedError{Launcher: l.id, Err: parseErr}
+	}
+	if receiptPath != "" && (result.Location == nil || result.Location.Session != sessionName || result.Location.Pane == "") {
+		return result, LaunchAcceptedError{Launcher: l.id, Err: errors.New("tmux returned no launch-owned session identity")}
+	}
+	if receiptPath != "" && result.Location != nil {
+		receipt, receiptErr := ReadManagedCodexLaunchReceipt(receiptPath)
+		if receiptErr != nil && !errors.Is(receiptErr, os.ErrNotExist) {
+			return result, LaunchAcceptedError{Launcher: l.id, Err: receiptErr}
+		}
+		if receiptErr == nil && (receipt.Runtime != LauncherTMUX || receipt.LaunchID != sessionName || receipt.TmuxSession != sessionName || filepath.Clean(receipt.Cwd) != filepath.Clean(request.Cwd) || receipt.TmuxPane != result.Location.Pane) {
+			return result, LaunchAcceptedError{Launcher: l.id, Err: errors.New("tmux launch receipt does not match the launch result")}
+		}
 	}
 	return result, nil
+}
+
+func launchCommandStarted(err error) bool {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return false
+	}
+	var startErr *exec.Error
+	return !errors.As(err, &startErr)
+}
+
+func managedCodexLaunchArgv(argv []string, launchID, receiptPath, runtime string) []string {
+	args := make([]string, 0, len(argv)+4)
+	args = append(args, "env", "AGENTHAIL_CODEX_LAUNCH_ID="+launchID, "AGENTHAIL_CODEX_LAUNCH_RECEIPT="+receiptPath, "AGENTHAIL_CODEX_LAUNCH_RUNTIME="+runtime)
+	return append(args, argv...)
 }
 
 func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
@@ -120,22 +178,34 @@ func validateLaunchRequest(request LaunchRequest, agents []SurfaceKind) error {
 	return nil
 }
 
-func agentArgv(request LaunchRequest) []string {
+func agentArgv(request LaunchRequest) ([]string, error) {
 	if request.Agent == KindClaude {
-		argv := []string{"claude"}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home for Claude executable: %w", err)
+		}
+		binary, err := ClaudeBinary(home)
+		if err != nil {
+			return nil, err
+		}
+		argv := []string{binary}
 		if request.Model != "" {
 			argv = append(argv, "--model", request.Model)
 		}
 		if request.Name != "" {
 			argv = append(argv, "--name", request.Name)
 		}
-		return append(argv, "--", request.Message)
+		return append(argv, "--", request.Message), nil
 	}
-	argv := []string{"agenthail", "codex", "--cd", request.Cwd}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve agenthail executable: %w", err)
+	}
+	argv := []string{executable, "codex", "--cd", request.Cwd}
 	if request.Model != "" {
 		argv = append(argv, "--model", request.Model)
 	}
-	return append(argv, "--", request.Message)
+	return append(argv, "--", request.Message), nil
 }
 
 type launcherIntent struct {
@@ -176,6 +246,15 @@ func writeLauncherIntent(cwd string, argv []string) (string, string, error) {
 	return command, path, nil
 }
 
+func withLauncherEnvironment(command string, values ...string) string {
+	command = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), "exec "))
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, shellQuote(value))
+	}
+	return "exec env " + strings.Join(quoted, " ") + " " + command
+}
+
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
@@ -187,11 +266,14 @@ func parseLaunchResult(id string, out []byte) (LaunchResult, error) {
 	}
 	if id == LauncherTMUX {
 		fields := strings.Fields(text)
-		location := &Location{}
-		if len(fields) > 0 {
-			location.Session = fields[0]
+		if len(fields) == 0 {
+			return LaunchResult{}, nil
 		}
-		if len(fields) > 1 {
+		if len(fields) > 2 || (len(fields) == 2 && !strings.HasPrefix(fields[1], "%")) {
+			return LaunchResult{}, fmt.Errorf("parse %s launch result: expected tmux session and pane", id)
+		}
+		location := &Location{Session: fields[0]}
+		if len(fields) == 2 {
 			location.Pane = fields[1]
 		}
 		return LaunchResult{Location: location}, nil
@@ -253,7 +335,109 @@ func (l *processLauncher) locateCMUX(ctx context.Context, sessions []Session) ma
 		}
 		located[record.SessionID] = Location{Workspace: record.Workspace, Surface: record.Surface}
 	}
+	_ = ReclaimManagedCodexCMUXLaunchReceipts(func(workspace, surface string) (bool, error) {
+		return l.cmuxSurfacePresent(ctx, workspace, surface)
+	})
+	wantedSessions := make(map[string]Session, len(sessions))
+	for _, session := range sessions {
+		wantedSessions[session.ID] = session
+	}
+	if dir, err := managedCodexLaunchReceiptDir(); err == nil {
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.HasPrefix(entry.Name(), "agenthail-") || !strings.HasSuffix(entry.Name(), ".json") {
+					continue
+				}
+				launchID := strings.TrimSuffix(entry.Name(), ".json")
+				path, err := ManagedCodexLaunchReceiptPath(launchID)
+				if err != nil {
+					continue
+				}
+				receipt, err := ReadManagedCodexLaunchReceipt(path)
+				if err != nil || receipt.Runtime != LauncherCMUX || receipt.LaunchID != launchID || receipt.Workspace == "" || receipt.Surface == "" {
+					continue
+				}
+				session, ok := wantedSessions[receipt.ThreadID]
+				if !ok || session.Surface != KindCodex || filepath.Clean(session.Cwd) != filepath.Clean(receipt.Cwd) {
+					continue
+				}
+				present, err := l.cmuxSurfacePresent(ctx, receipt.Workspace, receipt.Surface)
+				if err != nil || !present {
+					continue
+				}
+				located[receipt.ThreadID] = Location{Workspace: receipt.Workspace, Surface: receipt.Surface}
+			}
+		}
+	}
 	return located
+}
+
+func (l *processLauncher) cmuxSurfacePresent(ctx context.Context, workspace, surface string) (bool, error) {
+	out, err := l.run(ctx, l.command, "--json", "--id-format", "both", "tree", "--workspace", workspace)
+	if err != nil {
+		return false, err
+	}
+	var tree cmuxTreeInventory
+	if err := json.Unmarshal(out, &tree); err != nil || tree.Windows == nil || len(*tree.Windows) == 0 {
+		if err == nil {
+			err = errors.New("cmux tree inventory is empty")
+		}
+		return false, fmt.Errorf("invalid cmux tree inventory: %w", err)
+	}
+	for _, window := range *tree.Windows {
+		if window.Workspaces == nil {
+			return false, errors.New("invalid cmux tree inventory: workspace layer is missing")
+		}
+		for _, candidate := range *window.Workspaces {
+			if candidate.ID == "" && candidate.Ref == "" {
+				return false, errors.New("invalid cmux tree inventory: workspace identity is missing")
+			}
+			if candidate.ID != workspace && candidate.Ref != workspace {
+				continue
+			}
+			if candidate.Panes == nil {
+				return false, errors.New("invalid cmux tree inventory: pane layer is missing")
+			}
+			for _, pane := range *candidate.Panes {
+				if pane.Surfaces == nil {
+					return false, errors.New("invalid cmux tree inventory: surface layer is missing")
+				}
+				for _, candidateSurface := range *pane.Surfaces {
+					if candidateSurface.ID == "" && candidateSurface.Ref == "" {
+						return false, errors.New("invalid cmux tree inventory: surface identity is missing")
+					}
+					if candidateSurface.ID == surface || candidateSurface.Ref == surface {
+						return true, nil
+					}
+				}
+			}
+			return false, nil
+		}
+	}
+	return false, nil
+}
+
+type cmuxTreeInventory struct {
+	Windows *[]cmuxTreeWindow `json:"windows"`
+}
+
+type cmuxTreeWindow struct {
+	Workspaces *[]cmuxTreeWorkspace `json:"workspaces"`
+}
+
+type cmuxTreeWorkspace struct {
+	ID    string          `json:"id"`
+	Ref   string          `json:"ref"`
+	Panes *[]cmuxTreePane `json:"panes"`
+}
+
+type cmuxTreePane struct {
+	Surfaces *[]cmuxTreeSurface `json:"surfaces"`
+}
+
+type cmuxTreeSurface struct {
+	ID  string `json:"id"`
+	Ref string `json:"ref"`
 }
 
 type tmuxPane struct {
@@ -280,7 +464,45 @@ func (l *processLauncher) locateTMUX(ctx context.Context, sessions []Session) ma
 		}
 		panes = append(panes, tmuxPane{PID: pid, Session: fields[1], Pane: fields[2], Cwd: fields[3]})
 	}
+	liveSessions := make(map[string]struct{}, len(panes))
+	for _, pane := range panes {
+		liveSessions[pane.Session] = struct{}{}
+	}
+	_ = ReclaimManagedCodexLaunchReceipts(liveSessions, func(sessionName string) (bool, error) {
+		current, err := l.run(ctx, l.command, "list-sessions", "-F", "#{session_name}")
+		if err != nil {
+			return false, err
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(current)), "\n") {
+			if strings.TrimSpace(line) == sessionName {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
 	located := make(map[string]Location)
+	wanted := make(map[string]Session, len(sessions))
+	for _, session := range sessions {
+		wanted[session.ID] = session
+	}
+	for _, pane := range panes {
+		if !l.pidAlive(pane.PID) {
+			continue
+		}
+		receiptPath, err := ManagedCodexLaunchReceiptPath(pane.Session)
+		if err != nil {
+			continue
+		}
+		receipt, err := ReadManagedCodexLaunchReceipt(receiptPath)
+		if err != nil || receipt.LaunchID != pane.Session || receipt.TmuxSession != pane.Session || receipt.TmuxPane != pane.Pane {
+			continue
+		}
+		session, ok := wanted[receipt.ThreadID]
+		if !ok || session.Surface != KindCodex || filepath.Clean(session.Cwd) != filepath.Clean(receipt.Cwd) {
+			continue
+		}
+		located[receipt.ThreadID] = Location{Session: pane.Session, Pane: pane.Pane}
+	}
 	for _, session := range sessions {
 		if session.PID <= 0 || !l.pidAlive(session.PID) {
 			continue

@@ -78,6 +78,15 @@ func (h *catalogHub) publishSurface(state registry.CatalogSurfaceState, event re
 	return persisted, created, nil
 }
 
+func (h *catalogHub) updateProjection(sessionID, priorFingerprint, nextFingerprint string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, _, err := h.registry.UpdateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint); err != nil {
+		return err
+	}
+	return h.flushCommittedLocked()
+}
+
 func (h *catalogHub) reconcileOmissions(kind surface.SurfaceKind, seen map[string]struct{}) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -334,19 +343,34 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			}
 			observedAt := time.Now().UTC()
 			open := session.Surface == surface.KindClaude && openClaude[session.PID]
-			row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], counts[session.ID], open, config)
-			payload, err := json.Marshal(map[string]any{"session": row})
-			if err != nil {
-				continue
+			queueCount := counts[session.ID]
+			for attempt := 0; attempt < 3; attempt++ {
+				row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], queueCount, open, config)
+				payload, err := json.Marshal(map[string]any{"session": row})
+				if err != nil {
+					break
+				}
+				projection := row
+				projection.ObservedAt = time.Time{}
+				fingerprint, err := json.Marshal(projection)
+				if err != nil {
+					break
+				}
+				key := "session.upserted:" + session.ID
+				_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+				if publishErr == nil {
+					break
+				}
+				var conflict *registry.CatalogQueueProjectionConflict
+				if !errors.As(publishErr, &conflict) {
+					d.log.Printf("catalog session %s: %s", d.resolveDisplay(session.ID), publishErr)
+					break
+				}
+				queueCount = conflict.QueueCount
+				if attempt == 2 {
+					d.log.Printf("catalog session %s remained unstable while publishing queue projection", d.resolveDisplay(session.ID))
+				}
 			}
-			projection := row
-			projection.ObservedAt = time.Time{}
-			fingerprint, err := json.Marshal(projection)
-			if err != nil {
-				continue
-			}
-			key := "session.upserted:" + session.ID
-			_, _, _ = d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
 		}
 		complete := true
 		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
@@ -358,6 +382,56 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		observedAt := time.Now().UTC()
 		payload, _ := json.Marshal(map[string]string{"surface": string(adapter.Name()), "health": "healthy", "observedAt": observedAt.Format(time.RFC3339Nano)})
 		_, _, _ = d.catalog.publishSurface(registry.CatalogSurfaceState{Surface: adapter.Name(), Health: "healthy", ObservedAt: observedAt}, registry.CatalogEvent{DedupeKey: "surface.health:" + string(adapter.Name()) + ":healthy", Type: "surface.health", EntityID: string(adapter.Name()), Payload: payload})
+	}
+}
+
+func (d *Daemon) publishCatalogQueueCounts() {
+	counts, err := d.Registry.QueueCounts()
+	if err != nil {
+		d.log.Printf("catalog queue counts: %s", err)
+		return
+	}
+	snapshot, err := d.Registry.CatalogSnapshot()
+	if err != nil {
+		d.log.Printf("catalog queue snapshot: %s", err)
+		return
+	}
+	config, err := LoadDashboardConfig()
+	if err != nil {
+		d.log.Printf("catalog config: %s", err)
+		return
+	}
+	now := time.Now()
+	for _, record := range snapshot.Sessions {
+		count := counts[record.Session.ID]
+		for attempt := 0; attempt < 3; attempt++ {
+			var projection dashboardSession
+			if json.Unmarshal([]byte(record.ProjectionFingerprint), &projection) != nil {
+				break
+			}
+			if projection.QueueCount == count {
+				break
+			}
+			projection.QueueCount = count
+			projection.Current, projection.CurrentReason = dashboardSessionPresence(record.Session, count, projection.Open, config.CodexRecentHours, now)
+			fingerprint, err := json.Marshal(projection)
+			if err != nil {
+				break
+			}
+			if err := d.catalog.updateProjection(record.Session.ID, record.ProjectionFingerprint, string(fingerprint)); err == nil {
+				break
+			} else {
+				var conflict *registry.CatalogQueueProjectionConflict
+				if !errors.As(err, &conflict) {
+					d.log.Printf("catalog queue projection %s: %s", d.resolveDisplay(record.Session.ID), err)
+					break
+				}
+				count = conflict.QueueCount
+				if attempt == 2 {
+					d.log.Printf("catalog queue projection %s remained unstable", d.resolveDisplay(record.Session.ID))
+				}
+			}
+		}
 	}
 }
 
@@ -459,16 +533,6 @@ func (d *Daemon) correlateObservedTerminalLaunches(ctx context.Context, sessions
 		}
 		sessions[index].Runtime = candidate.Runtime
 	}
-}
-
-func (d *Daemon) catalogSessionRow(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time) dashboardSession {
-	alias, _ := d.Registry.ReverseAlias(session.ID)
-	open := session.Surface == surface.KindClaude && claudeProcessOpen(ctx, session.PID)
-	config, err := LoadDashboardConfig()
-	if err != nil {
-		config = DashboardConfig{}
-	}
-	return d.catalogSessionProjection(adapter, session, identity, observedAt, alias, d.Registry.QueueCount(session.ID), open, config)
 }
 
 func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surface.Session, identity catalogIdentity, observedAt time.Time, alias string, queueCount int, open bool, config DashboardConfig) dashboardSession {

@@ -19,24 +19,6 @@ type coldPageSurface struct {
 	started   chan struct{}
 }
 
-func TestDashboardSnapshotCacheRejectsPreviousHostEpoch(t *testing.T) {
-	d, reg, _, _, _ := daemonFixture(t)
-	epoch, seq, err := reg.CatalogState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dashboard := &dashboardServer{state: dashboardState{HostEpoch: "previous-epoch", CatalogSeq: seq}, stateAt: time.Now()}
-	response := httptest.NewRecorder()
-	d.dashboardStateCached(dashboard, response, httptest.NewRequest(http.MethodGet, "/api/state", nil))
-	var state dashboardState
-	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
-		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
-	}
-	if state.HostEpoch != epoch {
-		t.Fatalf("cached previous epoch: %+v, want %s", state, epoch)
-	}
-}
-
 func (s *coldPageSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	s.readCalls.Add(1)
 	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "seeded-item", Kind: "text", Role: "assistant", BodyRef: "seed-ref", Text: "seeded from provider"}}}, nil
@@ -85,83 +67,6 @@ func TestDashboardSessionColdConcurrentReadsShareOneJournalSeed(t *testing.T) {
 	}
 	if got := adapter.readCalls.Load(); got != 1 {
 		t.Fatalf("provider seed reads=%d, want exactly one", got)
-	}
-}
-
-func TestSessionPageHandoffReusesSeedWithoutJournalChurn(t *testing.T) {
-	d, reg, fake, from, _ := daemonFixture(t)
-	adapter := &coldPageSurface{daemonSurface: fake, started: make(chan struct{}, 1)}
-	adapter.caps.Stream = true
-	t.Cleanup(d.sources.shutdown)
-	if err := d.sources.seed(context.Background(), &from, adapter); err != nil {
-		t.Fatal(err)
-	}
-	first, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	subscription, err := d.sources.subscribe(&from, adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer subscription.Cancel()
-	second, err := reg.ReadSessionJournalPage(from.ID, 0, 10)
-	if err != nil || adapter.readCalls.Load() != 1 || first.LatestSeq != second.LatestSeq {
-		t.Fatalf("reads=%d first=%+v second=%+v err=%v", adapter.readCalls.Load(), first, second, err)
-	}
-}
-
-func TestReadJournalPagePreservesPagingIdentityRolesAndBodyReferences(t *testing.T) {
-	d, r, _, from, _ := daemonFixture(t)
-	retention := registry.SessionJournalRetention{Count: 32, Bytes: 16 << 10}
-	for index := 1; index <= 5; index++ {
-		payload := sessionJournalPayload{
-			ItemID:  "item-" + string(rune('0'+index)),
-			Version: 1,
-			Op:      "upsert",
-			Kind:    "text",
-			Role:    "assistant",
-			Title:   "Answer",
-			Body:    "body-" + string(rune('0'+index)),
-			BodyRef: "body-ref-" + string(rune('0'+index)),
-			TS:      time.Date(2026, 10, 4, 12, index, 0, 0, time.UTC).Format(time.RFC3339),
-		}
-		if index == 1 {
-			payload.Role = "user"
-			payload.Title = "Prompt"
-		}
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := r.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: payload.Kind, ProviderKey: payload.ItemID, Payload: encoded, BodyRef: payload.BodyRef, FullBody: []byte(payload.Body), ObservedAt: time.Unix(int64(index), 0)}, retention); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	first, err := d.readJournalPage(from.ID, 0, 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Source != "journal" || first.JournalSeq != 5 || first.NextBefore != 2 || len(first.Items) != 4 {
-		t.Fatalf("first=%+v", first)
-	}
-	for index, item := range first.Items {
-		wantID := "item-" + string(rune('2'+index))
-		if item.ID != wantID || item.Role != "assistant" || item.BodyRef != "body-ref-"+string(rune('2'+index)) {
-			t.Fatalf("item[%d]=%+v want id=%s", index, item, wantID)
-		}
-	}
-
-	second, err := d.readJournalPage(from.ID, uint64(first.NextBefore), 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.JournalSeq != 5 || second.NextBefore != 0 || len(second.Items) != 1 || second.Items[0].ID != "item-1" || second.Items[0].Role != "user" || second.Items[0].BodyRef != "body-ref-1" {
-		t.Fatalf("second=%+v", second)
-	}
-	if len(second.Exchanges) != 1 || second.Exchanges[0].User != "body-1" || second.Exchanges[0].Source != "journal" {
-		t.Fatalf("exchanges=%+v", second.Exchanges)
 	}
 }
 

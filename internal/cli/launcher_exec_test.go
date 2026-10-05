@@ -25,7 +25,7 @@ func TestLauncherExecConsumesIntentAndPreservesArgv(t *testing.T) {
 	if err := os.WriteFile(intentPath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&App{}).cmdLauncherExec([]string{intentPath}); err != nil {
+	if err := (&App{}).Run([]string{"launcher-exec", intentPath}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(intentPath); !os.IsNotExist(err) {
@@ -46,7 +46,7 @@ func TestLauncherExecRejectsUnprotectedIntent(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"argv":["/bin/true"],"cwd":"/"}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&App{}).cmdLauncherExec([]string{path}); err == nil || !strings.Contains(err.Error(), "0600") {
+	if err := (&App{}).Run([]string{"launcher-exec", path}); err == nil || !strings.Contains(err.Error(), "0600") {
 		t.Fatalf("error = %v, want 0600 rejection", err)
 	}
 	if _, err := os.Stat(path); err != nil {

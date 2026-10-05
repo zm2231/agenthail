@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
@@ -98,5 +100,110 @@ func TestAPIV1SearchUsesGuardAndExistingHistorySearch(t *testing.T) {
 	json.Unmarshal(response.Body.Bytes(), &body)
 	if _, ok := body["results"]; !ok {
 		t.Fatal(body)
+	}
+}
+
+type providerHistorySurface struct {
+	*daemonSurface
+	mu      sync.Mutex
+	befores []int64
+	fail    bool
+}
+
+func (s *providerHistorySurface) ReadSession(_ context.Context, _ *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.befores = append(s.befores, request.Before)
+	if request.Before == 0 {
+		return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "recent-1", Kind: "message", Role: "user", Text: "recent ask"}, {ID: "recent-2", Kind: "message", Role: "assistant", Text: "recent answer"}}, NextBefore: 7, Source: "local-transcript"}, nil
+	}
+	if s.fail {
+		return nil, errors.New("transcript unreadable")
+	}
+	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "older-1", Kind: "message", Role: "user", Text: "older ask"}}, NextBefore: 0, Source: "local-transcript"}, nil
+}
+
+func TestSessionPageContinuesIntoProviderHistoryPastSeed(t *testing.T) {
+	_, registry, fake, _, _ := daemonFixture(t)
+	adapter := &providerHistorySurface{daemonSurface: fake}
+	d := New(registry, []surface.Surface{adapter})
+	defer d.sources.shutdown()
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	read := func(query string) surface.SessionTimeline {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatal(response.Body.String())
+		}
+		var body struct {
+			Timeline surface.SessionTimeline `json:"timeline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Timeline
+	}
+	first := read("")
+	if first.Source != "journal" || len(first.Items) != 2 || first.NextBefore != encodeProviderHistoryCursor(7) {
+		t.Fatalf("seeded page lost the provider boundary: %+v", first)
+	}
+	older := read(fmt.Sprintf("&timelineBefore=%d", first.NextBefore))
+	if len(older.Items) != 1 || older.Items[0].Text != "older ask" || older.NextBefore != 0 || older.UnavailableReason != "" {
+		t.Fatalf("older provider page=%+v", older)
+	}
+	adapter.mu.Lock()
+	befores := append([]int64(nil), adapter.befores...)
+	adapter.fail = true
+	adapter.mu.Unlock()
+	if len(befores) < 2 || befores[0] != 0 || befores[len(befores)-1] != 7 {
+		t.Fatalf("provider reads=%v", befores)
+	}
+	failed := read(fmt.Sprintf("&timelineBefore=%d", first.NextBefore))
+	if len(failed.Items) != 0 || failed.NextBefore != 0 || failed.UnavailableReason == "" {
+		t.Fatalf("failed older read reported exhaustion: %+v", failed)
+	}
+}
+
+func TestSessionPageWithPreexistingJournalReportsHistoryGapInsteadOfExhaustion(t *testing.T) {
+	_, registry, fake, from, _ := daemonFixture(t)
+	if _, _, err := registry.AppendSessionJournalEntry(registrypkg.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "legacy", Payload: []byte(`{"itemId":"legacy","version":1,"op":"upsert","kind":"text","role":"assistant","body":"legacy"}`)}, registrypkg.SessionJournalRetention{Count: 32, Bytes: 4096}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.MarkSessionJournalSeed(from.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &providerHistorySurface{daemonSurface: fake}
+	d := New(registry, []surface.Surface{adapter})
+	defer d.sources.shutdown()
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	get := func(query string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if err := d.sources.seed(context.Background(), &from, adapter); err != nil {
+		t.Fatal(err)
+	}
+	response := get("")
+	var body struct {
+		Timeline surface.SessionTimeline `json:"timeline"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if len(body.Timeline.Items) != 3 || body.Timeline.Items[0].Text != "legacy" || body.Timeline.NextBefore == 0 {
+		t.Fatalf("pre-existing journal reported exhausted history: %+v", body.Timeline)
+	}
+	if _, provider := decodeProviderHistoryCursor(body.Timeline.NextBefore); provider {
+		t.Fatalf("re-seed attached a provider boundary below older journal entries: %+v", body.Timeline)
+	}
+	older := get(fmt.Sprintf("&timelineBefore=%d", body.Timeline.NextBefore))
+	if older.Code != http.StatusConflict || !strings.Contains(older.Body.String(), `"history_gap"`) {
+		t.Fatalf("older read code=%d body=%s", older.Code, older.Body.String())
 	}
 }

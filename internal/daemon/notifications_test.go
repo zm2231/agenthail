@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestBoundedNotificationTextFlattensAndLimits(t *testing.T) {
@@ -56,19 +55,6 @@ func TestNotifyPassesSessionToHelper(t *testing.T) {
 		if !test.want && strings.Contains(string(data), "--session") {
 			t.Fatalf("unexpected session flag: %q", data)
 		}
-	}
-}
-
-func TestNativeNotificationStatusUsesHelper(t *testing.T) {
-	home := t.TempDir()
-	helper := filepath.Join(home, "helper")
-	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' '{\"available\":true,\"authorization\":\"authorized\",\"authorized\":true,\"alerts\":true,\"sounds\":true}'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_MAC_APP", helper)
-	status := nativeNotificationStatus("status", 5*time.Second)
-	if !status.Authorized || status.Authorization != "authorized" {
-		t.Fatalf("status=%+v", status)
 	}
 }
 

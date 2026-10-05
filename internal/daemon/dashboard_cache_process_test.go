@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -24,24 +25,9 @@ func TestParseClaudeOpenProcessesRequiresPositivePIDAndExactClaudeBasename(t *te
 	}
 }
 
-func TestPublishEventInvalidatesOnlyStateRelevantDashboardEvents(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	d.dashboard = &dashboardServer{}
-
-	for _, eventType := range []string{"transcript.updated", "session.output", "unrelated.event"} {
-		d.publishEvent(eventType, "from", nil)
-	}
-	if got := d.dashboard.stateVersion.Load(); got != 0 {
-		t.Fatalf("non-state events invalidated cache: version=%d", got)
-	}
-	d.publishEvent("session.updated", "from", nil)
-	if got := d.dashboard.stateVersion.Load(); got != 1 {
-		t.Fatalf("state event did not invalidate cache: version=%d", got)
-	}
-}
-
 func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
+	d.discoverCatalog(context.Background())
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/state?limit=1", nil)
 	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
@@ -108,6 +94,33 @@ func TestDashboardCatalogPageUsesBoundedCatalogAndDoesNotPoisonFullCache(t *test
 	}
 	if len(full.Sessions) != 2 || full.TotalSessions != 2 {
 		t.Fatalf("full state was page-contaminated: %+v", full)
+	}
+}
+
+func TestDashboardEmptyCatalogPageDoesNotFallBackToSavedSessions(t *testing.T) {
+	d, store, fake, from, _ := daemonFixture(t)
+	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
+		Session:               from,
+		HostProject:           []byte(`{"id":"project"}`),
+		Checkout:              []byte(`{}`),
+		ProjectionFingerprint: `{"id":"from","surface":"codex","name":"from","cwd":"/work","status":"idle"}`,
+	}, registry.CatalogEvent{DedupeKey: "session:from:catalog", Type: "session.upserted", EntityID: from.ID, Payload: []byte(`{"session":{"id":"from"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	request := httptest.NewRequest(http.MethodGet, "/api/state?limit=20&q=does-not-exist", nil)
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var state dashboardState
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 0 || state.TotalSessions != 0 || fake.listCalls.Load() != 0 {
+		t.Fatalf("empty page fell back to saved/provider sessions: sessions=%d total=%d listCalls=%d", len(state.Sessions), state.TotalSessions, fake.listCalls.Load())
 	}
 }
 

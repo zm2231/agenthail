@@ -70,10 +70,17 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		writeDashboardJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "stream_gap", "message": "The session stream cursor is no longer retained."}, "earliestSeq": window.EarliestSeq, "latestSeq": window.LatestSeq})
 		return
 	}
+	d.writeSessionStream(w, r, flusher, sessionID, after, window, subscription.Entries)
+}
+
+func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flusher http.Flusher, sessionID string, after uint64, window registry.SessionJournalWindow, entries <-chan registry.SessionJournalEntry) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
-	seen := map[uint64]uint64{}
+	watermark := window.LatestSeq
+	if watermark < after {
+		watermark = after
+	}
 	for _, entry := range window.Entries {
 		if !d.apiEventStreamAuthorized(r) {
 			return
@@ -81,7 +88,9 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		if err := writeSessionStreamEntry(w, sessionID, entry); err != nil {
 			return
 		}
-		seen[entry.Seq] = sessionJournalVersion(entry)
+		if entry.Seq > watermark {
+			watermark = entry.Seq
+		}
 	}
 	flusher.Flush()
 	keepalive := time.NewTicker(eventKeepalivePeriod)
@@ -90,12 +99,11 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 		select {
 		case <-r.Context().Done():
 			return
-		case entry, open := <-subscription.Entries:
+		case entry, open := <-entries:
 			if !open {
 				return
 			}
-			version := sessionJournalVersion(entry)
-			if prior, found := seen[entry.Seq]; found && version <= prior {
+			if entry.Seq <= watermark {
 				continue
 			}
 			if !d.apiEventStreamAuthorized(r) {
@@ -104,7 +112,7 @@ func (d *Daemon) apiSessionStreamHandler(w http.ResponseWriter, r *http.Request)
 			if err := writeSessionStreamEntry(w, sessionID, entry); err != nil {
 				return
 			}
-			seen[entry.Seq] = version
+			watermark = entry.Seq
 			flusher.Flush()
 		case <-keepalive.C:
 			if !d.apiEventStreamAuthorized(r) {
@@ -169,14 +177,4 @@ func writeSessionStreamEntry(w http.ResponseWriter, sessionID string, entry regi
 	}
 	_, err = fmt.Fprintf(w, "id: %d\nevent: item\ndata: %s\n\n", entry.Seq, envelope)
 	return err
-}
-
-func sessionJournalVersion(entry registry.SessionJournalEntry) uint64 {
-	var payload struct {
-		Version uint64 `json:"version"`
-	}
-	if json.Unmarshal(entry.Payload, &payload) != nil {
-		return 0
-	}
-	return payload.Version
 }

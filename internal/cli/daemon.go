@@ -415,7 +415,7 @@ func restartLaunchdDaemon(label string) error {
 	if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
 		return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if pid, running := daemon.IsRunning(); running && pid != before {
 			fmt.Printf("daemon restarted (pid %d)\n", pid)

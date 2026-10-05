@@ -97,18 +97,27 @@ func scanAppendedJSONL(ctx context.Context, path string, offset int64, limit int
 		if err := ctx.Err(); err != nil {
 			return current, err
 		}
-		line, readErr := reader.ReadBytes('\n')
-		if readErr == io.EOF && len(line) > limit {
-			return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
+		var line []byte
+		var readErr error
+		for {
+			part, partErr := reader.ReadSlice('\n')
+			if len(line)+len(part) > limit {
+				return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
+			}
+			line = append(line, part...)
+			readErr = partErr
+			if partErr != bufio.ErrBufferFull {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return current, err
+			}
 		}
 		if readErr == io.EOF && len(line) > 0 {
 			return current, nil
 		}
 		if readErr != nil && readErr != io.EOF {
 			return current, readErr
-		}
-		if len(line) > limit {
-			return current, fmt.Errorf("transcript record exceeds %d bytes", limit)
 		}
 		if len(line) > 1 {
 			if err := visit(line); err != nil {

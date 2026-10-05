@@ -14,6 +14,7 @@ const (
 )
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
+	defer d.publishCatalogQueueCounts()
 	if expired, err := d.Registry.ExpireMessages(time.Now()); err != nil {
 		d.log.Printf("expire queued messages: %s", err)
 	} else {
@@ -246,12 +247,14 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.log.Printf("check steer queue %s: %s", d.resolveDisplay(session.ID), steerQueueErr)
 	}
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer
-	if (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue || canSteerQueued {
+	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
+	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy
+	if canDrainQueue || canDrainSteer {
 		queued := d.Registry.QueueCount(session.ID)
-		if canSteerQueued && observation.Status == surface.StatusBusy {
-			d.drainSteerMessageQueue(ctx, adapter, session)
-		} else {
+		if canDrainQueue {
 			d.drainMessageQueue(ctx, adapter, session)
+		} else {
+			d.drainSteerMessageQueue(ctx, adapter, session)
 		}
 		if queued > 0 {
 			d.publishEvent("state.changed", session.ID, map[string]string{"source": "queue"})

@@ -29,7 +29,9 @@ struct SearchableModelSelectionSheet: View {
         _customID = State(initialValue: Self.customValue(currentSelectedID, options: initialOptions))
     }
 
-    private var filteredOptions: [ModelOption] {
+    private var filteredOptions: [ModelOption] { Self.matching(options, query: query) }
+
+    static func matching(_ options: [ModelOption], query: String) -> [ModelOption] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return options }
         return options.filter { option in

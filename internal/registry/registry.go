@@ -17,12 +17,13 @@ import (
 type Registry struct {
 	db   *sql.DB
 	path string
+	now  func() time.Time
 }
 
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 11
+	schemaVersion   = 12
 	queueMessageTTL = time.Hour
 )
 
@@ -55,7 +56,7 @@ func Open(path string) (*Registry, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	r := &Registry{db: db, path: path}
+	r := &Registry{db: db, path: path, now: time.Now}
 	if err := r.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -129,6 +130,18 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
+	turnObservedExisted, columnErr := r.columnExists("session_runtime", "turn_observed")
+	if columnErr != nil {
+		return columnErr
+	}
+	if err := r.ensureColumn("session_runtime", "turn_observed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if !turnObservedExisted {
+		if _, err := r.db.Exec(`UPDATE session_runtime SET turn_observed=1 WHERE last_status<>'unknown' OR active_turn_id<>'' OR completed_turn_id<>'' OR relay_hops<>0`); err != nil {
+			return err
+		}
+	}
 	if err := r.ensureColumn("launcher_pending", "alias", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -142,6 +155,12 @@ func (r *Registry) migrate() error {
 		return err
 	}
 	if err := r.ensureColumn("session_journal_state", "seed_seq", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("session_journal_state", "seed_identity", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if err := r.ensureColumn("session_journal_state", "history_before", `INTEGER NOT NULL DEFAULT -1`); err != nil {
 		return err
 	}
 	if err := r.ensureColumn("session_journal", "body_ref", `TEXT NOT NULL DEFAULT ''`); err != nil {
@@ -194,10 +213,10 @@ func (r *Registry) migrate() error {
 	return err
 }
 
-func (r *Registry) ensureColumn(table, name, declaration string) error {
+func (r *Registry) columnExists(table, name string) (bool, error) {
 	rows, err := r.db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
-		return err
+		return false, err
 	}
 	found := false
 	for rows.Next() {
@@ -206,13 +225,18 @@ func (r *Registry) ensureColumn(table, name, declaration string) error {
 		var defaultValue any
 		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &pk); err != nil {
 			rows.Close()
-			return err
+			return false, err
 		}
 		if columnName == name {
 			found = true
 		}
 	}
-	if err := rows.Close(); err != nil {
+	return found, rows.Close()
+}
+
+func (r *Registry) ensureColumn(table, name, declaration string) error {
+	found, err := r.columnExists(table, name)
+	if err != nil {
 		return err
 	}
 	if found {
@@ -280,6 +304,7 @@ CREATE TABLE IF NOT EXISTS session_runtime (
 	completed_turn_id TEXT NOT NULL DEFAULT '',
 	relay_hops INTEGER NOT NULL DEFAULT 0,
 	notification_armed INTEGER NOT NULL DEFAULT 0,
+	turn_observed INTEGER NOT NULL DEFAULT 0,
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS launcher_pending (
@@ -378,7 +403,9 @@ CREATE TABLE IF NOT EXISTS session_journal_state (
 	source_epoch TEXT NOT NULL DEFAULT '',
 	pruned_before INTEGER NOT NULL DEFAULT 0,
 	seed_status TEXT NOT NULL DEFAULT 'unknown',
-	seed_seq INTEGER NOT NULL DEFAULT 0
+	seed_seq INTEGER NOT NULL DEFAULT 0,
+	seed_identity TEXT NOT NULL DEFAULT '',
+	history_before INTEGER NOT NULL DEFAULT -1
 );
 CREATE TABLE IF NOT EXISTS session_journal_bodies (
 	ref TEXT PRIMARY KEY,
@@ -423,6 +450,35 @@ CREATE TABLE IF NOT EXISTS catalog_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS catalog_events_created ON catalog_events(created_at DESC, seq DESC);
+CREATE TRIGGER IF NOT EXISTS message_queue_catalog_insert AFTER INSERT ON message_queue
+WHEN NEW.status IN ('pending','inflight')
+BEGIN
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
+		json_object('sessionId',NEW.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=NEW.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+CREATE TRIGGER IF NOT EXISTS message_queue_catalog_update AFTER UPDATE OF status,session_id ON message_queue
+WHEN (OLD.status IN ('pending','inflight')) != (NEW.status IN ('pending','inflight')) OR (OLD.session_id != NEW.session_id AND NEW.status IN ('pending','inflight'))
+BEGIN
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
+		json_object('sessionId',NEW.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=NEW.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	SELECT 'session.queue:'||OLD.session_id||':'||lower(hex(randomblob(12))),'session.queue',OLD.session_id,
+		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now')
+	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
+END;
+CREATE TRIGGER IF NOT EXISTS message_queue_catalog_delete AFTER DELETE ON message_queue
+WHEN OLD.status IN ('pending','inflight')
+BEGIN
+	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
+	VALUES('session.queue:'||OLD.session_id||':'||lower(hex(randomblob(12))),'session.queue',OLD.session_id,
+		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
+		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL
@@ -868,7 +924,7 @@ func (r *Registry) QueueCompact(sessionID string) (int64, error) {
 	if err != sql.ErrNoRows {
 		return 0, err
 	}
-	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
+	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
 	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,expires_at_ms,status,updated_at) VALUES (?,?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact, expiresAt)
 	if err != nil {
 		return 0, err
@@ -902,7 +958,7 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
 		options.BusyDelivery = "queue"
 	}
-	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
+	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, 0, err
@@ -990,7 +1046,7 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 
 func (r *Registry) QueueCount(sessionID string) int {
 	var n int
-	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, time.Now().UnixMilli()).Scan(&n)
+	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, r.now().UnixMilli()).Scan(&n)
 	return n
 }
 
@@ -1001,7 +1057,7 @@ func (r *Registry) PendingSteer(sessionID string) (bool, error) {
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, time.Now().UnixMilli())
+	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, r.now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -1251,7 +1307,7 @@ type AttentionItem struct {
 const uncertainDeliveryError = "delivery outcome is unknown after daemon interruption; retry explicitly if the target did not receive it"
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
-	now := time.Now()
+	now := r.now()
 	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue`
 	if !includeDelivered {
 		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
@@ -1281,7 +1337,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 }
 
 func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
-	now := time.Now()
+	now := r.now()
 	var row QueueRow
 	var evidence string
 	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
@@ -1402,7 +1458,7 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,expires_at_ms=?,delivered=0,updated_at=datetime('now') WHERE id=? AND status IN ('dead','expired')`, time.Now().Add(queueMessageTTL).UnixMilli(), id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,expires_at_ms=?,delivered=0,updated_at=datetime('now') WHERE id=? AND status IN ('dead','expired')`, r.now().Add(queueMessageTTL).UnixMilli(), id)
 	if err != nil {
 		return err
 	}
@@ -1410,7 +1466,7 @@ func (r *Registry) RetryMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not dead-lettered or expired", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
-	return r.ReconcileAttentionItems(time.Now())
+	return r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) CancelMessage(id int64) error {
@@ -1424,7 +1480,7 @@ func (r *Registry) CancelMessage(id int64) error {
 		return fmt.Errorf("queue item %d is not pending or dead-lettered", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "canceled", SessionID: sessionID, QueueID: id, Message: message, Result: "removed from delivery queue"})
-	return r.ReconcileAttentionItems(time.Now())
+	return r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
@@ -1464,7 +1520,7 @@ func (r *Registry) CancelMessagesForSession(sessionID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+	if err := r.ReconcileAttentionItems(r.now()); err != nil {
 		return count, err
 	}
 	return count, nil
@@ -1549,7 +1605,7 @@ func (r *Registry) AckMessage(id int64) error {
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not inflight", id)
 	}
-	return r.ReconcileAttentionItems(time.Now())
+	return r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) AckMessageWithRelayHops(id int64, sessionID string, relayHops int) error {
@@ -1575,13 +1631,13 @@ func (r *Registry) AckMessageWithEvidence(id int64, sessionID string, relayHops 
 	if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentSent, evidence, providerKey); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,relay_hops,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET relay_hops=excluded.relay_hops,updated_at=datetime('now')`, sessionID, relayHops); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,relay_hops,turn_observed,updated_at) VALUES(?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET relay_hops=excluded.relay_hops,turn_observed=1,updated_at=datetime('now')`, sessionID, relayHops); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return r.ReconcileAttentionItems(time.Now())
+	return r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts int) error {
@@ -1669,7 +1725,7 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return r.ReconcileAttentionItems(time.Now())
+	return r.ReconcileAttentionItems(r.now())
 }
 
 func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
@@ -1692,7 +1748,7 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	if err := r.ReconcileAttentionItems(time.Now()); err != nil {
+	if err := r.ReconcileAttentionItems(r.now()); err != nil {
 		return notified, err
 	}
 	return notified, nil
@@ -1750,7 +1806,7 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	var state RuntimeState
 	var status, updatedAt string
 	var notificationArmed int
-	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=?`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
+	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
 	if err == sql.ErrNoRows {
 		return state, false, nil
 	}
@@ -1769,12 +1825,12 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 }
 
 func (r *Registry) MarkDeliveryStarted(sessionID, activeTurnID, completedTurnID string) error {
-	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,notification_armed,updated_at) VALUES(?,?,?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,notification_armed=1,updated_at=datetime('now')`, sessionID, string(surface.StatusBusy), activeTurnID, completedTurnID)
+	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,notification_armed,turn_observed,updated_at) VALUES(?,?,?,?,1,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=CASE WHEN session_runtime.turn_observed=1 THEN session_runtime.completed_turn_id ELSE excluded.completed_turn_id END,notification_armed=1,turn_observed=1,updated_at=datetime('now')`, sessionID, string(surface.StatusBusy), activeTurnID, completedTurnID)
 	return err
 }
 
 func (r *Registry) SaveRuntimeState(sessionID string, observation surface.TurnObservation) error {
-	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,updated_at) VALUES(?,?,?,?,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now')`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
+	_, err := r.db.Exec(`INSERT INTO session_runtime(session_id,last_status,active_turn_id,completed_turn_id,turn_observed,updated_at) VALUES(?,?,?,?,1,datetime('now')) ON CONFLICT(session_id) DO UPDATE SET last_status=excluded.last_status,active_turn_id=excluded.active_turn_id,completed_turn_id=excluded.completed_turn_id,turn_observed=1,relay_hops=CASE WHEN excluded.completed_turn_id != session_runtime.completed_turn_id THEN 0 ELSE session_runtime.relay_hops END,updated_at=datetime('now')`, sessionID, string(observation.Status), observation.ActiveTurnID, observation.CompletedTurnID)
 	return err
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-install-test.XXXXXX")"
 TEST_HOME="$TMP/home odd\" dollar\$ back\\slash"
 DATA_DIR="$TEST_HOME/data odd\" dollar\$ back\\slash"
 OLD_BIN="$TEST_HOME/.local/bin"
@@ -178,9 +178,10 @@ test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "11"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "12"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_status'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_seq'")" = "1"
+test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_identity'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('catalog_sessions') WHERE name='discovery_failures'")" = "1"
 test "$(sqlite3 "$TEST_HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('launcher_pending') WHERE name='alias'")" = "1"
 
@@ -208,11 +209,16 @@ test ! -e "$SKILL_HOME/.claude/skills/agenthail-operations"
 test ! -e "$SKILL_HOME/.codex/skills/agenthail-operations"
 test ! -e "$SKILL_HOME/.hermes/skills/agenthail-operations"
 
+mkdir -p "$TMP/checkout/skills/agenthail-operations" "$SKILL_HOME/.codex/skills" "$SKILL_HOME/.hermes/skills"
+ln -s "$TMP/checkout/skills/agenthail-operations" "$SKILL_HOME/.codex/skills/agenthail-operations"
+ln -s "$TMP/removed-install/skills/agenthail-operations" "$SKILL_HOME/.hermes/skills/agenthail-operations"
 mkdir -p "$SKILL_HOME/.claude/skills/agenthail-operations"
 printf 'mine\n' >"$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >"$TMP/skill-collision.log" 2>&1
 grep -Fq 'is not an agenthail symlink' "$TMP/skill-collision.log"
 grep -Fqx 'mine' "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
+test "$(readlink "$SKILL_HOME/.codex/skills/agenthail-operations")" = "$TMP/checkout/skills/agenthail-operations"
+test "$(readlink "$SKILL_HOME/.hermes/skills/agenthail-operations")" = "$SKILL_DATA/skills/agenthail-operations"
 
 install_once "$CUSTOM_HOME" "$CUSTOM_BIN" "$CUSTOM_DATA_1" >/dev/null
 CUSTOM_PID_1="$(cat "$CUSTOM_HOME/.agenthail/daemon.pid")"

@@ -76,10 +76,10 @@ struct SessionState: Codable, Identifiable, Hashable {
     let alias: String?
     let status: String
     let lastActive: String?
-    let queueCount: Int
+    var queueCount: Int
     let open: Bool
-    let current: Bool
-    let currentReason: String?
+    var current: Bool
+    var currentReason: String?
     let capabilities: Capabilities
     let readOnly: Bool?
     let readOnlyReason: String?
@@ -618,6 +618,7 @@ struct CatalogStreamData: Decodable {
     let health: String?
     let detail: String?
     let deliveryId: Int64?
+    let queueCount: Int?
     let sourceSessionId: String?
     let message: String?
     let reason: String?

@@ -466,7 +466,6 @@ final class AgenthailIOSModel: ObservableObject {
             let items = try await api.queuedInstructions()
             for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
                 guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
-                    deliveryStatus[sessionID] = "Delivery is no longer in recent history. Check the session before retrying."
                     continue
                 }
                 switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
@@ -480,15 +479,11 @@ final class AgenthailIOSModel: ObservableObject {
                 case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
                 case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
-                default: deliveryStatus[sessionID] = "Delivery status unavailable. Check Inbox before retrying."
+                default: continue
                 }
                 if item.isHistorical { deliveryQueueIDs.removeValue(forKey: sessionID) }
             }
-        } catch {
-            for (sessionID, queueID) in expected where deliveryQueueIDs[sessionID] == queueID {
-                deliveryStatus[sessionID] = "Delivery status could not be refreshed. Check Inbox before retrying."
-            }
-        }
+        } catch {}
     }
 
     private func startSessionMetadata(_ id: String, requestID: UUID) {
@@ -839,6 +834,11 @@ final class AgenthailIOSModel: ObservableObject {
             else { current.sessions.append(changed) }
             current.totalSessions = current.sessions.count
             snapshot = current
+        case "session.queue":
+            guard let id = event.data.sessionId, let count = event.data.queueCount,
+                  let index = current.sessions.firstIndex(where: { $0.id == id }) else { return }
+            current.sessions[index] = Self.applyingQueueCount(count, to: current.sessions[index], codexRecentHours: current.codexRecentHours, now: Date())
+            snapshot = current
         case "session.removed":
             guard let id = event.data.sessionId else { _ = await refresh(); return }
             current.sessions.removeAll { $0.id == id }
@@ -872,6 +872,32 @@ final class AgenthailIOSModel: ObservableObject {
         default:
             return
         }
+    }
+
+    static func applyingQueueCount(_ count: Int, to session: SessionState, codexRecentHours: Int, now: Date) -> SessionState {
+        var updated = session
+        updated.queueCount = count
+        func activeWithin(hours: Int) -> Bool {
+            guard let value = session.lastActive, let date = ISO8601DateFormatter.sessionDate(value) else { return false }
+            return now.timeIntervalSince(date) <= TimeInterval(hours) * 3600
+        }
+        switch session.surface {
+        case "claude":
+            if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
+            else if !session.open { (updated.current, updated.currentReason) = (false, nil) }
+            else { (updated.current, updated.currentReason) = (true, session.isWorking ? "working" : "open") }
+        case "codex":
+            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
+            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
+            else if session.status != "notLoaded" && activeWithin(hours: codexRecentHours) { (updated.current, updated.currentReason) = (true, "recent") }
+            else { (updated.current, updated.currentReason) = (false, nil) }
+        default:
+            if session.isWorking { (updated.current, updated.currentReason) = (true, "working") }
+            else if count > 0 { (updated.current, updated.currentReason) = (true, "queued") }
+            else if activeWithin(hours: 24) { (updated.current, updated.currentReason) = (true, "recent") }
+            else { (updated.current, updated.currentReason) = (false, nil) }
+        }
+        return updated
     }
 
     private func startSessionStream(_ id: String) {

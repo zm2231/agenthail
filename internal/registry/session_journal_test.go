@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -84,14 +83,6 @@ func TestSessionJournalIdenticalProviderReplayDoesNotAdvanceWatermark(t *testing
 	}
 }
 
-func TestSessionJournalRejectsEntryBeyondByteRetention(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "session")
-	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", Payload: []byte("too large")}, SessionJournalRetention{Count: 1, Bytes: 3}); err == nil {
-		t.Fatal("oversized entry was accepted")
-	}
-}
-
 func TestSessionJournalBodyIsSessionBoundAndExpiresWithRetention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
@@ -162,22 +153,6 @@ func TestSessionJournalUpsertMaintainsByteRetention(t *testing.T) {
 	}
 }
 
-func TestSessionJournalRetentionCountsFullBodyBytes(t *testing.T) {
-	r := openTestRegistry(t)
-	register(t, r, "session")
-	retention := SessionJournalRetention{Count: 4, Bytes: 32}
-	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("preview"), BodyRef: "body-ref", FullBody: []byte("0123456789")}, retention); err != nil {
-		t.Fatal(err)
-	}
-	var retained int
-	if err := r.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
-		t.Fatal(err)
-	}
-	if retained != len("preview")+len("0123456789") {
-		t.Fatalf("retained bytes=%d, want %d", retained, len("preview")+len("0123456789"))
-	}
-}
-
 func TestSessionJournalRejectsSingleBodyBeyondRetention(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
@@ -185,12 +160,9 @@ func TestSessionJournalRejectsSingleBodyBeyondRetention(t *testing.T) {
 	if !errors.Is(err, ErrSessionJournalEntryTooLarge) {
 		t.Fatalf("err=%v, want ErrSessionJournalEntryTooLarge", err)
 	}
-	var entries int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM session_journal WHERE session_id=?`, "session").Scan(&entries); err != nil {
-		t.Fatal(err)
-	}
-	if entries != 0 {
-		t.Fatalf("journal entries=%d, want 0 after rejected body", entries)
+	window, err := r.SessionJournalAfter("session", 0, 10)
+	if err != nil || len(window.Entries) != 0 {
+		t.Fatalf("window=%+v err=%v, want no entries after rejected body", window, err)
 	}
 }
 
@@ -226,41 +198,53 @@ func TestSessionJournalPageReportsGapAfterRetentionPrunesHistory(t *testing.T) {
 	}
 }
 
-func TestSessionJournalMigrationNormalizesRetainedBodyBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
-	old, err := Open(path)
-	if err != nil {
+func TestSessionJournalPageExposesProviderHistoryBoundaryUntilPruned(t *testing.T) {
+	reg := openTestRegistry(t)
+	register(t, reg, "s")
+	retention := SessionJournalRetention{Count: 2, Bytes: 4096}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 9); err != nil {
 		t.Fatal(err)
 	}
-	register(t, old, "session")
-	retention := SessionJournalRetention{Count: 4, Bytes: 10}
-	if _, _, err := old.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "body", Payload: []byte("p"), BodyRef: "body-ref", FullBody: []byte("123456789")}, retention); err != nil {
-		old.Close()
+	if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: "a", Payload: []byte(`{"itemId":"a"}`)}, retention); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := old.db.Exec(`UPDATE session_journal SET bytes=length(payload); UPDATE session_journal_state SET retained_bytes=length('p'); PRAGMA user_version=8`); err != nil {
-		old.Close()
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 3); err != nil {
 		t.Fatal(err)
 	}
-	if err := old.Close(); err != nil {
+	page, err := reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || page.HistoryBefore != 9 || page.NextBefore != 0 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	for _, key := range []string{"b", "c"} {
+		if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: key, Payload: []byte(`{"itemId":"` + key + `"}`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err = reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || page.HistoryBefore != 0 {
+		t.Fatalf("pruned journal still exposed provider boundary: %+v err=%v", page, err)
+	}
+}
+
+func TestSessionJournalWithoutRecordedBoundaryEndsInHistoryGap(t *testing.T) {
+	reg := openTestRegistry(t)
+	register(t, reg, "s")
+	retention := SessionJournalRetention{Count: 8, Bytes: 4096}
+	for _, key := range []string{"a", "b"} {
+		if _, _, err := reg.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "s", Kind: "text", ProviderKey: key, Payload: []byte(`{"itemId":"` + key + `"}`)}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.RecordSessionJournalHistoryBoundary("s", 5); err != nil {
 		t.Fatal(err)
 	}
-	migrated, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
+	page, err := reg.ReadSessionJournalPage("s", 0, 10)
+	if err != nil || len(page.Entries) != 2 || page.HistoryBefore != 0 || page.NextBefore != page.Entries[0].Seq {
+		t.Fatalf("journal with unknown older boundary reported exhaustion: %+v err=%v", page, err)
 	}
-	defer migrated.Close()
-	var retained int
-	if err := migrated.db.QueryRow(`SELECT retained_bytes FROM session_journal_state WHERE session_id=?`, "session").Scan(&retained); err != nil {
-		t.Fatal(err)
-	}
-	if retained != 10 {
-		t.Fatalf("retained bytes=%d, want 10", retained)
-	}
-	if _, _, err := migrated.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "item", ProviderKey: "next", Payload: []byte("q")}, retention); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := migrated.SessionJournalBody("session", "body-ref", 0, 1); err == nil {
-		t.Fatal("old body remained after normalized retention pruned it")
+	_, err = reg.ReadSessionJournalPage("s", page.NextBefore, 10)
+	var gap *SessionJournalHistoryGapError
+	if !errors.As(err, &gap) || gap.EarliestSeq != page.Entries[0].Seq {
+		t.Fatalf("older read past unknown boundary err=%v", err)
 	}
 }

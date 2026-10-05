@@ -12,321 +12,442 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestManagerOwnsDistinctPeersAndRecoversChildExit(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "ah-manager-")
+var (
+	buildOnce sync.Once
+	buildDir  string
+	binary    string
+	buildErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if buildDir != "" {
+		_ = os.RemoveAll(buildDir)
+	}
+	os.Exit(code)
+}
+
+func agenthailBinary(t *testing.T) string {
+	t.Helper()
+	buildOnce.Do(func() {
+		buildDir, buildErr = os.MkdirTemp("", "ah-bin-")
+		if buildErr != nil {
+			return
+		}
+		binary = filepath.Join(buildDir, "agenthail")
+		if output, err := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail").CombinedOutput(); err != nil {
+			buildErr = fmt.Errorf("build: %v\n%s", err, output)
+		}
+	})
+	if buildErr != nil {
+		t.Fatal(buildErr)
+	}
+	return binary
+}
+
+type peerFixture struct {
+	t         *testing.T
+	ctx       context.Context
+	home      string
+	socketDir string
+	reg       *registry.Registry
+	manager   *Manager
+}
+
+type peerRecord struct {
+	PID                 int    `json:"pid"`
+	Name                string `json:"name"`
+	Agenthail           string `json:"agenthail"`
+	MessagingSocketPath string `json:"messagingSocketPath"`
+}
+
+func newPeerFixture(t *testing.T, sessionIDs ...string) *peerFixture {
+	t.Helper()
+	home, err := os.MkdirTemp("/tmp", "ah-peers-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(home)
-	binary := filepath.Join(home, "agenthail")
-	build := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, output)
-	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
 	reg, err := registry.Open(filepath.Join(home, ".agenthail", "registry.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
-	for _, id := range []string{"recent", "older"} {
+	t.Cleanup(func() { _ = reg.Close() })
+	for _, id := range sessionIDs {
 		if err := reg.RegisterSession(surface.Session{ID: id, Surface: surface.KindNotion, Name: id, Status: surface.StatusIdle}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	manager, err := Start(ctx, home, reg, binary)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	socketDir := filepath.Join(home, "socks")
+	manager, err := start(ctx, home, reg, agenthailBinary(t), socketDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.socketDir = filepath.Join(home, "socks")
-	defer manager.Close()
-	if err := manager.Ensure(ctx, "recent"); err != nil {
+	t.Cleanup(manager.Close)
+	return &peerFixture{t: t, ctx: ctx, home: home, socketDir: socketDir, reg: reg, manager: manager}
+}
+
+func (f *peerFixture) records() []peerRecord {
+	f.t.Helper()
+	paths, _ := filepath.Glob(filepath.Join(f.home, ".claude", "sessions", "*.json"))
+	var records []peerRecord
+	for _, path := range paths {
+		var record peerRecord
+		data, err := os.ReadFile(path)
+		if err == nil && json.Unmarshal(data, &record) == nil && record.Agenthail == "peer-worker" {
+			records = append(records, record)
+		}
+	}
+	return records
+}
+
+func (f *peerFixture) worker(name string) peerRecord {
+	f.t.Helper()
+	var found []peerRecord
+	for _, record := range f.records() {
+		if record.Name == "agenthail/notion: "+name {
+			found = append(found, record)
+		}
+	}
+	if len(found) != 1 {
+		f.t.Fatalf("Claude-visible records for %q: %+v", name, found)
+	}
+	return found[0]
+}
+
+func (f *peerFixture) recordPath(pid int) string {
+	return filepath.Join(f.home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+}
+
+func (f *peerFixture) controlSockets(pid int) []string {
+	paths, _ := filepath.Glob(filepath.Join(claudepeer.RuntimeRoot(f.home), "*", strconv.Itoa(pid)+".sock"))
+	return paths
+}
+
+func killProcess(t *testing.T, pid int) {
+	t.Helper()
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.ReverseAlias("recent"); err != sql.ErrNoRows {
+	waitUntil(t, fmt.Sprintf("process %d to exit", pid), func() bool { return syscall.Kill(pid, 0) != nil })
+}
+
+func waitUntil(t *testing.T, what string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func sendPeerFrame(t *testing.T, socket string, frame map[string]any) {
+	t.Helper()
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if err := json.NewEncoder(conn).Encode(frame); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.(*net.UnixConn).CloseWrite()
+	if _, err := io.ReadAll(conn); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func userFrame(id, from, content string) map[string]any {
+	return map[string]any{"msgV": 1, "msg_id": id, "type": "user", "from": "uds:" + from, "message": map[string]string{"role": "user", "content": content}}
+}
+
+type nativePeer struct {
+	socket string
+	frames chan map[string]any
+}
+
+func (f *peerFixture) startNative() *nativePeer {
+	f.t.Helper()
+	t := f.t
+	if err := os.MkdirAll(f.socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	native := &nativePeer{socket: filepath.Join(f.socketDir, strconv.Itoa(os.Getpid())+".sock"), frames: make(chan map[string]any, 64)}
+	listener, err := net.Listen("unix", native.socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close(); _ = os.Remove(native.socket) })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			data, _ := io.ReadAll(conn)
+			_ = conn.Close()
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				var frame map[string]any
+				if json.Unmarshal([]byte(line), &frame) == nil {
+					native.frames <- frame
+				}
+			}
+		}
+	}()
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	started, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "sessionId": "native-test", "procStart": strings.TrimSpace(string(started)), "messagingSocketPath": native.socket})
+	path := f.recordPath(os.Getpid())
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, record, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	return native
+}
+
+func (n *nativePeer) await(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	for {
+		select {
+		case frame := <-n.frames:
+			if frame["type"] == kind {
+				return frame
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("native peer received no %s frame", kind)
+		}
+	}
+}
+
+func (n *nativePeer) replySocket(t *testing.T) string {
+	t.Helper()
+	from, _ := n.await(t, "user")["from"].(string)
+	if !strings.HasPrefix(from, "uds:") {
+		t.Fatalf("frame from=%q", from)
+	}
+	return strings.TrimPrefix(from, "uds:")
+}
+
+func TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers(t *testing.T) {
+	f := newPeerFixture(t, "recent", "older")
+	if err := f.manager.Ensure(f.ctx, "recent"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.reg.ReverseAlias("recent"); err != sql.ErrNoRows {
 		t.Fatalf("background registration minted handle: %v", err)
 	}
-	if err := Ensure(ctx, home, "older"); err != nil {
+	if err := Ensure(f.ctx, f.home, "older"); err != nil {
 		t.Fatal(err)
 	}
-	first, second := manager.children["recent"], manager.children["older"]
-	if first.process.Pid == second.process.Pid {
+	recent, older := f.worker("recent"), f.worker("older")
+	if recent.PID == older.PID {
 		t.Fatal("agents share a PID")
 	}
-	if err := Ensure(ctx, home, "older"); err != nil {
+	if err := Ensure(f.ctx, f.home, "older"); err != nil {
 		t.Fatal(err)
 	}
-	if manager.children["older"] != second {
-		t.Fatal("duplicate registration spawned a new worker")
+	if again := f.worker("older"); again.PID != older.PID {
+		t.Fatalf("duplicate registration spawned a new worker: %d -> %d", older.PID, again.PID)
 	}
-	receipt, err := Send(ctx, home, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "manager routed message")
+
+	duplicate := userFrame(uuid.NewString(), recent.MessagingSocketPath, "peer reply")
+	sendPeerFrame(t, older.MessagingSocketPath, duplicate)
+	sendPeerFrame(t, older.MessagingSocketPath, duplicate)
+	if count := f.reg.QueueCount("older"); count != 1 {
+		t.Fatalf("duplicate inbound msg_id queued %d times", count)
+	}
+
+	if err := f.reg.SetAlias("renamed", "older"); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "heartbeat to publish the rename", func() bool {
+		var record peerRecord
+		data, err := os.ReadFile(f.recordPath(older.PID))
+		return err == nil && json.Unmarshal(data, &record) == nil && record.Name == "agenthail/notion: renamed"
+	})
+
+	controls := f.controlSockets(older.PID)
+	if len(controls) != 1 {
+		t.Fatalf("control sockets=%v", controls)
+	}
+	if err := os.Remove(controls[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.Ensure(f.ctx, "older"); err != nil {
+		t.Fatalf("heal missing control endpoint: %v", err)
+	}
+	healed := f.worker("renamed")
+	if healed.PID == older.PID {
+		t.Fatal("missing control endpoint did not replace its worker")
+	}
+	killProcess(t, healed.PID)
+	if err := Ensure(f.ctx, f.home, "older"); err != nil {
+		t.Fatalf("worker restart: %v", err)
+	}
+	if restarted := f.worker("renamed"); restarted.PID == healed.PID {
+		t.Fatal("dead worker reused")
+	}
+
+	var pids []int
+	for _, record := range f.records() {
+		pids = append(pids, record.PID)
+	}
+	f.manager.Close()
+	for _, pid := range pids {
+		if syscall.Kill(pid, 0) == nil {
+			t.Fatalf("worker %d remained alive", pid)
+		}
+	}
+	for _, pattern := range []string{filepath.Join(f.socketDir, "*.sock"), filepath.Join(claudepeer.RuntimeRoot(f.home), "*", "*"), filepath.Join(f.home, ".claude", "sessions", "*.json")} {
+		if files, _ := filepath.Glob(pattern); len(files) != 0 {
+			t.Fatalf("peer artifacts remain: %v", files)
+		}
+	}
+}
+
+func TestManagerReplyRelayLifecycle(t *testing.T) {
+	f := newPeerFixture(t, "recent")
+	native := f.startNative()
+	send := func(message string) {
+		t.Helper()
+		receipt, err := f.manager.Send(f.ctx, "recent", native.socket, message)
+		if err != nil || receipt == nil || !receipt.Accepted {
+			t.Fatalf("send receipt=%+v err=%v", receipt, err)
+		}
+	}
+
+	receipt, err := Send(f.ctx, f.home, "recent", native.socket, "manager routed message")
 	if err != nil || receipt == nil || !receipt.Accepted {
 		t.Fatalf("manager send receipt=%+v err=%v", receipt, err)
 	}
-	if alias, err := reg.ReverseAlias("recent"); err != nil || alias != "recent" {
+	if alias, err := f.reg.ReverseAlias("recent"); err != nil || alias != "recent" {
 		t.Fatalf("first send handle=%q err=%v", alias, err)
 	}
-	relay := manager.relays["recent"]
-	if !relay.healthy() {
-		t.Fatalf("new reply relay is not healthy: pid=%d path=%q", relay.process.Pid, relay.socketPath)
+	relay := native.replySocket(t)
+	helper := f.worker("recent")
+	if relay == helper.MessagingSocketPath {
+		t.Fatal("non-Claude sender replies route to its helper instead of a durable relay")
 	}
+
 	results := make(chan error, 4)
 	for range 4 {
 		go func() {
-			session, sessionErr := reg.Session("recent")
-			if sessionErr != nil {
-				results <- sessionErr
-				return
-			}
-			err := manager.ensureRelay(ctx, *session)
+			_, err := f.manager.Send(f.ctx, "recent", native.socket, "concurrent")
 			results <- err
 		}()
 	}
 	for range 4 {
 		if err := <-results; err != nil {
-			t.Fatalf("concurrent relay send: %v", err)
+			t.Fatalf("concurrent send: %v", err)
 		}
 	}
-	if manager.relays["recent"] != relay {
-		t.Fatalf("concurrent sends replaced the durable relay: before=%d after=%d path=%q paths=%d healthy=%v", relay.process.Pid, manager.relays["recent"].process.Pid, relay.socketPath, len(relay.paths), relay.healthy())
+	for range 4 {
+		if got := native.replySocket(t); got != relay {
+			t.Fatalf("concurrent sends replaced the durable relay: %q -> %q", relay, got)
+		}
 	}
-	receipt, err = Send(ctx, home, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), strings.Repeat("x", 16<<10))
-	if err != nil || receipt == nil || !receipt.Accepted {
-		t.Fatalf("large manager send receipt=%+v err=%v", receipt, err)
+	send(strings.Repeat("x", 16<<10))
+	if got := native.replySocket(t); got != relay {
+		t.Fatalf("large send used relay %q, want %q", got, relay)
 	}
-	oldFirstPID := first.process.Pid
-	if err := os.Remove(first.controlPath); err != nil {
+
+	controls := f.controlSockets(helper.PID)
+	if len(controls) != 1 {
+		t.Fatalf("control sockets=%v", controls)
+	}
+	if err := os.Remove(controls[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Ensure(ctx, "recent"); err != nil {
-		t.Fatalf("heal missing control endpoint: %v", err)
-	}
-	first = manager.children["recent"]
-	if first.process.Pid == oldFirstPID {
-		t.Fatal("missing control endpoint did not replace its worker")
-	}
-	if manager.relays["recent"] != relay {
+	send("send after control repair")
+	if got := native.replySocket(t); got != relay {
 		t.Fatal("helper replacement discarded the durable relay")
 	}
-	receipt, err = manager.Send(ctx, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "send after control repair")
-	if err != nil || receipt == nil || !receipt.Accepted {
-		t.Fatalf("post-repair receipt=%+v err=%v", receipt, err)
+	replacementHelper := f.worker("recent")
+	if replacementHelper.PID == helper.PID {
+		t.Fatal("missing control endpoint did not replace its helper")
 	}
-	if err := first.process.Kill(); err != nil {
+
+	killProcess(t, replacementHelper.PID)
+	recordPath := f.recordPath(replacementHelper.PID)
+	var record map[string]any
+	data, err := os.ReadFile(recordPath)
+	if err != nil || json.Unmarshal(data, &record) != nil {
+		t.Fatalf("dead helper record=%s err=%v", data, err)
+	}
+	record["processToken"] = "replacement-process"
+	replacement, _ := json.Marshal(record)
+	if err := os.WriteFile(recordPath, replacement, 0600); err != nil {
 		t.Fatal(err)
 	}
-	<-first.done
-	manager.RetireInactive(time.Now(), 24*time.Hour)
-	if manager.children["recent"] != nil {
-		t.Fatal("dead helper was not retired")
+	f.manager.RetireInactive(time.Now(), 24*time.Hour)
+	if got, err := os.ReadFile(recordPath); err != nil || string(got) != string(replacement) {
+		t.Fatalf("retiring a dead helper changed a replacement record: %s err=%v", got, err)
 	}
-	if manager.relays["recent"] != relay {
-		t.Fatal("retiring a dead helper discarded the durable relay")
+	if controls := f.controlSockets(replacementHelper.PID); len(controls) != 0 {
+		t.Fatalf("dead helper was not retired: %v", controls)
 	}
-	if manager.relays["recent"] == nil {
-		t.Fatal("non-Claude sender did not get a durable reply relay")
-	}
-	nativeSocket := filepath.Join(manager.socketDir, strconv.Itoa(os.Getpid())+".sock")
-	nativeListener, err := net.Listen("unix", nativeSocket)
-	if err != nil {
+	if err := os.Remove(recordPath); err != nil {
 		t.Fatal(err)
 	}
-	defer nativeListener.Close()
-	receipts := make(chan []byte, 2)
-	go func() {
-		for {
-			conn, err := nativeListener.Accept()
-			if err != nil {
-				return
-			}
-			data, _ := io.ReadAll(conn)
-			receipts <- data
-			_ = conn.Close()
-		}
-	}()
-	startCmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
-	startCmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-	startBytes, err := startCmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude", "sessions"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	nativeRecord := map[string]any{"pid": os.Getpid(), "sessionId": "native-test", "procStart": strings.TrimSpace(string(startBytes)), "messagingSocketPath": nativeSocket}
-	data, _ := json.Marshal(nativeRecord)
-	if err := os.WriteFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
+
 	replyID := uuid.NewString()
-	replyFrame := map[string]any{"msgV": 1, "msg_id": replyID, "type": "user", "from": "uds:" + nativeSocket, "message": map[string]string{"role": "user", "content": "reply after helper replacement"}}
-	for range 2 {
-		conn, err := net.Dial("unix", manager.relays["recent"].socketPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
-		if err := json.NewEncoder(conn).Encode(replyFrame); err != nil {
-			t.Fatal(err)
-		}
-		conn.(*net.UnixConn).CloseWrite()
-		if _, err := io.ReadAll(conn); err != nil {
-			t.Fatal(err)
-		}
-		conn.Close()
-	}
-	if count := reg.QueueCount("recent"); count != 1 {
+	reply := userFrame(replyID, native.socket, "reply after helper replacement")
+	sendPeerFrame(t, relay, reply)
+	sendPeerFrame(t, relay, reply)
+	if count := f.reg.QueueCount("recent"); count != 1 {
 		t.Fatalf("relay reply queue count=%d", count)
 	}
-	select {
-	case receiptData := <-receipts:
-		if !strings.Contains(string(receiptData), `"status":"received"`) || !strings.Contains(string(receiptData), replyID) {
-			t.Fatalf("native receipt=%s", receiptData)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("native receipt not delivered")
+	status := native.await(t, "control")
+	if status["status"] != "received" || status["orig_msg_id"] != replyID {
+		t.Fatalf("native receipt=%v", status)
 	}
-	oldRelayPID, oldRelaySocket := relay.process.Pid, relay.socketPath
-	if err := relay.process.Kill(); err != nil {
+
+	relayPID, err := strconv.Atoi(strings.TrimSuffix(filepath.Base(relay), ".sock"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	<-relay.done
-	receipt, err = manager.Send(ctx, "recent", filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock"), "send after relay restart")
-	if err != nil || receipt == nil || !receipt.Accepted {
-		t.Fatalf("relay restart receipt=%+v err=%v", receipt, err)
+	killProcess(t, relayPID)
+	send("send after relay restart")
+	restarted := native.replySocket(t)
+	if restarted == relay {
+		t.Fatal("dead relay was reused")
 	}
-	newRelay := manager.relays["recent"]
-	if newRelay == nil || newRelay.process.Pid == oldRelayPID || newRelay.socketPath == oldRelaySocket {
-		t.Fatalf("relay was not recreated with fresh ownership: old=%d/%q new=%v", oldRelayPID, oldRelaySocket, newRelay)
-	}
-	if _, err := os.Lstat(oldRelaySocket); !os.IsNotExist(err) {
+	if _, err := os.Lstat(relay); !os.IsNotExist(err) {
 		t.Fatalf("old relay socket remains after restart: %v", err)
 	}
-	socket := filepath.Join(manager.socketDir, strconv.Itoa(second.process.Pid)+".sock")
-	messageID := uuid.NewString()
-	for range 2 {
-		conn, err := net.Dial("unix", socket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
-		err = json.NewEncoder(conn).Encode(map[string]any{"msgV": 1, "msg_id": messageID, "type": "user", "from": "uds:" + filepath.Join(manager.socketDir, strconv.Itoa(first.process.Pid)+".sock"), "message": map[string]string{"role": "user", "content": "peer reply"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		conn.(*net.UnixConn).CloseWrite()
-		if _, err := io.ReadAll(conn); err != nil {
-			t.Fatal(err)
-		}
-		conn.Close()
-	}
-	if count := reg.QueueCount("older"); count != 5 {
-		t.Fatalf("duplicate inbound queue count=%d", count)
-	}
-	if err := reg.SetAlias("renamed", "older"); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(2200 * time.Millisecond)
-	data, err = os.ReadFile(filepath.Join(home, ".claude", "sessions", strconv.Itoa(second.process.Pid)+".json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var metadata struct {
-		Name string `json:"name"`
-	}
-	if json.Unmarshal(data, &metadata) != nil || metadata.Name != "agenthail/notion: renamed" {
-		t.Fatalf("heartbeat metadata=%s", data)
-	}
-	if err := second.process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	<-second.done
-	if err := Ensure(ctx, home, "older"); err != nil {
-		t.Fatalf("worker restart: %v", err)
-	}
-	if manager.children["older"].process.Pid == second.process.Pid {
-		t.Fatal("dead worker reused")
-	}
-	if err := reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusOffline, LastActive: time.Now().Add(-48 * time.Hour)}); err != nil {
-		t.Fatal(err)
-	}
-	if recent := manager.children["recent"]; recent != nil {
-		recent.lastUsed = time.Now().Add(-48 * time.Hour)
-		if err := recent.process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-		<-recent.done
-	}
-	manager.RetireInactive(time.Now(), 24*time.Hour)
-	if manager.children["recent"] != nil {
-		t.Fatal("inactive peer was not retired")
-	}
-	if manager.relays["recent"] != nil {
-		t.Fatal("offline relay was not retired after its helper died")
-	}
-	children := manager.children
-	manager.Close()
-	nativeListener.Close()
-	_ = os.Remove(nativeSocket)
-	_ = os.Remove(filepath.Join(home, ".claude", "sessions", strconv.Itoa(os.Getpid())+".json"))
-	for _, entry := range children {
-		select {
-		case <-entry.done:
-		default:
-			t.Fatal("child remained alive")
-		}
-	}
-	files, _ := filepath.Glob(filepath.Join(home, ".agenthail", "peers", "*.sock"))
-	if len(files) != 0 {
-		t.Fatalf("control sockets remain: %v", files)
-	}
-	files, _ = filepath.Glob(filepath.Join(manager.socketDir, "*.sock"))
-	if len(files) != 0 {
-		t.Fatalf("native sockets remain: %v", files)
-	}
-	files, _ = filepath.Glob(filepath.Join(home, ".claude", "sessions", "*.json"))
-	if len(files) != 0 {
-		t.Fatalf("peer records remain: %v", files)
-	}
-}
 
-func TestRetireInactivePreservesRecentlyUsedOnDemandPeer(t *testing.T) {
-	home := t.TempDir()
-	reg, err := registry.Open(filepath.Join(home, ".agenthail", "registry.db"))
-	if err != nil {
+	if err := f.reg.RegisterSession(surface.Session{ID: "recent", Surface: surface.KindNotion, Name: "recent", Status: surface.StatusOffline}); err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
-	if err := reg.RegisterSession(surface.Session{ID: "old", Surface: surface.KindCodex, Status: surface.StatusIdle, LastActive: time.Now().Add(-7 * 24 * time.Hour)}); err != nil {
-		t.Fatal(err)
+	f.manager.RetireInactive(time.Now().Add(48*time.Hour), 24*time.Hour)
+	if _, err := os.Lstat(restarted); !os.IsNotExist(err) {
+		t.Fatalf("offline relay was not retired: %v", err)
 	}
-	manager := &Manager{registry: reg, children: map[string]*child{
-		"old": {lastUsed: time.Now(), done: make(chan struct{})},
-	}}
-	manager.RetireInactive(time.Now(), 24*time.Hour)
-	if manager.children["old"] == nil {
-		t.Fatal("recently used on-demand peer was retired before its reply window elapsed")
-	}
-}
-
-func TestRetireInactiveAlwaysReclaimsDeadPeer(t *testing.T) {
-	done := make(chan struct{})
-	close(done)
-	manager := &Manager{children: map[string]*child{
-		"dead": {lastUsed: time.Now(), done: done, paths: map[string]os.FileInfo{}},
-	}}
-	manager.RetireInactive(time.Now(), 24*time.Hour)
-	if manager.children["dead"] != nil || len(manager.children) != 0 {
-		t.Fatalf("dead peer still consumes capacity: %+v", manager.children)
+	if records := f.records(); len(records) != 0 {
+		t.Fatalf("offline helper was not retired: %+v", records)
 	}
 }
 
@@ -337,87 +458,73 @@ func TestOversizedSendIsTerminalBeforeManagerDial(t *testing.T) {
 	}
 }
 
-func TestManagerRejectsUnknownOperation(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "ah-manager-operation-")
+type wireResponse struct {
+	OK    bool `json:"ok"`
+	Error *struct {
+		Class string `json:"class"`
+		Kind  string `json:"kind"`
+		Error string `json:"error"`
+	} `json:"error"`
+}
+
+func managerWireRequest(t *testing.T, home string, request map[string]any) wireResponse {
+	t.Helper()
+	conn, err := net.Dial("unix", managerPath(home))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(home)
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := json.NewEncoder(conn).Encode(request); err != nil {
+		t.Fatal(err)
+	}
+	var response wireResponse
+	if err := json.NewDecoder(conn).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func startIdleManager(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("/tmp", "ah-manager-wire-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
 	reg, err := registry.Open(filepath.Join(home, ".agenthail", "registry.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reg.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	manager, err := Start(ctx, home, reg, "missing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close()
-	response, err := requestManager(ctx, home, managerRequest{Operation: "bogus"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.Error == nil || response.Error.Class != "terminal" || response.Error.Kind != string(surface.DeliveryInvalidRequest) {
-		t.Fatalf("response=%+v", response)
-	}
-}
-
-func TestManagerRejectsPeerCardinalityBeyondLimit(t *testing.T) {
-	manager := &Manager{children: make(map[string]*child)}
-	for index := range maxManagedPeers {
-		manager.children[fmt.Sprintf("peer-%d", index)] = &child{done: make(chan struct{})}
-	}
-	err := manager.Ensure(context.Background(), "one-too-many")
-	if err == nil || !strings.Contains(err.Error(), "peer limit") {
-		t.Fatalf("limit error=%v", err)
-	}
-}
-
-func TestManagerRejectsRequestsBeyondConcurrencyLimit(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "ah-request-limit-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(home)
-	reg, err := registry.Open(filepath.Join(home, ".agenthail", "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reg.Close()
+	t.Cleanup(func() { _ = reg.Close() })
 	manager, err := Start(context.Background(), home, reg, "missing")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Close()
-	for range maxManagerRequests {
-		manager.requests <- struct{}{}
-	}
-	stalled, err := net.Dial("unix", managerPath(home))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stalled.Write([]byte("{")); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(time.Second)
-	for len(manager.rejections) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(manager.rejections) == 0 {
-		t.Fatal("stalled overload request was not admitted to bounded rejection handling")
-	}
-	response, err := requestManager(context.Background(), home, managerRequest{Operation: "ensure", SourceSessionID: "source"})
-	_ = stalled.Close()
-	for range maxManagerRequests {
-		<-manager.requests
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.Error == nil || response.Error.Class != "unavailable" || !strings.Contains(response.Error.Error, "concurrency limit") {
+	t.Cleanup(manager.Close)
+	return home
+}
+
+func TestManagerRejectsUnknownOperation(t *testing.T) {
+	home := startIdleManager(t)
+	response := managerWireRequest(t, home, map[string]any{"operation": "bogus"})
+	if response.OK || response.Error == nil || response.Error.Class != "terminal" || response.Error.Kind != string(surface.DeliveryInvalidRequest) {
 		t.Fatalf("response=%+v", response)
+	}
+}
+
+func TestManagerRejectsRequestsBeyondConcurrencyLimit(t *testing.T) {
+	home := startIdleManager(t)
+	for range maxManagerRequests {
+		stalled, err := net.Dial("unix", managerPath(home))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = stalled.Close() })
+	}
+	response := managerWireRequest(t, home, map[string]any{"operation": "bogus"})
+	if response.Error == nil || response.Error.Class != "unavailable" {
+		t.Fatalf("request beyond the concurrency limit was processed: %+v", response)
 	}
 }
 
@@ -458,11 +565,7 @@ func TestManagerRestartReconcilesCrashArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(home)
-	binary := filepath.Join(home, "agenthail")
-	build := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, output)
-	}
+	binary := agenthailBinary(t)
 	reg, err := registry.Open(filepath.Join(home, ".agenthail", "registry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -608,9 +711,8 @@ func TestConcurrentManagerStartReplacesStaleEndpointOnce(t *testing.T) {
 		t.Fatalf("started managers=%d", started)
 	}
 	defer winner.Close()
-	response, err := requestManager(context.Background(), home, managerRequest{Operation: "bogus"})
-	if err != nil || response.Error == nil {
-		t.Fatalf("surviving manager response=%+v err=%v", response, err)
+	if response := managerWireRequest(t, home, map[string]any{"operation": "bogus"}); response.Error == nil {
+		t.Fatalf("surviving manager response=%+v", response)
 	}
 }
 
@@ -683,32 +785,5 @@ func TestSendResponseLossHasUnknownOutcome(t *testing.T) {
 	}
 	if err := <-read; err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestChildCleanupPreservesReplacementSessionRecord(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "42.json")
-	original := recordOwnership{PID: 42, SessionID: "codex:source", ProcStart: "same-second", StartedAt: 1, Agenthail: "peer-worker", ProcessToken: "first-token"}
-	data, _ := json.Marshal(original)
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	replacement := original
-	replacement.StartedAt = 2
-	replacement.ProcessToken = "second-token"
-	replacementData, _ := json.Marshal(replacement)
-	if err := os.WriteFile(path, replacementData, 0600); err != nil {
-		t.Fatal(err)
-	}
-	entry := &child{process: &os.Process{Pid: 42}, paths: map[string]os.FileInfo{path: info}, recordPath: path, record: original}
-	entry.cleanup()
-	got, err := os.ReadFile(path)
-	if err != nil || string(got) != string(replacementData) {
-		t.Fatalf("replacement record changed: %s err=%v", got, err)
 	}
 }

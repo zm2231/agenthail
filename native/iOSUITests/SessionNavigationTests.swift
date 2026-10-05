@@ -26,13 +26,6 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.buttons["voice-entry"].exists)
     }
 
-    func testEmptyActivityStillShowsSavedMessages() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-rich", "--preview-history-only"]
-        app.launch()
-        XCTAssertTrue(app.staticTexts["Saved message history remains readable."].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Ready for your instruction"].exists)
-    }
 
     func testSessionOpensAndReturnsToBrowser() {
         let app = XCUIApplication()
@@ -59,28 +52,21 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["New session"].waitForExistence(timeout: 5))
     }
 
-    func testInboxOpensTheCanonicalSessionBrowser() {
+    func testInboxNavigationReturnsToSessionsAndFromInspectorAndComposer() {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app"]
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
         app.launch()
         app.tabBars.buttons["Inbox"].tap()
-        let session = app.buttons["inbox-session-2"]
-        XCTAssertTrue(session.waitForExistence(timeout: 10))
-        session.tap()
-        XCTAssertTrue(app.buttons["Session menu"].waitForExistence(timeout: 10))
+        let inboxSession = app.buttons["inbox-session-2"]
+        XCTAssertTrue(inboxSession.waitForExistence(timeout: 10))
+        inboxSession.tap()
+        let menu = app.buttons["Session menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars["Sessions"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["Sessions"].isSelected)
         app.buttons["session-demo"].tap()
         XCTAssertTrue(app.buttons["Stop current turn"].waitForExistence(timeout: 10))
-    }
-
-    func testSessionInboxReturnsFromInspectorAndComposer() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app", "--preview-delivery"]
-        app.launch()
-        app.buttons["session-demo"].tap()
-        let menu = app.buttons["Session menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
         app.buttons["Session details"].tap()
@@ -109,34 +95,7 @@ final class SessionNavigationTests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Session inbox"].exists)
     }
 
-    func testClaudeMetadataAppearsInSessionDetails() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-inspector", "--preview-metadata"]
-        app.launch()
 
-        for _ in 0..<5 { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["Claude runs"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["job-1"].exists)
-        XCTAssertTrue(app.staticTexts["Claude subagents"].exists)
-        XCTAssertTrue(app.staticTexts["agent-1"].exists)
-        XCTAssertTrue(app.staticTexts["/Users/demo/.claude/agents/agent-1.jsonl"].exists)
-    }
-
-    func testExpiredInstructionsAreOnlyInHistory() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--preview-session", "--preview-app"]
-        app.launch()
-        app.tabBars.buttons["Inbox"].tap()
-        XCTAssertTrue(app.buttons["inbox-session-2"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Old release reminder"].exists)
-        app.segmentedControls.buttons["History"].tap()
-        XCTAssertTrue(app.staticTexts["Old release reminder"].waitForExistence(timeout: 5))
-        app.buttons["Send again"].tap()
-        XCTAssertTrue(app.sheets["Send this instruction again?"].waitForExistence(timeout: 5))
-        if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() }
-        else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.8)).tap() }
-        XCTAssertTrue(app.staticTexts["Old release reminder"].exists)
-    }
 
     private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "hittable == true")

@@ -1,4 +1,4 @@
-package surfaces
+package surface
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func claudeBinary(home string) (string, error) {
+func ClaudeBinary(home string) (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("AGENTHAIL_CLAUDE_BIN")); configured != "" {
 		path, err := exec.LookPath(configured)
 		if err != nil {

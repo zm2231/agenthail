@@ -36,125 +36,7 @@ func (c *Claude) ReadAttachment(ctx context.Context, s *surface.Session, id stri
 	return readTranscriptAttachment(ctx, s, id, "claude")
 }
 func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id string) (*surface.Attachment, []byte, error) {
-	if attachment, data, ok := c.readLiveAttachment(ctx, s, id); ok {
-		return attachment, data, nil
-	}
-	if strings.HasPrefix(id, "live-attachment:") {
-		return c.readDurableLiveAttachment(ctx, s, id)
-	}
 	return readTranscriptAttachment(ctx, s, id, "codex")
-}
-
-func (c *Codex) rememberLiveAttachment(ctx context.Context, sessionID, itemID string, index int, ref attachmentReference) (*surface.Attachment, error) {
-	data, err := readAttachmentReference(ctx, ref)
-	if err != nil {
-		return nil, err
-	}
-	media, width, height, err := validateAttachment(data)
-	if err != nil {
-		return nil, err
-	}
-	id := liveAttachmentID(sessionID, hashBytes(data))
-	attachment := surface.Attachment{ID: id, MediaType: media, Width: width, Height: height, Bytes: int64(len(data))}
-	key := sessionID + "\x00" + id
-	c.attachmentMu.Lock()
-	if c.attachments == nil {
-		c.attachments = map[string]liveAttachment{}
-	}
-	_, existed := c.attachments[key]
-	if existing, ok := c.attachments[key]; ok {
-		c.attachmentBytes -= int64(len(existing.data))
-	}
-	dataCopy := append([]byte(nil), data...)
-	c.attachments[key] = liveAttachment{key: key, meta: attachment, data: dataCopy}
-	if !existed {
-		c.attachmentOrder = append(c.attachmentOrder, key)
-	}
-	c.attachmentBytes += int64(len(dataCopy))
-	for c.attachmentBytes > maxLiveAttachmentCacheBytes && len(c.attachmentOrder) > 0 {
-		oldest := c.attachmentOrder[0]
-		c.attachmentOrder = c.attachmentOrder[1:]
-		cached, ok := c.attachments[oldest]
-		if !ok {
-			continue
-		}
-		delete(c.attachments, oldest)
-		c.attachmentBytes -= int64(len(cached.data))
-	}
-	c.attachmentMu.Unlock()
-	return &attachment, nil
-}
-
-func liveAttachmentID(sessionID, digest string) string {
-	return "live-attachment:" + sessionID + ":" + digest
-}
-
-func liveAttachmentParts(id string) (string, string, bool) {
-	prefix := "live-attachment:"
-	if !strings.HasPrefix(id, prefix) {
-		return "", "", false
-	}
-	separator := strings.LastIndex(id, ":")
-	if separator <= len(prefix) || len(id)-separator-1 != 64 {
-		return "", "", false
-	}
-	sessionID := id[len(prefix):separator]
-	digest := id[separator+1:]
-	if _, err := hex.DecodeString(digest); err != nil {
-		return "", "", false
-	}
-	return sessionID, digest, true
-}
-
-func (c *Codex) readLiveAttachment(ctx context.Context, session *surface.Session, id string) (*surface.Attachment, []byte, bool) {
-	if session == nil || !strings.HasPrefix(id, "live-attachment:") {
-		return nil, nil, false
-	}
-	owner, _, ok := liveAttachmentParts(id)
-	if !ok || owner != session.ID {
-		return nil, nil, false
-	}
-	select {
-	case <-ctx.Done():
-		return nil, nil, false
-	default:
-	}
-	c.attachmentMu.Lock()
-	attachment, ok := c.attachments[session.ID+"\x00"+id]
-	c.attachmentMu.Unlock()
-	if !ok {
-		return nil, nil, false
-	}
-	data := append([]byte(nil), attachment.data...)
-	meta := attachment.meta
-	return &meta, data, true
-}
-
-func (c *Codex) readDurableLiveAttachment(ctx context.Context, session *surface.Session, id string) (*surface.Attachment, []byte, error) {
-	owner, digest, ok := liveAttachmentParts(id)
-	if !ok || session == nil || owner != session.ID {
-		return nil, nil, ErrAttachmentNotFound
-	}
-	path := session.Transcript
-	if path == "" {
-		path = codexTranscriptPath(session)
-	}
-	page, err := readTranscriptPage(ctx, path, "codex", 0, timelineItemLimit)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, item := range page.Items {
-		if item.Attachment == nil || !strings.HasSuffix(item.Attachment.ID, ":"+digest) {
-			continue
-		}
-		meta, data, err := readTranscriptAttachment(ctx, session, item.Attachment.ID, "codex")
-		if err != nil || hashBytes(data) != digest {
-			continue
-		}
-		meta.ID = id
-		return meta, data, nil
-	}
-	return nil, nil, ErrAttachmentNotFound
 }
 
 func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, source string) (*surface.Attachment, []byte, error) {
@@ -368,6 +250,12 @@ func attachmentReferenceFromValue(v any) (attachmentReference, bool) {
 		if media == "" {
 			media = str(x, "mediaType")
 		}
+		switch imageURL := x["image_url"].(type) {
+		case string:
+			return attachmentReferenceFromValue(imageURL)
+		case map[string]any:
+			return attachmentReferenceFromValue(str(imageURL, "url"))
+		}
 		if data := str(x, "data"); data != "" {
 			if strings.HasPrefix(data, "data:") {
 				return attachmentReference{MediaType: media, Data: data}, true
@@ -390,15 +278,10 @@ func claudeAttachmentReferences(record map[string]any) []attachmentReference {
 		b, _ := raw.(map[string]any)
 		switch str(b, "type") {
 		case "image":
-			if r, ok := attachmentReferenceFromValue(b["source"]); ok {
-				out = append(out, r)
-			}
+			out = appendAttachmentReference(out, b["source"])
 		case "tool_result":
-			content, _ := b["content"].([]any)
-			for _, v := range content {
-				if r, ok := attachmentReferenceFromValue(v); ok {
-					out = append(out, r)
-				}
+			for _, image := range toolResultImageContent(b["content"]) {
+				out = appendAttachmentReference(out, image)
 			}
 		}
 	}
@@ -409,21 +292,29 @@ func codexAttachmentReferences(record map[string]any) []attachmentReference {
 	var out []attachmentReference
 	if images, ok := payload["images"].([]any); ok {
 		for _, v := range images {
-			if r, ok := attachmentReferenceFromValue(v); ok {
-				out = append(out, r)
-			}
+			out = appendAttachmentReference(out, v)
 		}
 	}
 	blocks, _ := payload["content"].([]any)
 	for _, v := range blocks {
 		b, _ := v.(map[string]any)
-		if strings.Contains(str(b, "type"), "image") {
-			if r, ok := attachmentReferenceFromValue(b); ok {
-				out = append(out, r)
+		if str(b, "text") == "" && strings.Contains(str(b, "type"), "image") {
+			out = appendAttachmentReference(out, b)
+		}
+	}
+	if _, images, ok := codexTypedToolOutput(payload["output"]); ok && images > 0 {
+		outputs, _ := payload["output"].([]any)
+		for _, v := range outputs {
+			if b, _ := v.(map[string]any); str(b, "type") == "input_image" {
+				out = appendAttachmentReference(out, b)
 			}
 		}
 	}
 	return out
+}
+func appendAttachmentReference(out []attachmentReference, value any) []attachmentReference {
+	ref, _ := attachmentReferenceFromValue(value)
+	return append(out, ref)
 }
 func timelineItemsForSource(record map[string]any, source string) []surface.TimelineItem {
 	if source == "claude" {

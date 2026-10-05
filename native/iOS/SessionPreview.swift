@@ -13,7 +13,7 @@ struct SessionPreview: View {
         let snapshot = try! decoder.decode(DashboardSnapshot.self, from: Data((capture?.snapshotJSON ?? Self.snapshotJSON).utf8))
         let capturedDetail = capture.flatMap { $0.detailJSON[$0.initialSessionID] }
         var detail = try! decoder.decode(SessionDetail.self, from: Data((capturedDetail ?? Self.previewDetailJSON).utf8))
-        if ProcessInfo.processInfo.arguments.contains("--preview-app") || ProcessInfo.processInfo.arguments.contains("--preview-metadata"),
+        if ProcessInfo.processInfo.arguments.contains("--preview-app"),
            let metadata = try? decoder.decode(SessionMetadata.self, from: Data(Self.previewMetadataJSON.utf8)) {
             detail.claudeRuns = metadata.claudeRuns
             detail.claudeSubagents = metadata.claudeSubagents
@@ -54,7 +54,7 @@ struct SessionPreview: View {
     }
     nonisolated static var previewDetailJSON: String {
         let reading = ProcessInfo.processInfo.arguments.contains("--preview-reading")
-        guard ProcessInfo.processInfo.arguments.contains("--preview-app") || ProcessInfo.processInfo.arguments.contains("--preview-rich") || reading else { return detailJSON }
+        guard ProcessInfo.processInfo.arguments.contains("--preview-app") || reading else { return detailJSON }
         var detail = try! JSONSerialization.jsonObject(with: Data(detailJSON.utf8)) as! [String: Any]
         var timeline = detail["timeline"] as! [String: Any]
         var items = timeline["items"] as! [[String: Any]]
@@ -70,10 +70,6 @@ struct SessionPreview: View {
         }
         timeline["items"] = items
         timeline["nextBefore"] = 0
-        if ProcessInfo.processInfo.arguments.contains("--preview-history-only") {
-            timeline["items"] = []
-            detail["exchanges"] = [["user": "Read the saved conversation", "assistant": "Saved message history remains readable.", "timestamp": "2026-09-12T04:03:00Z"]]
-        }
         detail["timeline"] = timeline
         return String(data: try! JSONSerialization.data(withJSONObject: detail), encoding: .utf8)!
     }
@@ -136,12 +132,7 @@ private final class SessionPreviewProtocol: URLProtocol, @unchecked Sendable {
         switch request.url?.path {
         case "/api/v1/session-options": body = #"{"surfaces":[{"id":"claude","workspace":true},{"id":"codex","workspace":true},{"id":"notion","workspace":false}],"workspaces":["/Users/demo/projects/fieldnotes"]}"#
         case "/api/v1/models":
-            if ProcessInfo.processInfo.arguments.contains("--preview-models-error") {
-                status = 503
-                body = #"{"error":{"message":"Runtime model catalog unavailable"}}"#
-            } else {
-                body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
-            }
+            body = #"{"models":[{"id":"default","displayName":"Runtime default","default":true},{"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","supportedReasoningEfforts":["low","medium","high"],"defaultReasoningEffort":"low"},{"id":"chatgpt-web/pro","displayName":"ChatGPT Web — Pro","supportedReasoningEfforts":["ultra"],"defaultReasoningEffort":"ultra"},{"id":"gpt-5.5","displayName":"GPT-5.5","supportedReasoningEfforts":["medium","high"],"defaultReasoningEffort":"medium"},{"id":"gpt-5.3-codex-spark","displayName":"GPT-5.3 Codex Spark","supportedReasoningEfforts":["low","medium"],"defaultReasoningEffort":"low"},{"id":"provider/custom-runtime","displayName":"Provider custom runtime","description":"Provider supplied model ID","allowsCustom":true}]}"#
         case "/api/v1/snapshot": body = SessionPreview.snapshotJSON
         case "/api/v1/queue": body = SessionPreview.queueJSON
         case "/api/v1/session-metadata": body = #"{"sessionId":"demo","claudeRuns":[{"recordPath":"/Users/demo/.claude/runs/job-1.json","jobId":"job-1","sessionId":"demo","runType":"bg","providerState":"working","createdAt":"2026-09-07T12:00:00Z","updatedAt":"2026-09-07T12:04:00Z"}],"claudeSubagents":[{"parentSessionId":"demo","agentId":"agent-1","transcriptPath":"/Users/demo/.claude/agents/agent-1.jsonl"}]}"#

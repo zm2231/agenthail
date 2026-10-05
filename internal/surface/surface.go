@@ -26,19 +26,27 @@ const (
 )
 
 type Session struct {
-	ID              string        `json:"id"`
-	Surface         SurfaceKind   `json:"surface"`
-	Name            string        `json:"name"`
-	Cwd             string        `json:"cwd"`
-	PID             int           `json:"pid"`
-	Status          SessionStatus `json:"status"`
-	Transcript      string        `json:"transcript"`
-	HasLocal        bool          `json:"hasLocal"`
-	Source          string        `json:"source,omitempty"`
-	Transport       string        `json:"transport,omitempty"`
-	ConfiguredModel string        `json:"configuredModel,omitempty"`
-	LastActive      time.Time     `json:"lastActive"`
-	Runtime         *Runtime      `json:"runtime,omitempty"`
+	ID                    string        `json:"id"`
+	Surface               SurfaceKind   `json:"surface"`
+	Name                  string        `json:"name"`
+	Cwd                   string        `json:"cwd"`
+	PID                   int           `json:"pid"`
+	Status                SessionStatus `json:"status"`
+	Transcript            string        `json:"transcript"`
+	HasLocal              bool          `json:"hasLocal"`
+	Source                string        `json:"source,omitempty"`
+	Transport             string        `json:"transport,omitempty"`
+	ConfiguredModel       string        `json:"configuredModel,omitempty"`
+	LastActive            time.Time     `json:"lastActive"`
+	Runtime               *Runtime      `json:"runtime,omitempty"`
+	StreamCursor          uint64        `json:"-"`
+	StreamCursorSet       bool          `json:"-"`
+	TranscriptOffset      int64         `json:"-"`
+	TranscriptOffsetSet   bool          `json:"-"`
+	TranscriptIdentity    string        `json:"-"`
+	CodexPendingEventUser bool          `json:"-"`
+	CodexPendingEventTurn string        `json:"-"`
+	CodexCurrentTurnID    string        `json:"-"`
 }
 
 type SessionSearchResult struct {
@@ -52,6 +60,14 @@ type SessionSearcher interface {
 
 type ReadinessChecker interface {
 	Ready(ctx context.Context) error
+}
+
+type StreamCursorReader interface {
+	StreamCursor(context.Context, *Session) (uint64, error)
+}
+
+type LocalTranscriptProvider interface {
+	RequiresLocalTranscript(*Session) bool
 }
 
 func IsReadOnlySession(session *Session) bool {
@@ -325,24 +341,72 @@ type Exchange struct {
 }
 
 type StreamEvent struct {
-	Role        string        `json:"role,omitempty"`
-	Title       string        `json:"title,omitempty"`
-	Status      string        `json:"status,omitempty"`
-	CallID      string        `json:"callId,omitempty"`
-	Attachment  *Attachment   `json:"attachment,omitempty"`
-	Truncated   bool          `json:"truncated,omitempty"`
-	ID          string        `json:"id,omitempty"`
-	ProviderKey string        `json:"providerKey,omitempty"`
-	Cursor      uint64        `json:"cursor,omitempty"`
-	Version     uint64        `json:"version,omitempty"`
-	Operation   string        `json:"operation,omitempty"`
-	Final       bool          `json:"final,omitempty"`
-	TurnID      string        `json:"turnId,omitempty"`
-	Timestamp   time.Time     `json:"timestamp,omitempty"`
-	Kind        string        `json:"kind"`
-	Text        string        `json:"text"`
-	Context     *ContextUsage `json:"context,omitempty"`
-	Goal        *GoalState    `json:"goal,omitempty"`
+	Role             string        `json:"role,omitempty"`
+	Title            string        `json:"title,omitempty"`
+	Status           string        `json:"status,omitempty"`
+	CallID           string        `json:"callId,omitempty"`
+	Attachment       *Attachment   `json:"attachment,omitempty"`
+	Truncated        bool          `json:"truncated,omitempty"`
+	TruncationReason string        `json:"truncationReason,omitempty"`
+	ID               string        `json:"id,omitempty"`
+	ProviderKey      string        `json:"providerKey,omitempty"`
+	Cursor           uint64        `json:"cursor,omitempty"`
+	Version          uint64        `json:"version,omitempty"`
+	Operation        string        `json:"operation,omitempty"`
+	Final            bool          `json:"final,omitempty"`
+	TurnID           string        `json:"turnId,omitempty"`
+	Timestamp        time.Time     `json:"timestamp,omitempty"`
+	Kind             string        `json:"kind"`
+	Text             string        `json:"text"`
+	Context          *ContextUsage `json:"context,omitempty"`
+	Goal             *GoalState    `json:"goal,omitempty"`
+}
+
+type StreamEventClass string
+
+const (
+	StreamEventMessage    StreamEventClass = "message"
+	StreamEventToolCall   StreamEventClass = "tool_call"
+	StreamEventToolResult StreamEventClass = "tool_result"
+	StreamEventTerminal   StreamEventClass = "terminal"
+	StreamEventOther      StreamEventClass = "other"
+)
+
+func (e StreamEvent) Class() StreamEventClass {
+	switch e.Kind {
+	case "text", "message", "assistant":
+		return StreamEventMessage
+	case "tool_use", "toolCall", "tool_call":
+		return StreamEventToolCall
+	case "tool_result", "toolResult":
+		return StreamEventToolResult
+	case "done", "source-error":
+		return StreamEventTerminal
+	default:
+		return StreamEventOther
+	}
+}
+
+func (e StreamEvent) Failed() bool {
+	if e.Class() != StreamEventTerminal {
+		return false
+	}
+	switch e.Status {
+	case "failed", "error", "cancelled", "canceled":
+		return true
+	default:
+		return e.Kind == "source-error"
+	}
+}
+
+func StreamEventDelta(event StreamEvent, previous string) string {
+	if event.Operation == "append" {
+		return event.Text
+	}
+	if strings.HasPrefix(event.Text, previous) {
+		return strings.TrimPrefix(event.Text, previous)
+	}
+	return event.Text
 }
 
 type ContextUsage struct {
@@ -479,6 +543,8 @@ func truncate(s string, n int) string {
 func TruncateString(s string, n int) string { return truncate(s, n) }
 
 var ErrUnsupported = errUnsupported{}
+
+var ErrStreamWindow = errors.New("stream window elapsed")
 
 type errUnsupported struct{}
 

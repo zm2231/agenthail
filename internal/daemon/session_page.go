@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -15,6 +16,9 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		return result, err
 	}
 	result.NextBefore = int64(page.NextBefore)
+	if page.HistoryBefore > 0 {
+		result.NextBefore = encodeProviderHistoryCursor(page.HistoryBefore)
+	}
 	result.JournalSeq = page.LatestSeq
 	var newestSourceErrorSeq uint64
 	for _, entry := range page.Entries {
@@ -23,18 +27,14 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			return result, fmt.Errorf("decode journal item: %w", err)
 		}
 		if payload.Kind == "source-error" {
-			if newestSourceErrorSeq == 0 {
-				newestSourceErrorSeq = entry.Seq
-				result.UnavailableReason = payload.Reason
-			}
+			newestSourceErrorSeq = entry.Seq
+			result.UnavailableReason = payload.Reason
 			continue
 		}
 		if payload.Op == "remove" {
 			continue
 		}
-		if newestSourceErrorSeq == 0 {
-			result.UnavailableReason = ""
-		}
+		result.UnavailableReason = ""
 		title := payload.Title
 		if title == "" {
 			title = payload.Kind
@@ -61,8 +61,40 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 			result.Exchanges[len(result.Exchanges)-1].Assistant = payload.Body
 		}
 	}
-	if status, seedSeq, statusErr := d.Registry.SessionJournalSeedCheckpoint(sessionID); statusErr == nil && status == registry.SessionJournalSeeded && (newestSourceErrorSeq == 0 || newestSourceErrorSeq <= seedSeq) {
+	if status, seedSeq, _, statusErr := d.Registry.SessionJournalSeedCheckpoint(sessionID); statusErr == nil && status == registry.SessionJournalSeeded && (newestSourceErrorSeq == 0 || newestSourceErrorSeq <= seedSeq) {
 		result.UnavailableReason = ""
 	}
 	return result, nil
+}
+
+const providerHistoryCursorBase = int64(1) << 52
+
+func encodeProviderHistoryCursor(before int64) int64 {
+	if before <= 0 || before >= providerHistoryCursorBase {
+		return 0
+	}
+	return providerHistoryCursorBase + before
+}
+
+func decodeProviderHistoryCursor(cursor int64) (int64, bool) {
+	if cursor <= providerHistoryCursorBase {
+		return 0, false
+	}
+	return cursor - providerHistoryCursorBase, true
+}
+
+func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.Session, adapter surface.Surface, before int64, limit int) (*surface.SessionReadResult, error) {
+	read, err := d.sources.readHistory(ctx, session, adapter, before, limit)
+	if err != nil {
+		return &surface.SessionReadResult{Source: "history", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, UnavailableReason: boundedSessionSourceReason("Older activity could not be read: " + err.Error())}, nil
+	}
+	result := *read
+	if result.Items == nil {
+		result.Items = []surface.TimelineItem{}
+	}
+	if result.Exchanges == nil {
+		result.Exchanges = []surface.Exchange{}
+	}
+	result.NextBefore = encodeProviderHistoryCursor(read.NextBefore)
+	return &result, nil
 }

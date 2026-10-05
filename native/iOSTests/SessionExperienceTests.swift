@@ -77,6 +77,30 @@ final class SessionExperienceTests: XCTestCase {
     }
 
     @MainActor
+    func testSavedMessagesShowWhenActivityTimelineIsEmpty() {
+        let empty = SessionTimeline(nextBefore: nil, items: [], source: nil, truncated: false, unavailableReason: nil)
+        XCTAssertFalse(SessionScreen.showsActivity(timeline: empty, itemCount: 0, activityCursor: nil, exchangeCount: 1))
+        XCTAssertTrue(SessionScreen.showsActivity(timeline: empty, itemCount: 0, activityCursor: nil, exchangeCount: 0))
+        XCTAssertTrue(SessionScreen.showsActivity(timeline: empty, itemCount: 0, activityCursor: 40, exchangeCount: 1))
+        XCTAssertTrue(SessionScreen.showsActivity(timeline: empty, itemCount: 2, activityCursor: nil, exchangeCount: 1))
+        let unavailable = SessionTimeline(nextBefore: nil, items: [], source: nil, truncated: false, unavailableReason: "Transcript unavailable")
+        XCTAssertFalse(SessionScreen.showsActivity(timeline: unavailable, itemCount: 2, activityCursor: nil, exchangeCount: 0))
+    }
+
+    @MainActor
+    func testModelSearchMatchesIDNameAndDescription() {
+        let options = [
+            ModelOption(id: "gpt-web-pro", displayName: "ChatGPT Web — Pro", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: nil, defaultReasoningEffort: nil),
+            ModelOption(id: "opus", displayName: "Opus", description: "Deep reasoning", default: nil, allowsCustom: true, supportedReasoningEfforts: nil, defaultReasoningEffort: nil),
+        ]
+        XCTAssertEqual(SearchableModelSelectionSheet.matching(options, query: "  ").map(\.id), ["gpt-web-pro", "opus"])
+        XCTAssertEqual(SearchableModelSelectionSheet.matching(options, query: "chatgpt web").map(\.id), ["gpt-web-pro"])
+        XCTAssertEqual(SearchableModelSelectionSheet.matching(options, query: "OPUS").map(\.id), ["opus"])
+        XCTAssertEqual(SearchableModelSelectionSheet.matching(options, query: "reasoning").map(\.id), ["opus"])
+        XCTAssertTrue(SearchableModelSelectionSheet.matching(options, query: "missing").isEmpty)
+    }
+
+    @MainActor
     func testFailedSessionAndSearchAreRecoverable() async throws {
         SessionExperienceProtocol.state.reset()
         let model = makeModel()

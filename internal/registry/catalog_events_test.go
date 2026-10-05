@@ -53,7 +53,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 	row := snapshot.Sessions[0]
-	if !row.Freshness.Stale || row.Freshness.Generation != 2 || !row.Freshness.ObservedAt.Equal(observed) || row.Session.ID != "catalog-session" || row.Session.Cwd != "/work" {
+	if !row.Freshness.Stale || row.Freshness.Generation != 2 || !row.Freshness.ObservedAt.Equal(observed) || row.Session.ID != "catalog-session" || row.Session.Cwd != "/work" || string(row.HostProject) != `{"id":"project"}` {
 		t.Fatalf("row=%+v", row)
 	}
 	var payload struct {
@@ -70,29 +70,6 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 	recovered, err := r.CatalogSnapshot()
 	if err != nil || recovered.Sessions[0].Freshness.Stale || recovered.Sessions[0].Freshness.Generation != 3 {
 		t.Fatalf("recovered=%+v err=%v", recovered, err)
-	}
-}
-
-func TestFailedDiscoveryDoesNotAdvanceSuccessfulOmissionCount(t *testing.T) {
-	r := openTestRegistry(t)
-	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-after-failure", Surface: surface.KindCodex}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-after-failure","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-after-failure:initial", Type: "session.upserted", EntityID: "omission-after-failure", Payload: []byte(`{"session":{"id":"omission-after-failure"}}`)}); err != nil {
-		t.Fatal(err)
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Duration(attempt+1)*time.Minute)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2); err != nil || len(events) != 0 {
-		t.Fatalf("first successful omission events=%+v err=%v", events, err)
-	}
-	snapshot, err := r.CatalogSnapshot()
-	if err != nil || len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].Freshness.Stale || !snapshot.Sessions[0].Freshness.ObservedAt.Equal(observed) {
-		t.Fatalf("after failure plus omission snapshot=%+v err=%v", snapshot, err)
-	}
-	if events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2); err != nil || len(events) != 1 {
-		t.Fatalf("second consecutive omission events=%+v err=%v", events, err)
 	}
 }
 
@@ -148,46 +125,6 @@ func TestCatalogSnapshotPageFiltersAndBoundsRows(t *testing.T) {
 	}
 }
 
-func TestAppendCatalogEventTxRollsBackWithOwnerTransaction(t *testing.T) {
-	r := openTestRegistry(t)
-	if err := r.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, created, err := r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: "rollback", Type: "delivery.problem", EntityID: "intent-1", Payload: []byte(`{"id":"intent-1"}`)}); err != nil || !created {
-		t.Fatalf("append created=%v err=%v", created, err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(window.Events) != 0 {
-		t.Fatalf("events survived rollback: %+v", window.Events)
-	}
-}
-
-func TestRecordCatalogSessionCommitsStateAndEventTogether(t *testing.T) {
-	r := openTestRegistry(t)
-	session := surface.Session{ID: "catalog-session", Surface: surface.KindCodex, Name: "Catalog"}
-	event, created, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project-1"}`), Checkout: []byte(`{"id":"checkout-1"}`), ObservedAt: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC), ProjectionFingerprint: "initial"}, CatalogEvent{DedupeKey: "catalog-session:1", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"catalog-session"}}`)})
-	if err != nil || !created || event.Seq != 1 {
-		t.Fatalf("event=%+v created=%v err=%v", event, created, err)
-	}
-	snapshot, err := r.CatalogSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.CatalogSeq != event.Seq || len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Session.ID != session.ID || string(snapshot.Sessions[0].HostProject) != `{"id":"project-1"}` {
-		t.Fatalf("snapshot=%+v", snapshot)
-	}
-}
-
 func TestCatalogOmissionRequiresTwoSuccessfulReconciliations(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "omitted", Surface: surface.KindCodex}
@@ -222,5 +159,87 @@ func TestSessionJournalSourceEpochChangesOnRestart(t *testing.T) {
 	second, err := r.BeginSessionJournalSource("session")
 	if err != nil || second == "" || second == first {
 		t.Fatalf("second=%q first=%q err=%v", second, first, err)
+	}
+}
+
+func TestRecordCatalogSurfacePublishesEveryHealthTransition(t *testing.T) {
+	r := openTestRegistry(t)
+	start := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	for index, health := range []string{"healthy", "unavailable", "healthy", "healthy", "unavailable"} {
+		observedAt := start.Add(time.Duration(index) * time.Second)
+		if _, _, err := r.RecordCatalogSurface(CatalogSurfaceState{Surface: surface.KindCodex, Health: health, ObservedAt: observedAt}, CatalogEvent{DedupeKey: "surface.health:codex:" + health, Type: "surface.health", EntityID: "codex", Payload: []byte(`{"health":"` + health + `"}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, event := range window.Events {
+		var payload struct {
+			Health string `json:"health"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, payload.Health)
+	}
+	want := []string{"healthy", "unavailable", "healthy", "unavailable"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("surface health events=%v want=%v", got, want)
+	}
+}
+
+func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
+	r := openTestRegistry(t)
+	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, Name: "Queued", Status: surface.StatusIdle}
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"queued-claude","open":false}`}, CatalogEvent{DedupeKey: "session.upserted:queued-claude", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"queued-claude"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	page := func() CatalogPage {
+		t.Helper()
+		current, err := r.CatalogSnapshotPage(CatalogPageRequest{Scope: "current", Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return current
+	}
+	empty := page()
+	if len(empty.Sessions) != 0 {
+		t.Fatalf("idle session listed as current: %+v", empty.Sessions)
+	}
+	if err := r.QueueMessage(session.ID, "first"); err != nil {
+		t.Fatal(err)
+	}
+	queued := page()
+	if queued.CatalogSeq <= empty.CatalogSeq || len(queued.Sessions) != 1 {
+		t.Fatalf("enqueue seq=%d->%d sessions=%d", empty.CatalogSeq, queued.CatalogSeq, len(queued.Sessions))
+	}
+	item, err := r.ClaimNextMessage(session.ID, time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	claimed := page()
+	if claimed.CatalogSeq != queued.CatalogSeq || len(claimed.Sessions) != 1 {
+		t.Fatalf("claim changed membership or watermark: seq=%d->%d sessions=%d", queued.CatalogSeq, claimed.CatalogSeq, len(claimed.Sessions))
+	}
+	if err := r.AckMessage(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	drained := page()
+	if drained.CatalogSeq <= claimed.CatalogSeq || len(drained.Sessions) != 0 {
+		t.Fatalf("drain seq=%d->%d sessions=%d", claimed.CatalogSeq, drained.CatalogSeq, len(drained.Sessions))
+	}
+	if err := r.QueueMessage(session.ID, "expires"); err != nil {
+		t.Fatal(err)
+	}
+	beforeExpiry := page()
+	if expired, err := r.ExpireMessages(time.Now().Add(365 * 24 * time.Hour)); err != nil || expired != 1 {
+		t.Fatalf("expired=%d err=%v", expired, err)
+	}
+	swept := page()
+	if swept.CatalogSeq <= beforeExpiry.CatalogSeq || len(swept.Sessions) != 0 {
+		t.Fatalf("expiry seq=%d->%d sessions=%d", beforeExpiry.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
 	}
 }

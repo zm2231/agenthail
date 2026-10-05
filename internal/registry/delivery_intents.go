@@ -220,6 +220,114 @@ func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, fai
 	return failDeliveryIntent(r.db, id, status, failure)
 }
 
+// MarkDeliveryIntentSent completes the same logical intent created before a
+// provider side effect. Keeping this transition on the original row preserves
+// the delivery ID across accepted, submitted, and reconciled outcomes.
+func (r *Registry) MarkDeliveryIntentSent(id int64, providerKey string, evidence surface.DeliveryEvidence) (bool, error) {
+	if id == 0 || strings.TrimSpace(string(evidence)) == "" {
+		return false, fmt.Errorf("delivery intent completion requires an id and evidence")
+	}
+	res, err := r.db.Exec(`UPDATE delivery_intents SET status=?,evidence=?,provider_key=CASE WHEN ?!='' THEN ? ELSE provider_key END,failure='',updated_at=datetime('now') WHERE id=? AND status=?`, DeliveryIntentSent, evidence, providerKey, providerKey, id, DeliveryIntentSubmitted)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// DiscardDeliveryIntent drops a submitted intent refused before any provider
+// effect; the caller already holds the error, so it is not a durable problem.
+func (r *Registry) DiscardDeliveryIntent(id int64) error {
+	_, err := r.db.Exec(`DELETE FROM delivery_intents WHERE id=? AND status=?`, id, DeliveryIntentSubmitted)
+	return err
+}
+
+// QueueDeliveryUsingIntent moves a pre-effect submitted intent into the
+// durable queue without creating a second delivery identity.
+func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey string, options surface.SendOptions) (int64, int64, error) {
+	if intentID == 0 {
+		return 0, 0, fmt.Errorf("queued delivery requires an intent")
+	}
+	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
+		options.BusyDelivery = "queue"
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+	var senderSessionID, targetSessionID string
+	var status string
+	if err := tx.QueryRow(`SELECT sender_session_id,target_session_id,status FROM delivery_intents WHERE id=?`, intentID).Scan(&senderSessionID, &targetSessionID, &status); err != nil {
+		return 0, 0, err
+	}
+	if status != string(DeliveryIntentSubmitted) {
+		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
+	}
+	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, expiresAt, options.BusyDelivery)
+	if err != nil {
+		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return 0, 0, err
+		}
+		var queueID, existingIntentID int64
+		if scanErr := tx.QueryRow(`SELECT id FROM message_queue WHERE delivery_key=?`, deliveryKey).Scan(&queueID); scanErr != nil {
+			return 0, 0, scanErr
+		}
+		scanErr := tx.QueryRow(`SELECT id FROM delivery_intents WHERE queue_id=?`, queueID).Scan(&existingIntentID)
+		if scanErr == sql.ErrNoRows {
+			if _, bindErr := tx.Exec(`UPDATE delivery_intents SET queue_id=?,status=?,evidence=?,updated_at=datetime('now') WHERE id=? AND status=?`, queueID, DeliveryIntentQueued, surface.EvidenceQueued, intentID, DeliveryIntentSubmitted); bindErr != nil {
+				return 0, 0, bindErr
+			}
+			existingIntentID = intentID
+		} else if scanErr != nil {
+			return 0, 0, scanErr
+		} else if _, deleteErr := tx.Exec(`DELETE FROM delivery_intents WHERE id=? AND status=?`, intentID, DeliveryIntentSubmitted); deleteErr != nil {
+			return 0, 0, deleteErr
+		}
+		if commitErr := tx.Commit(); commitErr != nil {
+			return 0, 0, commitErr
+		}
+		return queueID, existingIntentID, nil
+	}
+	queueID, err := res.LastInsertId()
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.Exec(`UPDATE delivery_intents SET queue_id=?,status=?,evidence=?,updated_at=datetime('now') WHERE id=? AND status=?`, queueID, DeliveryIntentQueued, surface.EvidenceQueued, intentID, DeliveryIntentSubmitted); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: targetSessionID, SourceSessionID: senderSessionID, QueueID: queueID, Message: message})
+	return queueID, intentID, nil
+}
+
+// FailDeliveryIntentWithNotice makes the failure durable before returning. If
+// notice insertion fails, the failed intent still commits and can be retried
+// by QueueDeliveryFailureNotice; it is never silently reverted to submitted.
+func (r *Registry) FailDeliveryIntentWithNotice(id int64, failure string) (bool, error) {
+	if id == 0 {
+		return false, fmt.Errorf("delivery failure requires an intent")
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	changed, err := failDeliveryIntent(tx, id, DeliveryIntentFailed, failure)
+	if err != nil || !changed {
+		_ = tx.Rollback()
+		return changed, err
+	}
+	_, _, noticeErr := queueDeliveryFailureNotice(tx, id)
+	commitErr := tx.Commit()
+	if commitErr != nil {
+		return false, commitErr
+	}
+	return true, noticeErr
+}
+
 type deliveryIntentExecutor interface {
 	deliveryIntentQuerier
 	Exec(query string, args ...any) (sql.Result, error)

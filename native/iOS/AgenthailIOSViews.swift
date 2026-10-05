@@ -395,6 +395,10 @@ struct SessionScreen: View {
         return model.olderActivity.filter { !ids.contains($0.id) } + latest
     }
 
+    static func showsActivity(timeline: SessionTimeline, itemCount: Int, activityCursor: Int64?, exchangeCount: Int) -> Bool {
+        timeline.unavailableReason == nil && (itemCount > 0 || (activityCursor ?? 0) > 0 || exchangeCount == 0)
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -416,8 +420,8 @@ struct SessionScreen: View {
                         if let warning = detail.transcriptWarning {
                             Label(warning, systemImage: "exclamationmark.bubble").font(.footnote).foregroundStyle(.secondary)
                         }
-                        if let timeline = detail.timeline, timeline.unavailableReason == nil,
-                           !items.isEmpty || (model.activityCursor ?? 0) > 0 || detail.exchanges.isEmpty {
+                        if let timeline = detail.timeline,
+                           Self.showsActivity(timeline: timeline, itemCount: items.count, activityCursor: model.activityCursor, exchangeCount: detail.exchanges.count) {
                             if (model.activityCursor ?? 0) > 0 {
                                 Button { followingLatest = false; Task { await model.loadOlderActivity() } } label: {
                                     if model.loadingOlderActivity { ProgressView("Loading older activity") }

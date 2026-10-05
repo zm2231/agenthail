@@ -11,6 +11,15 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+func (d *Daemon) dispatcher() delivery.Dispatcher {
+	return delivery.Dispatcher{Registry: d.Registry, ProblemCommitted: func() {
+		if err := d.catalog.flushCommitted(); err != nil {
+			d.log.Printf("publish delivery problem: %s", err)
+		}
+		d.publishEvent("state.changed", "", map[string]string{"source": "delivery-problem"})
+	}}
+}
+
 func (d *Daemon) createNotionThread(ctx context.Context, message, alias, model string) (*delivery.Receipt, error) {
 	adapter := d.surfaceForKind(surface.KindNotion)
 	if adapter == nil {

@@ -237,8 +237,123 @@ func (a *App) cmdCodex(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve current directory: %w", err)
 	}
+	if receiptPath := strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_RECEIPT")); receiptPath != "" || strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID")) != "" {
+		launchID := strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_ID"))
+		if launchID == "" || receiptPath == "" {
+			return fmt.Errorf("managed Codex launch identity is incomplete")
+		}
+		expectedReceiptPath, err := surface.ManagedCodexLaunchReceiptPath(launchID)
+		if err != nil || filepath.Clean(receiptPath) != filepath.Clean(expectedReceiptPath) {
+			return fmt.Errorf("managed Codex launch receipt path is not launch-owned")
+		}
+		binding, err := managedCodexLaunchBindingFromEnv()
+		if err != nil {
+			return err
+		}
+		prepareCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return runManagedCodexLaunch(prepareCtx, args, cwd, launchID, receiptPath, binding, surfaces.NewCodex("").PrepareManagedTerminalSession, func(path string, argv, env []string) error {
+			return syscall.Exec(path, argv, env)
+		}, path)
+	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
 	return syscall.Exec(path, argv, os.Environ())
+}
+
+type managedCodexPreparer func(context.Context, string, string) (*surface.Session, error)
+type managedCodexExec func(string, []string, []string) error
+type managedCodexLaunchBinding struct {
+	Runtime   string
+	TmuxPane  string
+	Workspace string
+	Surface   string
+}
+
+func managedCodexLaunchBindingFromEnv() (managedCodexLaunchBinding, error) {
+	binding := managedCodexLaunchBinding{
+		Runtime:   strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_LAUNCH_RUNTIME")),
+		TmuxPane:  strings.TrimSpace(os.Getenv("TMUX_PANE")),
+		Workspace: strings.TrimSpace(os.Getenv("CMUX_WORKSPACE_ID")),
+		Surface:   strings.TrimSpace(os.Getenv("CMUX_SURFACE_ID")),
+	}
+	switch binding.Runtime {
+	case surface.LauncherTMUX:
+		if binding.TmuxPane == "" || !strings.HasPrefix(binding.TmuxPane, "%") {
+			return managedCodexLaunchBinding{}, fmt.Errorf("managed Codex tmux launch did not receive valid TMUX_PANE")
+		}
+		binding.Workspace, binding.Surface = "", ""
+	case surface.LauncherCMUX:
+		if binding.Workspace == "" || binding.Surface == "" {
+			return managedCodexLaunchBinding{}, fmt.Errorf("managed Codex CMUX launch received incomplete identity")
+		}
+		binding.TmuxPane = ""
+	default:
+		return managedCodexLaunchBinding{}, fmt.Errorf("managed Codex launch runtime is missing or unsupported")
+	}
+	return binding, nil
+}
+
+func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, receiptPath string, binding managedCodexLaunchBinding, prepare managedCodexPreparer, execute managedCodexExec, path string) error {
+	model, message, err := managedCodexLaunchArgs(args)
+	if err != nil {
+		return err
+	}
+	session, err := prepare(ctx, cwd, model)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.ID == "" {
+		return errors.New("managed Codex launch returned no provider thread ID")
+	}
+	receipt := surface.ManagedCodexLaunchReceipt{LaunchID: launchID, ThreadID: session.ID, Cwd: cwd, Runtime: binding.Runtime, TmuxSession: launchID, TmuxPane: binding.TmuxPane, Workspace: binding.Workspace, Surface: binding.Surface}
+	if binding.Runtime == surface.LauncherCMUX {
+		receipt.TmuxSession = ""
+	}
+	if err := surface.WriteManagedCodexLaunchReceipt(receiptPath, receipt); err != nil {
+		return err
+	}
+	argv := []string{"codex", "resume", session.ID, "--remote", "unix://"}
+	if message != "" {
+		argv = append(argv, "--", message)
+	}
+	return execute(path, argv, os.Environ())
+}
+
+func managedCodexLaunchArgs(args []string) (string, string, error) {
+	model := ""
+	message := ""
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			if index+1 >= len(args) {
+				return "", "", fmt.Errorf("managed Codex launch requires a message")
+			}
+			if len(args) != index+2 {
+				return "", "", fmt.Errorf("managed Codex launch accepts one message")
+			}
+			message = args[index+1]
+			break
+		}
+		switch arg {
+		case "--cd", "-C":
+			if index+1 >= len(args) {
+				return "", "", fmt.Errorf("managed Codex launch %s requires a directory", arg)
+			}
+			index++
+		case "--model", "-m":
+			if index+1 >= len(args) {
+				return "", "", fmt.Errorf("managed Codex launch %s requires a model", arg)
+			}
+			model = args[index+1]
+			index++
+		default:
+			return "", "", fmt.Errorf("managed Codex launch does not support argument %q", arg)
+		}
+	}
+	if message == "" {
+		return "", "", fmt.Errorf("managed Codex launch requires a message")
+	}
+	return model, message, nil
 }
 
 func repairManagedCodexRuntime(ctx context.Context) error {
@@ -1022,10 +1137,37 @@ func streamEventDelta(event sessionstream.Event, bodies map[string]string, versi
 	return event.Body
 }
 
+func directStreamEventDelta(event surface.StreamEvent, bodies map[string]string, versions map[string]uint64) string {
+	key := event.ID
+	if key == "" {
+		key = event.ProviderKey
+	}
+	if key == "" {
+		return event.Text
+	}
+	if prior, found := versions[key]; found && event.Version > 0 && prior > 0 && event.Version <= prior {
+		return ""
+	}
+	versions[key] = event.Version
+	previous := bodies[key]
+	if event.Operation == "append" {
+		bodies[key] = previous + event.Text
+		return event.Text
+	}
+	bodies[key] = event.Text
+	return surface.StreamEventDelta(event, previous)
+}
+
 func printSessionStreamEvent(event sessionstream.Event, bodies map[string]string, versions map[string]uint64) {
-	if event.Kind == "tool_use" {
+	if event.Kind == "tool_use" || event.Kind == "toolCall" || event.Kind == "tool_call" {
 		if text := streamEventDelta(event, bodies, versions); text != "" {
 			fmt.Printf("  -> %s\n", text)
+		}
+		return
+	}
+	if event.Kind == "tool_result" || event.Kind == "toolResult" {
+		if text := streamEventDelta(event, bodies, versions); text != "" {
+			fmt.Printf("  <- %s\n", text)
 		}
 		return
 	}
@@ -1035,6 +1177,55 @@ func printSessionStreamEvent(event sessionstream.Event, bodies map[string]string
 	if text := streamEventDelta(event, bodies, versions); text != "" {
 		fmt.Print(text)
 	}
+}
+
+func directStreamTerminalError(event surface.StreamEvent, turnID string) error {
+	if !event.Failed() {
+		return nil
+	}
+	reason := event.Status
+	if reason == "" {
+		reason = "terminal failure"
+	}
+	return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+}
+
+func streamDirectOutput(ctx context.Context, surf surface.Surface, sess *surface.Session, turnID string, timeout time.Duration) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	bodies := map[string]string{}
+	versions := map[string]uint64{}
+	var terminalErr error
+	err := surf.Stream(streamCtx, sess, turnID, func(event surface.StreamEvent) {
+		switch event.Class() {
+		case surface.StreamEventMessage:
+			if event.Role != "" && event.Role != "assistant" {
+				return
+			}
+			if text := directStreamEventDelta(event, bodies, versions); text != "" {
+				fmt.Print(text)
+			}
+		case surface.StreamEventToolCall:
+			if text := event.Text; text != "" {
+				fmt.Printf("  -> %s\n", text)
+			}
+		case surface.StreamEventToolResult:
+			if text := event.Text; text != "" {
+				fmt.Printf("  <- %s\n", text)
+			}
+		case surface.StreamEventTerminal:
+			if err := directStreamTerminalError(event, turnID); err != nil {
+				terminalErr = err
+				cancel()
+				return
+			}
+			fmt.Println()
+		}
+	}, timeout)
+	if terminalErr != nil {
+		return terminalErr
+	}
+	return err
 }
 
 func consumeSessionReply(ctx context.Context, subscription sessionstream.Subscription, turnID string) (*surface.ReplyResult, error) {
@@ -1094,6 +1285,16 @@ func consumeDaemonStreamOutput(ctx context.Context, subscription sessionstream.S
 				continue
 			}
 			if event.Kind == "done" {
+				if event.Failed() {
+					reason := event.Reason
+					if reason == "" {
+						reason = event.Status
+					}
+					if reason == "" {
+						reason = "terminal failure"
+					}
+					return fmt.Errorf("turn %s did not complete successfully: %s", turnID, reason)
+				}
 				fmt.Println()
 				return nil
 			}
@@ -1249,15 +1450,7 @@ func (a *App) cmdSend(args []string) error {
 		if useDaemonStream {
 			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
 		}
-		return surf.Stream(ctx, sess, receipt.TurnID, func(ev surface.StreamEvent) {
-			if ev.Kind == "text" {
-				fmt.Print(ev.Text)
-			} else if ev.Kind == "tool_use" {
-				fmt.Printf("  -> %s\n", ev.Text)
-			} else if ev.Kind == "done" {
-				fmt.Println()
-			}
-		}, timeout)
+		return streamDirectOutput(ctx, surf, sess, receipt.TurnID, timeout)
 	}
 
 	if wantReply {
@@ -1615,16 +1808,7 @@ func (a *App) cmdStream(args []string) error {
 			}
 		}
 	}
-	return surf.Stream(ctx, sess, "", func(ev surface.StreamEvent) {
-		switch ev.Kind {
-		case "text":
-			fmt.Print(ev.Text)
-		case "tool_use":
-			fmt.Printf("  -> %s\n", ev.Text)
-		case "done":
-			fmt.Println()
-		}
-	}, timeout)
+	return streamDirectOutput(ctx, surf, sess, "", timeout)
 }
 
 func (a *App) cmdCompact(args []string) error {
@@ -1725,11 +1909,23 @@ func (a *App) cmdSteer(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
+	sourceID, err := a.sourceSessionID(ctx, "")
+	if err != nil {
+		return err
+	}
+	if sourceID != "" {
+		ctx = surface.WithSourceSessionID(ctx, sourceID)
+	}
 	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, strings.Join(positional[1:], " "))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("steer %s for %s\n", receipt.Evidence, a.resolveDisplay(sess.ID))
+	target := a.resolveDisplay(sess.ID)
+	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
+		fmt.Printf("Submitted to %s.\n", target)
+	} else {
+		fmt.Printf("Sent to %s.\n", target)
+	}
 	return nil
 }
 

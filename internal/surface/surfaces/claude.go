@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -137,14 +138,6 @@ func toCse(bridgeID string) string {
 	s = strings.TrimPrefix(s, "session_")
 	s = strings.TrimPrefix(s, "cse_")
 	return "cse_" + s
-}
-
-func projectDir(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects", strings.ReplaceAll(cwd, "/", "-"))
 }
 
 func (c *Claude) transcriptPath(s *surface.Session) string {
@@ -495,98 +488,10 @@ func (c *Claude) Stream(ctx context.Context, sess *surface.Session, uuid string,
 	if sess.Transport == "uds" && uuid != "" {
 		return surface.ErrUnsupported
 	}
-	if sess.Transport == "uds" {
-		return c.streamUDSTimeline(ctx, sess, onEvent, timeout)
-	}
-	path := sess.Transcript
-	if path == "" {
-		path = c.transcriptPath(sess)
-	}
-	if path == "" || !fileExists(path) {
-		return fmt.Errorf("no local transcript for streaming")
-	}
-	deadline := time.Now().Add(timeout)
-	state, err := c.observeTranscript(ctx, path)
-	if err != nil {
-		return err
-	}
-	targetID := uuid
-	baselineUserID := ""
-	if state.hasCurrent {
-		baselineUserID = state.current.UserID
-	}
-	if targetID == "" && state.hasCurrent && !state.current.Done && !state.current.Interrupted {
-		targetID = state.current.UserID
-	}
-	lastText := ""
-	var lastContext surface.ContextUsage
-	var nextContextPoll time.Time
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if !time.Now().Before(nextContextPoll) {
-			nextContextPoll = time.Now().Add(time.Second)
-			if usage, usageErr := c.ContextUsage(ctx, sess); usageErr == nil && usage != nil && *usage != lastContext {
-				lastContext = *usage
-				onEvent(surface.StreamEvent{Kind: "context", Context: usage})
-			}
-		}
-		state, err := c.observeTranscript(ctx, path)
-		if err != nil {
-			time.Sleep(300 * time.Millisecond)
-			continue
-		}
-		if targetID == "" && state.hasCurrent && state.current.UserID != "" && state.current.UserID != baselineUserID {
-			targetID = state.current.UserID
-		}
-		if !state.hasCurrent || targetID == "" || state.current.UserID != targetID {
-			time.Sleep(300 * time.Millisecond)
-			continue
-		}
-		turn := state.current
-		if turn.Assistant != "" && turn.Assistant != lastText {
-			text := turn.Assistant
-			if strings.HasPrefix(text, lastText) {
-				text = strings.TrimPrefix(text, lastText)
-			}
-			lastText = turn.Assistant
-			if text != "" {
-				key := turn.MessageID
-				if key == "" {
-					key = turn.UserID
-				}
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "append", TurnID: targetID, Kind: "text", Text: text})
-			}
-		}
-		if turn.Done {
-			key := turn.MessageID
-			if key == "" {
-				key = turn.UserID
-			}
-			if turn.Assistant != "" {
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "upsert", Final: true, TurnID: targetID, Kind: "text", Text: turn.Assistant})
-			}
-			onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(turn.Assistant)), Operation: "phase", TurnID: targetID, Kind: "done"})
-			if sess.Transport == "uds" && uuid == "" {
-				baselineUserID = turn.UserID
-				targetID = ""
-				lastText = ""
-				continue
-			}
-			return nil
-		}
-		if turn.Interrupted {
-			return fmt.Errorf("Claude turn %s was interrupted", targetID)
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return c.streamTimeline(ctx, sess, uuid, onEvent, timeout)
 }
 
-func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, onEvent func(surface.StreamEvent), timeout time.Duration) error {
+func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -598,10 +503,18 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 	if err != nil {
 		return err
 	}
-	// The overlap covers records written between page seeding and tail startup;
-	// stable record keys make replay idempotent in the journal.
-	offset := max(int64(0), state.offset-initialClaudeObservationBytes)
-	if offset > 0 {
+	identity := transcriptFileIdentity(state.fileInfo)
+	offset := state.offset
+	if uuid != "" {
+		// A targeted wait looks back so a turn submitted before the tail started is still found;
+		// events outside that turn are filtered below.
+		offset = max(int64(0), state.offset-initialClaudeObservationBytes)
+	} else if sess.TranscriptOffsetSet && sess.TranscriptOffset <= state.offset && identity != "" && sess.TranscriptIdentity == identity {
+		// The session source resumes at its seed or previous window boundary, so records written
+		// in between are delivered once without replaying history the seed bounded away.
+		offset = sess.TranscriptOffset
+	}
+	if uuid != "" && offset > 0 {
 		file, openErr := os.Open(path)
 		if openErr != nil {
 			return openErr
@@ -620,49 +533,111 @@ func (c *Claude) streamUDSTimeline(ctx context.Context, sess *surface.Session, o
 	}
 	deadline := time.Now().Add(timeout)
 	currentTurnID := ""
+	if state.hasCurrent {
+		hasTurnStart, scanErr := claudeTranscriptHasTurnStart(ctx, path, offset)
+		if scanErr != nil {
+			return scanErr
+		}
+		if !hasTurnStart {
+			currentTurnID = state.current.UserID
+		}
+	}
+	terminalTurns := map[string]bool{}
 	for time.Now().Before(deadline) {
 		lineOffset := offset
+		completed := false
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+			recordOffset := lineOffset
+			lineOffset += int64(len(line))
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				return nil
 			}
 			turnID := currentTurnID
-			if str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) {
+			if claudeRecordStartsTurn(record) {
 				currentTurnID = str(record, "uuid")
 				turnID = currentTurnID
 			}
+			done, interrupted := claudeStreamTerminal(record)
+			if interrupted {
+				if uuid != "" && turnID == uuid {
+					return fmt.Errorf("Claude turn %s was interrupted", uuid)
+				}
+				if turnID != "" && !terminalTurns[turnID] {
+					terminalTurns[turnID] = true
+					key := stableTimelineItemID(recordOffset, line, 0)
+					onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done", Status: "cancelled"})
+				}
+				return nil
+			}
 			items := claudeTimelineItems(record)
-			if err := decorateTimelineAttachments(ctx, items, record, "claude", lineOffset); err != nil {
+			if err := decorateTimelineAttachments(ctx, items, record, "claude", recordOffset); err != nil {
 				return err
 			}
+			if uuid != "" && turnID != uuid {
+				return nil
+			}
 			for index, item := range items {
-				key := stableTimelineItemID(lineOffset, line, index)
+				key := stableTimelineItemID(recordOffset, line, index)
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
 				}
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Timestamp: at, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
-			if str(record, "type") == "assistant" && strNested(record, "message", "stop_reason") == "end_turn" {
-				key := stableTimelineItemID(lineOffset, line, len(items))
+			if done && turnID != "" && !terminalTurns[turnID] {
+				terminalTurns[turnID] = true
+				key := stableTimelineItemID(recordOffset, line, len(items))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
+				if uuid != "" && turnID == uuid {
+					completed = true
+				}
 			}
-			lineOffset += int64(len(line))
 			return nil
 		})
 		if scanErr != nil {
 			return scanErr
 		}
 		offset = next
+		if uuid == "" {
+			sess.TranscriptOffset = offset
+			sess.TranscriptOffsetSet = true
+			sess.TranscriptIdentity = identity
+		}
+		if completed {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(transcriptPollInterval):
 		}
 	}
-	return fmt.Errorf("stream timed out after %s", timeout)
+	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)
+}
+
+var errClaudeTurnStartFound = errors.New("claude turn start found")
+
+func claudeTranscriptHasTurnStart(ctx context.Context, path string, offset int64) (bool, error) {
+	_, err := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		if !bytes.Contains(line, []byte(`"user"`)) {
+			return nil
+		}
+		var record map[string]any
+		if json.Unmarshal(line, &record) == nil && claudeRecordStartsTurn(record) {
+			return errClaudeTurnStartFound
+		}
+		return nil
+	})
+	if errors.Is(err, errClaudeTurnStartFound) {
+		return true, nil
+	}
+	return false, err
+}
+
+func claudeRecordStartsTurn(record map[string]any) bool {
+	return str(record, "type") == "user" && str(record, "uuid") != "" && !claudeRecordHasToolResult(record) && !claudeRecordIsInterrupt(record)
 }
 
 func claudeRecordHasToolResult(record map[string]any) bool {
@@ -675,6 +650,28 @@ func claudeRecordHasToolResult(record map[string]any) bool {
 		}
 	}
 	return str(message, "tool_use_id") != ""
+}
+
+func claudeRecordIsInterrupt(record map[string]any) bool {
+	if str(record, "type") != "user" {
+		return false
+	}
+	message, _ := record["message"].(map[string]any)
+	return isClaudeInterruptMarker(strings.TrimSpace(transcriptText(message["content"])))
+}
+
+func claudeStreamTerminal(record map[string]any) (done, interrupted bool) {
+	switch str(record, "type") {
+	case "system":
+		return str(record, "subtype") == "turn_duration", false
+	case "assistant":
+		reason := strNested(record, "message", "stop_reason")
+		return reason == "end_turn", claudeTerminalInterruption(reason)
+	case "user":
+		return false, claudeRecordIsInterrupt(record)
+	default:
+		return false, false
+	}
 }
 
 func strNested(record map[string]any, object, field string) string {
@@ -849,7 +846,7 @@ func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message strin
 		return err
 	}
 	if current.Status != surface.StatusBusy {
-		return fmt.Errorf("session idle; nothing to steer (use 'send' instead)")
+		return surface.DeliveryUnavailable(errors.New("session idle; nothing to steer (use 'send' instead)"))
 	}
 	_, err = c.postMessage(ctx, current, message)
 	return err

@@ -2,48 +2,36 @@ package surfaces
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
-	"time"
 )
 
-type modelListClient struct {
-	pages []map[string]any
-	index int
-}
-
-func (c *modelListClient) Request(_ context.Context, method string, params map[string]any, _ time.Duration) (map[string]any, error) {
-	if method != "model/list" {
-		return nil, nil
-	}
-	if c.index > 0 && params["cursor"] != "page-2" {
-		return map[string]any{"result": map[string]any{"data": []any{}, "nextCursor": nil}}, nil
-	}
-	page := c.pages[c.index]
-	c.index++
-	return page, nil
-}
-
-func (c *modelListClient) Close() error { return nil }
-
-func TestListCodexModelsPreservesCatalogAndStopsAtEmptyCursor(t *testing.T) {
-	client := &modelListClient{pages: []map[string]any{
-		{"result": map[string]any{
+func TestCodexModelsPreservesCatalogAndStopsAtEmptyCursor(t *testing.T) {
+	pages := map[string]map[string]any{
+		"": {
 			"data": []any{
 				map[string]any{"id": "gpt-5.6-sol", "displayName": "GPT-5.6-Sol", "description": "workhorse", "isDefault": true, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "low", "description": "fast"}, map[string]any{"reasoningEffort": "high", "description": "deep"}}, "defaultReasoningEffort": "high", "serviceTiers": []any{map[string]any{"id": "priority", "name": "Fast"}}},
 				map[string]any{"model": "chatgpt-web/pro", "displayName": "ChatGPT Web — Pro"},
 			},
 			"nextCursor": "page-2",
-		}},
-		{"result": map[string]any{
+		},
+		"page-2": {
 			"data": []any{
 				map[string]any{"id": "gpt-5.6-sol", "displayName": "duplicate"},
 				map[string]any{"id": "gpt-5.5"},
 			},
 			"nextCursor": "",
-		}},
-	}}
-
-	models, err := listCodexModels(context.Background(), client)
+		},
+	}
+	fake := startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		if method != "model/list" {
+			return nil
+		}
+		cursor, _ := params["cursor"].(string)
+		return pages[cursor]
+	})
+	models, err := isolatedManagedRuntime(t).Models(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,14 +50,24 @@ func TestListCodexModelsPreservesCatalogAndStopsAtEmptyCursor(t *testing.T) {
 	if models[2].DisplayName != "gpt-5.5" {
 		t.Fatalf("missing display name was not made truthful: %#v", models[2])
 	}
-	if client.index != 2 {
-		t.Fatalf("requested %d pages after empty cursor", client.index)
+	if calls := fake.Calls("model/list"); len(calls) != 2 {
+		t.Fatalf("requested %d pages after empty cursor", len(calls))
 	}
 }
 
-func TestParseClaudeRuntimeModelsPreservesCatalogMetadata(t *testing.T) {
-	data := []byte(`{"type":"control_response","response":{"request_id":"catalog","response":{"models":[{"value":"default","displayName":"Default","description":"recommended","supportedEffortLevels":["low","high"]},{"value":"haiku","displayName":"Haiku","resolvedModel":"claude-haiku-4-5-20251001"}]}}}`)
-	models, err := parseClaudeRuntimeModels(data, "catalog")
+func TestClaudeModelsPreservesCatalogMetadata(t *testing.T) {
+	home := t.TempDir()
+	binary := filepath.Join(home, "claude")
+	script := `#!/bin/sh
+IFS= read -r _
+printf '%s\n' '{"type":"control_response","response":{"request_id":"agenthail-model-catalog","response":{"models":[{"value":"default","displayName":"Default","description":"recommended","supportedEffortLevels":["low","high"]},{"value":"haiku","displayName":"Haiku","resolvedModel":"claude-haiku-4-5-20251001"}]}}}'
+sleep 30
+`
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	models, err := NewClaude("Default", home).Models(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

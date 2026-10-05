@@ -23,7 +23,17 @@ full-row `session.upserted`, `session.removed`, `session.unavailable`, and
 `surface.health` catalog deltas. A proven delivery problem is one idempotent
 `delivery.problem` catalog event with `deliveryId`, target and source session
 IDs, bounded message or body reference, reason and timestamp; it is committed
-with the delivery failure/notice state. A failed discovery records
+with the delivery failure/notice state. Every queue mutation that changes a
+session's pending or in-flight count (enqueue, drain, cancel, retry, dead
+letter, expiry sweep) commits a `session.queue` event with `sessionId` and the
+new `queueCount` in the same transaction, so `catalogSeq` moves with the paging
+membership that reads the live queue and stale page cursors are rejected.
+Clients update the known row's `queueCount` and presence (`current` and
+`currentReason`) from it and ignore it for unknown sessions; the following
+background projection pass also emits a full-row `session.upserted`. The registry
+validates the queue count inside the projection transaction before persisting
+that full-row event; if the producer's count is stale, the daemon rebuilds the
+row from the transaction's count before retrying. A failed discovery records
 freshness/health without changing presence rows. A successful omission must
 meet the configured removal threshold before producing `session.removed`.
 
@@ -71,8 +81,11 @@ Each session event has `itemId`, optional `providerKey`, mutation `version`,
 operation (`append`, `upsert`, `remove`, or `phase`), `kind`, optional `turnId`
 and `ts`, bounded `body`, `truncated`, optional `truncationReason`, and optional `bodyRef`. A body
 reference is opaque, bound to the authenticated session, range-limited and
-expires with journal retention; it never names a host path. A source rebuild is
-a typed `source-error` reset with a bounded `reason`, not a removal. A provider absence or partial read never deletes
+expires with journal retention; it never names a host path. A source failure
+(provider stream or seed error, or a rejected journal write) is a typed
+`source-error` reset with a bounded `reason`, not a removal. A rejected write
+does not advance that item's provider cursor or body state, so a replay of the
+same provider cursor is persisted. A provider absence or partial read never deletes
 historical journal content.
 
 Body range reads use byte offsets with UTF-8 boundaries: `start` must begin at
@@ -86,7 +99,7 @@ separate. The following shapes are canonical:
 
 ```json
 {"stream":"catalog","seq":41,"type":"session.upserted","data":{"session":{"id":"s1","surface":"codex","name":"Build","status":"busy","lastActive":"2026-10-03T12:00:00Z","hostProject":{"id":"host-project-1","displayName":"agenthail","commonDir":"/repo/.git"},"checkout":{"id":"checkout-1","path":"/repo/.worktrees/api","branch":"feat/api","isMain":false,"dirty":true},"freshness":{"generation":7,"observedAt":"2026-10-03T12:00:00Z","stale":false}}}}
-{"stream":"catalog","seq":42,"type":"delivery.problem","data":{"deliveryId":1,"sessionId":"s1","sourceSessionId":"s2","message":"Run the tests","reason":"target_not_writable","at":"2026-10-03T12:00:01Z"}}
+{"stream":"catalog","seq":42,"type":"delivery.problem","data":{"deliveryId":1,"sessionId":"s1","sourceSessionId":"s2","message":"Run the tests","reason":"message expired after 1 hour","at":"2026-10-03T12:00:01Z"}}
 {"stream":"session","sessionId":"s1","seq":9,"type":"item","data":{"itemId":"m1","providerKey":"m1","version":6,"op":"append","kind":"text","turnId":"u1","ts":"2026-10-03T12:00:02Z","body":"answer","truncated":false}}
 ```
 
@@ -94,9 +107,14 @@ separate. The following shapes are canonical:
 
 A `SessionSource` is the only component allowed to read provider session
 content for its session. It normalizes provider output, appends journal events
-in sequence order, and fans out journal entries to subscribers. Codex renderer
-records use their native sequence as raw-delta identity within a persisted
-source epoch; it is not presented as a stable final-message ID. Claude transcript
+in sequence order, and fans out journal entries to subscribers. Codex Desktop
+content is read from its local JSONL transcript as one incremental source: the
+seed ends at the last complete newline, and the live tail starts at that exact
+byte offset. Seed and tail use the same record parser and stable item keys,
+including durable offset-based attachment references; an incomplete final line
+is left for the tail. Codex managed app-server sessions use their separate
+native transport path. The Desktop content stream does not use renderer event
+records or a renderer cursor as a second content source. Claude transcript
 records use immutable record identity, not a mutable text hash. Provider keys remain absent where a
 source cannot prove identity or correlate an effect. The source is held while
 any viewer subscribes, a relay/route watches the session, a managed turn is

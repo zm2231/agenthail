@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(mktemp -d /tmp/agenthail-pkg-components.XXXXXX)"
+root="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-pkg-components.XXXXXX")"
+trap 'rm -rf "$root"' EXIT
 components="$root/components.plist"
 component="$root/component.pkg"
 mkdir -p "$root/root/Applications/Agenthail.app/Contents/MacOS"

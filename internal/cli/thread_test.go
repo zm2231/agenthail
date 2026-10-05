@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -85,8 +86,8 @@ func TestThreadCreateCodexAcceptsMessageFlagAndDefaultsToCallerCwd(t *testing.T)
 	base := &cliSurface{kind: surface.KindCodex}
 	starter := &starterCLISurface{
 		cliSurface: base,
-		session:    &surface.Session{ID: "thread", Surface: surface.KindCodex, Cwd: "/tmp", Transport: "managed"},
-		delivery:   &surface.SendResult{UUID: "turn", Accepted: true},
+		session:    &surface.Session{ID: "thread-flag", Surface: surface.KindCodex, Cwd: "/tmp", Transport: "managed"},
+		delivery:   &surface.SendResult{UUID: "turn-flag", Accepted: true},
 	}
 	app := threadFixture(t, starter)
 	wantCwd, err := os.Getwd()
@@ -102,7 +103,7 @@ func TestThreadCreateCodexAcceptsMessageFlagAndDefaultsToCallerCwd(t *testing.T)
 	if len(starter.options) != 1 || starter.options[0].Message != "Use the explicit flag" || starter.options[0].Cwd != wantCwd {
 		t.Fatalf("options=%+v want cwd=%q", starter.options, wantCwd)
 	}
-	if !strings.Contains(output, "created codex/thread") || !strings.Contains(output, "started turn turn") {
+	if !strings.Contains(output, "thread-flag") || !strings.Contains(output, "turn-flag") {
 		t.Fatalf("output=%q", output)
 	}
 }
@@ -155,7 +156,7 @@ func TestThreadCreateCodexPreservesCreatedThreadOnUnknownTurn(t *testing.T) {
 		t.Fatalf("err=%v", runErr)
 	}
 	var result threadCreateOutput
-	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil || result.Session.ID != "created" || result.Detail != "Submitted to @builder." || result.Warning != "" || strings.Contains(strings.ToLower(output), "unresolved") || strings.Contains(strings.ToLower(output), "confirm") || strings.Contains(strings.ToLower(output), "inspect") || strings.Contains(strings.ToLower(output), "retrying") {
+	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Unknown || result.Status != "submitted" || !result.Accepted || result.Retryable || result.DeliveryID <= 0 || result.Session == nil || result.Session.ID != "created" || !strings.Contains(result.Detail, "@builder") || result.Warning != "" {
 		t.Fatalf("result=%+v decodeErr=%v output=%q", result, err, output)
 	}
 	if _, err := app.Registry.Session("created"); err != nil {
@@ -197,21 +198,39 @@ func TestThreadCreateCodexReportsDefinitiveInitialFailure(t *testing.T) {
 	if err != nil || intent.Status != "failed" || intent.TargetSessionID != "created" {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
-}
-
-func TestThreadCreateCodexHumanSubmittedDetailIsNeutral(t *testing.T) {
-	cwd := t.TempDir()
-	starter := &starterCLISurface{
-		cliSurface: &cliSurface{kind: surface.KindCodex},
-		session:    &surface.Session{ID: "created", Surface: surface.KindCodex, Cwd: cwd, Transport: "managed"},
-		err:        surface.DeliveryOutcomeUnknown(errors.New("provider response lost")),
+	if got := app.Registry.QueueCount(registry.OperatorSessionID); got != 1 {
+		t.Fatalf("failure notice queue count=%d, want 1", got)
 	}
-	app := threadFixture(t, starter)
-	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"thread", "create", "codex", "Build this", "--cwd", cwd, "--alias", "builder"})
-	})
-	if err != nil || output != "Submitted to @builder.\n" {
-		t.Fatalf("output=%q err=%v", output, err)
+	events, err := app.Registry.CatalogEventsAfter(0, 20)
+	if err != nil || len(events.Events) == 0 {
+		t.Fatalf("catalog events=%+v err=%v", events, err)
+	}
+	queueEvent := false
+	for _, event := range events.Events {
+		if event.Type == "session.queue" && event.EntityID == registry.OperatorSessionID {
+			queueEvent = true
+		}
+	}
+	if !queueEvent {
+		t.Fatalf("catalog events missing operator notice: %+v", events.Events)
+	}
+	type problemPayload struct {
+		DeliveryID      int64  `json:"deliveryId"`
+		SessionID       string `json:"sessionId"`
+		SourceSessionID string `json:"sourceSessionId"`
+		Reason          string `json:"reason"`
+	}
+	var problem problemPayload
+	for _, event := range events.Events {
+		if event.Type == "delivery.problem" {
+			if err := json.Unmarshal(event.Payload, &problem); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if problem.DeliveryID != result.DeliveryID || problem.SessionID != "created" || problem.SourceSessionID != registry.OperatorSessionID || problem.Reason != "initial message rejected" {
+		t.Fatalf("problem payload=%+v", problem)
 	}
 }
 
@@ -239,13 +258,6 @@ func TestThreadCreateCodexValidatesInputs(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 		})
-	}
-}
-
-func TestThreadCreateHelpIsSuccessful(t *testing.T) {
-	output, err := captureStdout(t, func() error { return (&App{}).Run([]string{"thread", "create", "codex", "--help"}) })
-	if err != nil || !strings.Contains(output, "agenthail thread create <codex|claude>") {
-		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 

@@ -100,7 +100,6 @@ type State struct {
 	Target         *surface.Session `json:"target,omitempty"`
 	AudioProvider  string           `json:"audioProvider,omitempty"`
 	CodingProvider string           `json:"codingProvider,omitempty"`
-	DynamicTools   bool             `json:"dynamicTools"`
 }
 
 type Action struct {
@@ -136,6 +135,20 @@ type Service struct {
 	setOperatorSourceActive func(session *surface.Session, active bool)
 	stream                  SessionStreamProvider
 	operatorSourceActive    bool
+	clock                   clock
+}
+
+type clock struct {
+	now    func() time.Time
+	ticker func() (<-chan time.Time, func())
+}
+
+var systemClock = clock{
+	now: time.Now,
+	ticker: func() (<-chan time.Time, func()) {
+		t := time.NewTicker(time.Second)
+		return t.C, t.Stop
+	},
 }
 
 func New(path string, provider Provider, register func(surface.Session) error, commandPath string) *Service {
@@ -151,7 +164,11 @@ func NewWithTargetsAndOperatorSource(path string, provider Provider, register fu
 }
 
 func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider) *Service {
-	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream}
+	return newService(path, provider, register, commandPath, target, dispatcher, setOperatorSourceActive, stream, systemClock)
+}
+
+func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
+	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock}
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -198,7 +215,7 @@ func (s *Service) View(owner string) State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Owner == owner {
-		s.lastSeen = time.Now()
+		s.lastSeen = s.clock.now()
 		if s.active() && s.cursor.Source != "" && s.provider != nil && s.loadErr == nil {
 			s.observe()
 		}
@@ -270,7 +287,7 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 	if s.active() && s.state.Owner != owner {
 		return s.view(owner), errors.New("another device owns this call")
 	}
-	s.lastSeen = time.Now()
+	s.lastSeen = s.clock.now()
 	err := s.apply(ctx, owner, a)
 	return s.view(owner), err
 }
@@ -283,10 +300,7 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		if v.Phase == "creating" {
 			return errors.New("operator creation outcome is unknown; inspect Codex before creating another operator")
 		}
-		if v.Session != nil && !v.DynamicTools && s.active() {
-			return errors.New("resolve the existing voice call before upgrading its orchestrator")
-		}
-		if v.Session != nil && v.DynamicTools {
+		if v.Session != nil {
 			if s.register != nil {
 				return s.register(*v.Session)
 			}
@@ -613,34 +627,71 @@ func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string,
 	}
 	finalSpoken := false
 	terminalDone := false
-	interimText := ""
-	err = target.Adapter.Stream(ctx, target.Session, turnID, func(event surface.StreamEvent) {
-		if event.Kind == "done" {
-			terminalDone = true
-			return
-		}
-		if event.Kind == "text" && strings.TrimSpace(event.Text) != "" {
-			if event.Final {
-				if finalSpoken {
-					return
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	lastBody := map[string]string{}
+	seenVersion := map[string]uint64{}
+	finalItems := map[string]bool{}
+	var streamFailure error
+	err = target.Adapter.Stream(streamCtx, target.Session, turnID, func(event surface.StreamEvent) {
+		switch event.Class() {
+		case surface.StreamEventTerminal:
+			if event.Failed() {
+				reason := event.Status
+				if reason == "" {
+					reason = "terminal failure"
 				}
-				finalSpoken = true
-				if event.Text == interimText {
-					return
-				}
-				text := event.Text
-				if strings.HasPrefix(text, interimText) {
-					text = strings.TrimPrefix(text, interimText)
-				}
-				if strings.TrimSpace(text) != "" {
-					s.speakDelegation(attemptID, messageID, target.Session, turnID, text, "final")
-				}
+				streamFailure = errors.New(reason)
+				cancelStream()
 				return
 			}
-			interimText += event.Text
-			s.speakDelegation(attemptID, messageID, target.Session, turnID, event.Text, "interim")
+			terminalDone = true
+		case surface.StreamEventMessage:
+			if event.Role != "" && event.Role != "assistant" {
+				return
+			}
+			if event.Final {
+				finalSpoken = true
+			}
+			key := event.ID
+			if key == "" {
+				key = event.ProviderKey
+			}
+			if key != "" {
+				if prior, found := seenVersion[key]; found && event.Version > 0 && prior > 0 && event.Version <= prior {
+					return
+				}
+				seenVersion[key] = event.Version
+			}
+			if event.Final && key != "" {
+				if finalItems[key] {
+					return
+				}
+				finalItems[key] = true
+			}
+			text := event.Text
+			if key != "" {
+				previous := lastBody[key]
+				text = surface.StreamEventDelta(event, previous)
+				if event.Operation == "append" {
+					lastBody[key] = previous + event.Text
+				} else {
+					lastBody[key] = event.Text
+				}
+			}
+			if strings.TrimSpace(text) != "" {
+				stage := "interim"
+				if event.Final {
+					stage = "final"
+				}
+				s.speakDelegation(attemptID, messageID, target.Session, turnID, text, stage)
+			}
 		}
 	}, 5*time.Minute)
+	if streamFailure != nil {
+		s.recordDelegationFailure(attemptID, messageID, targetID, streamFailure)
+		return
+	}
 	if err != nil {
 		s.recordDelegationFailure(attemptID, messageID, targetID, err)
 		return
@@ -742,7 +793,6 @@ func (s *Service) appendDelegationEvent(messageID string, target *surface.Sessio
 
 func (s *Service) createOperator(ctx context.Context) error {
 	previous := s.state
-	migratingTools := previous.State.Session != nil && !previous.State.DynamicTools
 	instructions := OperatorInstructions(s.commandPath)
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
 	s.state.State.Phase = "creating"
@@ -768,12 +818,8 @@ func (s *Service) createOperator(ctx context.Context) error {
 		}
 		return err
 	}
-	message := ""
-	if migratingTools {
-		message = "Created an upgraded voice orchestrator with Agenthail transfer tools. The previous conversation remains in Sessions."
-	}
 	s.state = diskState{State: State{
-		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, DynamicTools: true, Message: message, Events: []Event{},
+		Protocol: 1, Session: session, Phase: "ready", SkillDigest: digest, Events: []Event{},
 	}}
 	s.cursor, s.boundAttempt, s.eventGap = Cursor{}, "", false
 	if err := s.save(); err != nil {
@@ -810,9 +856,9 @@ func (s *Service) observe() {
 	}
 	s.running = true
 	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
+		ticks, stop := s.clock.ticker()
+		defer stop()
+		for range ticks {
 			s.mu.Lock()
 			if !s.active() {
 				s.running = false
@@ -825,7 +871,7 @@ func (s *Service) observe() {
 			if err != nil {
 				s.state.State.Message = "Voice event connection interrupted: " + err.Error()
 			}
-			if time.Since(s.lastSeen) > 40*time.Second {
+			if s.clock.now().Sub(s.lastSeen) > 40*time.Second {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = s.apply(ctx, s.state.Owner, Action{Action: "stop", AttemptID: s.state.State.AttemptID})
 				cancel()

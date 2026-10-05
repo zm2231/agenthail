@@ -38,6 +38,11 @@ func TestDispatcherAppliesSourceSessionIDToImmediateAndDeferredSend(t *testing.T
 	if err := r.RegisterSession(*session); err != nil {
 		t.Fatal(err)
 	}
+	for _, sourceID := range []string{"source-immediate", "source-deferred"} {
+		if err := r.RegisterSession(surface.Session{ID: sourceID, Surface: surface.SurfaceKind("agenthail")}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	adapter := &sourceCheckingSurface{fakeSurface: fakeSurface{kind: surface.KindClaude, result: &surface.SendResult{UUID: "turn", Accepted: true}}}
 	options := surface.SendOptions{Model: "sonnet", SourceSessionID: "source-immediate"}
 	if _, err := (Dispatcher{Registry: r}).DeliverWithOptions(context.Background(), adapter, session, "now", "", options); err != nil {
@@ -54,26 +59,5 @@ func TestDispatcherAppliesSourceSessionIDToImmediateAndDeferredSend(t *testing.T
 	item, err := r.ClaimNextMessage(session.ID, time.Now())
 	if err != nil || item == nil || item.SourceSessionID != "source-deferred" {
 		t.Fatalf("queued item=%+v err=%v", item, err)
-	}
-}
-
-func TestPeerTransportAcceptanceDoesNotInventActiveTurn(t *testing.T) {
-	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	session := &surface.Session{ID: "native", Surface: surface.KindClaude, Transport: "uds"}
-	if err := r.RegisterSession(*session); err != nil {
-		t.Fatal(err)
-	}
-	adapter := &sourceCheckingSurface{fakeSurface: fakeSurface{kind: surface.KindClaude, result: &surface.SendResult{UUID: "message-id", Accepted: true}}}
-	receipt, err := (Dispatcher{Registry: r}).Deliver(context.Background(), adapter, session, "message", "")
-	if err != nil || receipt.Evidence != surface.EvidenceTransportAccepted {
-		t.Fatalf("receipt=%+v err=%v", receipt, err)
-	}
-	state, found, err := r.RuntimeState(session.ID)
-	if err != nil || (found && state.ActiveTurnID != "") {
-		t.Fatalf("invented active turn=%+v err=%v", state, err)
 	}
 }

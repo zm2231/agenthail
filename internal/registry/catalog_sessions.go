@@ -40,6 +40,67 @@ type CatalogSurfaceState struct {
 	ObservedAt time.Time
 }
 
+// CatalogQueueProjectionConflict reports that a caller built a projection
+// from a queue count that changed before the catalog transaction could commit.
+type CatalogQueueProjectionConflict struct {
+	SessionID  string
+	QueueCount int
+}
+
+func (e *CatalogQueueProjectionConflict) Error() string {
+	return fmt.Sprintf("catalog queue projection for %s is stale; current queue count is %d", e.SessionID, e.QueueCount)
+}
+
+func queueCountInProjection(raw []byte) (int, bool) {
+	var projection struct {
+		QueueCount *int `json:"queueCount"`
+	}
+	if err := json.Unmarshal(raw, &projection); err != nil {
+		return 0, false
+	}
+	if projection.QueueCount == nil {
+		return 0, false
+	}
+	return *projection.QueueCount, true
+}
+
+func queueCountInCatalogEvent(raw []byte) (int, bool) {
+	var envelope struct {
+		Session json.RawMessage `json:"session"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return 0, false
+	}
+	if len(envelope.Session) == 0 {
+		return 0, false
+	}
+	return queueCountInProjection(envelope.Session)
+}
+
+func queueCountTx(tx *sql.Tx, sessionID string, now time.Time) (int, error) {
+	var count int
+	err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, now.UnixMilli()).Scan(&count)
+	return count, err
+}
+
+func validateQueueProjectionTx(tx *sql.Tx, sessionID string, fingerprint, eventPayload []byte) error {
+	count, err := queueCountTx(tx, sessionID, time.Now())
+	if err != nil {
+		return err
+	}
+	projected, present := queueCountInProjection(fingerprint)
+	if present && projected != count {
+		return &CatalogQueueProjectionConflict{SessionID: sessionID, QueueCount: count}
+	}
+	if len(eventPayload) > 0 {
+		projected, present = queueCountInCatalogEvent(eventPayload)
+		if present && projected != count {
+			return &CatalogQueueProjectionConflict{SessionID: sessionID, QueueCount: count}
+		}
+	}
+	return nil
+}
+
 func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event CatalogEvent) (CatalogEvent, bool, error) {
 	if err := r.EnsureCatalogState(); err != nil {
 		return CatalogEvent{}, false, err
@@ -55,9 +116,23 @@ func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO catalog_surfaces(surface,health,detail,observed_at) VALUES(?,?,?,?) ON CONFLICT(surface) DO UPDATE SET health=excluded.health,detail=excluded.detail,observed_at=excluded.observed_at`, string(state.Surface), state.Health, state.Detail, state.ObservedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	var priorHealth, priorDetail string
+	err = tx.QueryRow(`SELECT health,detail FROM catalog_surfaces WHERE surface=?`, string(state.Surface)).Scan(&priorHealth, &priorDetail)
+	if err != nil && err != sql.ErrNoRows {
 		return CatalogEvent{}, false, err
 	}
+	changed := err == sql.ErrNoRows || priorHealth != state.Health || priorDetail != state.Detail
+	observedAt := state.ObservedAt.UTC().Format(time.RFC3339Nano)
+	if _, err := tx.Exec(`INSERT INTO catalog_surfaces(surface,health,detail,observed_at) VALUES(?,?,?,?) ON CONFLICT(surface) DO UPDATE SET health=excluded.health,detail=excluded.detail,observed_at=excluded.observed_at`, string(state.Surface), state.Health, state.Detail, observedAt); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if !changed {
+		if err := tx.Commit(); err != nil {
+			return CatalogEvent{}, false, err
+		}
+		return CatalogEvent{}, false, nil
+	}
+	event.DedupeKey = event.DedupeKey + ":" + observedAt
 	persisted, created, err := r.AppendCatalogEventTx(tx, event)
 	if err != nil {
 		return CatalogEvent{}, false, err
@@ -91,6 +166,9 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	defer tx.Rollback()
+	if err := validateQueueProjectionTx(tx, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
+		return CatalogEvent{}, false, err
+	}
 	var priorFingerprint string
 	var priorGeneration, priorMisses, priorDiscoveryFailures int64
 	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration, &priorMisses, &priorDiscoveryFailures)
@@ -213,6 +291,55 @@ func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason 
 		return nil, err
 	}
 	return events, nil
+}
+
+func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, nextFingerprint string) (CatalogEvent, bool, error) {
+	if sessionID == "" || nextFingerprint == "" {
+		return CatalogEvent{}, false, fmt.Errorf("catalog session id and projection fingerprint are required")
+	}
+	var session map[string]any
+	if err := json.Unmarshal([]byte(nextFingerprint), &session); err != nil {
+		return CatalogEvent{}, false, fmt.Errorf("catalog projection fingerprint must be a JSON object: %w", err)
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	defer tx.Rollback()
+	if err := validateQueueProjectionTx(tx, sessionID, []byte(nextFingerprint), nil); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	var fingerprint, observedAt string
+	var generation, misses, discoveryFailures int64
+	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,observed_at FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&fingerprint, &generation, &misses, &discoveryFailures, &observedAt)
+	if err == sql.ErrNoRows || (err == nil && (fingerprint != priorFingerprint || fingerprint == nextFingerprint)) {
+		return CatalogEvent{}, false, nil
+	}
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	lastObserved, err := time.Parse(time.RFC3339Nano, observedAt)
+	if err != nil {
+		return CatalogEvent{}, false, fmt.Errorf("parse catalog observation: %w", err)
+	}
+	generation++
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, nextFingerprint, generation, sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	session["observedAt"] = lastObserved
+	session["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: lastObserved, Stale: misses > 0 || discoveryFailures > 0}
+	envelope, err := json.Marshal(map[string]any{"session": session})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	event, created, err := r.AppendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", sessionID, generation), Type: "session.upserted", EntityID: sessionID, Payload: envelope})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return event, created, nil
 }
 
 func (r *Registry) ReconcileCatalogOmissions(kind surface.SurfaceKind, seen map[string]struct{}, threshold int) ([]CatalogEvent, error) {

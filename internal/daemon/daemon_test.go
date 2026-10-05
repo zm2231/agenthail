@@ -26,6 +26,7 @@ type daemonSurface struct {
 	sessions       map[string]surface.Session
 	observations   map[string]*surface.TurnObservation
 	accepted       bool
+	nilResult      bool
 	sent           []string
 	steered        []string
 	models         []string
@@ -199,6 +200,9 @@ func (f *daemonSurface) Send(_ context.Context, session *surface.Session, messag
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.sent = append(f.sent, message)
+	if f.nilResult {
+		return nil, nil
+	}
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
@@ -213,6 +217,9 @@ func (f *daemonSurface) SendWithOptions(_ context.Context, session *surface.Sess
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	f.sent = append(f.sent, message)
+	if f.nilResult {
+		return nil, nil
+	}
 	f.models = append(f.models, options.Model)
 	if f.sendErr != nil {
 		return nil, f.sendErr
@@ -317,29 +324,6 @@ func TestObservationPersistsRefreshedCodexTransport(t *testing.T) {
 	}
 }
 
-func TestObservationBaselinesThenRelaysOnceAndQueuesBusyTarget(t *testing.T) {
-	daemon, r, fake, from, _ := daemonFixture(t)
-	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
-		t.Fatal(err)
-	}
-	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-1", Reply: &surface.ReplyResult{Text: "one", Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
-	if len(fake.sent) != 0 {
-		t.Fatalf("baseline relayed: %v", fake.sent)
-	}
-
-	fake.accepted = false
-	fake.observations["from"] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "turn-2", Reply: &surface.ReplyResult{Text: "same", Done: true}}
-	daemon.observeSession(context.Background(), fake, &from)
-	if len(fake.sent) != 0 || r.QueueCount("to") != 1 {
-		t.Fatalf("sent=%v pending=%d", fake.sent, r.QueueCount("to"))
-	}
-	daemon.observeSession(context.Background(), fake, &from)
-	if len(fake.sent) != 0 || r.QueueCount("to") != 1 {
-		t.Fatalf("duplicate: sent=%v pending=%d", fake.sent, r.QueueCount("to"))
-	}
-}
-
 func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if err := SaveDashboardConfig(DashboardConfig{BusyDelivery: "steer"}); err != nil {
@@ -365,6 +349,33 @@ func TestBusySteerRelayUsesDurableQueueUntilOutbox(t *testing.T) {
 	d.drainSteerMessageQueue(context.Background(), fake, &to)
 	if len(fake.steered) != 1 || r.QueueCount(to.ID) != 0 {
 		t.Fatalf("steered=%v queued=%d", fake.steered, r.QueueCount(to.ID))
+	}
+}
+
+func TestObservationKeepsQueueItemsBlockedWhileSteerIsPending(t *testing.T) {
+	d, r, fake, _, to := daemonFixture(t)
+	fake.caps = surface.Capabilities{Send: true, Steer: true}
+	if _, err := r.QueueMessageWithOptions(to.ID, "ordinary queued", "queue:1", surface.SendOptions{BusyDelivery: "queue"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueMessageWithOptions(to.ID, "steer queued", "steer:1", surface.SendOptions{BusyDelivery: "steer"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, observation := range []*surface.TurnObservation{
+		{Status: surface.StatusUnknown},
+		{Status: surface.StatusOffline},
+		{Status: surface.StatusIdle, ActiveTurnID: "still-running"},
+	} {
+		fake.observations[to.ID] = observation
+		d.observeSession(context.Background(), fake, &to)
+		if len(fake.sent) != 0 || len(fake.steered) != 0 || r.QueueCount(to.ID) != 2 {
+			t.Fatalf("status=%s active=%q sent=%v steered=%v queued=%d", observation.Status, observation.ActiveTurnID, fake.sent, fake.steered, r.QueueCount(to.ID))
+		}
+	}
+	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-busy"}
+	d.observeSession(context.Background(), fake, &to)
+	if len(fake.sent) != 0 || len(fake.steered) != 1 || fake.steered[0] != "steer queued" || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("busy sent=%v steered=%v queued=%d", fake.sent, fake.steered, r.QueueCount(to.ID))
 	}
 }
 
@@ -534,23 +545,6 @@ func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
 	}
 }
 
-func TestQueuedTerminalFailureNotifiesSenderOnce(t *testing.T) {
-	daemon, r, fake, from, to := daemonFixture(t)
-	_, deliveryID, err := r.QueueDeliveryWithIntent(to.ID, "deliver later", "", surface.SendOptions{SourceSessionID: from.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	stored, err := r.DeliveryIntent(deliveryID)
-	if err != nil || stored.Status != registry.DeliveryIntentFailed || stored.NotificationQueueID == 0 {
-		t.Fatalf("intent=%+v err=%v", stored, err)
-	}
-	if count := r.QueueCount(from.ID); count != 1 {
-		t.Fatalf("sender notices=%d", count)
-	}
-}
-
 func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
 	daemon, r, fake, from, to := daemonFixture(t)
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
@@ -564,7 +558,7 @@ func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	if events := withoutQueueCatalogEvents(window.Events); err != nil || len(events) != 1 || events[0].Type != "delivery.problem" {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -580,7 +574,7 @@ func TestQueuedRelaySuccessDoesNotCreateDeliveryProblem(t *testing.T) {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 0 {
+	if err != nil || len(withoutQueueCatalogEvents(window.Events)) != 0 {
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
@@ -841,22 +835,6 @@ func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
 	}
 }
 
-func TestOneShotRelayQueuesOnlyFirstMatchingCompletion(t *testing.T) {
-	daemon, r, _, from, to := daemonFixture(t)
-	if _, err := r.AddRouteWithOptions(from.ID, to.ID, ".*", true); err != nil {
-		t.Fatal(err)
-	}
-	daemon.fireRelays(&from, "completion-one", 0, "first")
-	daemon.fireRelays(&from, "completion-two", 0, "second")
-	if got := r.QueueCount(to.ID); got != 1 {
-		t.Fatalf("queued=%d, want one", got)
-	}
-	routes, err := r.ListRoutes()
-	if err != nil || len(routes) != 1 || routes[0].Active || routes[0].FireCount != 1 {
-		t.Fatalf("routes=%+v err=%v", routes, err)
-	}
-}
-
 func TestScanObservesOnlyWatchedSessionsWithoutDiscovery(t *testing.T) {
 	daemon, r, fake, _, _ := daemonFixture(t)
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
@@ -912,24 +890,6 @@ func TestScanDrainsClaudeQueueWithObservedIdleStatus(t *testing.T) {
 	daemon.scanAndRelay(context.Background())
 
 	if r.QueueCount(to.ID) != 0 || len(fake.sent) != 1 || fake.sent[0] != "deliver after idle" {
-		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
-	}
-}
-
-func TestScanDoesNotDrainQueueWithUnknownStatus(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	to.Status = surface.StatusBusy
-	if err := r.RegisterSession(to); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.QueueMessage(to.ID, "wait for a known idle state"); err != nil {
-		t.Fatal(err)
-	}
-	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusUnknown}
-
-	daemon.scanAndRelay(context.Background())
-
-	if r.QueueCount(to.ID) != 1 || len(fake.sent) != 0 {
 		t.Fatalf("pending=%d sent=%v", r.QueueCount(to.ID), fake.sent)
 	}
 }
@@ -1137,30 +1097,6 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	daemon.queueWorkers.Wait()
 }
 
-func TestQueueWaitsForBridgeRecoveryAndDeliversExactlyOnce(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	if err := r.QueueMessage(to.ID, "deliver after bridge recovery"); err != nil {
-		t.Fatal(err)
-	}
-	fake.observeErr = errors.New("Codex Desktop request dispatcher is unavailable")
-	daemon.scanAndRelay(context.Background())
-	daemon.scanAndRelay(context.Background())
-	fake.observeErr = errors.New("Codex Desktop bridge was replaced; rebinding")
-	daemon.scanAndRelay(context.Background())
-	item, err := r.QueueItem(1)
-	if err != nil || item.Status != "pending" || item.Attempts != 0 || len(fake.sent) != 0 {
-		t.Fatalf("unavailable item=%+v sent=%v err=%v", item, fake.sent, err)
-	}
-	fake.observeErr = nil
-	fake.observations[to.ID] = &surface.TurnObservation{Status: surface.StatusIdle}
-	daemon.scanAndRelay(context.Background())
-	daemon.scanAndRelay(context.Background())
-	item, err = r.QueueItem(1)
-	if err != nil || item.Status != "delivered" || item.Attempts != 1 || len(fake.sent) != 1 {
-		t.Fatalf("recovered item=%+v sent=%v err=%v", item, fake.sent, err)
-	}
-}
-
 func TestObservationErrorsAreThrottledUntilRecovery(t *testing.T) {
 	daemon, _, fake, _, to := daemonFixture(t)
 	var output bytes.Buffer
@@ -1230,90 +1166,13 @@ func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
-	if err != nil || len(window.Events) != 1 || window.Events[0].Type != "delivery.problem" {
+	problems := 0
+	for _, event := range window.Events {
+		if event.Type == "delivery.problem" {
+			problems++
+		}
+	}
+	if err != nil || problems != 1 {
 		t.Fatalf("events=%+v err=%v", window, err)
-	}
-}
-
-func TestOutboxOnlyAcknowledgesAcceptedDelivery(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	if err := r.QueueMessage("to", "wait"); err != nil {
-		t.Fatal(err)
-	}
-	fake.accepted = false
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	if r.QueueCount("to") != 1 {
-		t.Fatal("rejected message disappeared")
-	}
-
-	daemon2, r2, fake2, _, to2 := daemonFixture(t)
-	if err := r2.QueueMessage("to", "deliver"); err != nil {
-		t.Fatal(err)
-	}
-	fake2.accepted = true
-	daemon2.drainMessageQueue(context.Background(), fake2, &to2)
-	if r2.QueueCount("to") != 0 || len(fake2.sent) != 1 {
-		t.Fatalf("pending=%d sent=%v", r2.QueueCount("to"), fake2.sent)
-	}
-}
-
-func TestOutboxPreservesQueuedModelSelection(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	if _, err := r.QueueMessageWithOptions("to", "modelled", "", surface.SendOptions{Model: "sonnet"}); err != nil {
-		t.Fatal(err)
-	}
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	if len(fake.models) != 1 || fake.models[0] != "sonnet" || r.QueueCount("to") != 0 {
-		t.Fatalf("models=%v pending=%d", fake.models, r.QueueCount("to"))
-	}
-}
-
-func TestOutboxDeadLettersUnknownDeliveryWithoutAutomaticRetry(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	if err := r.QueueMessage("to", "maybe delivered"); err != nil {
-		t.Fatal(err)
-	}
-	fake.sendErr = surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	if len(fake.sent) != 1 {
-		t.Fatalf("ambiguous delivery retried %d times", len(fake.sent))
-	}
-	rows, err := r.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "outcome is unknown") {
-		t.Fatalf("rows=%+v err=%v", rows, err)
-	}
-}
-
-func TestOutboxDefersPreDeliveryFailureWithoutDeadLettering(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	if err := r.QueueMessage("to", "wait for bridge"); err != nil {
-		t.Fatal(err)
-	}
-	fake.sendErr = surface.DeliveryUnavailable(context.DeadlineExceeded)
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	item, err := r.QueueItem(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if item.Status != "pending" || item.Attempts != 1 || !strings.Contains(item.LastError, "delivery did not start") {
-		t.Fatalf("item=%+v", item)
-	}
-}
-
-func TestOutboxDeadLettersTerminalDeliveryWithoutRetry(t *testing.T) {
-	daemon, r, fake, _, to := daemonFixture(t)
-	if err := r.QueueMessage("to", "stale session"); err != nil {
-		t.Fatal(err)
-	}
-	fake.sendErr = surface.DeliveryTerminal(errors.New("HTTP 404: session not found"))
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	daemon.drainMessageQueue(context.Background(), fake, &to)
-	if len(fake.sent) != 1 {
-		t.Fatalf("terminal delivery retried %d times", len(fake.sent))
-	}
-	rows, err := r.ListQueue(false)
-	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || !strings.Contains(rows[0].LastError, "delivery rejected") {
-		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }

@@ -397,7 +397,10 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("confirm Notion persistence: %w", observeErr))
 		}
 		if completionID != "" && completionID != baselineID && reply != nil && reply.Done {
-			return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
+			if newThread {
+				return &surface.SendResult{UUID: resultThreadID, Accepted: true}, nil
+			}
+			return &surface.SendResult{UUID: completionID, Accepted: true}, nil
 		}
 		select {
 		case <-ctx.Done():
