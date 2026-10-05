@@ -77,13 +77,18 @@ func queueCountInCatalogEvent(raw []byte) (int, bool) {
 	return queueCountInProjection(envelope.Session)
 }
 
-func queueCountTx(tx *sql.Tx, sessionID string, now time.Time) (int, error) {
+// catalogQuerier is a write transaction or the read pool.
+type catalogQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func queueCountTx(tx catalogQuerier, sessionID string, now time.Time) (int, error) {
 	var count int
 	err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, now.UnixMilli()).Scan(&count)
 	return count, err
 }
 
-func validateQueueProjectionTx(tx *sql.Tx, sessionID string, fingerprint, eventPayload []byte) error {
+func validateQueueProjectionTx(tx catalogQuerier, sessionID string, fingerprint, eventPayload []byte) error {
 	count, err := queueCountTx(tx, sessionID, time.Now())
 	if err != nil {
 		return err
@@ -161,6 +166,9 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	} else {
 		state.ObservedAt = state.ObservedAt.UTC()
 	}
+	if unchanged, err := r.catalogSessionUnchanged(state, event); err != nil || unchanged {
+		return CatalogEvent{}, false, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return CatalogEvent{}, false, err
@@ -169,22 +177,16 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err := validateQueueProjectionTx(tx, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	var priorFingerprint, priorUnavailable string
-	var priorHostProject, priorCheckout []byte
-	var priorGeneration, priorMisses, priorDiscoveryFailures int64
-	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration, &priorMisses, &priorDiscoveryFailures, &priorHostProject, &priorCheckout, &priorUnavailable)
-	if err != nil && err != sql.ErrNoRows {
+	prior, err := readCatalogSessionPrior(tx, state.Session.ID)
+	if err != nil {
 		return CatalogEvent{}, false, err
 	}
-	changed := err == sql.ErrNoRows || priorFingerprint != state.ProjectionFingerprint || priorMisses > 0 || priorDiscoveryFailures > 0
-	if !changed && string(priorHostProject) == string(state.HostProject) && string(priorCheckout) == string(state.Checkout) && priorUnavailable == state.UnavailableReason {
-		current, err := sessionRowMatchesTx(tx, state.Session)
-		if err != nil {
-			return CatalogEvent{}, false, err
-		}
-		if current {
-			return CatalogEvent{}, false, tx.Commit()
-		}
+	priorGeneration := prior.generation
+	changed := prior.changedBy(state)
+	if unchanged, err := prior.unchangedBy(tx, state); err != nil {
+		return CatalogEvent{}, false, err
+	} else if unchanged {
+		return CatalogEvent{}, false, tx.Commit()
 	}
 	if changed {
 		priorGeneration++
@@ -227,10 +229,54 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	return persisted, created, nil
 }
 
+// catalogSessionUnchanged answers from the read pool whether recording the
+// state would change nothing, so an unchanged observation takes no write lock.
+// RecordCatalogSession checks again inside its transaction.
+func (r *Registry) catalogSessionUnchanged(state CatalogSessionState, event CatalogEvent) (bool, error) {
+	if err := validateQueueProjectionTx(r.read, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
+		return false, err
+	}
+	prior, err := readCatalogSessionPrior(r.read, state.Session.ID)
+	if err != nil {
+		return false, err
+	}
+	return prior.unchangedBy(r.read, state)
+}
+
+type catalogSessionPrior struct {
+	found                        bool
+	fingerprint, unavailable     string
+	hostProject, checkout        []byte
+	generation, misses, failures int64
+}
+
+func readCatalogSessionPrior(q catalogQuerier, sessionID string) (catalogSessionPrior, error) {
+	var prior catalogSessionPrior
+	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.hostProject, &prior.checkout, &prior.unavailable)
+	if err == sql.ErrNoRows {
+		return catalogSessionPrior{}, nil
+	}
+	prior.found = err == nil
+	return prior, err
+}
+
+// changedBy reports whether the state's projection differs from the stored
+// row or the row is marked stale, which requires a new generation.
+func (p catalogSessionPrior) changedBy(state CatalogSessionState) bool {
+	return !p.found || p.fingerprint != state.ProjectionFingerprint || p.misses > 0 || p.failures > 0
+}
+
+func (p catalogSessionPrior) unchangedBy(q catalogQuerier, state CatalogSessionState) (bool, error) {
+	if p.changedBy(state) || string(p.hostProject) != string(state.HostProject) || string(p.checkout) != string(state.Checkout) || p.unavailable != state.UnavailableReason {
+		return false, nil
+	}
+	return sessionRowMatchesTx(q, state.Session)
+}
+
 // sessionRowMatchesTx reports whether registering the session would leave its
 // stored session and runtime rows unchanged, so an unchanged catalog
 // observation needs no write.
-func sessionRowMatchesTx(tx *sql.Tx, s surface.Session) (bool, error) {
+func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 	var kind, name, cwd, status, transcript, source, transport, model string
 	var pid, hasLocal int
 	var lastActiveMS int64
@@ -363,6 +409,14 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 	var session map[string]any
 	if err := json.Unmarshal([]byte(nextFingerprint), &session); err != nil {
 		return CatalogEvent{}, false, fmt.Errorf("catalog projection fingerprint must be a JSON object: %w", err)
+	}
+	if err := validateQueueProjectionTx(r.read, sessionID, []byte(nextFingerprint), nil); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if prior, err := readCatalogSessionPrior(r.read, sessionID); err != nil {
+		return CatalogEvent{}, false, err
+	} else if !prior.found || prior.fingerprint != priorFingerprint || prior.fingerprint == nextFingerprint {
+		return CatalogEvent{}, false, nil
 	}
 	tx, err := r.db.Begin()
 	if err != nil {

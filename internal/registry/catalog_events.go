@@ -227,12 +227,20 @@ func (r *Registry) BeginSessionJournalSource(sessionID string) (string, error) {
 }
 
 func (r *Registry) catalogHostEpoch(create bool) (string, error) {
+	var epoch string
+	err := r.read.QueryRow(`SELECT host_epoch FROM catalog_state WHERE id=1`).Scan(&epoch)
+	if err == nil {
+		return epoch, nil
+	}
+	if err != sql.ErrNoRows || !create {
+		return "", err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
-	epoch, err := catalogHostEpochTx(tx, create)
+	epoch, err = catalogHostEpochTx(tx, create)
 	if err != nil {
 		return "", err
 	}
