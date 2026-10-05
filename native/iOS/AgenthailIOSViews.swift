@@ -1105,10 +1105,11 @@ func formatGoalDuration(_ seconds: Int) -> String {
 
 extension ISO8601DateFormatter {
     static func sessionDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        (try? fractionalSessionDate.parse(value)) ?? (try? wholeSecondSessionDate.parse(value))
     }
+
+    private static let fractionalSessionDate = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecondSessionDate = Date.ISO8601FormatStyle()
 }
 
 struct IOSSessionRow: View {

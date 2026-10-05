@@ -168,6 +168,16 @@ final class AgenthailIOSTests: XCTestCase {
         XCTAssertEqual(model.selectedDetail?.timeline?.items, before)
     }
 
+    func testSessionDateReadsEveryTimestampForm() {
+        let whole = ISO8601DateFormatter.sessionDate("2026-10-04T15:58:00Z")
+        XCTAssertEqual(whole, Date(timeIntervalSince1970: 1_791_129_480))
+        XCTAssertEqual(ISO8601DateFormatter.sessionDate("2026-10-04T11:58:00-04:00"), whole)
+        let fraction = ISO8601DateFormatter.sessionDate("2026-10-04T15:58:00.25Z")
+        XCTAssertEqual(fraction.map { $0.timeIntervalSince1970 }, 1_791_129_480.25)
+        XCTAssertNotNil(ISO8601DateFormatter.sessionDate("2026-10-04T15:58:00.123456789Z"))
+        XCTAssertNil(ISO8601DateFormatter.sessionDate("yesterday"))
+    }
+
     @MainActor
     func testSessionStreamKeepsPeerMessageSender() throws {
         let model = AgenthailIOSModel(autoConnect: false)
