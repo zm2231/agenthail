@@ -3,6 +3,7 @@ package surfaces
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -57,5 +58,45 @@ func TestClaudeTranscriptDoesNotGuessBetweenProjects(t *testing.T) {
 	}
 	if got := adapter.transcriptPath(&surface.Session{ID: "../escape", Cwd: "/Users/dev/three"}); got != "" {
 		t.Fatalf("an id with a path separator resolved to %q", got)
+	}
+}
+
+func TestClaudeTranscriptIsNotPredictedForLongProjectNames(t *testing.T) {
+	home := t.TempDir()
+	adapter := NewClaude("", home)
+	long := "/Users/dev/" + strings.Repeat("deep/", 50) + "repo"
+	session := &surface.Session{ID: "long-1", Cwd: long}
+	if got := adapter.transcriptPath(session); got != "" {
+		t.Fatalf("a long project name was predicted as %q; Claude Code shortens it with a hash", got)
+	}
+	want := writeClaudeProjectTranscript(t, home, claudeProjectDir(long)[:claudeProjectDirLimit]+"-abc123", "long-1")
+	if got := adapter.transcriptPath(session); got != want {
+		t.Fatalf("long project transcript %q, want %q once it exists", got, want)
+	}
+}
+
+func TestClaudeTranscriptLocatorListsProjectsOncePerPass(t *testing.T) {
+	home := t.TempDir()
+	adapter := NewClaude("", home)
+	want := writeClaudeProjectTranscript(t, home, "-Users-dev-launch", "moved-2")
+	locator := &claudeTranscriptLocator{projects: filepath.Join(home, ".claude", "projects")}
+	for _, id := range []string{"pending-a", "pending-b", "pending-c"} {
+		adapter.resolveTranscript(&surface.Session{Cwd: "/Users/dev/new"}, id, locator)
+	}
+	writeClaudeProjectTranscript(t, home, "-Users-dev-later", "pending-d")
+	if got := adapter.resolveTranscript(&surface.Session{Cwd: "/Users/dev/new"}, "pending-d", locator); got != filepath.Join(home, ".claude", "projects", "-Users-dev-new", "pending-d.jsonl") {
+		t.Fatalf("a project created after the pass listed projects was enumerated again: %q", got)
+	}
+	if got := adapter.resolveTranscript(&surface.Session{Cwd: "/Users/dev/launch/sub"}, "moved-2", locator); got != want {
+		t.Fatalf("moved conversation %q, want %q", got, want)
+	}
+	if got := adapter.cachedTranscript("moved-2"); got != want {
+		t.Fatalf("a located transcript was not remembered: %q", got)
+	}
+	if err := os.Remove(want); err != nil {
+		t.Fatal(err)
+	}
+	if got := adapter.cachedTranscript("moved-2"); got != "" {
+		t.Fatalf("a remembered transcript that was deleted is still returned: %q", got)
 	}
 }
