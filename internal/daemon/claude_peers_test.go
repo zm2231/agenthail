@@ -83,3 +83,46 @@ func TestBridgedClaudeCapabilitiesUseRemoteControlContract(t *testing.T) {
 		t.Fatalf("caps=%+v readOnly=%v", caps, caps.ReadOnly)
 	}
 }
+
+func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T) {
+	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	d := New(reg, []surface.Surface{&daemonSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	ensured := make(chan string, 8)
+	passes := make(chan struct{}, 8)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.runClaudePeerRegistration(ctx, func(_ context.Context, id string) error {
+			ensured <- id
+			return nil
+		}, func(time.Time) { passes <- struct{}{} })
+	}()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-passes:
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup pass did not run")
+	}
+	select {
+	case id := <-ensured:
+		t.Fatalf("empty catalog registered %q", id)
+	default:
+	}
+	session := surface.Session{ID: "discovered", Surface: surface.KindCodex, Status: surface.StatusBusy, LastActive: time.Now()}
+	if _, _, err := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now().UTC(), ProjectionFingerprint: `{}`}, registry.CatalogEvent{DedupeKey: "session.upserted:discovered", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-ensured:
+		if id != "discovered" {
+			t.Fatalf("ensured %q", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("discovered session waited for the 30 second ticker")
+	}
+}

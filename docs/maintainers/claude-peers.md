@@ -2,7 +2,7 @@
 
 The daemon publishes one live helper process per eligible non-Claude agent. Each helper owns its real PID-named Claude registry file and Unix socket, so Claude can address the individual agent and send replies back. Registration itself performs no inference. Native Claude sessions already publish their own records. See `internal/daemon/claude_peers.go:registerRecentClaudePeers` and `internal/peerbridge/manager.go:Ensure`.
 
-Startup and a 30-second refresh pre-register busy agents and agents active within the last 24 hours. The refresh reads the session catalog that discovery commits rather than listing surfaces itself, and it skips catalog rows that discovery marked stale, so a failing surface is listed once per discovery pass. An older sender is registered on demand through `peerbridge.Send`. Idle helpers age out after 24 hours and are recreated automatically on the next outbound send. Each helper uses a process and a SQLite connection; this is intentionally a per-agent identity, not a single shared alias.
+Startup, every catalog session change that discovery commits, and a 30-second refresh pre-register busy agents and agents active within the last 24 hours. Registration reads the session catalog that discovery commits rather than listing surfaces itself, and it skips catalog rows that discovery marked stale, so a failing surface is listed once per discovery pass and a newly discovered agent becomes a peer without waiting for the refresh. An older sender is registered on demand through `peerbridge.Send`. Idle helpers age out after 24 hours and are recreated automatically on the next outbound send. Each helper uses a process and a SQLite connection; this is intentionally a per-agent identity, not a single shared alias.
 
 ## Operator path
 

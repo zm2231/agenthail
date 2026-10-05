@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/peerbridge"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -29,19 +31,84 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			d.registerRecentClaudePeers(ctx, manager.Ensure)
-			manager.RetireInactive(time.Now(), claudePeerIdleLifetime)
+		d.runClaudePeerRegistration(ctx, manager.Ensure, func(now time.Time) { manager.RetireInactive(now, claudePeerIdleLifetime) })
+	}()
+	return func() { cancel(); <-done; manager.Close() }, nil
+}
+
+// runClaudePeerRegistration registers peers at startup, whenever discovery
+// commits a session change, and every 30 seconds so idle peers age out.
+func (d *Daemon) runClaudePeerRegistration(ctx context.Context, ensure func(context.Context, string) error, retire func(time.Time)) {
+	changed := d.watchCatalogSessions(ctx)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		d.registerRecentClaudePeers(ctx, ensure)
+		retire(time.Now())
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-changed:
+		}
+	}
+}
+
+// watchCatalogSessions signals after discovery commits a session change, so a
+// newly discovered agent becomes a peer without waiting for the next tick. It
+// subscribes before returning, and resubscribes before signalling a dropped
+// subscription, so no commit falls between a pass and the subscription.
+func (d *Daemon) watchCatalogSessions(ctx context.Context) <-chan struct{} {
+	changed := make(chan struct{}, 1)
+	signal := func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	}
+	stream, cancel := d.subscribeCatalogSessions(ctx, signal)
+	go func() {
+		for stream != nil {
 			select {
 			case <-ctx.Done():
+				cancel()
 				return
-			case <-ticker.C:
+			case event, open := <-stream:
+				if !open {
+					cancel()
+					stream, cancel = d.subscribeCatalogSessions(ctx, signal)
+					signal()
+				} else if strings.HasPrefix(event.Type, "session.") {
+					signal()
+				}
 			}
 		}
 	}()
-	return func() { cancel(); <-done; manager.Close() }, nil
+	return changed
+}
+
+func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) (<-chan registry.CatalogEvent, func()) {
+	for ctx.Err() == nil {
+		_, latest, err := d.Registry.CatalogState()
+		if err == nil {
+			var window registry.CatalogEventWindow
+			var stream <-chan registry.CatalogEvent
+			var cancel func()
+			window, stream, cancel, err = d.catalog.subscribe(latest)
+			if err == nil {
+				if len(window.Events) > 0 {
+					signal()
+				}
+				return stream, cancel
+			}
+		}
+		d.logRuntimeError("claude-peers:catalog", err)
+		select {
+		case <-ctx.Done():
+		case <-time.After(catalogDiscoveryInterval):
+		}
+	}
+	return nil, func() {}
 }
 
 // registerRecentClaudePeers reads the catalog that discovery commits instead
