@@ -70,6 +70,25 @@ struct SessionPaneTest {
         if case .request(409, "Codex is unavailable") = conflict(#"{"error":{"code":"transport_unavailable","message":"Codex is unavailable"}}"#) {} else { check(false, "other conflicts keep their message and are not gaps") }
         if case .request(409, _) = conflict("not json") {} else { check(false, "an unreadable conflict is not a gap") }
 
+        let detailJSON = #"{"session":{"id":"R","surface":"codex","name":"r","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"exchanges":[],"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":true,"model":true,"interrupt":true,"steer":true},"readOnly":false,"readOnlyReason":"","timeline":{"items":[],"nextBefore":null,"truncated":false}}"#
+        var detailRequests = 0
+        let flaky = try! StubServer { line, _ in
+            guard line.contains("/api/v1/session?") else { return StubServer.reply("404 Not Found", "{}") }
+            detailRequests += 1
+            return detailRequests == 1 ? StubServer.reply("200 OK", detailJSON) : StubServer.reply("500 Internal Server Error", #"{"error":{"message":"refresh failed"}}"#)
+        }
+        let flakyPort = await flaky.ready()
+        let live = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(flakyPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let livePane = live.openPane()
+        livePane.select("R")
+        for _ in 0..<60 where livePane.detail == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        check(livePane.detail?.session.id == "R" && !livePane.detailStale, "the first load shows the session")
+        livePane.sessionChanged("R")
+        for _ in 0..<60 where !livePane.detailRefreshFailed { try? await Task.sleep(for: .milliseconds(50)) }
+        check(livePane.detail?.session.id == "R" && livePane.detailStale && livePane.detailRefreshFailed, "a failed refresh keeps the last content and shows that it could not refresh")
+        live.closePane(livePane)
+        flaky.stop()
+
         let offline = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let offlinePane = offline.openPane()
         offline.operationError = "An action failed."
@@ -79,7 +98,7 @@ struct SessionPaneTest {
         check(offline.operationError == "An action failed.", "a failed session load leaves another operation's error alone")
         offline.closePane(offlinePane)
 
-        let stalledServer = try! StalledConflictServer()
+        let stalledServer = try! StubServer { _, _ in "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"error\":{\"code\":\"stream_un" }
         let port = await stalledServer.ready()
         let stalledAPI = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(port)")!, token: "t", session: URLSession(configuration: .ephemeral))
         let started = Date()
@@ -97,20 +116,27 @@ struct SessionPaneTest {
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }
 
-    final class StalledConflictServer: @unchecked Sendable {
+    final class StubServer: @unchecked Sendable {
         private let listener: NWListener
         private var connections: [NWConnection] = []
+        private var requests = 0
 
-        init() throws {
+        init(respond: @escaping (String, Int) -> String?) throws {
             listener = try NWListener(using: .tcp, on: .any)
             listener.newConnectionHandler = { [self] connection in
                 connections.append(connection)
                 connection.start(queue: .main)
-                connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
-                    let reply = "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"error\":{\"code\":\"stream_un"
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, _, _ in
+                    let line = data.flatMap { String(data: $0, encoding: .utf8) }?.components(separatedBy: "\r\n").first ?? ""
+                    requests += 1
+                    guard let reply = respond(line, requests) else { return }
                     connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
                 }
             }
+        }
+
+        static func reply(_ status: String, _ body: String) -> String {
+            "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
         }
 
         func ready() async -> UInt16 {

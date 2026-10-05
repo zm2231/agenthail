@@ -139,7 +139,10 @@ final class SessionPane: ObservableObject, Identifiable {
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
             detailLoadError = error.localizedDescription
-            if detailStale { detailRefreshFailed = true }
+            if detail?.session.id == id {
+                detailStale = true
+                detailRefreshFailed = true
+            }
             return false
         }
     }
