@@ -266,13 +266,11 @@ extension SessionSidebar {
 
     private var searchMatches: (local: [SessionState], remote: [SessionSearchItem]) {
         let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let local = model.knownSessions
-            .filter { session in
-                [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
-                    .compactMap { $0 }
-                    .contains { $0.localizedCaseInsensitiveContains(query) }
-            }
-            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let local = SessionTree.newestFirst(model.knownSessions.filter { session in
+            [session.title, session.name, session.hostProject?.displayName, session.checkout?.branch]
+                .compactMap { $0 }
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        })
         let localIDs = Set(local.map(\.id))
         let remote = query.count >= 3 ? model.searchResults.filter { !localIDs.contains($0.session.id) } : []
         return (local, remote)

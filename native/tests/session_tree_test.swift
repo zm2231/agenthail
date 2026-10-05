@@ -36,6 +36,13 @@ struct SessionTreeTest {
         expect(capped.checkouts.map(\.label) == ["feat/x", "main"], "checkouts with no visible sessions are hidden")
         let keepSelected = project.limited(to: 1, keeping: "old")
         expect(Set(keepSelected.checkouts.flatMap(\.sessions).map(\.id)) == ["busy", "old"], "the selected session stays visible past the cap")
+        let mixed = [
+            session("whole", status: "idle", lastActive: "2026-10-04T15:58:00Z", project: "agenthail", checkout: "main", branch: "main"),
+            session("short-fraction", status: "idle", lastActive: "2026-10-04T11:59:58.03-04:00", project: "agenthail", checkout: "main", branch: "main"),
+            session("sqlite", status: "idle", lastActive: "2026-10-04 15:59:00", project: "agenthail", checkout: "main", branch: "main"),
+            session("unparsed", status: "idle", lastActive: "yesterday", project: "agenthail", checkout: "main", branch: "main")
+        ]
+        expect(SessionTree.newestFirst(mixed).map(\.id) == ["short-fraction", "sqlite", "whole", "unparsed"], "newest first across timestamp formats, unparsed last")
         print("session tree tests passed")
     }
 

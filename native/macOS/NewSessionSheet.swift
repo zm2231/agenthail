@@ -23,9 +23,7 @@ struct NewSessionSheet: View {
 
     private var folders: [String] {
         var seen = Set<String>()
-        return model.knownSessions
-            .filter { $0.hostProject != nil }
-            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        return SessionTree.newestFirst(model.knownSessions.filter { $0.hostProject != nil })
             .compactMap { $0.checkout?.path ?? $0.cwd }
             .filter { !$0.hasPrefix("/private/") && !$0.hasPrefix("/var/") && !$0.contains("/.no-mistakes/") && seen.insert($0).inserted }
             .prefix(12)

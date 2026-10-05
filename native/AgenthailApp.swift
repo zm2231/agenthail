@@ -460,9 +460,7 @@ private struct SessionMenuSection: Identifiable {
     static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
         let attention = model.attentionSessionIDs
         let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention, now: Date())
-        let others = model.knownSessions
-            .filter { !attention.contains($0.id) }
-            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let others = SessionTree.newestFirst(model.knownSessions.filter { !attention.contains($0.id) })
         return [
             SessionMenuSection(title: "Needs you", sessions: Array(tree.needsYou.prefix(limit))),
             SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).prefix(limit))),

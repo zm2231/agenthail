@@ -28,14 +28,16 @@ struct CommandPalette: View {
                     .compactMap { $0 }
                     .contains { $0.localizedCaseInsensitiveContains(trimmed) }
             }
+            .map { (session: $0, activity: SessionTree.activity($0)) }
             .sorted { lhs, rhs in
-                let left = (titleMatch(lhs, trimmed), attention.contains(lhs.id), lhs.isWorking)
-                let right = (titleMatch(rhs, trimmed), attention.contains(rhs.id), rhs.isWorking)
+                let left = (titleMatch(lhs.session, trimmed), attention.contains(lhs.session.id), lhs.session.isWorking)
+                let right = (titleMatch(rhs.session, trimmed), attention.contains(rhs.session.id), rhs.session.isWorking)
                 if left.0 != right.0 { return left.0 }
                 if left.1 != right.1 { return left.1 }
                 if left.2 != right.2 { return left.2 }
-                return SessionTree.activity(lhs) > SessionTree.activity(rhs)
+                return lhs.activity > rhs.activity
             }
+            .map(\.session)
             .prefix(trimmed.isEmpty ? 6 : 20)
             .map { session in
                 Entry(
