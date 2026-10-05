@@ -169,6 +169,20 @@ final class AgenthailIOSTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStreamKeepsPeerMessageSender() throws {
+        let model = AgenthailIOSModel(autoConnect: false)
+        var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
+        detail.timeline = SessionTimeline(nextBefore: nil, items: [], source: "fixture", truncated: false, unavailableReason: nil)
+        model.selectedSessionID = detail.session.id
+        model.selectedDetail = detail
+        let event = try JSONDecoder().decode(SessionStreamEvent.self, from: Data(#"{"stream":"session","sessionId":"demo","seq":1,"type":"item","data":{"itemId":"peer:m1","version":1,"kind":"message","op":"append","role":"peer","origin":"peer","sender":"builder","title":"builder","ts":"2026-10-03T12:00:00Z","body":"Branch is ready","truncated":false}}"#.utf8))
+        model.applySessionStreamEvent(event)
+        let item = try XCTUnwrap(model.selectedDetail?.timeline?.items.first)
+        XCTAssertTrue(item.isPeerMessage)
+        XCTAssertEqual(item.peerLabel, "From builder")
+    }
+
+    @MainActor
     func testSessionStreamPreservesJournalItemMetadataAndBodyReference() throws {
         let model = AgenthailIOSModel(autoConnect: false)
         var detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))

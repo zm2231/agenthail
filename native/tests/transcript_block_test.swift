@@ -6,7 +6,25 @@ struct TranscriptBlockTest {
         TimelineItem(id: UUID().uuidString, kind: kind, role: role, title: title, text: text, timestamp: nil, callId: nil, status: status, truncated: false, truncationReason: nil, bodyRef: nil)
     }
 
+    static func injected() {
+        var peer = item("message", "builder", text: "Branch is ready", role: "peer")
+        peer.sender = "builder"
+        var anonymous = item("message", "Agent message", text: "Hello", role: "peer")
+        anonymous.sender = ""
+        let kinds = TranscriptBlock.build([
+            peer,
+            anonymous,
+            item("event", "Task notification", text: "Tests passed", role: "system", status: "completed"),
+        ]).map(\.kind)
+        check(kinds == [
+            .peer(sender: "builder", text: "Branch is ready"),
+            .peer(sender: "another agent", text: "Hello"),
+            .notice("Task notification · completed: Tests passed"),
+        ], "injected prompts are not shown as the agent's own reply: \(kinds)")
+    }
+
     static func main() {
+        injected()
         let blocks = TranscriptBlock.build([
             item("message", "user", text: "Start", role: "user"),
             item("reasoning", "Reasoning summary", text: "Plan the work"),

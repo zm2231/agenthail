@@ -798,6 +798,8 @@ struct TranscriptBlockView: View {
                 .lineSpacing(4)
                 .foregroundStyle(DesktopPalette.text)
                 .textSelection(.enabled)
+        case .peer(let sender, let text):
+            UserBubble(text: text, receipt: nil, sender: sender)
         case .tools(let items):
             ToolRunView(items: items, expanded: $expanded)
         case .annotation(let text):
@@ -885,10 +887,11 @@ struct AttachmentImageView: View {
 struct UserBubble: View {
     let text: String
     let receipt: String?
+    var sender: String? = nil
     @State private var expanded = false
 
     var body: some View {
-        let envelope = PeerEnvelope(text)
+        let envelope = sender.map { PeerEnvelope(sender: $0, body: text) } ?? PeerEnvelope(text)
         VStack(alignment: .trailing, spacing: 5) {
             if let sender = envelope.sender {
                 Text("From \(sender)")

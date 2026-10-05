@@ -4,6 +4,7 @@ struct TranscriptBlock: Identifiable, Equatable {
     enum Kind: Equatable {
         case user(String)
         case assistant(String)
+        case peer(sender: String, text: String)
         case tools([TimelineItem])
         case annotation(String)
         case notice(String)
@@ -30,6 +31,8 @@ struct TranscriptBlock: Identifiable, Equatable {
                     let (text, images) = stripImageMarkers(item.text)
                     if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text))) }
                     if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
+                } else if item.isPeerMessage {
+                    blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text)))
                 } else {
                     blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text)))
                 }

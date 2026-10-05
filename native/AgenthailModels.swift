@@ -602,6 +602,7 @@ struct SessionStreamItem: Decodable {
     let context: ContextState?
     let goal: GoalState?
     let role: String?
+    let sender: String?
     let title: String?
     let status: String?
     let truncated: Bool
@@ -670,6 +671,11 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let truncationReason: String?
     let bodyRef: String?
     var attachment: SessionAttachment? = nil
+    var sender: String? = nil
+
+    var isPeerMessage: Bool { kind == "message" && role == "peer" }
+    var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
+    var peerLabel: String { "From \(peerSender)" }
 }
 
 struct SessionSearchResponse: Decodable {

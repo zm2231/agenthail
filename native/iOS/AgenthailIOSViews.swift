@@ -829,13 +829,14 @@ struct IOSTimelineRow: View {
 
     private var messageLabel: String {
         if item.role == "user" { return "You" }
+        if item.isPeerMessage { return item.peerLabel }
         if item.role == "system" || item.role == "developer" { return "Context" }
         if item.title.contains("commentary") { return "Update" }
         if item.title.contains("analysis") { return "Reasoning" }
         return "Assistant"
     }
     private var eventLabel: String {
-        let title = item.title.replacingOccurrences(of: "_", with: " ").capitalized
+        let title = [item.title.replacingOccurrences(of: "_", with: " ").capitalized, item.status ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return item.text.isEmpty ? title : "\(title) · \(item.text)"
     }
     private var shortened: some View {
