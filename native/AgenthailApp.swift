@@ -241,7 +241,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
             header.isEnabled = false
             menu.addItem(header)
             for session in section.sessions {
-                let item = NSMenuItem(title: SessionMenuSection.label(session), action: #selector(openSession(_:)), keyEquivalent: "")
+                let item = NSMenuItem(title: SessionMenuSection.label(session, in: model.knownSessions), action: #selector(openSession(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = session.id
                 menu.addItem(item)
@@ -460,18 +460,18 @@ private struct SessionMenuSection: Identifiable {
     static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
         let attention = model.attentionSessionIDs
         let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention, now: Date())
-        let others = model.knownSessions
-            .filter { !attention.contains($0.id) }
+        let others = SessionFamilies.build(model.knownSessions)
+            .filter { !attention.contains($0.root.id) }
             .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
         return [
             SessionMenuSection(title: "Needs you", sessions: Array(tree.needsYou.prefix(limit))),
-            SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).prefix(limit))),
-            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !$0.isWorking }.prefix(limit)))
+            SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).map(\.root).prefix(limit))),
+            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !$0.isWorking }.map(\.root).prefix(limit)))
         ].filter { !$0.sessions.isEmpty }
     }
 
-    static func label(_ session: SessionState) -> String {
-        "\(session.title)  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
+    static func label(_ session: SessionState, in sessions: [SessionState]) -> String {
+        "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
     }
 }
 
@@ -508,7 +508,7 @@ private struct AgenthailMenuContent: View {
             model.mainPane.select(session.id)
             open()
         } label: {
-            Text(SessionMenuSection.label(session))
+            Text(SessionMenuSection.label(session, in: model.knownSessions))
         }
     }
 

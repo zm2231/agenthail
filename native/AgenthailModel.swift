@@ -75,7 +75,6 @@ final class AgenthailModel: ObservableObject {
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
-    var workingSessions: [SessionState] { snapshot?.sessions.filter(\.isWorking) ?? [] }
     var knownSessions: [SessionState] {
         let listed = snapshot?.sessions ?? []
         let listedIDs = Set(listed.map(\.id))

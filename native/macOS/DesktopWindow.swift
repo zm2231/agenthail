@@ -57,6 +57,7 @@ struct SessionSidebar: View {
     @ObservedObject var pane: SessionPane
     @Environment(\.openWindow) private var openWindow
     @State private var expandedProjects: Set<String> = []
+    @State private var expandedFamilies: Set<String> = []
     @FocusState private var searchFocused: Bool
     @ObservedObject private var shortcuts = ShortcutStore.shared
 
@@ -143,7 +144,7 @@ struct SessionSidebar: View {
                         VStack(alignment: .leading, spacing: 2) {
                             SidebarCaption("Needs you")
                             ForEach(tree.needsYou) { session in
-                                sessionButton(session, needsYou: true)
+                                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: true)
                             }
                         }
                     }
@@ -157,8 +158,8 @@ struct SessionSidebar: View {
                                 if single == nil {
                                     CheckoutRowView(checkout: checkout)
                                 }
-                                ForEach(checkout.sessions) { session in
-                                    sessionButton(session, needsYou: model.attentionSessionIDs.contains(session.id))
+                                ForEach(checkout.families) { family in
+                                    familyRows(family)
                                 }
                             }
                             if project.sessionCount > shown.sessionCount || expanded && project.sessionCount > SessionTree.collapsedSessionLimit {
@@ -208,7 +209,7 @@ extension SessionSidebar {
         VStack(alignment: .leading, spacing: 2) {
             SidebarCaption("Sessions")
             ForEach(local) { session in
-                sessionButton(session, needsYou: model.attentionSessionIDs.contains(session.id))
+                sessionButton(session, title: SessionFamilies.title(session, in: model.knownSessions), needsYou: model.attentionSessionIDs.contains(session.id))
             }
             if local.isEmpty {
                 Text("No matching sessions.")
@@ -286,9 +287,43 @@ extension SessionSidebar {
         var ids = tree.needsYou.map(\.id)
         for project in tree.projects {
             let shown = expandedProjects.contains(project.id) ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
-            ids += shown.checkouts.flatMap(\.sessions).map(\.id).filter { !ids.contains($0) }
+            for family in shown.checkouts.flatMap(\.families) {
+                let rows = [family.root.id] + (familyExpanded(family) ? family.members.map(\.id) : [])
+                ids += rows.filter { !ids.contains($0) }
+            }
         }
         return ids
+    }
+
+    private func familyExpanded(_ family: SessionFamily) -> Bool {
+        !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == pane.selectedSessionID })
+    }
+
+    @ViewBuilder
+    private func familyRows(_ family: SessionFamily) -> some View {
+        let expanded = familyExpanded(family)
+        HStack(spacing: 0) {
+            sessionButton(family.root, title: family.root.title, family: family, needsYou: model.attentionSessionIDs.contains(family.root.id))
+            if !family.members.isEmpty {
+                Button {
+                    if expandedFamilies.contains(family.id) { expandedFamilies.remove(family.id) } else { expandedFamilies.insert(family.id) }
+                } label: {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 18, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(DesktopPalette.text2)
+                .accessibilityLabel(expanded ? "Hide subagents" : "Show subagents")
+            }
+        }
+        if expanded {
+            ForEach(family.members) { member in
+                sessionButton(member.session, title: SessionFamilies.label(member.session), needsYou: model.attentionSessionIDs.contains(member.id))
+                    .padding(.leading, CGFloat(member.depth) * 16)
+            }
+        }
     }
 
     private func step(_ order: [String], by offset: Int) {
@@ -302,12 +337,12 @@ extension SessionSidebar {
         }
     }
 
-    private func sessionButton(_ session: SessionState, needsYou: Bool) -> some View {
+    private func sessionButton(_ session: SessionState, title: String, family: SessionFamily? = nil, needsYou: Bool) -> some View {
         let selected = pane.selectedSessionID == session.id
         return Button {
             pane.select(session.id)
         } label: {
-            SessionRowView(session: session, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains(session.id))
+            SessionRowView(session: session, title: title, family: family, needsYou: needsYou, finishedUnseen: model.finishedUnseen.contains(session.id))
                 .padding(.vertical, 6)
                 .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -396,16 +431,28 @@ struct CheckoutRowView: View {
 
 struct SessionRowView: View {
     let session: SessionState
+    var title: String? = nil
+    var family: SessionFamily? = nil
     let needsYou: Bool
     var finishedUnseen = false
 
     var body: some View {
         HStack(spacing: 9) {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
-            Text(session.title)
+            Text(title ?? session.title)
                 .lineLimit(1)
                 .foregroundStyle(session.open || session.isWorking ? DesktopPalette.text : DesktopPalette.text2)
             Spacer(minLength: 4)
+            if let family, family.subagentCount > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "person.2")
+                    Text(family.workingSubagents > 0 ? "\(family.workingSubagents)/\(family.subagentCount)" : "\(family.subagentCount)")
+                }
+                .font(.system(size: 10.5))
+                .foregroundStyle(family.workingSubagents > 0 ? DesktopPalette.work : DesktopPalette.text2)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(SessionFamilies.subagentSummary(family))
+            }
             Text(relativeAge(session.lastActive))
                 .font(.system(size: 11))
                 .foregroundStyle(DesktopPalette.text2)
@@ -437,15 +484,6 @@ struct StatusIndicator: View {
         }
         .frame(width: 12, height: 12)
         .accessibilityHidden(true)
-    }
-}
-
-extension SessionState {
-    var title: String {
-        if let alias, !alias.isEmpty { return "@\(alias)" }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == id || UUID(uuidString: trimmed) != nil { return "Untitled conversation" }
-        return trimmed
     }
 }
 
@@ -496,7 +534,7 @@ struct ConversationPane: View {
     var body: some View {
         if let session = pane.displayedSession {
             VStack(spacing: 0) {
-                ConversationHeader(session: session, model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) })
+                ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) })
                 TranscriptView(model: model, pane: pane, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if pane.removedSession?.id == session.id {
@@ -565,6 +603,7 @@ struct RemovedSessionBar: View {
 
 struct ConversationHeader: View {
     let session: SessionState
+    let title: String
     let model: String?
     let context: ContextState?
     @Binding var inspectorVisible: Bool
@@ -575,7 +614,7 @@ struct ConversationHeader: View {
     var body: some View {
         HStack(spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? session.title)
+                Text(session.subagent != nil ? title : session.alias.map { _ in session.name.isEmpty ? session.title : session.name } ?? title)
                     .font(.system(size: 13.5, weight: .semibold))
                 if let alias = session.alias, !alias.isEmpty {
                     Text("@\(alias)")
@@ -1612,6 +1651,7 @@ struct DetailsTab: View {
                     .help("Ask the agent to compact its context")
             }
             GoalSection(model: model, pane: pane, session: session)
+            SubagentsSection(model: model, pane: pane, session: session)
             ClaudeObservationsSection(detail: pane.detail)
         }
         .task(id: catalogNeeded) {
