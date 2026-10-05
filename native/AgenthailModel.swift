@@ -695,7 +695,6 @@ final class AgenthailModel: ObservableObject {
                     if case AgenthailAPIError.streamGap = error {
                         catalogPosition = CatalogPosition(epoch: nil, cursor: 0)
                         _ = await refresh(fresh: true)
-                        continue
                     }
                     try? await Task.sleep(for: .seconds(backoff.nextDelay()))
                 }

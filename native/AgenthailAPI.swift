@@ -7,6 +7,7 @@ enum AgenthailAPIError: LocalizedError {
     case request(Int, String)
     case historyGap(String)
     case streamGap
+    case streamUnsupported
     case streamClosed
 
     var errorDescription: String? {
@@ -17,6 +18,7 @@ enum AgenthailAPIError: LocalizedError {
         case .request(_, let message): return message
         case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
+        case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
     }
@@ -289,7 +291,7 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
         if let response = response as? HTTPURLResponse, response.statusCode == 409 {
-            throw AgenthailAPIError.streamGap
+            throw await Self.streamConflict(bytes)
         }
         try validate(response: response, data: nil)
         await onConnected()
@@ -330,7 +332,7 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
         if let response = response as? HTTPURLResponse, response.statusCode == 409 {
-            throw AgenthailAPIError.streamGap
+            throw await Self.streamConflict(bytes)
         }
         try validate(response: response, data: nil)
         await onConnected()
@@ -400,6 +402,26 @@ final class AgenthailAPI: @unchecked Sendable {
     private func setIdempotencyHeader(on request: inout URLRequest, path: String, method: String, key: String?) {
         guard method == "POST", path == "/api/v1/actions" else { return }
         request.setValue(key ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
+    }
+
+    private static func streamConflict(_ bytes: URLSession.AsyncBytes) async -> AgenthailAPIError {
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= 16 * 1024 { break }
+            }
+        } catch {}
+        return streamConflict(data)
+    }
+
+    static func streamConflict(_ data: Data) -> AgenthailAPIError {
+        let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? [String: Any]
+        switch error?["code"] as? String {
+        case "stream_gap": return .streamGap
+        case "stream_unsupported": return .streamUnsupported
+        default: return .request(409, error?["message"] as? String ?? HTTPURLResponse.localizedString(forStatusCode: 409))
+        }
     }
 
     private func validate(response: URLResponse, data: Data?) throws {

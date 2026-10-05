@@ -35,6 +35,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var sessionCursor: UInt64 = 0
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
+    private var detailLoadError: String?
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var metadata = MetadataOverlay()
@@ -109,15 +110,16 @@ final class SessionPane: ObservableObject, Identifiable {
         detailAppliedGeneration = detailRequestGeneration
     }
 
-    func loadSession(_ id: String) async {
-        guard !closed, let api = model.api else { return }
+    @discardableResult
+    func loadSession(_ id: String) async -> Bool {
+        guard !closed, let api = model.api else { return false }
         detailRequestGeneration &+= 1
         let generation = detailRequestGeneration
         do {
             let startedAt = Date()
             if selectedSessionID == id { detailLoadedAt = startedAt }
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
-            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return }
+            guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
             if olderItems.isEmpty {
                 olderCursor = loaded.timeline?.nextBefore
@@ -131,10 +133,15 @@ final class SessionPane: ObservableObject, Identifiable {
             detailStale = false
             detailRefreshFailed = false
             model.detailLoaded(merged, for: id)
+            if let detailLoadError, model.operationError == detailLoadError { model.operationError = nil }
+            detailLoadError = nil
+            return true
         } catch {
-            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return }
+            guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
             model.operationError = error.localizedDescription
+            detailLoadError = error.localizedDescription
             if detailStale { detailRefreshFailed = true }
+            return false
         }
     }
 
@@ -310,7 +317,13 @@ final class SessionPane: ObservableObject, Identifiable {
 
     private func startDetailLoad(_ id: String) {
         detailLoadTask?.cancel()
-        detailLoadTask = Task { await loadSession(id) }
+        detailLoadTask = Task {
+            let backoff = EventRetryBackoff()
+            while !Task.isCancelled, !closed, selectedSessionID == id {
+                if await loadSession(id) { return }
+                try? await Task.sleep(for: .seconds(backoff.nextDelay()))
+            }
+        }
     }
 
     private func scheduleDetailReload(_ id: String) {
@@ -347,10 +360,10 @@ final class SessionPane: ObservableObject, Identifiable {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
+                    if case AgenthailAPIError.streamUnsupported = error { return }
                     if case AgenthailAPIError.streamGap = error {
                         sessionCursor = 0
                         scheduleDetailReload(id)
-                        continue
                     }
                     try? await Task.sleep(for: .seconds(backoff.nextDelay()))
                 }

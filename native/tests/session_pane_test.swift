@@ -63,6 +63,12 @@ struct SessionPaneTest {
         check(watched.draftIsEmpty, "removing the last attachment empties the draft")
         observation.cancel()
 
+        func conflict(_ json: String) -> AgenthailAPIError { AgenthailAPI.streamConflict(Data(json.utf8)) }
+        if case .streamGap = conflict(#"{"error":{"code":"stream_gap","message":"gone"}}"#) {} else { check(false, "a retained-cursor conflict is a gap") }
+        if case .streamUnsupported = conflict(#"{"error":{"code":"stream_unsupported","message":"no stream"}}"#) {} else { check(false, "a session without a live stream is not a gap") }
+        if case .request(409, "Codex is unavailable") = conflict(#"{"error":{"code":"transport_unavailable","message":"Codex is unavailable"}}"#) {} else { check(false, "other conflicts keep their message and are not gaps") }
+        if case .request(409, _) = conflict("not json") {} else { check(false, "an unreadable conflict is not a gap") }
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
     }
