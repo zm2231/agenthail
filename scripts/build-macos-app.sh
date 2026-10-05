@@ -91,9 +91,13 @@ cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 "$ROOT/scripts/codesign-with-retry.sh" --force --options runtime --sign "$IDENTITY" "$OUTPUT/Contents/Resources/agenthail"
 SWIFT_ARCH="$ARCH"
 [ "$SWIFT_ARCH" = "amd64" ] && SWIFT_ARCH="x86_64"
-SWIFT_BIN="$(swift build --package-path "$ROOT/native" -c release --arch "$SWIFT_ARCH" --show-bin-path)"
+# Dependencies must share the app's deployment target, or mismatched async specializations abort (swiftlang/swift#86204).
+# Swift Build reads it from --triple, the native build system from -Xswiftc -target.
+SWIFT_TARGET="$SWIFT_ARCH-apple-macosx15.0"
+SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --triple "$SWIFT_TARGET" -Xswiftc -target -Xswiftc "$SWIFT_TARGET")
+SWIFT_BIN="$("${SWIFT_BUILD[@]}" --show-bin-path)"
 rm -rf "$SWIFT_BIN"/*.bundle
-swift build --package-path "$ROOT/native" -c release --arch "$SWIFT_ARCH" --product AgenthailMac >/dev/null
+"${SWIFT_BUILD[@]}" --product AgenthailMac >/dev/null
 cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
 for bundle in "$SWIFT_BIN"/*.bundle; do
 	cp -R "$bundle" "$OUTPUT/Contents/Resources/"
