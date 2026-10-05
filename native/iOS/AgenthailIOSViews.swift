@@ -121,7 +121,7 @@ struct MainTabs: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
             guard let sessionID = notification.object as? String else { return }
-            model.openNotification(sessionID)
+            model.openSession(sessionID)
             selection = 0
         }
     }
@@ -526,7 +526,12 @@ struct SessionScreen: View {
             }
             .refreshable { await model.refreshSession(session.id) }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+                VStack(spacing: 0) {
+                    if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+                    if let note = SharedConversation.note(session) {
+                        SharedConversationNote(note: note, peers: SharedConversation.peers(session), onOpen: model.openSession)
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
@@ -963,6 +968,38 @@ struct SessionSummary: View {
     }
 }
 
+struct SharedConversationNote: View {
+    let note: String
+    let peers: [SharedProcess]
+    let onOpen: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(note, systemImage: "square.on.square")
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(peers) { peer in
+                HStack {
+                    if peers.count > 1 { Text(SharedConversation.peerLabel(peer)).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    Button("Open other") { onOpen(peer.id) }
+                        .font(.footnote.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .accessibilityLabel(SharedConversation.openLabel(peer))
+                        .accessibilityIdentifier("open-shared-" + peer.id)
+                }
+            }
+        }
+        .font(.footnote)
+        .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("shared-conversation-note")
+    }
+}
+
 struct SessionInspector: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
@@ -1008,7 +1045,7 @@ struct SessionInspector: View {
                     NavigationLink {
                         QueueListView(model: model, sessionID: session.id) { id in
                             dismiss()
-                            model.openNotification(id)
+                            model.openSession(id)
                         }
                     } label: { Label("Session inbox", systemImage: "tray") }
                 }
@@ -1127,6 +1164,12 @@ struct IOSSessionRow: View {
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if let shared = SharedConversation.badge(session) {
+                    Text(shared)
+                        .font(.caption.monospaced().weight(.semibold))
+                        .foregroundStyle(SessionStyle.accent)
+                        .accessibilityLabel(SharedConversation.badgeLabel(session))
+                }
                 if session.isWorking {
                     Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
                 }

@@ -119,6 +119,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
+    var sharedWith: [SharedProcess]? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -140,6 +141,59 @@ struct SubagentIdentity: Codable, Hashable {
 struct SubagentRollup: Codable, Hashable {
     let count: Int
     let working: Int
+}
+
+struct SharedProcess: Codable, Hashable, Identifiable {
+    let id: String
+    var name: String? = nil
+    let pid: Int
+    let status: String
+    var startedAt: String? = nil
+}
+
+enum SharedConversation {
+    static func peers(_ session: SessionState) -> [SharedProcess] {
+        session.sharedWith ?? []
+    }
+
+    static func processCount(_ session: SessionState) -> Int {
+        peers(session).isEmpty ? 0 : peers(session).count + 1
+    }
+
+    static func badge(_ session: SessionState) -> String? {
+        let count = processCount(session)
+        return count > 1 ? "⧉\(count)" : nil
+    }
+
+    static func badgeLabel(_ session: SessionState) -> String {
+        "Open in \(processCount(session)) processes"
+    }
+
+    static func started(_ peer: SharedProcess) -> String {
+        guard let raw = peer.startedAt, let date = parse(raw) else { return "start time unknown" }
+        return "started \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    static func note(_ session: SessionState) -> String? {
+        let peers = peers(session)
+        guard !peers.isEmpty else { return nil }
+        if peers.count == 1 {
+            return "Also open in pid \(peers[0].pid) (\(started(peers[0]))). Messages here go to this process."
+        }
+        return "Also open in \(peers.count) other processes. Messages here go to this process."
+    }
+
+    static func openLabel(_ peer: SharedProcess) -> String {
+        "Open other process, pid \(peer.pid)"
+    }
+
+    static func peerLabel(_ peer: SharedProcess) -> String {
+        "pid \(peer.pid) (\(started(peer)))"
+    }
+
+    private static func parse(_ raw: String) -> Date? {
+        (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(raw)) ?? (try? Date.ISO8601FormatStyle().parse(raw))
+    }
 }
 
 struct SessionFamily: Identifiable, Equatable {

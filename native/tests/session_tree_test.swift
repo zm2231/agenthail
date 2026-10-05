@@ -77,6 +77,21 @@ struct SessionTreeTest {
             session("unparsed", status: "idle", lastActive: "yesterday", project: "agenthail", checkout: "main", branch: "main")
         ]
         expect(SessionTree.newestFirst(mixed).map(\.id) == ["short-fraction", "sqlite", "whole", "unparsed"], "newest first across timestamp formats, unparsed last")
+        let sharedRow = #"{"id":"remote-b","surface":"claude","name":"Fixture","status":"idle","queueCount":0,"open":true,"current":true,"capabilities":{"send":true,"stream":true,"reply":true,"goal":false,"compact":false,"model":true,"interrupt":true,"steer":true}"#
+        let sharedJSON = sharedRow + #","sharedWith":[{"id":"remote-a","name":"Fixture","pid":4101,"status":"busy","startedAt":"2026-10-04T11:40:00.250-04:00"}]}"#
+        let shared = try! JSONDecoder().decode(SessionState.self, from: Data(sharedJSON.utf8))
+        expect(SharedConversation.badge(shared) == "⧉2", "a row shared with one other process shows a two-process badge")
+        expect(SharedConversation.badgeLabel(shared) == "Open in 2 processes", "the badge has a spoken label")
+        let note = SharedConversation.note(shared) ?? ""
+        expect(note.hasPrefix("Also open in pid 4101 (started ") && note.hasSuffix("). Messages here go to this process."), "the header names the other pid and its start: \(note)")
+        expect(SharedConversation.openLabel(shared.sharedWith![0]) == "Open other process, pid 4101", "the open action names the pid without digit grouping")
+        var three = shared
+        three.sharedWith?.append(SharedProcess(id: "remote-c", pid: 4103, status: "idle"))
+        expect(SharedConversation.badge(three) == "⧉3", "the badge counts every process")
+        expect(SharedConversation.note(three) == "Also open in 2 other processes. Messages here go to this process.", "several peers are summarized and listed")
+        expect(SharedConversation.peerLabel(three.sharedWith![1]) == "pid 4103 (start time unknown)", "a peer without a start time says so")
+        let unshared = try! JSONDecoder().decode(SessionState.self, from: Data((sharedRow + "}").utf8))
+        expect(unshared.sharedWith == nil && SharedConversation.badge(unshared) == nil && SharedConversation.note(unshared) == nil, "an unshared row has no badge or note")
         print("session tree tests passed")
     }
 
