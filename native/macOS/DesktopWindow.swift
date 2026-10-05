@@ -1209,18 +1209,22 @@ struct ComposerView: View {
                     .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
-                ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
-                    DeliveryProblemBanner(problem: problem, model: model)
-                        .padding(.bottom, 8)
-                }
                 let queued = model.queuedItems(for: session.id)
-                if !queued.isEmpty {
-                    QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
-                        .padding(.horizontal, 10)
-                }
-                if !draft.attachments.isEmpty {
-                    AttachmentDock(attachments: $draft.attachments, roundedTop: queued.isEmpty)
-                        .padding(.horizontal, 10)
+                BoundedDock {
+                    VStack(spacing: 0) {
+                        ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
+                            DeliveryProblemBanner(problem: problem, model: model)
+                                .padding(.bottom, 8)
+                        }
+                        if !queued.isEmpty {
+                            QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
+                                .padding(.horizontal, 10)
+                        }
+                        if !draft.attachments.isEmpty {
+                            AttachmentDock(attachments: $draft.attachments, roundedTop: queued.isEmpty)
+                                .padding(.horizontal, 10)
+                        }
+                    }
                 }
                 VStack(spacing: 0) {
                     TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
