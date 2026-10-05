@@ -19,6 +19,7 @@ import (
 const (
 	defaultPollInterval      = 5 * time.Second
 	catalogDiscoveryInterval = 30 * time.Second
+	catalogStatusInterval    = time.Second
 )
 
 type Daemon struct {
@@ -36,6 +37,8 @@ type Daemon struct {
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
+	catalogLive       map[string]*catalogLiveSession
+	catalogIdentities *catalogIdentityCache
 	sources           *sessionSourceManager
 	sourceHoldMu      sync.Mutex
 	surfaceHealthMu   sync.Mutex
@@ -86,6 +89,8 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		events:            newEventHub(reg),
 		sources:           newSessionSourceManager(reg),
 		sourceHolds:       map[string]map[string]func(){},
+		catalogLive:       map[string]*catalogLiveSession{},
+		catalogIdentities: newCatalogIdentityCache(),
 	}
 	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
 	if err := reg.EnsureCatalogState(); err != nil {
@@ -184,22 +189,43 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if recovered > 0 {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
+	catalogDone := make(chan struct{})
+	go func() {
+		defer close(catalogDone)
+		d.runCatalog(ctx)
+	}()
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
-	catalogTicker := time.NewTicker(catalogDiscoveryInterval)
-	defer catalogTicker.Stop()
 	d.scanAndRelay(ctx)
-	d.discoverCatalog(ctx)
 	for {
 		select {
 		case <-ctx.Done():
+			<-catalogDone
 			d.queueWorkers.Wait()
 			d.log.Printf("stopping")
 			return nil
 		case <-observerTicker.C:
 			d.scanAndRelay(ctx)
-		case <-catalogTicker.C:
+		}
+	}
+}
+
+// runCatalog owns catalog discovery and the status pass. It runs apart from
+// relay observation so a slow relay scan never delays a status change.
+func (d *Daemon) runCatalog(ctx context.Context) {
+	discoveryTicker := time.NewTicker(catalogDiscoveryInterval)
+	defer discoveryTicker.Stop()
+	statusTicker := time.NewTicker(catalogStatusInterval)
+	defer statusTicker.Stop()
+	d.discoverCatalog(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-discoveryTicker.C:
 			d.discoverCatalog(ctx)
+		case <-statusTicker.C:
+			d.refreshCatalogStatus(ctx)
 		}
 	}
 }

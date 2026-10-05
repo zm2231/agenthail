@@ -169,13 +169,23 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err := validateQueueProjectionTx(tx, state.Session.ID, []byte(state.ProjectionFingerprint), event.Payload); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	var priorFingerprint string
+	var priorFingerprint, priorUnavailable string
+	var priorHostProject, priorCheckout []byte
 	var priorGeneration, priorMisses, priorDiscoveryFailures int64
-	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration, &priorMisses, &priorDiscoveryFailures)
+	err = tx.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, state.Session.ID).Scan(&priorFingerprint, &priorGeneration, &priorMisses, &priorDiscoveryFailures, &priorHostProject, &priorCheckout, &priorUnavailable)
 	if err != nil && err != sql.ErrNoRows {
 		return CatalogEvent{}, false, err
 	}
 	changed := err == sql.ErrNoRows || priorFingerprint != state.ProjectionFingerprint || priorMisses > 0 || priorDiscoveryFailures > 0
+	if !changed && string(priorHostProject) == string(state.HostProject) && string(priorCheckout) == string(state.Checkout) && priorUnavailable == state.UnavailableReason {
+		current, err := sessionRowMatchesTx(tx, state.Session)
+		if err != nil {
+			return CatalogEvent{}, false, err
+		}
+		if current {
+			return CatalogEvent{}, false, tx.Commit()
+		}
+	}
 	if changed {
 		priorGeneration++
 	}
@@ -215,6 +225,58 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		return CatalogEvent{}, false, err
 	}
 	return persisted, created, nil
+}
+
+// sessionRowMatchesTx reports whether registering the session would leave its
+// stored session and runtime rows unchanged, so an unchanged catalog
+// observation needs no write.
+func sessionRowMatchesTx(tx *sql.Tx, s surface.Session) (bool, error) {
+	var kind, name, cwd, status, transcript, source, transport, model string
+	var pid, hasLocal int
+	var lastActiveMS int64
+	err := tx.QueryRow(`SELECT surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms FROM sessions WHERE id=?`, s.ID).Scan(&kind, &name, &cwd, &pid, &status, &transcript, &hasLocal, &source, &transport, &model, &lastActiveMS)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	wantLastActive := int64(0)
+	if !s.LastActive.IsZero() {
+		wantLastActive = s.LastActive.UnixMilli()
+	}
+	if kind != string(s.Surface) || name != s.Name || cwd != s.Cwd || pid != s.PID || status != string(s.Status) || transcript != s.Transcript || hasLocal != b2i(s.HasLocal) || source != s.Source || transport != s.Transport || (s.ConfiguredModel != "" && model != s.ConfiguredModel) || lastActiveMS != wantLastActive {
+		return false, nil
+	}
+	if s.Runtime != nil {
+		location, err := json.Marshal(s.Runtime.Location)
+		if err != nil {
+			return false, err
+		}
+		var launcher string
+		var storedLocation []byte
+		var focusable int
+		err = tx.QueryRow(`SELECT runtime_launcher,runtime_location,runtime_focusable FROM session_runtime WHERE session_id=?`, s.ID).Scan(&launcher, &storedLocation, &focusable)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if launcher != string(s.Runtime.Launcher) || string(storedLocation) != string(location) || focusable != b2i(s.Runtime.Focusable) {
+			return false, nil
+		}
+	}
+	if s.Surface == surface.KindClaude && s.Transcript != "" {
+		var duplicates int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID).Scan(&duplicates); err != nil {
+			return false, err
+		}
+		if duplicates > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // MarkCatalogDiscoveryFailure preserves the last discovered rows while making
@@ -342,18 +404,40 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 	return event, created, nil
 }
 
-func (r *Registry) ReconcileCatalogOmissions(kind surface.SurfaceKind, seen map[string]struct{}, threshold int) ([]CatalogEvent, error) {
+// RecordCatalogDiscovery closes one successful discovery pass of a surface in
+// a single transaction. Every session the pass saw keeps a fresh row, so its
+// observed_at advances to the pass observation time without rewriting the
+// row's projection. When the listing is complete, rows it omitted count a miss
+// and are removed once they reach the threshold.
+func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool, threshold int) ([]CatalogEvent, error) {
 	if err := r.EnsureCatalogState(); err != nil {
 		return nil, err
 	}
 	if threshold < 1 {
 		return nil, fmt.Errorf("catalog omission threshold must be positive")
 	}
+	if observedAt.IsZero() {
+		return nil, fmt.Errorf("catalog discovery observation time is required")
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	encodedIDs, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE catalog_sessions SET observed_at=? WHERE session_id IN (SELECT value FROM json_each(?)) AND misses=0 AND discovery_failures=0`, observedAt.UTC().Format(time.RFC3339Nano), string(encodedIDs)); err != nil {
+		return nil, err
+	}
+	if !complete {
+		return nil, tx.Commit()
+	}
 	rows, err := tx.Query(`SELECT cs.session_id,cs.observed_at,cs.misses FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.surface=?`, string(kind))
 	if err != nil {
 		return nil, err

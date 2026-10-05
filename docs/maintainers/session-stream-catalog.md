@@ -20,7 +20,9 @@ Each row retains the existing session summary fields and adds
 Git query records typed unavailable identity and never hides the session. A
 surface discoverer performs provider `List` calls in the background and emits
 full-row `session.upserted`, `session.removed`, `session.unavailable`, and
-`surface.health` catalog deltas. A proven delivery problem is one idempotent
+`surface.health` catalog deltas. A status pass publishes a session's busy or
+idle transition from its local status files within about a second, between
+discovery passes (see `catalog-bounded-freshness.md`). A proven delivery problem is one idempotent
 `delivery.problem` catalog event with `deliveryId`, target and source session
 IDs, bounded message or body reference, reason and timestamp; it is committed
 with the delivery failure/notice state. Every queue mutation that changes a

@@ -521,6 +521,15 @@ type TurnInterrupter interface {
 	InterruptTurn(context.Context, *Session, string) error
 }
 
+// LocalStatusSource lets the catalog follow a listed session's status between
+// discovery passes from local files alone, without provider calls.
+// LocalStatusFiles names the files whose change can change the status;
+// LocalStatus re-derives Status and LastActive from them.
+type LocalStatusSource interface {
+	LocalStatusFiles(session Session) []string
+	LocalStatus(ctx context.Context, session Session) (Session, error)
+}
+
 // CatalogListCompleteness declares whether a successful List result is a
 // complete enumeration suitable for omission reconciliation.
 type CatalogListCompleteness interface {

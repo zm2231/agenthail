@@ -2,7 +2,9 @@ package surfaces
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -34,6 +36,35 @@ func (c *Codex) reconcileLocalStatus(session *surface.Session) {
 	if status == surface.StatusBusy && info.ModTime().After(session.LastActive) {
 		session.LastActive = info.ModTime()
 	}
+}
+
+func (c *Codex) LocalStatusFiles(session surface.Session) []string {
+	if session.Transcript == "" {
+		return nil
+	}
+	return []string{session.Transcript}
+}
+
+// LocalStatus applies the transcript's latest task lifecycle. Between
+// discovery passes it is the newest evidence, so it takes precedence over the
+// provider status the last pass reported.
+func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
+	if session.Transcript == "" {
+		return session, fmt.Errorf("codex session %s has no local transcript", session.ID)
+	}
+	info, err := os.Stat(session.Transcript)
+	if err != nil {
+		return session, err
+	}
+	status := codexTranscriptStatus(session.Transcript, info.ModTime(), time.Now())
+	if status == surface.StatusUnknown {
+		return session, nil
+	}
+	session.Status = status
+	if status == surface.StatusBusy && info.ModTime().After(session.LastActive) {
+		session.LastActive = info.ModTime()
+	}
+	return session, nil
 }
 
 func codexTranscriptStatus(path string, modified, now time.Time) surface.SessionStatus {
