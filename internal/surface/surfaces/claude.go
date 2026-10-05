@@ -924,16 +924,7 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 	if path == "" {
 		path = c.transcriptPath(sess)
 	}
-	turns, err := readClaudeTailTurns(ctx, path)
-	if err != nil {
-		return "", err
-	}
-	for i := len(turns) - 1; i >= 0; i-- {
-		if turns[i].Model != "" {
-			return turns[i].Model, nil
-		}
-	}
-	return "", fmt.Errorf("model unavailable: no assistant turn recorded")
+	return readClaudeLatestModel(ctx, path)
 }
 
 func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {

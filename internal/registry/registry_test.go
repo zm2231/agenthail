@@ -1134,3 +1134,104 @@ func TestClaimDeadLettersStaleInflightWithoutAutomaticRedelivery(t *testing.T) {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 }
+
+func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	register(t, r, "session")
+	if err := r.EnsureCatalogState(); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	held, err := other.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := held.Exec(`UPDATE sessions SET name='held by another process' WHERE id='session'`); err != nil {
+		t.Fatal(err)
+	}
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- r.RegisterSession(surface.Session{ID: "waiting-writer", Surface: surface.KindCodex})
+	}()
+	for deadline := time.Now().Add(2 * time.Second); r.db.Stats().InUse == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("writer never took the write connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	readsDone := make(chan error, 1)
+	go func() {
+		if _, err := r.Session("session"); err != nil {
+			readsDone <- err
+			return
+		}
+		if _, _, err := r.CatalogState(); err != nil {
+			readsDone <- err
+			return
+		}
+		if _, err := r.QueueCounts(); err != nil {
+			readsDone <- err
+			return
+		}
+		if _, err := r.ListHistory(10, ""); err != nil {
+			readsDone <- err
+			return
+		}
+		if _, err := r.ReadSessionJournalPage("session", 0, 10); err != nil {
+			readsDone <- err
+			return
+		}
+		readsDone <- r.EnsureAliasAvailable("unclaimed")
+	}()
+	select {
+	case err := <-readsDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reads waited for a writer blocked on another process's lock")
+	}
+	if err := held.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLegacyOpenMergesDuplicateClaudeTranscripts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"claude-old", "claude-new"} {
+		if _, err := r.db.Exec(`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local) VALUES (?,?,'','',0,'idle','/transcripts/shared.jsonl',0)`, id, string(surface.KindClaude)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.db.Exec(`PRAGMA user_version=0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var count int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE transcript='/transcripts/shared.jsonl'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("sessions sharing a transcript=%d err=%v", count, err)
+	}
+}

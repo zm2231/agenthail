@@ -27,7 +27,7 @@ func (r *Registry) RecordPendingLaunch(launcher string, agent surface.SurfaceKin
 }
 
 func (r *Registry) PendingLaunches() ([]PendingLaunch, error) {
-	rows, err := r.db.Query(`SELECT id,launcher,agent,cwd,name,alias,location FROM launcher_pending ORDER BY id`)
+	rows, err := r.read.Query(`SELECT id,launcher,agent,cwd,name,alias,location FROM launcher_pending ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

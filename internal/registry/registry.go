@@ -15,8 +15,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Registry serializes writes through one connection and serves reads from a
+// separate pool. In WAL mode readers never wait for the write lock, so a write
+// blocked on another process's lock does not stall API reads.
 type Registry struct {
 	db   *sql.DB
+	read *sql.DB
 	path string
 	now  func() time.Time
 }
@@ -26,6 +30,7 @@ var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 const (
 	schemaVersion   = 12
 	queueMessageTTL = time.Hour
+	readConnections = 4
 )
 
 func queueMessageTTLLabel() string {
@@ -57,9 +62,16 @@ func Open(path string) (*Registry, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	r := &Registry{db: db, path: path, now: time.Now}
-	if err := r.migrate(); err != nil {
+	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)")
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	read.SetMaxOpenConns(readConnections)
+	read.SetMaxIdleConns(readConnections)
+	r := &Registry{db: db, read: read, path: path, now: time.Now}
+	if err := r.migrate(); err != nil {
+		r.Close()
 		return nil, err
 	}
 	return r, nil
@@ -67,7 +79,7 @@ func Open(path string) (*Registry, error) {
 
 func (r *Registry) Path() string { return r.path }
 
-func (r *Registry) Close() error { return r.db.Close() }
+func (r *Registry) Close() error { return errors.Join(r.read.Close(), r.db.Close()) }
 
 func (r *Registry) migrate() error {
 	var version int
@@ -726,7 +738,7 @@ func removeMergedCatalogRowTx(tx *sql.Tx, oldID, currentID string) error {
 
 func (r *Registry) LookupAlias(name string) (string, error) {
 	var sid string
-	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&sid)
+	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&sid)
 	return sid, err
 }
 
@@ -735,7 +747,7 @@ func (r *Registry) EnsureAliasAvailable(name string) error {
 		return nil
 	}
 	var owner string
-	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
+	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -826,7 +838,7 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return sid, nil
 	}
 	var exact string
-	if err := r.db.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
+	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
 		return exact, nil
 	}
 	prefix := escapeLike(target) + "%"
@@ -866,7 +878,7 @@ func (r *Registry) resolveSubagentPath(path string) (string, error) {
 		return "", fmt.Errorf("subagent target %q: %w", "@"+path, err)
 	}
 	for _, segment := range segments[1:] {
-		rows, err := r.db.Query(`SELECT id,agent_nickname FROM sessions WHERE parent_session_id=? ORDER BY id`, current)
+		rows, err := r.read.Query(`SELECT id,agent_nickname FROM sessions WHERE parent_session_id=? ORDER BY id`, current)
 		if err != nil {
 			return "", err
 		}
@@ -916,7 +928,7 @@ func escapeLike(value string) string {
 }
 
 func (r *Registry) matchingIDs(query string, args ...any) ([]string, error) {
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1161,18 +1173,18 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 
 func (r *Registry) QueueCount(sessionID string) int {
 	var n int
-	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, r.now().UnixMilli()).Scan(&n)
+	r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, r.now().UnixMilli()).Scan(&n)
 	return n
 }
 
 func (r *Registry) PendingSteer(sessionID string) (bool, error) {
 	var found int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
+	err := r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
 	return found > 0, err
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, r.now().UnixMilli())
+	rows, err := r.read.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, r.now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -1265,7 +1277,7 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	}
 	query += ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit)
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1312,7 +1324,7 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 	}
 	query += ` ORDER BY h.id DESC LIMIT ?`
 	args = append(args, limit+1)
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1374,7 +1386,7 @@ func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 }
 
 func (r *Registry) ListHistoryKinds() ([]string, error) {
-	rows, err := r.db.Query(`SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
+	rows, err := r.read.Query(`SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
 	if err != nil {
 		return nil, err
 	}
@@ -1432,7 +1444,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	if !includeDelivered {
 		args = append(args, now.UnixMilli())
 	}
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1455,7 +1467,7 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	now := r.now()
 	var row QueueRow
 	var evidence string
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
+	err := r.read.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -1500,7 +1512,7 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 		query += ` WHERE resolved_at=''`
 	}
 	query += ` ORDER BY created_at DESC,id DESC`
-	rows, err := r.db.Query(query)
+	rows, err := r.read.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -1921,7 +1933,7 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	var state RuntimeState
 	var status, updatedAt string
 	var notificationArmed int
-	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
+	err := r.read.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
 	if err == sql.ErrNoRows {
 		return state, false, nil
 	}
@@ -1974,7 +1986,7 @@ type WatchedSession struct {
 }
 
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
 		WHERE s.id IN (
@@ -2023,7 +2035,7 @@ type RouteRow struct {
 }
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
-	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
+	rows, err := r.read.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
 		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), '')
 		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
 		GROUP BY r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active
@@ -2062,7 +2074,7 @@ type AliasRow struct {
 }
 
 func (r *Registry) ListAliases() ([]AliasRow, error) {
-	rows, err := r.db.Query(`SELECT name, session_id FROM aliases ORDER BY name`)
+	rows, err := r.read.Query(`SELECT name, session_id FROM aliases ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -2084,7 +2096,7 @@ type ChannelRow struct {
 }
 
 func (r *Registry) ListChannels() ([]ChannelRow, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT c.name, COALESCE(count(cm.session_id),0) as n
 		FROM channels c
 		LEFT JOIN channel_members cm ON cm.channel_id = c.id
@@ -2109,7 +2121,7 @@ func (r *Registry) ListChannels() ([]ChannelRow, error) {
 }
 
 func (r *Registry) ChannelMembers(channelName string) ([]string, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT cm.session_id FROM channel_members cm
 		JOIN channels c ON c.id = cm.channel_id
 		WHERE c.name = ?`, channelName)
@@ -2135,7 +2147,7 @@ func b2i(b bool) int {
 }
 
 func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) {
-	err = r.db.QueryRow(`SELECT surface, name, cwd FROM sessions WHERE id = ?`, id).Scan(&surface, &name, &cwd)
+	err = r.read.QueryRow(`SELECT surface, name, cwd FROM sessions WHERE id = ?`, id).Scan(&surface, &name, &cwd)
 	return
 }
 
@@ -2148,7 +2160,7 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var location []byte
 	var focusable int
 	var subagent subagentColumns
-	err := r.db.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
+	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
 		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable,
 	}, subagent.targets()...)...)
 	if err != nil {
@@ -2178,7 +2190,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
+	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
@@ -2229,7 +2241,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		query += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2272,13 +2284,13 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {
 	var stale bool
-	err := r.db.QueryRow(`SELECT updated_at < datetime(?,'unixepoch') FROM sessions WHERE id=?`, before.Unix(), id).Scan(&stale)
+	err := r.read.QueryRow(`SELECT updated_at < datetime(?,'unixepoch') FROM sessions WHERE id=?`, before.Unix(), id).Scan(&stale)
 	return stale, err
 }
 
 func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 	var name string
-	err := r.db.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name)
+	err := r.read.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name)
 	return name, err
 }
 

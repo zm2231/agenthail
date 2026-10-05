@@ -67,7 +67,7 @@ func (r *Registry) EnsureCatalogState() error {
 }
 
 func (r *Registry) CatalogState() (string, uint64, error) {
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return "", 0, err
 	}
@@ -152,7 +152,7 @@ func (r *Registry) CatalogEventsAfter(after uint64, limit int) (CatalogEventWind
 	if limit < 1 {
 		return CatalogEventWindow{Events: []CatalogEvent{}}, nil
 	}
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogEventWindow{}, err
 	}

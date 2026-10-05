@@ -65,7 +65,7 @@ func (r *Registry) SessionJournalSeedStatus(sessionID string) (string, error) {
 		return "", fmt.Errorf("session id is required")
 	}
 	var status string
-	err := r.db.QueryRow(`SELECT seed_status FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status)
+	err := r.read.QueryRow(`SELECT seed_status FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status)
 	if err == sql.ErrNoRows {
 		return SessionJournalSeedUnknown, nil
 	}
@@ -115,7 +115,7 @@ func (r *Registry) SessionJournalSeedCheckpoint(sessionID string) (string, uint6
 	var status string
 	var seq int64
 	var identity string
-	err := r.db.QueryRow(`SELECT seed_status,seed_seq,seed_identity FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status, &seq, &identity)
+	err := r.read.QueryRow(`SELECT seed_status,seed_seq,seed_identity FROM session_journal_state WHERE session_id=?`, sessionID).Scan(&status, &seq, &identity)
 	if err == sql.ErrNoRows {
 		return SessionJournalSeedUnknown, 0, "", nil
 	}
@@ -132,7 +132,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 	if strings.TrimSpace(sessionID) == "" || limit < 1 || limit > 200 {
 		return SessionJournalPage{}, fmt.Errorf("invalid journal page request")
 	}
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return SessionJournalPage{}, err
 	}
@@ -339,7 +339,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 		return SessionJournalWindow{Entries: []SessionJournalEntry{}}, nil
 	}
 	var earliest, latest sql.NullInt64
-	if err := r.db.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
+	if err := r.read.QueryRow(`SELECT MIN(seq),MAX(seq) FROM session_journal WHERE session_id=?`, sessionID).Scan(&earliest, &latest); err != nil {
 		return SessionJournalWindow{}, err
 	}
 	window := SessionJournalWindow{Entries: []SessionJournalEntry{}}
@@ -352,7 +352,7 @@ func (r *Registry) SessionJournalAfter(sessionID string, after uint64, limit int
 	if window.Gap {
 		return window, nil
 	}
-	rows, err := r.db.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
+	rows, err := r.read.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?`, sessionID, after, limit)
 	if err != nil {
 		return SessionJournalWindow{}, err
 	}
@@ -376,7 +376,7 @@ func (r *Registry) SessionJournalEntryByProviderKey(sessionID, providerKey strin
 	if err != nil || !found || entry.BodyRef == "" {
 		return entry, found, err
 	}
-	if err := r.db.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, entry.BodyRef).Scan(&entry.FullBody); err != nil && err != sql.ErrNoRows {
+	if err := r.read.QueryRow(`SELECT body FROM session_journal_bodies WHERE session_id=? AND ref=?`, sessionID, entry.BodyRef).Scan(&entry.FullBody); err != nil && err != sql.ErrNoRows {
 		return SessionJournalEntry{}, false, err
 	}
 	return entry, true, nil
@@ -455,7 +455,7 @@ func (r *Registry) SessionJournalBody(sessionID, ref string, start, end int) ([]
 	}
 	var body []byte
 	var total int
-	if err := r.db.QueryRow(`SELECT length(body),substr(body,?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`, start+1, end-start+1, sessionID, ref).Scan(&total, &body); err != nil {
+	if err := r.read.QueryRow(`SELECT length(body),substr(body,?,?) FROM session_journal_bodies WHERE session_id=? AND ref=?`, start+1, end-start+1, sessionID, ref).Scan(&total, &body); err != nil {
 		return nil, 0, err
 	}
 	if start > total {

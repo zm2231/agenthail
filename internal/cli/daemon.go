@@ -277,6 +277,25 @@ func waitForDashboard(listen string, timeout time.Duration) error {
 	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemonStatusLogPath())
 }
 
+// daemonServicePlist runs the daemon at the Standard launchd process type.
+// Background makes macOS throttle the API server whenever the Mac is busy.
+func daemonServicePlist(exe, envXML, logPath string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>%s</string>
+  <key>ProgramArguments</key><array><string>%s</string><string>daemon-run</string></array>
+  <key>EnvironmentVariables</key><dict>
+%s  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Standard</string>
+  <key>StandardOutPath</key><string>%s</string>
+  <key>StandardErrorPath</key><string>%s</string>
+</dict></plist>
+`, daemonLaunchdLabel, html.EscapeString(exe), envXML, html.EscapeString(logPath), html.EscapeString(logPath))
+}
+
 func daemonServicePath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library", "LaunchAgents", daemonLaunchdLabel+".plist")
@@ -332,20 +351,7 @@ func (a *App) daemonInstallService() error {
 			fmt.Fprintf(&envXML, "    <key>%s</key><string>%s</string>\n", key, html.EscapeString(environment[key]))
 		}
 	}
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>%s</string>
-  <key>ProgramArguments</key><array><string>%s</string><string>daemon-run</string></array>
-  <key>EnvironmentVariables</key><dict>
-%s  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>ProcessType</key><string>Background</string>
-  <key>StandardOutPath</key><string>%s</string>
-  <key>StandardErrorPath</key><string>%s</string>
-</dict></plist>
-`, daemonLaunchdLabel, html.EscapeString(exe), envXML.String(), html.EscapeString(logPath), html.EscapeString(logPath))
+	plist := daemonServicePlist(exe, envXML.String(), logPath)
 	path := daemonServicePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err

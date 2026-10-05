@@ -494,7 +494,7 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 }
 
 func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogSnapshot{}, err
 	}
