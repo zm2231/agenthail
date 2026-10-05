@@ -749,7 +749,7 @@ function renderSurfaceHealth() {
           ? "The Codex background service will stop after a restart."
           : rawDetail;
     const runtime = surface.runtime?.name
-      ? `<p><strong>${escape(surface.runtime.name)}</strong> ${escape(surface.runtime.reachable ? surface.runtime.durable ? "stays available in the background" : "is open now but will not restart automatically" : "is not connected")}</p>${surface.runtime.remediation ? `<p>How to fix: ${escape(surface.runtime.remediation)}</p>` : ""}`
+      ? `<p><strong>${escape(surface.runtime.name)}</strong> ${escape(surface.runtime.reachable ? surface.runtime.durable ? "stays available in the background" : "is open now but will not restart automatically" : "is not connected")}</p>${surface.runtime.remediation ? `<p>How to fix: ${escape(surface.runtime.remediation)}</p>` : ""}${(surface.runtime.notes || []).map((note) => `<p>${note.message === rawDetail ? "" : `${escape(note.message)}<br>`}${note.remediation ? `How to fix: ${escape(note.remediation)}` : ""}</p>`).join("")}`
       : "";
     const repair = surface.repairAction
       ? `<button class="soft-button" data-surface-repair="${escape(surface.repairAction)}" type="button">${escape(surface.repairLabel || "Repair")}</button>`

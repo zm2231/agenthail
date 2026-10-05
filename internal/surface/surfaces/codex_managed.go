@@ -50,13 +50,7 @@ type managedCodexClient struct {
 }
 
 func managedCodexSocketPath() string {
-	home := os.Getenv("CODEX_HOME")
-	if home == "" {
-		if userHome, err := os.UserHomeDir(); err == nil {
-			home = filepath.Join(userHome, ".codex")
-		}
-	}
-	return filepath.Join(home, "app-server-control", "app-server-control.sock")
+	return filepath.Join(codexHome(), "app-server-control", "app-server-control.sock")
 }
 
 func dialManagedCodex(ctx context.Context) (*managedCodexClient, error) {

@@ -40,9 +40,15 @@ agenthail doctor --json
 
 AgentHail targets macOS. Native Claude messages use local sockets and require
 the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
-uses AgentHail's local app-server bridge. Relevant overrides are
-`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`, `AGENTHAIL_CODEX_BIN`,
-`AGENTHAIL_CODEX_REMOTE`, `AGENTHAIL_NOTION_SPACE`, and
+Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
+Managed terminals (`agenthail codex`) need the standalone Codex runtime; an
+npm, Homebrew or ChatGPT.app `codex` cannot run its app-server daemon. AgentHail
+finds every Codex automatically, and `doctor --json` reports a typed runtime
+`problem` plus non-failing `notes` with the exact install step
+(`curl -fsSL https://chatgpt.com/codex/install.sh | sh`). Never run that
+installer on the user's behalf. Relevant overrides are
+`AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
+`AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT`, `AGENTHAIL_NOTION_SPACE`, and
 `AGENTHAIL_NOTION_USER`. Never print browser cookies, dashboard tokens, or
 credentials.
 

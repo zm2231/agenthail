@@ -15,6 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
 const (
@@ -313,7 +314,7 @@ func (a *App) daemonInstallService() error {
 		"AGENTHAIL_SIDECAR":                     os.Getenv("AGENTHAIL_SIDECAR"),
 		"AGENTHAIL_COOKIE_BRIDGE":               os.Getenv("AGENTHAIL_COOKIE_BRIDGE"),
 		"AGENTHAIL_PYTHON":                      os.Getenv("AGENTHAIL_PYTHON"),
-		"AGENTHAIL_CODEX_BIN":                   os.Getenv("AGENTHAIL_CODEX_BIN"),
+		"CODEX_HOME":                            os.Getenv("CODEX_HOME"),
 		"AGENTHAIL_CLAUDE_BIN":                  os.Getenv("AGENTHAIL_CLAUDE_BIN"),
 		"AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT": codexconfig.RemoteDebuggingPort(),
 		"AGENTHAIL_CHROME_PROFILE":              envOr("AGENTHAIL_CHROME_PROFILE", "Default"),
@@ -326,7 +327,7 @@ func (a *App) daemonInstallService() error {
 		"PATH":                                  envOr("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"),
 	}
 	var envXML strings.Builder
-	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "AGENTHAIL_CODEX_BIN", "AGENTHAIL_CLAUDE_BIN", "AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
+	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "CODEX_HOME", "AGENTHAIL_CLAUDE_BIN", "AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
 		if environment[key] != "" {
 			fmt.Fprintf(&envXML, "    <key>%s</key><string>%s</string>\n", key, html.EscapeString(environment[key]))
 		}
@@ -368,6 +369,7 @@ func (a *App) daemonInstallService() error {
 	for time.Now().Before(deadline) {
 		if pid, running := daemon.IsRunning(); running {
 			fmt.Printf("installed and started launchd service %s (pid %d)\n", daemonLaunchdLabel, pid)
+			printCodexSetupNote()
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -468,5 +470,11 @@ func humanSize(n int64) string {
 		return fmt.Sprintf("%.1fKB", float64(n)/1024)
 	default:
 		return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
+	}
+}
+
+func printCodexSetupNote() {
+	if _, err := surfaces.ManagedCodexBinary(); err != nil {
+		fmt.Printf("Codex: %s\n", err)
 	}
 }

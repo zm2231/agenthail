@@ -27,12 +27,7 @@ type codexDaemonSettings struct {
 }
 
 func codexDaemonSettingsPath() string {
-	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if home == "" {
-		userHome, _ := os.UserHomeDir()
-		home = filepath.Join(userHome, ".codex")
-	}
-	return filepath.Join(home, "app-server-daemon", "settings.json")
+	return filepath.Join(codexHome(), "app-server-daemon", "settings.json")
 }
 
 func codexRemoteControlEnabled() (bool, error) {
@@ -47,40 +42,20 @@ func codexRemoteControlEnabled() (bool, error) {
 	return settings.RemoteControlEnabled, nil
 }
 
-func codexBinary() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("AGENTHAIL_CODEX_BIN")); configured != "" {
-		path, err := exec.LookPath(configured)
-		if err != nil {
-			return "", fmt.Errorf("AGENTHAIL_CODEX_BIN %q is not executable", configured)
-		}
-		return path, nil
-	}
-	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if home == "" {
-		userHome, _ := os.UserHomeDir()
-		home = filepath.Join(userHome, ".codex")
-	}
-	managed := filepath.Join(home, "packages", "standalone", "current", "codex")
-	if info, err := os.Stat(managed); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-		return managed, nil
-	}
-	if path, err := exec.LookPath("codex"); err == nil {
-		return path, nil
-	}
-	userHome, _ := os.UserHomeDir()
-	for _, path := range []string{
-		"/Applications/ChatGPT.app/Contents/Resources/codex",
-		filepath.Join(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-	} {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("Codex standalone runtime was not found at %s; install it from https://chatgpt.com/codex/install.sh or set AGENTHAIL_CODEX_BIN", managed)
-}
+const (
+	codexLaunchRemediation       = "run 'agenthail launch codex' (quit Codex first if it is already open)"
+	codexStartManagedRemediation = "run 'agenthail codex' to start the managed Codex app-server"
+	codexInstallRemediation      = "install the standalone Codex runtime: " + CodexStandaloneInstallCommand
+)
+
+var ErrCodexStandaloneMissing = errors.New("standalone Codex runtime is not installed")
 
 func ManagedCodexBinary() (string, error) {
-	return codexBinary()
+	install := DetectCodexInstallation()
+	if install.Standalone == "" {
+		return "", fmt.Errorf("%w: %s; %s", ErrCodexStandaloneMissing, install.standaloneMissingNote(), codexInstallRemediation)
+	}
+	return install.Standalone, nil
 }
 
 func RestartManagedCodexRuntime(ctx context.Context) error {
@@ -99,7 +74,7 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 		commandCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
-	binary, err := codexBinary()
+	binary, err := ManagedCodexBinary()
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +89,11 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 }
 
 func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
+	install := DetectCodexInstallation()
+	var notes []surface.RuntimeNote
+	if c.managed && install.Standalone == "" {
+		notes = append(notes, surface.RuntimeNote{Problem: surface.RuntimeStandaloneMissing, Message: install.standaloneMissingNote(), Remediation: codexInstallRemediation})
+	}
 	desktopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	desktopErr := c.DesktopReady(desktopCtx)
 	cancel()
@@ -124,41 +104,64 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 			Reachable: true,
 			Durable:   true,
 			Backend:   "desktop",
+			Notes:     notes,
 		}
+	}
+	bridge := surface.RuntimeStatus{
+		Name:        "Codex Desktop bridge",
+		Problem:     surface.RuntimeBridgeUnavailable,
+		Detail:      desktopErr.Error(),
+		Remediation: codexLaunchRemediation,
+		Notes:       notes,
 	}
 	if !c.managed {
+		return bridge
+	}
+	if install.Standalone == "" {
+		if install.Desktop != "" {
+			return bridge
+		}
 		return surface.RuntimeStatus{
-			Name:        "Codex Desktop bridge",
-			Detail:      desktopErr.Error(),
-			Remediation: "run 'agenthail launch codex'",
+			Name:        "Codex managed app-server",
+			Problem:     surface.RuntimeStandaloneMissing,
+			Detail:      install.standaloneMissingNote() + "; Codex Desktop is not installed either",
+			Remediation: codexInstallRemediation,
 		}
 	}
-	status := surface.RuntimeStatus{
-		Name:        "Codex managed app-server",
-		Remediation: "run 'agenthail launch codex'",
-	}
+	managed := surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeStopped, Remediation: codexStartManagedRemediation}
 	output, err := runCodexDaemon(ctx, "version")
 	if err != nil {
-		status.Detail = err.Error()
-		return status
+		managed.Detail = err.Error()
+	} else {
+		var version codexDaemonVersion
+		if err := json.Unmarshal(output, &version); err != nil {
+			managed.Detail = fmt.Sprintf("parse Codex managed app-server status: %v", err)
+		} else if version.Status != "running" {
+			managed.Detail = fmt.Sprintf("managed Codex app-server is %s", version.Status)
+		} else {
+			managed.Reachable = true
+			managed.Backend = version.Backend
+			managed.Problem = ""
+			managed.Remediation = ""
+			supervisor := strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_SUPERVISOR"))
+			launchdService := strings.TrimSpace(os.Getenv("XPC_SERVICE_NAME")) == "com.agenthail.daemon"
+			managed.Durable = version.Backend != "" && version.Backend != "pid" || supervisor == "homebrew" || launchdService
+			if !managed.Durable {
+				managed.Problem = surface.RuntimeUnsupervised
+				managed.Detail = "reachable but not supervised across reboot"
+				managed.Remediation = "run 'agenthail daemon install'"
+			}
+			if install.Desktop != "" {
+				managed.Notes = append(managed.Notes, surface.RuntimeNote{Problem: surface.RuntimeBridgeUnavailable, Message: "Codex Desktop conversations need the Desktop bridge: " + desktopErr.Error(), Remediation: codexLaunchRemediation})
+			}
+			return managed
+		}
 	}
-	var version codexDaemonVersion
-	if err := json.Unmarshal(output, &version); err != nil {
-		status.Detail = fmt.Sprintf("parse Codex managed app-server status: %v", err)
-		return status
+	if install.Desktop != "" {
+		bridge.Notes = append(bridge.Notes, surface.RuntimeNote{Problem: surface.RuntimeStopped, Message: "the managed Codex app-server is not running: " + managed.Detail, Remediation: codexStartManagedRemediation})
+		return bridge
 	}
-	status.Reachable = version.Status == "running"
-	status.Backend = version.Backend
-	supervisor := strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_SUPERVISOR"))
-	launchdService := strings.TrimSpace(os.Getenv("XPC_SERVICE_NAME")) == "com.agenthail.daemon"
-	status.Durable = version.Backend != "" && version.Backend != "pid" || status.Reachable && (supervisor == "homebrew" || launchdService)
-	if status.Reachable && !status.Durable {
-		status.Detail = "reachable but not supervised across reboot"
-	}
-	if status.Durable {
-		status.Remediation = ""
-	}
-	return status
+	return managed
 }
 
 func (c *Codex) EnsureRuntime(ctx context.Context) error {
@@ -180,7 +183,7 @@ func (c *Codex) ensureRuntime(ctx context.Context) error {
 		return nil
 	}
 	if _, err := runCodexDaemon(ctx, "start"); err != nil {
-		return fmt.Errorf("managed Codex app-server is unavailable: %w; install the Codex standalone runtime, then run 'agenthail launch codex'", err)
+		return fmt.Errorf("managed Codex app-server is unavailable: %w", err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -193,7 +196,7 @@ func (c *Codex) ensureRuntime(ctx context.Context) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("managed Codex app-server did not create %s; run 'agenthail launch codex' again or inspect 'agenthail doctor'", managedCodexSocketPath())
+	return fmt.Errorf("managed Codex app-server did not create %s; run 'agenthail codex' again or inspect 'agenthail doctor'", managedCodexSocketPath())
 }
 
 func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {

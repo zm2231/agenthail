@@ -422,6 +422,9 @@ echo "Codex Desktop:"
 echo "  agenthail launch codex       # launch with the local control bridge"
 echo "Codex terminal:"
 echo "  agenthail codex              # start a writable terminal session"
+if [ ! -x "${CODEX_HOME:-$HOME/.codex}/packages/standalone/current/codex" ]; then
+	echo "  needs the standalone Codex runtime: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+fi
 echo "Codex automation:"
 echo "  agenthail thread create codex \"task\" --json"
 echo "  Plain codex sessions remain readable but read-only in Agenthail."

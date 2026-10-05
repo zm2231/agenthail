@@ -27,11 +27,7 @@ func TestCodexCatalogListIsNotComplete(t *testing.T) {
 func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	home := startManagedCodex(t, managedDiscovery).Home
 	logPath := filepath.Join(home, "managed-runtime.log")
-	script := filepath.Join(home, "codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	installStandaloneCodex(t, home, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n")
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	upgrader := websocket.Upgrader{}
 	var server *httptest.Server
@@ -81,11 +77,7 @@ func TestCodexDiscoveryDoesNotStartManagedRuntime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	logPath := filepath.Join(home, "managed-runtime.log")
-	script := filepath.Join(home, "codex")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	installStandaloneCodex(t, home, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n")
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	codex := NewCodex("")
 	codex.desktopURL = "http://127.0.0.1:1"
@@ -137,12 +129,10 @@ func TestCodexManagedRuntimeStatusReportsDurability(t *testing.T) {
 		{name: "launchd backend", backend: "launchd", durable: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			script := filepath.Join(t.TempDir(), "codex")
-			body := "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\"" + test.backend + "\",\"socketPath\":\"/tmp/codex.sock\"}'\n"
-			if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("AGENTHAIL_CODEX_BIN", script)
+			home := t.TempDir()
+			t.Setenv("CODEX_HOME", home)
+			isolateCodexInstalls(t, false)
+			installStandaloneCodex(t, home, "#!/bin/sh\n[ \"$1 $2 $3\" = \"app-server daemon version\" ] || exit 2\nprintf '%s\\n' '{\"status\":\"running\",\"backend\":\""+test.backend+"\",\"socketPath\":\"/tmp/codex.sock\"}'\n")
 			t.Setenv("AGENTHAIL_DAEMON_SUPERVISOR", test.supervisor)
 			t.Setenv("XPC_SERVICE_NAME", test.xpc)
 			status := isolatedManagedRuntime(t).RuntimeStatus(context.Background())
@@ -150,8 +140,8 @@ func TestCodexManagedRuntimeStatusReportsDurability(t *testing.T) {
 				t.Fatalf("status=%+v", status)
 			}
 			if test.remediation {
-				if !strings.Contains(status.Remediation, "agenthail launch codex") {
-					t.Fatalf("remediation=%q", status.Remediation)
+				if status.Problem != surface.RuntimeUnsupervised || !strings.Contains(status.Remediation, "agenthail daemon install") {
+					t.Fatalf("status=%+v", status)
 				}
 			} else if test.durable && (status.Detail != "" || status.Remediation != "") {
 				t.Fatalf("supervised status carries degraded detail: %+v", status)
@@ -175,12 +165,7 @@ func TestCodexEnsureRuntimeStartsMissingManagedDaemonOnce(t *testing.T) {
 	logPath := filepath.Join(root, "calls.log")
 	codeHome := filepath.Join(root, "codex-home")
 	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nif [ \"$1 $2 $3\" = \"app-server daemon enable-remote-control\" ]; then exit 0; fi\nif [ \"$1 $2 $3\" = \"app-server daemon start\" ]; then mkdir -p \"$(dirname \"$AGENTHAIL_TEST_SOCKET\")\"; : > \"$AGENTHAIL_TEST_SOCKET\"; exit 0; fi\nexit 2\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	installStandaloneCodex(t, codeHome, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nif [ \"$1 $2 $3\" = \"app-server daemon enable-remote-control\" ]; then exit 0; fi\nif [ \"$1 $2 $3\" = \"app-server daemon start\" ]; then mkdir -p \"$(dirname \"$AGENTHAIL_TEST_SOCKET\")\"; : > \"$AGENTHAIL_TEST_SOCKET\"; exit 0; fi\nexit 2\n")
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	t.Setenv("AGENTHAIL_TEST_SOCKET", socketPath)
 	t.Setenv("CODEX_HOME", codeHome)
@@ -200,11 +185,11 @@ func TestCodexEnsureRuntimeStartsMissingManagedDaemonOnce(t *testing.T) {
 	}
 }
 
-func TestCodexEnsureRuntimeNamesMissingManagedDaemon(t *testing.T) {
-	t.Setenv("AGENTHAIL_CODEX_BIN", filepath.Join(t.TempDir(), "missing-codex"))
+func TestCodexEnsureRuntimeNamesMissingStandaloneInstall(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
+	isolateCodexInstalls(t, false)
 	err := NewCodex("").EnsureRuntime(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "AGENTHAIL_CODEX_BIN") {
+	if !errors.Is(err, ErrCodexStandaloneMissing) || !strings.Contains(err.Error(), CodexStandaloneInstallCommand) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -227,12 +212,7 @@ func TestCodexEnsureRuntimeEnablesRemoteControlWhenDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(root, "calls.log")
-	script := filepath.Join(root, "codex")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 0\n"
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	installStandaloneCodex(t, codeHome, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 0\n")
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	t.Setenv("CODEX_HOME", codeHome)
 	if err := NewCodex("").EnsureRuntime(context.Background()); err != nil {
