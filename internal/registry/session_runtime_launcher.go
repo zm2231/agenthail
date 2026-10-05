@@ -26,7 +26,7 @@ func (r *Registry) SessionRuntime(sessionID string) (*surface.Runtime, bool, err
 	var launcher string
 	var location []byte
 	var focusable int
-	err := r.db.QueryRow(`SELECT runtime_launcher,runtime_location,runtime_focusable FROM session_runtime WHERE session_id=?`, sessionID).Scan(&launcher, &location, &focusable)
+	err := r.read.QueryRow(`SELECT runtime_launcher,runtime_location,runtime_focusable FROM session_runtime WHERE session_id=?`, sessionID).Scan(&launcher, &location, &focusable)
 	if err == sql.ErrNoRows || launcher == "" {
 		return nil, false, nil
 	}
@@ -50,7 +50,7 @@ func (r *Registry) SessionRuntimes(ids []string) (map[string]*surface.Runtime, e
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := r.db.Query(`SELECT session_id,runtime_launcher,runtime_location,COALESCE(runtime_focusable,0) FROM session_runtime WHERE session_id IN (`+placeholders+`)`, args...)
+	rows, err := r.read.Query(`SELECT session_id,runtime_launcher,runtime_location,COALESCE(runtime_focusable,0) FROM session_runtime WHERE session_id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, err
 	}

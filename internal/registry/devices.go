@@ -139,13 +139,15 @@ func (r *Registry) CompleteDevicePairing(secret, name string) (Device, string, e
 	return device, token, nil
 }
 
+const deviceLastSeenResolution = time.Minute
+
 func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, error) {
 	if !strings.HasPrefix(token, deviceTokenPrefix) {
 		return Device{}, ErrDeviceDenied
 	}
 	var device Device
 	var scopes string
-	err := r.db.QueryRow(`SELECT id,name,scopes,created_at,last_seen_at,revoked_at FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt)
+	err := r.read.QueryRow(`SELECT id,name,scopes,created_at,last_seen_at,revoked_at FROM paired_devices WHERE token_hash=?`, hashDeviceSecret(token)).Scan(&device.ID, &device.Name, &scopes, &device.CreatedAt, &device.LastSeenAt, &device.RevokedAt)
 	if errors.Is(err, sql.ErrNoRows) || device.RevokedAt != "" {
 		return Device{}, ErrDeviceDenied
 	}
@@ -156,11 +158,17 @@ func (r *Registry) AuthenticateDevice(token, requiredScope string) (Device, erro
 	if requiredScope != "" && !deviceHasScope(device.Scopes, requiredScope) {
 		return Device{}, ErrDeviceDenied
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, now, device.ID); err != nil {
+	now := time.Now().UTC()
+	// Each authenticated request would otherwise be a write; last-seen is
+	// shown to the minute, so a recent stamp is left as is.
+	if lastSeen, err := time.Parse(time.RFC3339Nano, device.LastSeenAt); err == nil && now.Sub(lastSeen) < deviceLastSeenResolution {
+		return device, nil
+	}
+	stamp := now.Format(time.RFC3339Nano)
+	if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=? WHERE id=? AND revoked_at=''`, stamp, device.ID); err != nil {
 		return Device{}, err
 	}
-	device.LastSeenAt = now
+	device.LastSeenAt = stamp
 	return device, nil
 }
 
@@ -172,7 +180,7 @@ func (r *Registry) ListDevices(includeRevoked bool) ([]Device, error) {
 		query += ` WHERE d.revoked_at=''`
 	}
 	query += ` ORDER BY d.created_at DESC,d.id DESC`
-	rows, err := r.db.Query(query)
+	rows, err := r.read.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +239,7 @@ func (r *Registry) RemoveDevicePushTarget(deviceID string) error {
 }
 
 func (r *Registry) DevicePushTargets() ([]DevicePushTarget, error) {
-	rows, err := r.db.Query(`SELECT p.device_id,p.installation_id,p.credential,p.enabled,p.updated_at
+	rows, err := r.read.Query(`SELECT p.device_id,p.installation_id,p.credential,p.enabled,p.updated_at
 		FROM device_push_targets p JOIN paired_devices d ON d.id=p.device_id
 		WHERE p.enabled=1 AND d.revoked_at='' ORDER BY p.updated_at DESC`)
 	if err != nil {

@@ -68,7 +68,7 @@ type DeliveryProblem struct {
 }
 
 func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT id,target_session_id,sender_session_id,message,failure,status,updated_at
 		FROM delivery_intents
 		WHERE status IN (?,?) AND COALESCE(dismissed_at,'')=''

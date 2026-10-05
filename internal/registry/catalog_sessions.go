@@ -409,7 +409,7 @@ func (r *Registry) ReconcileCatalogOmissions(kind surface.SurfaceKind, seen map[
 }
 
 func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogSnapshot{}, err
 	}

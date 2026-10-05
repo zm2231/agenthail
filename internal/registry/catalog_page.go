@@ -48,7 +48,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 		request.CodexRecentHours = 24
 	}
 
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogPage{}, err
 	}
