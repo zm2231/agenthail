@@ -709,7 +709,16 @@ struct TranscriptView: View {
         }
         .overlay {
             if pane.detail == nil, pane.selectedSessionID == session.id {
-                ProgressView().controlSize(.small)
+                VStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    if let error = pane.detailLoadError {
+                        Text("Couldn't load this session. Retrying… \(error)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 360)
+                    }
+                }
             }
         }
         .overlay(alignment: .top) {

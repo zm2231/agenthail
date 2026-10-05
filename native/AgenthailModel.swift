@@ -87,7 +87,8 @@ final class AgenthailModel: ObservableObject {
         SessionTree.build(knownSessions, filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
 
-    init(connecting: Bool = true) {
+    init(connecting: Bool = true, api: AgenthailAPI? = nil) {
+        self.api = api
         mainPane = SessionPane(model: self, restoresSelection: true)
         panes = [mainPane]
         if connecting { connect() }

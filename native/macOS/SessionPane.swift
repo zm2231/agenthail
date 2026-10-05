@@ -35,7 +35,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var sessionCursor: UInt64 = 0
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
-    private var detailLoadError: String?
+    @Published private(set) var detailLoadError: String?
     private var olderTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var metadata = MetadataOverlay()
@@ -85,6 +85,7 @@ final class SessionPane: ObservableObject, Identifiable {
         detail = model.cachedDetail(id)
         detailStale = detail != nil
         detailRefreshFailed = false
+        detailLoadError = nil
         detailLoadedAt = nil
         detailReloadPending = false
         detailReloadTask?.cancel()
@@ -133,12 +134,10 @@ final class SessionPane: ObservableObject, Identifiable {
             detailStale = false
             detailRefreshFailed = false
             model.detailLoaded(merged, for: id)
-            if let detailLoadError, model.operationError == detailLoadError { model.operationError = nil }
             detailLoadError = nil
             return true
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
-            model.operationError = error.localizedDescription
             detailLoadError = error.localizedDescription
             if detailStale { detailRefreshFailed = true }
             return false

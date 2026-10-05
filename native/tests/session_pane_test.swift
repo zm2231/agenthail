@@ -70,6 +70,15 @@ struct SessionPaneTest {
         if case .request(409, "Codex is unavailable") = conflict(#"{"error":{"code":"transport_unavailable","message":"Codex is unavailable"}}"#) {} else { check(false, "other conflicts keep their message and are not gaps") }
         if case .request(409, _) = conflict("not json") {} else { check(false, "an unreadable conflict is not a gap") }
 
+        let offline = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let offlinePane = offline.openPane()
+        offline.operationError = "An action failed."
+        offlinePane.select("unreachable")
+        for _ in 0..<40 where offlinePane.detailLoadError == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        check(offlinePane.detailLoadError != nil && offlinePane.detail == nil, "a failed first load is shown on the pane while it retries")
+        check(offline.operationError == "An action failed.", "a failed session load leaves another operation's error alone")
+        offline.closePane(offlinePane)
+
         let stalledServer = try! StalledConflictServer()
         let port = await stalledServer.ready()
         let stalledAPI = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(port)")!, token: "t", session: URLSession(configuration: .ephemeral))
