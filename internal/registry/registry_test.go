@@ -1235,3 +1235,125 @@ func TestLegacyOpenMergesDuplicateClaudeTranscripts(t *testing.T) {
 		t.Fatalf("sessions sharing a transcript=%d err=%v", count, err)
 	}
 }
+
+func stubLiveProcesses(t *testing.T, live ...int) {
+	t.Helper()
+	previous := processAlive
+	processAlive = func(pid int) bool {
+		for _, candidate := range live {
+			if pid == candidate {
+				return true
+			}
+		}
+		return false
+	}
+	t.Cleanup(func() { processAlive = previous })
+}
+
+func TestRegisterSessionKeepsALiveClaudeProcessSharingItsConversation(t *testing.T) {
+	stubLiveProcesses(t, 101, 202)
+	r := openTestRegistry(t)
+	original := surface.Session{ID: "original", Surface: surface.KindClaude, PID: 101, Transcript: "/tmp/shared.jsonl"}
+	if err := r.RegisterSession(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("collab", original.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.QueueMessage(original.ID, "for the original"); err != nil {
+		t.Fatal(err)
+	}
+	resumed := surface.Session{ID: "resumed", Surface: surface.KindClaude, PID: 202, Transcript: original.Transcript}
+	if err := r.RegisterSession(resumed); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "resumed-bridge", Surface: surface.KindClaude, PID: 202, Transcript: original.Transcript}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Session(resumed.ID); err != sql.ErrNoRows {
+		t.Fatalf("the resumed process's earlier id survived its new one: %v", err)
+	}
+	resumed.ID = "resumed-bridge"
+	for _, id := range []string{original.ID, resumed.ID} {
+		if _, err := r.Session(id); err != nil {
+			t.Fatalf("live session %s was merged away: %v", id, err)
+		}
+	}
+	if resolved, err := r.LookupAlias("collab"); err != nil || resolved != original.ID {
+		t.Fatalf("alias=%q err=%v", resolved, err)
+	}
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].SessionID != original.ID {
+		t.Fatalf("queue=%+v err=%v", rows, err)
+	}
+}
+
+func TestRegisterSessionAbsorbsAnExitedProcessSharingItsConversation(t *testing.T) {
+	stubLiveProcesses(t, 202)
+	r := openTestRegistry(t)
+	exited := surface.Session{ID: "exited", Surface: surface.KindClaude, PID: 101, Transcript: "/tmp/shared.jsonl"}
+	if err := r.RegisterSession(exited); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("collab", exited.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumed := surface.Session{ID: "resumed", Surface: surface.KindClaude, PID: 202, Transcript: exited.Transcript}
+	if err := r.RegisterSession(resumed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Session(exited.ID); err != sql.ErrNoRows {
+		t.Fatalf("exited session survived: %v", err)
+	}
+	if resolved, err := r.LookupAlias("collab"); err != nil || resolved != resumed.ID {
+		t.Fatalf("alias=%q err=%v", resolved, err)
+	}
+}
+
+func TestOpenKeepsLiveClaudeRowsAndAbsorbsExitedOnesIntoALiveRow(t *testing.T) {
+	stubLiveProcesses(t, 101, 202)
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		id      string
+		pid     int
+		updated string
+	}{{"live-older", 101, "2026-10-01 00:00:00"}, {"same-process-earlier-id", 202, "2026-10-01 12:00:00"}, {"live-newer", 202, "2026-10-02 00:00:00"}, {"exited-newest", 303, "2026-10-03 00:00:00"}} {
+		if _, err := r.db.Exec(`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,updated_at) VALUES (?,?,'','',?,'idle','/transcripts/shared.jsonl',0,?)`, row.id, string(surface.KindClaude), row.pid, row.updated); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetAlias("exited-alias", "exited-newest"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.Exec(`PRAGMA user_version=0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	for _, id := range []string{"live-older", "live-newer"} {
+		if _, err := reopened.Session(id); err != nil {
+			t.Fatalf("live session %s was merged away: %v", id, err)
+		}
+	}
+	for _, id := range []string{"exited-newest", "same-process-earlier-id"} {
+		if _, err := reopened.Session(id); err != sql.ErrNoRows {
+			t.Fatalf("%s survived: %v", id, err)
+		}
+	}
+	if resolved, err := reopened.LookupAlias("exited-alias"); err != nil || resolved != "live-newer" {
+		t.Fatalf("alias=%q err=%v", resolved, err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -335,16 +336,48 @@ func (c *Claude) firstUserMessage(path string) string {
 	return ""
 }
 
+// List returns one session per id. A conversation resumed in a second process
+// without Remote Control carries the same session id; the process that opened
+// it first keeps the id, so the later one never takes over its row.
 func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
+	processes, err := c.processes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]surface.Session, 0, len(processes))
+	started := make([]float64, 0, len(processes))
+	owner := map[string]int{}
+	for _, process := range processes {
+		if index, seen := owner[process.session.ID]; seen {
+			if process.startedAt < started[index] {
+				out[index], started[index] = process.session, process.startedAt
+			}
+			continue
+		}
+		owner[process.session.ID] = len(out)
+		out = append(out, process.session)
+		started = append(started, process.startedAt)
+	}
+	return out, nil
+}
+
+type claudeProcess struct {
+	session   surface.Session
+	startedAt float64
+}
+
+// processes returns a session for every live Claude process, including
+// processes that share a session id.
+func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 	sessionsDir := filepath.Join(c.home, ".claude", "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []surface.Session{}, nil
+			return nil, nil
 		}
 		return nil, fmt.Errorf("read Claude session directory: %w", err)
 	}
-	var out []surface.Session
+	var out []claudeProcess
 	transcript := c.transcripts.pass()
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
@@ -401,7 +434,11 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 				sess.Subagents = rollup
 			}
 		}
-		out = append(out, sess)
+		startedAt, ok := m["startedAt"].(float64)
+		if !ok {
+			startedAt = math.MaxFloat64
+		}
+		out = append(out, claudeProcess{session: sess, startedAt: startedAt})
 	}
 	return out, nil
 }
@@ -498,6 +535,9 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 		}
 	}
 	if len(matches) == 0 {
+		if process, found, err := c.processByPID(ctx, target); err != nil || found {
+			return process, err
+		}
 		return nil, fmt.Errorf("no session matched '%s'", target)
 	}
 	if len(matches) > 1 {
@@ -508,6 +548,26 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 		return nil, fmt.Errorf("ambiguous target '%s':\n%s", target, strings.Join(lines, "\n"))
 	}
 	return &matches[0], nil
+}
+
+// processByPID finds a live process that shares its session id with an
+// earlier one, which List leaves out.
+func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Session, bool, error) {
+	pid, err := strconv.Atoi(target)
+	if err != nil || pid <= 0 {
+		return nil, false, nil
+	}
+	processes, err := c.processes(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, process := range processes {
+		if process.session.PID == pid {
+			session := process.session
+			return &session, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {

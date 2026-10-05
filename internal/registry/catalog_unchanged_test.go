@@ -178,6 +178,7 @@ func TestDiscoveredClaudeAgentAbsorbsLaunchRegisteredAfterIt(t *testing.T) {
 }
 
 func TestMergedSessionKeepsDeliveryIntentsAndLeavesTheCatalog(t *testing.T) {
+	stubLiveProcesses(t, 77)
 	r := openTestRegistry(t)
 	transcript := "/home/test/.claude/projects/-work/conversation-4.jsonl"
 	legacy, legacyEvent := unchangedCatalogState("conversation-4", time.Now())

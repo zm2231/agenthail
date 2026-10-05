@@ -43,6 +43,26 @@ func TestClaudeListOmitsDeadBridgeProcesses(t *testing.T) {
 	}
 }
 
+func TestClaudeListKeepsTheFirstProcessOnASharedSessionID(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	original := `{"bridgeSessionId":"shared","pid":` + fmt.Sprint(os.Getpid()) + `,"startedAt":100,"name":"original","status":"idle"}`
+	resumed := `{"bridgeSessionId":"shared","pid":` + fmt.Sprint(os.Getppid()) + `,"startedAt":200,"name":"resumed","status":"idle"}`
+	if err := os.WriteFile(filepath.Join(dir, "a.json"), []byte(resumed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.json"), []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewClaude("", home).List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].PID != os.Getpid() || sessions[0].Name != "original" {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+}
+
 func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
