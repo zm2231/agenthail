@@ -28,6 +28,8 @@ The build verifies the runtime archive hashes before extraction. `THIRD_PARTY_NO
 
 The installer migrates an existing Homebrew Agenthail installation before activating the package. It preserves `~/.agenthail` and relinks only Agenthail-managed skill symlinks. The postinstall script installs the per-user launchd daemon, registers the Mac app login item, and opens the app for the logged-in console user. A headless or MDM install leaves activation to `agenthail daemon install` under the intended user account.
 
+`agenthail daemon install` is the only writer of `~/Library/LaunchAgents/com.agenthail.daemon.plist`. The daemon runs with launchd `ProcessType` `Standard`: with `Background`, macOS throttles the daemon whenever the Mac is busy, and every API request, including `/api/v1/version`, stalls for seconds. launchd reads the process type only from the plist, so an existing install keeps its old value until the plist is rewritten by the package installer or `agenthail daemon install`. Release notes for a version that changes the plist must say so.
+
 ## Build and verification
 
 ```bash
