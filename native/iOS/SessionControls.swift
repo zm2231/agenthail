@@ -144,7 +144,7 @@ struct QueueListView: View {
             }
             Button {
                 if let onOpenSession { onOpenSession(item.sessionId) }
-                else { dismiss(); model.openNotification(item.sessionId) }
+                else { dismiss(); model.openSession(item.sessionId) }
             } label: {
                 HStack {
                     Text(item.target).font(.headline)

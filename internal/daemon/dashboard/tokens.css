@@ -732,7 +732,7 @@ select {
   font-size: clamp(28px, 3vw, 42px);
   line-height: 1.1;
 }
-.notebook-header p:last-child {
+.notebook-header #chat-subtitle {
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 14px;
@@ -742,6 +742,54 @@ select {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+.shared-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  max-width: 860px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+.shared-note[hidden] {
+  display: none;
+}
+.shared-note p {
+  margin: 0;
+}
+.shared-note ul {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.shared-note li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.shared-note .soft-button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.shared-badge {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
 }
 .thread-meta {
   display: flex;
@@ -1649,7 +1697,7 @@ select {
   .notebook-header h1 {
     font-size: 22px;
   }
-  .notebook-header p:last-child {
+  .notebook-header #chat-subtitle {
     margin-top: 5px;
     font-size: 12px;
   }

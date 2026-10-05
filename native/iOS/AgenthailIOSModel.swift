@@ -565,7 +565,7 @@ final class AgenthailIOSModel: ObservableObject {
         if searchQuery == query { searching = false }
     }
 
-    func openNotification(_ sessionID: String) {
+    func openSession(_ sessionID: String) {
         requestedSessionID = sessionID
     }
 

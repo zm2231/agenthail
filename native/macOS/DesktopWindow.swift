@@ -451,6 +451,14 @@ struct SessionRowView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(SessionFamilies.subagentSummary(family))
             }
+            if let shared = SharedConversation.badge(session) {
+                Text(shared)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(DesktopPalette.accentText)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(SharedConversation.badgeLabel(session))
+                    .help(SharedConversation.badgeLabel(session))
+            }
             Text(relativeAge(session.lastActive))
                 .font(.system(size: 11))
                 .foregroundStyle(DesktopPalette.text2)
@@ -533,6 +541,9 @@ struct ConversationPane: View {
         if let session = pane.displayedSession {
             VStack(spacing: 0) {
                 ConversationHeader(session: session, title: SessionFamilies.title(session, in: model.knownSessions), model: pane.detail?.model, context: pane.detail?.context, inspectorVisible: $pane.inspectorVisible, leadingInset: headerInset, onFocusTerminal: { model.focusInTerminal(session) })
+                if let note = SharedConversation.note(session) {
+                    SharedConversationBanner(note: note, peers: SharedConversation.peers(session), leadingInset: headerInset, onOpen: pane.select)
+                }
                 TranscriptView(model: model, pane: pane, session: session)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if pane.removedSession?.id == session.id {
@@ -1346,6 +1357,53 @@ struct ComposerView: View {
         guard hasText else { return }
         let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
         pane.submit(busyDelivery: explicit)
+    }
+}
+
+struct SharedConversationBanner: View {
+    let note: String
+    let peers: [SharedProcess]
+    var leadingInset: CGFloat = 22
+    let onOpen: (String) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "square.on.square")
+                .foregroundStyle(DesktopPalette.accentText)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(note)
+                    .fixedSize(horizontal: false, vertical: true)
+                if peers.count > 1 {
+                    ForEach(peers) { peer in
+                        HStack(spacing: 10) {
+                            Text(SharedConversation.peerLabel(peer))
+                                .foregroundStyle(DesktopPalette.text2)
+                            openButton(peer)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if peers.count == 1 {
+                openButton(peers[0])
+            }
+        }
+        .font(.system(size: 12.5))
+        .padding(.leading, leadingInset)
+        .padding(.trailing, 14)
+        .padding(.vertical, 9)
+        .background(DesktopPalette.dock)
+        .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func openButton(_ peer: SharedProcess) -> some View {
+        Button("Open other") { onOpen(peer.id) }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesktopPalette.accentText)
+            .accessibilityLabel(SharedConversation.openLabel(peer))
+            .help(SharedConversation.openLabel(peer))
     }
 }
 

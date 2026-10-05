@@ -435,7 +435,9 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 			}
 		}
 		startedAt, ok := m["startedAt"].(float64)
-		if !ok {
+		if ok {
+			sess.StartedAt = time.UnixMilli(int64(startedAt))
+		} else {
 			startedAt = math.MaxFloat64
 		}
 		out = append(out, claudeProcess{session: sess, startedAt: startedAt})

@@ -38,6 +38,7 @@ type Session struct {
 	Transport             string          `json:"transport,omitempty"`
 	ConfiguredModel       string          `json:"configuredModel,omitempty"`
 	LastActive            time.Time       `json:"lastActive"`
+	StartedAt             time.Time       `json:"startedAt,omitzero"`
 	Runtime               *Runtime        `json:"runtime,omitempty"`
 	Subagent              *Subagent       `json:"subagent,omitempty"`
 	Subagents             *SubagentRollup `json:"subagents,omitempty"`

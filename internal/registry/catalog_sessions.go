@@ -544,6 +544,20 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 	return events, nil
 }
 
+// CatalogProjectionFingerprint returns the committed projection of one
+// catalog session, the same row CatalogSnapshot serves.
+func (r *Registry) CatalogProjectionFingerprint(sessionID string) (string, bool, error) {
+	var fingerprint string
+	err := r.read.QueryRow(`SELECT cs.projection_fingerprint FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, sessionID).Scan(&fingerprint)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return fingerprint, true, nil
+}
+
 func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	tx, err := r.read.Begin()
 	if err != nil {

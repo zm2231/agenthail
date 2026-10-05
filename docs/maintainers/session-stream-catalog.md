@@ -16,7 +16,13 @@ and `q` filters plus a stable page cursor, and returns saved rows plus
 Each row retains the existing session summary fields and adds
 `hostProject` (`id`, `displayName`, and `commonDir` or `path`), `checkout`
 (`id`, `path`, `branch` or `detachedHead`, `isMain`, and `dirty`), and
-`freshness` (`generation`, `observedAt`, and `stale`). A failed
+`freshness` (`generation`, `observedAt`, and `stale`). A Claude row whose
+transcript is open in other live processes adds `sharedWith`: one entry per
+other row (`id`, `name`, `pid`, `status`, `startedAt`), ordered by process
+start, and omitted when only one process has the conversation open. Discovery
+republishes every row of the conversation when a process opens or closes, the
+status pass republishes them when one changes status, and `/api/v1/session`
+returns the same `sharedWith`. A failed
 Git query records typed unavailable identity and never hides the session. A
 surface discoverer performs provider `List` calls in the background and emits
 full-row `session.upserted`, `session.removed`, `session.unavailable`, and

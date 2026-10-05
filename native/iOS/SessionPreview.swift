@@ -76,11 +76,16 @@ struct SessionPreview: View {
 
     nonisolated static var snapshotJSON: String {
         let capabilities: [String: Bool] = ["send": true, "stream": true, "reply": true, "goal": true, "compact": true, "model": true, "interrupt": true, "steer": true]
-        let sessions: [[String: Any]] = [
+        var sessions: [[String: Any]] = [
             ["id": "demo", "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "busy", "lastActive": "2026-09-12T04:03:00Z", "queueCount": 1, "open": true, "current": true, "capabilities": capabilities],
             ["id": "codex-demo", "name": "Review the release pipeline", "surface": "codex", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T03:45:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities],
             ["id": "saved-demo", "name": "Map the application architecture", "surface": "claude", "cwd": "/Users/demo/projects/agenthail", "status": "idle", "lastActive": "2026-09-11T13:00:00Z", "queueCount": 0, "open": false, "current": false, "capabilities": capabilities]
         ]
+        if ProcessInfo.processInfo.arguments.contains("--preview-shared") {
+            sessions.insert(["id": "demo-resumed", "name": "Make the build reliable", "surface": "claude", "cwd": "/Users/demo/projects/fieldnotes", "status": "idle", "lastActive": "2026-09-12T04:02:00Z", "queueCount": 0, "open": true, "current": true, "capabilities": capabilities,
+                             "sharedWith": [["id": "demo", "name": "Make the build reliable", "pid": 41017, "status": "busy", "startedAt": "2026-09-12T03:20:00Z"]]], at: 1)
+            sessions[0]["sharedWith"] = [["id": "demo-resumed", "name": "Make the build reliable", "pid": 41588, "status": "idle", "startedAt": "2026-09-12T03:55:00Z"]]
+        }
         let snapshot: [String: Any] = ["updatedAt": "2026-09-12T04:03:00Z", "daemon": ["running": true], "surfaces": [], "sessions": sessions, "totalSessions": sessions.count, "queue": [], "channels": [], "relays": [], "history": [], "attention": [], "codexRecentHours": 24]
         return String(data: try! JSONSerialization.data(withJSONObject: snapshot), encoding: .utf8)!
     }
