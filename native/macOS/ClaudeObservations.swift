@@ -19,23 +19,6 @@ struct ClaudeObservationsSection: View {
                 }
             }
         }
-        if let links = detail?.claudeSubagents, !links.isEmpty {
-            group("Claude subagents") {
-                ForEach(links) { link in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(link.agentId)
-                        if !link.transcriptPath.isEmpty {
-                            Text((link.transcriptPath as NSString).abbreviatingWithTildeInPath)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            }
-        }
         if let errors = detail?.metadataErrors, !errors.isEmpty {
             group("Some details couldn't load") {
                 ForEach(errors.keys.sorted(), id: \.self) { key in

@@ -34,14 +34,11 @@ The job record's `children` array is not used for session relationship
 observation. Its observed member was an artifact descriptor (`kind: frame`),
 not a Claude agent identity.
 
-Subagent relationships use a separate local producer. The Claude
-session-metadata API exposes only links whose validated parent ID matches the
-requested session:
-`~/.claude/projects/<encoded-cwd>/<parent-session-id>/subagents/agent-<agent-id>.jsonl`.
-`ObserveClaudeSubagentLinks` derives the parent session and agent ID from that
-path, then requires a JSONL record with matching exact `sessionId` and
-`agentId`. This yields a validated parent-session -> local-agent link without
-deriving state from transcript content.
+Subagent relationships use a separate local producer, documented with the
+working-state rule and the cache in [subagents.md](subagents.md). The
+session-metadata API reads only the requested session's subagents directory,
+`<project>/<transcript-id>/subagents/`, derived from the session's transcript
+path, and requires each transcript's identifying record to match its path.
 
 ## Deliberately unavailable
 

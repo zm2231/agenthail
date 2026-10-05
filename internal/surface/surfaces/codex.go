@@ -408,6 +408,7 @@ func codexSession(thread map[string]any, managed, desktopReachable bool) surface
 		Status:    codexStatus(thread["status"]),
 		Source:    source,
 		Transport: codexTransport(managed, desktopReachable),
+		Subagent:  codexSubagent(thread),
 	}
 	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
 		session.LastActive = time.Unix(int64(timestamp), 0)

@@ -6,8 +6,8 @@ struct SessionTreeTest {
         let now = SessionTree.parseTimestamp("2026-10-04T12:00:00Z")!
         expect(SessionTree.parseTimestamp("2026-10-04 12:00:00") == now, "SQLite UTC timestamps parse as UTC")
         let caps = Capabilities(send: true, stream: true, reply: true, goal: false, compact: false, model: true, interrupt: true, steer: true)
-        func session(_ id: String, status: String, lastActive: String, project: String, checkout: String, branch: String?, detached: String? = nil) -> SessionState {
-            SessionState(id: id, surface: "codex", name: id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", hostProject: HostProjectIdentity(id: project, displayName: project, commonDir: "/repo/.git", path: nil), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))
+        func session(_ id: String, status: String, lastActive: String, project: String, checkout: String, branch: String?, detached: String? = nil, name: String? = nil) -> SessionState {
+            SessionState(id: id, surface: "codex", name: name ?? id, alias: nil, status: status, lastActive: lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: "/repo/\(checkout)", hostProject: HostProjectIdentity(id: project, displayName: project, commonDir: "/repo/.git", path: nil), checkout: CheckoutIdentity(id: checkout, path: "/repo/\(checkout)", branch: branch, detachedHead: detached, isMain: checkout == "main", dirty: false))
         }
         let sessions = [
             session("old", status: "idle", lastActive: "2026-10-01T12:00:00Z", project: "agenthail", checkout: "main", branch: "main"),
@@ -36,6 +36,40 @@ struct SessionTreeTest {
         expect(capped.checkouts.map(\.label) == ["feat/x", "main"], "checkouts with no visible sessions are hidden")
         let keepSelected = project.limited(to: 1, keeping: "old")
         expect(Set(keepSelected.checkouts.flatMap(\.sessions).map(\.id)) == ["busy", "old"], "the selected session stays visible past the cap")
+        func member(_ id: String, parent: String, root: String, depth: Int, nickname: String, role: String? = nil, status: String, lastActive: String) -> SessionState {
+            var state = session(id, status: status, lastActive: lastActive, project: "agenthail", checkout: "main", branch: "main")
+            state.subagent = SubagentIdentity(parentId: parent, rootId: root, depth: depth, nickname: nickname, role: role)
+            return state
+        }
+        let lead = session("lead", status: "idle", lastActive: "2026-10-04T09:00:00Z", project: "agenthail", checkout: "main", branch: "main", name: "Build the parser")
+        let family = [
+            lead,
+            member("ada", parent: "lead", root: "lead", depth: 1, nickname: "Ada", status: "busy", lastActive: "2026-10-04T11:58:00Z"),
+            member("euclid", parent: "ada", root: "lead", depth: 2, nickname: "Euclid", role: "reviewer", status: "busy", lastActive: "2026-10-04T11:57:00Z"),
+            member("bo", parent: "lead", root: "lead", depth: 1, nickname: "Bo", status: "idle", lastActive: "2026-10-04T08:00:00Z"),
+            member("orphan", parent: "gone", root: "gone", depth: 1, nickname: "Dee", status: "idle", lastActive: "2026-10-04T07:00:00Z")
+        ]
+        let families = SessionFamilies.build(family)
+        expect(families.map(\.id) == ["lead", "orphan"], "subagents nest under a listed parent; an unlisted parent leaves a root: \(families.map(\.id))")
+        expect(families[0].members.map(\.id) == ["ada", "euclid", "bo"] && families[0].members.map(\.depth) == [1, 2, 1], "members follow their parent depth-first")
+        expect(families[0].subagentCount == 3 && families[0].workingSubagents == 2 && families[0].isWorking, "the root rolls up every descendant and working count")
+        expect(SessionFamilies.title(family[2], in: family) == "Build the parser > Ada > Euclid (reviewer)", "a standalone subagent reads as its parent chain: \(SessionFamilies.title(family[2], in: family))")
+        expect(SessionFamilies.title(family[4], in: family) == "Dee" && SessionFamilies.label(family[1]) == "Ada", "subagent labels use the nickname")
+
+        var claudeLead = session("claude-lead", status: "idle", lastActive: "2026-10-04T11:00:00Z", project: "fable", checkout: "wt", branch: "main")
+        claudeLead.subagents = SubagentRollup(count: 4, working: 1)
+        let claude = SessionFamilies.build([claudeLead])[0]
+        expect(claude.subagentCount == 4 && claude.workingSubagents == 1 && claude.isWorking, "observed Claude subagents roll into the parent row")
+
+        let familyTree = SessionTree.build(family + [claudeLead], filter: .running, attentionSessionIDs: [], now: now)
+        expect(families[1].isCurrent == false && families[0].isCurrent, "a family is current while any member works")
+        expect(familyTree.counts[.running] == 2, "Running counts working families, not subagent threads: \(familyTree.counts)")
+        expect(familyTree.projects.flatMap { $0.checkouts.flatMap(\.sessions) }.map(\.id).sorted() == ["claude-lead", "lead"], "a family with a working subagent is running and shows its root")
+        let allFamilies = SessionTree.build(family, filter: .all, attentionSessionIDs: [], now: now)
+        expect(allFamilies.counts[.all] == 2, "All counts families: \(allFamilies.counts)")
+        let capFamily = allFamilies.projects[0].limited(to: 1, keeping: "euclid")
+        expect(capFamily.checkouts.flatMap(\.families).map(\.id) == ["lead"], "selecting a subagent keeps its family visible past the cap")
+
         print("session tree tests passed")
     }
 

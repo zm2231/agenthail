@@ -79,6 +79,7 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	fork.Transcript = ""
 	fork.Status = surface.StatusIdle
 	fork.Name = str(thread, "name")
+	fork.Subagent = codexSubagent(thread)
 	fork.Cwd = str(result, "cwd")
 	if source := codexSource(thread["source"]); source != "" {
 		fork.Source = source

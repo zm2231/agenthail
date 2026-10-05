@@ -134,8 +134,12 @@ from healthy surfaces. Do not describe an unavailable Notion surface as active
 or configured.
 
 Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, or a
-qualified `surface:target` value. If AgentHail reports ambiguity, show the
-candidates and ask for one qualification. Never select heuristically.
+qualified `surface:target` value. A cwd/name fragment resolves to a family's
+root session, never to one of its subagents. Address a Codex subagent by its
+ID or as `@<parent>/<nickname>` (for example `@lead/Ada/Euclid` for a nested
+one). Claude subagents are read-only and cannot be targeted. If AgentHail
+reports ambiguity, show the candidates and ask for one qualification. Never
+select heuristically.
 
 ```bash
 agenthail identify claude:<session-id> researcher

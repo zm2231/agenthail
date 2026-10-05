@@ -117,6 +117,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var hostProject: HostProjectIdentity? = nil
     var checkout: CheckoutIdentity? = nil
     var runtime: SessionRuntime? = nil
+    var subagent: SubagentIdentity? = nil
+    var subagents: SubagentRollup? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -125,6 +127,103 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isReadOnly: Bool { readOnly == true }
+}
+
+struct SubagentIdentity: Codable, Hashable {
+    let parentId: String
+    let rootId: String
+    let depth: Int
+    var nickname: String? = nil
+    var role: String? = nil
+}
+
+struct SubagentRollup: Codable, Hashable {
+    let count: Int
+    let working: Int
+}
+
+struct SessionFamily: Identifiable, Equatable {
+    struct Member: Identifiable, Equatable {
+        let session: SessionState
+        let depth: Int
+        var id: String { session.id }
+    }
+
+    let root: SessionState
+    let members: [Member]
+    let subagentCount: Int
+    let workingSubagents: Int
+
+    var id: String { root.id }
+    var isWorking: Bool { root.isWorking || workingSubagents > 0 }
+    var isCurrent: Bool { isWorking || sessions.contains(where: \.current) }
+    var sessions: [SessionState] { [root] + members.map(\.session) }
+
+    func contains(_ sessionID: String?) -> Bool {
+        guard let sessionID else { return false }
+        return root.id == sessionID || members.contains { $0.id == sessionID }
+    }
+}
+
+enum SessionFamilies {
+    static func build(_ sessions: [SessionState]) -> [SessionFamily] {
+        let ids = Set(sessions.map(\.id))
+        var children: [String: [SessionState]] = [:]
+        var roots: [SessionState] = []
+        for session in sessions {
+            if let parent = session.subagent?.parentId, parent != session.id, ids.contains(parent) {
+                children[parent, default: []].append(session)
+            } else {
+                roots.append(session)
+            }
+        }
+        var placed: Set<String> = []
+        return roots.map { root in
+            placed.insert(root.id)
+            var members: [SessionFamily.Member] = []
+            func walk(_ parentID: String, depth: Int) {
+                for child in children[parentID] ?? [] where !placed.contains(child.id) {
+                    placed.insert(child.id)
+                    members.append(SessionFamily.Member(session: child, depth: depth))
+                    walk(child.id, depth: depth + 1)
+                }
+            }
+            walk(root.id, depth: 1)
+            let observed = root.subagents ?? SubagentRollup(count: 0, working: 0)
+            return SessionFamily(
+                root: root,
+                members: members,
+                subagentCount: members.count + observed.count,
+                workingSubagents: members.filter { $0.session.isWorking }.count + observed.working
+            )
+        }
+    }
+
+    static func subagentSummary(_ family: SessionFamily) -> String {
+        let noun = family.subagentCount == 1 ? "subagent" : "subagents"
+        return family.workingSubagents > 0 ? "\(family.subagentCount) \(noun), \(family.workingSubagents) working" : "\(family.subagentCount) \(noun)"
+    }
+
+    static func label(_ session: SessionState) -> String {
+        guard let nickname = session.subagent?.nickname, !nickname.isEmpty else { return session.title }
+        if let role = session.subagent?.role, !role.isEmpty { return "\(nickname) (\(role))" }
+        return nickname
+    }
+
+    static func title(_ session: SessionState, in sessions: [SessionState]) -> String {
+        guard let parentID = session.subagent?.parentId else { return session.title }
+        guard let parent = sessions.first(where: { $0.id == parentID }) else { return label(session) }
+        return "\(title(parent, in: sessions)) > \(label(session))"
+    }
+}
+
+extension SessionState {
+    var title: String {
+        if let alias, !alias.isEmpty { return "@\(alias)" }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == id || UUID(uuidString: trimmed) != nil { return "Untitled conversation" }
+        return trimmed
+    }
 }
 
 struct SessionRuntime: Codable, Hashable {
@@ -424,6 +523,12 @@ struct ClaudeRunObservation: Decodable, Identifiable, Equatable {
 struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
     let parentSessionId: String
     let agentId: String
+    var agentType: String? = nil
+    var description: String? = nil
+    var toolUseId: String? = nil
+    var depth: Int? = nil
+    var working: Bool? = nil
+    var lastActive: String? = nil
     let transcriptPath: String
 
     var id: String { agentId + transcriptPath }

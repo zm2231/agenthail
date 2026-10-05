@@ -34,6 +34,7 @@ type Claude struct {
 	modelsCache  []surface.ModelOption
 	modelsAt     time.Time
 	modelsFlight *claudeModelsFlight
+	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
 	request      ClaudeRequest
 }
@@ -55,7 +56,7 @@ func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 	if bridge == "" {
 		bridge = cookieBridgePath("cookie")
 	}
-	return &Claude{profile: profile, home: home, cookieBridge: bridge, request: request, transcripts: newClaudeTranscriptIndex(home)}
+	return &Claude{profile: profile, home: home, cookieBridge: bridge, subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -64,8 +65,12 @@ func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObse
 	return ObserveClaudeRuns(ctx, c.home)
 }
 
-func (c *Claude) ObserveClaudeSubagentLinks(ctx context.Context) ([]surface.ClaudeSubagentLink, error) {
-	return ObserveClaudeSubagentLinks(ctx, c.home)
+func (c *Claude) ObserveClaudeSubagents(ctx context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
+	return c.subagents.observeSession(ctx, session)
+}
+
+func (c *Claude) ObserveAllClaudeSubagents(ctx context.Context) ([]surface.ClaudeSubagentLink, error) {
+	return ObserveAllClaudeSubagents(ctx, c.home)
 }
 
 func (c *Claude) Capabilities() surface.Capabilities {
@@ -391,6 +396,11 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 			sess.Name = c.firstUserMessage(sess.Transcript)
 		}
 		c.applyRecordStatus(ctx, &sess, m)
+		if sess.HasLocal {
+			if rollup, rollupErr := c.subagents.rollup(ctx, &sess); rollupErr == nil {
+				sess.Subagents = rollup
+			}
+		}
 		out = append(out, sess)
 	}
 	return out, nil

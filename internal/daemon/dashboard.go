@@ -101,6 +101,8 @@ type dashboardSession struct {
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
+	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
+	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
 }
 
 type dashboardState struct {
@@ -829,6 +831,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
 				entry.Open = saved.Open
+				entry.Subagents = saved.Subagents
 			}
 		}
 		entry.QueueCount = counts[session.ID]
@@ -1951,14 +1954,11 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 			return filtered, err
 		}
 		requests["claudeSubagents"] = func() (any, error) {
-			links, err := observer.ObserveClaudeSubagentLinks(ctx)
-			filtered := []surface.ClaudeSubagentLink{}
-			for _, link := range links {
-				if link.ParentSessionID == session.ID {
-					filtered = append(filtered, link)
-				}
+			links, err := observer.ObserveClaudeSubagents(ctx, session)
+			if links == nil {
+				links = []surface.ClaudeSubagentLink{}
 			}
-			return filtered, err
+			return links, err
 		}
 	}
 	response := map[string]any{"sessionId": session.ID}

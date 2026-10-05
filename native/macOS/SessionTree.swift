@@ -14,17 +14,17 @@ struct SessionTree: Equatable {
         let name: String
         var checkouts: [Checkout]
 
-        var sessionCount: Int { checkouts.reduce(0) { $0 + $1.sessions.count } }
+        var sessionCount: Int { checkouts.reduce(0) { $0 + $1.families.count } }
 
         func limited(to limit: Int, keeping selectedID: String?) -> Project {
-            let ordered = checkouts.flatMap(\.sessions).sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+            let ordered = checkouts.flatMap(\.families).sorted { SessionTree.activity($0) > SessionTree.activity($1) }
             var visible = Set(ordered.prefix(limit).map(\.id))
-            if let selectedID, ordered.contains(where: { $0.id == selectedID }) { visible.insert(selectedID) }
+            if let selected = ordered.first(where: { $0.contains(selectedID) }) { visible.insert(selected.id) }
             var copy = self
             copy.checkouts = checkouts.compactMap { checkout in
                 var trimmed = checkout
-                trimmed.sessions = checkout.sessions.filter { visible.contains($0.id) }
-                return trimmed.sessions.isEmpty ? nil : trimmed
+                trimmed.families = checkout.families.filter { visible.contains($0.id) }
+                return trimmed.families.isEmpty ? nil : trimmed
             }
             return copy
         }
@@ -38,7 +38,9 @@ struct SessionTree: Equatable {
         let branchLabel: String?
         let isMain: Bool
         let dirty: Bool
-        var sessions: [SessionState]
+        var families: [SessionFamily]
+
+        var sessions: [SessionState] { families.map(\.root) }
     }
 
     static let recentWindow: TimeInterval = 24 * 60 * 60
@@ -48,15 +50,17 @@ struct SessionTree: Equatable {
     let counts: [SessionFilter: Int]
 
     static func build(_ sessions: [SessionState], filter: SessionFilter, attentionSessionIDs: Set<String>, now: Date) -> SessionTree {
+        let families = SessionFamilies.build(sessions)
         var counts: [SessionFilter: Int] = [:]
         for candidate in SessionFilter.allCases {
-            counts[candidate] = sessions.filter { includes($0, in: candidate, now: now) }.count
+            counts[candidate] = families.filter { includes($0, in: candidate, now: now) }.count
         }
-        let visible = sessions
+        let visible = families
             .filter { includes($0, in: filter, now: now) }
             .sorted { activity($0) > activity($1) }
         var projects: [Project] = []
-        for session in visible {
+        for family in visible {
+            let session = family.root
             let projectID = session.hostProject?.id ?? session.cwd ?? "unknown"
             if !projects.contains(where: { $0.id == projectID }) {
                 projects.append(Project(id: projectID, name: projectName(session), checkouts: []))
@@ -64,10 +68,10 @@ struct SessionTree: Equatable {
             let projectIndex = projects.firstIndex { $0.id == projectID }!
             let checkoutID = session.checkout?.id ?? session.checkout?.path ?? session.cwd ?? projectID
             if !projects[projectIndex].checkouts.contains(where: { $0.id == checkoutID }) {
-                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, sessions: []))
+                projects[projectIndex].checkouts.append(Checkout(id: checkoutID, label: checkoutLabel(session), branchLabel: branchLabel(session), isMain: session.checkout?.isMain ?? true, dirty: session.checkout?.dirty ?? false, families: []))
             }
             let checkoutIndex = projects[projectIndex].checkouts.firstIndex { $0.id == checkoutID }!
-            projects[projectIndex].checkouts[checkoutIndex].sessions.append(session)
+            projects[projectIndex].checkouts[checkoutIndex].families.append(family)
         }
         return SessionTree(projects: projects, needsYou: needsYou(sessions, attentionSessionIDs: attentionSessionIDs), counts: counts)
     }
@@ -87,6 +91,19 @@ struct SessionTree: Equatable {
         case .all:
             return true
         }
+    }
+
+    static func includes(_ family: SessionFamily, in filter: SessionFilter, now: Date) -> Bool {
+        switch filter {
+        case .running:
+            return family.isWorking
+        case .recent, .all:
+            return family.isWorking || family.sessions.contains { includes($0, in: filter, now: now) }
+        }
+    }
+
+    static func activity(_ family: SessionFamily) -> Date {
+        family.sessions.map(activity).max() ?? .distantPast
     }
 
     static func activity(_ session: SessionState) -> Date {
