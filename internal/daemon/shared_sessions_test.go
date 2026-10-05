@@ -201,3 +201,50 @@ func TestSharedClaudeSessionsOrdersPeersByStart(t *testing.T) {
 		t.Fatalf("c peers=%+v", got)
 	}
 }
+
+func TestFailedClaudeDiscoveryKeepsSnapshotAndDetailAgreeing(t *testing.T) {
+	d, store, source := sharedConversationFixture(t)
+	openSecondProcess(t, store, source)
+	d.discoverCatalog(context.Background())
+	d.Surfaces = []surface.Surface{&failingClaudeListSurface{daemonSurface: source.daemonSurface}}
+	d.discoverCatalog(context.Background())
+	for id, peer := range map[string]string{"first": "second", "second": "first"} {
+		row := stateSession(t, d, id)
+		if row.Freshness == nil || !row.Freshness.Stale {
+			t.Fatalf("%s freshness=%+v after failed discovery", id, row.Freshness)
+		}
+		raw, found := detailSharedWith(t, d, id)
+		var detail []dashboardSharedSession
+		if !found || json.Unmarshal(raw, &detail) != nil || !equalSharedSessions(detail, row.SharedWith) || len(detail) != 1 || detail[0].ID != peer {
+			t.Fatalf("%s snapshot sharedWith=%+v detail=%s", id, row.SharedWith, raw)
+		}
+	}
+}
+
+func TestPeerThatDidNotCommitIsDroppedFromSharedRow(t *testing.T) {
+	d, store, source := sharedConversationFixture(t)
+	openSecondProcess(t, store, source)
+	d.discoverCatalog(context.Background())
+	after := latestCatalogSeq(t, store)
+	// discoverCatalog drops a row whose publish failed from the live set.
+	delete(d.catalogLive, "second")
+	d.refreshCatalogStatus(context.Background())
+	if events := catalogSharedEvents(t, store, after, "first"); len(events) != 1 || events[0] != nil {
+		t.Fatalf("first events=%+v", events)
+	}
+	if shared := stateSession(t, d, "first").SharedWith; shared != nil {
+		t.Fatalf("state sharedWith=%+v", shared)
+	}
+	if raw, found := detailSharedWith(t, d, "first"); found {
+		t.Fatalf("detail sharedWith=%s", raw)
+	}
+	after = latestCatalogSeq(t, store)
+	d.refreshCatalogStatus(context.Background())
+	if events := catalogSharedEvents(t, store, after, "first"); len(events) != 0 {
+		t.Fatalf("settled relation republished: %+v", events)
+	}
+	d.discoverCatalog(context.Background())
+	if shared := stateSession(t, d, "first").SharedWith; len(shared) != 1 || shared[0].ID != "second" {
+		t.Fatalf("relation not restored by the next discovery: %+v", shared)
+	}
+}

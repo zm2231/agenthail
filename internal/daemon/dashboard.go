@@ -1908,8 +1908,12 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	response["journalSeq"] = sessionRead.JournalSeq
-	if shared := d.sharedSessions(session.ID); len(shared) > 0 {
-		response["sharedWith"] = shared
+	if session.Surface == surface.KindClaude {
+		if shared, err := d.savedSharedSessions(session.ID); err != nil {
+			d.log.Printf("session %s shared processes: %s", d.resolveDisplay(session.ID), err)
+		} else if len(shared) > 0 {
+			response["sharedWith"] = shared
+		}
 	}
 	if sessionReadErr != nil {
 		response["readError"] = "Session journal could not be read."

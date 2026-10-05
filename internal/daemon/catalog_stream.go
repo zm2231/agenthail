@@ -321,9 +321,6 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		health := d.recordSurfaceHealth(ctx, adapter, err)
 		if err != nil {
 			d.forgetCatalogLive(adapter.Name(), nil)
-			if adapter.Name() == surface.KindClaude {
-				d.storeSharedSessions(nil)
-			}
 			observedAt := time.Now().UTC()
 			if markErr := d.catalog.markDiscoveryFailure(adapter.Name(), "catalog discovery failed", observedAt); markErr != nil {
 				d.log.Printf("catalog discovery failure state: %s", markErr)
@@ -381,7 +378,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
 		if adapter.Name() == surface.KindClaude {
-			d.storeSharedSessions(shared)
+			d.refreshCatalogShared(&config, counts)
 		}
 		complete := true
 		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
@@ -414,7 +411,6 @@ func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]str
 func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 	var config *DashboardConfig
 	var counts map[string]int
-	refreshedClaude := false
 	for id, live := range d.catalogLive {
 		stamps := catalogFileStamps(live.files)
 		if live.stamps != nil && equalStrings(live.stamps, stamps) {
@@ -445,14 +441,11 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		}
 		if d.publishCatalogSession(live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, live.shared, *config, time.Now().UTC()) {
 			live.session = refreshed
-			refreshedClaude = refreshedClaude || live.adapter.Name() == surface.KindClaude
 		} else {
 			live.stamps = nil
 		}
 	}
-	if refreshedClaude {
-		d.refreshCatalogShared(*config, counts)
-	}
+	d.refreshCatalogShared(config, counts)
 }
 
 // publishCatalogSession records one session row, rebuilding the projection

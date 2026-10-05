@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"time"
@@ -52,23 +53,31 @@ func sharedClaudeSessions(sessions []surface.Session) map[string][]dashboardShar
 	return shared
 }
 
-// storeSharedSessions replaces the shared-process view that session detail
-// reads; discovery and status refresh own it.
-func (d *Daemon) storeSharedSessions(shared map[string][]dashboardSharedSession) {
-	d.sharedMu.Lock()
-	d.shared = shared
-	d.sharedMu.Unlock()
-}
-
-func (d *Daemon) sharedSessions(sessionID string) []dashboardSharedSession {
-	d.sharedMu.Lock()
-	defer d.sharedMu.Unlock()
-	return d.shared[sessionID]
+// savedSharedSessions reads the relation from the session's committed catalog
+// projection, the row snapshots serve, so detail and snapshots always agree.
+func (d *Daemon) savedSharedSessions(sessionID string) ([]dashboardSharedSession, error) {
+	snapshot, err := d.Registry.CatalogSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range snapshot.Sessions {
+		if record.Session.ID != sessionID {
+			continue
+		}
+		var saved dashboardSession
+		if err := json.Unmarshal([]byte(record.ProjectionFingerprint), &saved); err != nil {
+			return nil, err
+		}
+		return saved.SharedWith, nil
+	}
+	return nil, nil
 }
 
 // refreshCatalogShared republishes live Claude rows whose shared-process list
-// changed after a status refresh, so each row reports its peers' status.
-func (d *Daemon) refreshCatalogShared(config DashboardConfig, counts map[string]int) {
+// no longer matches the rows that committed, so a relation only names peers
+// clients can open and each entry carries its peer's current status. A failed
+// republish is retried on the next status tick.
+func (d *Daemon) refreshCatalogShared(config *DashboardConfig, counts map[string]int) {
 	sessions := make([]surface.Session, 0, len(d.catalogLive))
 	for _, live := range d.catalogLive {
 		if live.adapter.Name() == surface.KindClaude {
@@ -80,11 +89,22 @@ func (d *Daemon) refreshCatalogShared(config DashboardConfig, counts map[string]
 		if live.adapter.Name() != surface.KindClaude || equalSharedSessions(live.shared, shared[id]) {
 			continue
 		}
-		if d.publishCatalogSession(live.adapter, live.session, live.identity, live.alias, counts[id], live.open, shared[id], config, time.Now().UTC()) {
+		if config == nil {
+			loaded, err := LoadDashboardConfig()
+			if err != nil {
+				d.log.Printf("catalog config: %s", err)
+				return
+			}
+			config = &loaded
+			if counts, err = d.Registry.QueueCounts(); err != nil {
+				d.log.Printf("catalog queue counts: %s", err)
+				return
+			}
+		}
+		if d.publishCatalogSession(live.adapter, live.session, live.identity, live.alias, counts[id], live.open, shared[id], *config, time.Now().UTC()) {
 			live.shared = shared[id]
 		}
 	}
-	d.storeSharedSessions(shared)
 }
 
 func equalSharedSessions(left, right []dashboardSharedSession) bool {
