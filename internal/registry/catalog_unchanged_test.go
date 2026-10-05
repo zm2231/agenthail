@@ -151,3 +151,80 @@ func TestDiscoveredClaudeAgentKeepsUnrelatedConversationRows(t *testing.T) {
 		t.Fatalf("row with a live process was merged: %v", err)
 	}
 }
+
+func TestDiscoveredClaudeAgentAbsorbsLaunchRegisteredAfterIt(t *testing.T) {
+	r := openTestRegistry(t)
+	transcript := "/home/test/.claude/projects/-work/conversation-3.jsonl"
+	state, event := unchangedCatalogState("session_bridge", time.Now())
+	state.Session = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Cwd: "/work", PID: 4242, Status: surface.StatusBusy, Transcript: transcript, HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	if _, _, err := r.RecordCatalogSession(state, event); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "conversation-3", Surface: surface.KindClaude, Cwd: "/work", Status: surface.StatusUnknown, Source: "agenthail"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("late", "conversation-3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.RecordCatalogSession(state, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Session("conversation-3"); err == nil {
+		t.Fatal("next discovery pass kept the launch record")
+	}
+	if owner, err := r.LookupAlias("late"); err != nil || owner != "session_bridge" {
+		t.Fatalf("alias owner=%q err=%v", owner, err)
+	}
+}
+
+func TestMergedSessionKeepsDeliveryIntentsAndLeavesTheCatalog(t *testing.T) {
+	r := openTestRegistry(t)
+	transcript := "/home/test/.claude/projects/-work/conversation-4.jsonl"
+	legacy, legacyEvent := unchangedCatalogState("conversation-4", time.Now())
+	legacy.Session = surface.Session{ID: "conversation-4", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Transcript: transcript, HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	if _, _, err := r.RecordCatalogSession(legacy, legacyEvent); err != nil {
+		t.Fatal(err)
+	}
+	other := surface.Session{ID: "other", Surface: surface.KindCodex}
+	if err := r.RegisterSession(other); err != nil {
+		t.Fatal(err)
+	}
+	inbound, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: other.ID, TargetSessionID: legacy.Session.ID, Message: "to the agent", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbound, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: legacy.Session.ID, TargetSessionID: other.ID, Message: "from the agent", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, latest, err := r.CatalogState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, bridgeEvent := unchangedCatalogState("session_bridge", time.Now())
+	bridge.Session = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Transcript: transcript, HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	if _, _, err := r.RecordCatalogSession(bridge, bridgeEvent); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := r.DeliveryIntent(inbound.ID); err != nil || moved.TargetSessionID != "session_bridge" {
+		t.Fatalf("inbound=%+v err=%v", moved, err)
+	}
+	if moved, err := r.DeliveryIntent(outbound.ID); err != nil || moved.SenderSessionID != "session_bridge" {
+		t.Fatalf("outbound=%+v err=%v", moved, err)
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil || len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Session.ID != "session_bridge" {
+		t.Fatalf("snapshot=%+v err=%v", snapshot.Sessions, err)
+	}
+	window, err := r.CatalogEventsAfter(latest, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := false
+	for _, event := range window.Events {
+		removed = removed || (event.Type == "session.removed" && event.EntityID == "conversation-4")
+	}
+	if !removed {
+		t.Fatalf("events=%+v", window.Events)
+	}
+}
