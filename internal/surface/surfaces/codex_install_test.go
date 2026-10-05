@@ -139,3 +139,22 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectCodexInstallationFindsPerUserDesktop(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	isolateCodexInstalls(t, false)
+	perUser := []string{}
+	for _, path := range codexDesktopExecutables() {
+		if strings.HasPrefix(path, home) {
+			perUser = append(perUser, path)
+		}
+	}
+	CodexDesktopExecutables = perUser
+	desktop := filepath.Join(home, "Applications", "Codex.app", "Contents", "MacOS", "Codex")
+	writeExecutable(t, desktop, "#!/bin/sh\n")
+	if got := DetectCodexInstallation().Desktop; got != desktop {
+		t.Fatalf("desktop=%q, want the ~/Applications install", got)
+	}
+}

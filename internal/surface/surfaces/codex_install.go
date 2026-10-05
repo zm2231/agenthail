@@ -8,10 +8,19 @@ import (
 
 const CodexStandaloneInstallCommand = "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
 
-var CodexDesktopExecutables = []string{
-	"/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-	"/Applications/Codex.app/Contents/MacOS/ChatGPT",
-	"/Applications/Codex.app/Contents/MacOS/Codex",
+var CodexDesktopExecutables = codexDesktopExecutables()
+
+func codexDesktopExecutables() []string {
+	userHome, _ := os.UserHomeDir()
+	paths := []string{}
+	for _, root := range []string{"/Applications", filepath.Join(userHome, "Applications")} {
+		paths = append(paths,
+			filepath.Join(root, "ChatGPT.app", "Contents", "MacOS", "ChatGPT"),
+			filepath.Join(root, "Codex.app", "Contents", "MacOS", "ChatGPT"),
+			filepath.Join(root, "Codex.app", "Contents", "MacOS", "Codex"),
+		)
+	}
+	return paths
 }
 
 var codexBundledCLIs = func() []string {

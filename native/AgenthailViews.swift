@@ -863,6 +863,9 @@ struct SurfaceRow: View {
                     Circle().fill(surface.connected ? Color.green : Color.secondary).frame(width: 7, height: 7)
                     Text(surface.connected ? "Connected" : "Not connected").foregroundStyle(.secondary)
                 }
+                ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
+                    Text(line).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
             }
             Spacer()
             Metric(label: "WORKING", value: sessions.filter { $0.surface == surface.name && $0.isWorking }.count)

@@ -491,7 +491,51 @@ func TestDashboardSnapshotCarriesCodexRuntimeProblemAndRepair(t *testing.T) {
 			if entry.Health != test.health || entry.RepairAction != test.repair || entry.Runtime == nil || entry.Runtime.Problem != test.runtime.Problem || len(entry.Runtime.Notes) != len(test.runtime.Notes) {
 				t.Fatalf("entry=%+v runtime=%+v", entry, entry.Runtime)
 			}
+			event := latestSurfaceHealthEvent(t, d)
+			if event.Health != entry.Health || event.Detail != entry.HealthDetail || event.Runtime == nil || event.Runtime.Problem != entry.Runtime.Problem || len(event.Runtime.Notes) != len(entry.Runtime.Notes) {
+				t.Fatalf("stream event %+v disagrees with snapshot %+v", event, entry)
+			}
 		})
+	}
+}
+
+type surfaceHealthEvent struct {
+	Health  string                 `json:"health"`
+	Detail  string                 `json:"detail"`
+	Runtime *surface.RuntimeStatus `json:"runtime"`
+}
+
+func latestSurfaceHealthEvent(t *testing.T, d *Daemon) surfaceHealthEvent {
+	t.Helper()
+	window, err := d.Registry.CatalogEventsAfter(0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := len(window.Events) - 1; index >= 0; index-- {
+		if window.Events[index].Type == "surface.health" {
+			var event surfaceHealthEvent
+			if err := json.Unmarshal(window.Events[index].Payload, &event); err != nil {
+				t.Fatal(err)
+			}
+			return event
+		}
+	}
+	t.Fatal("no surface.health event")
+	return surfaceHealthEvent{}
+}
+
+func TestCatalogStreamPublishesANoteThatAppearsWhileHealthy(t *testing.T) {
+	_, registry, _, _, _ := daemonFixture(t)
+	adapter := &healthDaemonSurface{daemonSurface: &daemonSurface{kind: surface.KindCodex}, runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true}}
+	d := New(registry, []surface.Surface{adapter})
+	d.discoverCatalog(context.Background())
+	if event := latestSurfaceHealthEvent(t, d); event.Health != "healthy" || event.Runtime == nil || len(event.Runtime.Notes) != 0 {
+		t.Fatalf("event=%+v", event)
+	}
+	adapter.runtime.Notes = []surface.RuntimeNote{{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install"}}
+	d.discoverCatalog(context.Background())
+	if event := latestSurfaceHealthEvent(t, d); event.Health != "healthy" || event.Runtime == nil || len(event.Runtime.Notes) != 1 {
+		t.Fatalf("a note that appeared while healthy was not published: %+v", event)
 	}
 }
 

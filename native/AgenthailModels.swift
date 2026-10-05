@@ -67,6 +67,36 @@ struct SurfaceState: Decodable, Identifiable, Equatable {
     let health: String
     let healthDetail: String?
     let capabilities: Capabilities
+    var runtime: SurfaceRuntime? = nil
+
+    var needsAttention: Bool { health != "healthy" || !(runtime?.advice.isEmpty ?? true) }
+}
+
+struct SurfaceRuntimeNote: Decodable, Equatable {
+    let problem: String
+    let message: String
+    let remediation: String?
+}
+
+struct SurfaceRuntime: Decodable, Equatable {
+    let name: String
+    let reachable: Bool
+    let durable: Bool
+    let problem: String?
+    let detail: String?
+    let remediation: String?
+    let notes: [SurfaceRuntimeNote]?
+
+    var advice: [String] {
+        var lines: [String] = []
+        if problem != nil {
+            lines.append([detail, remediation.map { "Fix: \($0)" }].compactMap { $0 }.joined(separator: ". "))
+        }
+        for note in notes ?? [] {
+            lines.append(note.remediation.map { "\(note.message). Fix: \($0)" } ?? note.message)
+        }
+        return lines
+    }
 }
 
 struct SessionState: Codable, Identifiable, Hashable {
@@ -596,6 +626,7 @@ struct CatalogStreamData: Decodable {
     let surface: String?
     let health: String?
     let detail: String?
+    let runtime: SurfaceRuntime?
     let deliveryId: Int64?
     let queueCount: Int?
     let sourceSessionId: String?

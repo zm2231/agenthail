@@ -851,7 +851,7 @@ final class AgenthailIOSModel: ObservableObject {
                 return
             }
             let previous = current.surfaces[index]
-            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities)
+            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime)
             snapshot = current
         case "delivery.problem":
             guard let deliveryId = event.data.deliveryId,

@@ -855,7 +855,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	return state, nil
 }
 
-func (d *Daemon) recordSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) {
+func (d *Daemon) recordSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
 	entry := d.dashboardSurfaceHealth(ctx, adapter, listErr)
 	d.surfaceHealthMu.Lock()
 	defer d.surfaceHealthMu.Unlock()
@@ -863,6 +863,7 @@ func (d *Daemon) recordSurfaceHealth(ctx context.Context, adapter surface.Surfac
 		d.surfaceHealth = map[surface.SurfaceKind]dashboardSurface{}
 	}
 	d.surfaceHealth[adapter.Name()] = entry
+	return entry
 }
 
 func (d *Daemon) observedSurfaceHealth(kind surface.SurfaceKind) (dashboardSurface, bool) {
@@ -900,6 +901,13 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 				if entry.HealthDetail == "" {
 					entry.HealthDetail = runtimeStatus.Detail
 				}
+			}
+			if entry.Health == "healthy" && entry.HealthDetail == "" {
+				messages := make([]string, 0, len(runtimeStatus.Notes))
+				for _, note := range runtimeStatus.Notes {
+					messages = append(messages, note.Message)
+				}
+				entry.HealthDetail = strings.Join(messages, "; ")
 			}
 			switch runtimeStatus.Problem {
 			case surface.RuntimeBridgeUnavailable:
