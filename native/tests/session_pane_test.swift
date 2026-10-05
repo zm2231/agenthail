@@ -89,6 +89,26 @@ struct SessionPaneTest {
         live.closePane(livePane)
         flaky.stop()
 
+        let journaledJSON = detailJSON.replacingOccurrences(of: #""readOnly":false"#, with: #""journalSeq":100,"readOnly":false"#)
+        var journaledRequests: [String] = []
+        let journaled = try! StubServer { line, _ in
+            journaledRequests.append(line)
+            if line.contains("/api/v1/session-stream?") { return "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" }
+            if line.contains("/api/v1/session?") { return StubServer.reply("200 OK", journaledJSON) }
+            return StubServer.reply("404 Not Found", "{}")
+        }
+        let journaledPort = await journaled.ready()
+        let journaledModel = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(journaledPort)")!, token: "t", session: URLSession(configuration: .ephemeral)))
+        let journaledPane = journaledModel.openPane()
+        journaledPane.select("R")
+        for _ in 0..<60 where !journaledRequests.contains(where: { $0.contains("/api/v1/session-stream?") }) { try? await Task.sleep(for: .milliseconds(50)) }
+        let streamIndex = journaledRequests.firstIndex { $0.contains("/api/v1/session-stream?") }
+        let detailIndex = journaledRequests.firstIndex { $0.contains("/api/v1/session?") }
+        check(streamIndex != nil && journaledRequests[streamIndex!].contains("after=100"), "the live stream resumes after the loaded journal position: \(journaledRequests)")
+        check(detailIndex != nil && detailIndex! < streamIndex!, "the live stream opens after the first load")
+        journaledModel.closePane(journaledPane)
+        journaled.stop()
+
         let offline = AgenthailModel(connecting: false, api: AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:9")!, token: "t", session: URLSession(configuration: .ephemeral)))
         let offlinePane = offline.openPane()
         offline.operationError = "An action failed."
@@ -138,11 +158,17 @@ struct SessionPaneTest {
         let openPort = await openServer.ready()
         let openAPI = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(openPort)")!, token: "t", session: URLSession(configuration: .ephemeral))
         let received = ReceivedSequences()
-        let streaming = Task { try? await openAPI.streamSession(id: "S", after: 0, onConnected: {}, onEvent: { await received.add($0.seq) }) }
+        let streaming = Task {
+            try? await openAPI.streamSession(id: "S", after: 0, onConnected: {}, onEvent: { await received.add($0.seq) })
+            await received.finish()
+        }
         let deadline = Date().addingTimeInterval(5)
         while await received.values.count < 2, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
         check(await received.values == [1, 2], "events on a stream that stays open arrive as they are sent")
         streaming.cancel()
+        let cancelDeadline = Date().addingTimeInterval(3)
+        while await !received.finished, Date() < cancelDeadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(await received.finished, "cancelling a silent open stream ends it")
         openServer.stop()
 
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
@@ -151,7 +177,9 @@ struct SessionPaneTest {
 
     actor ReceivedSequences {
         private(set) var values: [UInt64] = []
+        private(set) var finished = false
         func add(_ value: UInt64) { values.append(value) }
+        func finish() { finished = true }
     }
 
     final class StubServer: @unchecked Sendable {
