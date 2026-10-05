@@ -28,6 +28,8 @@ type fixtureProvider struct {
 	pending      []Batch
 	polled       chan struct{}
 	interrupts   int
+	speaking     chan struct{}
+	speakingText string
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -172,7 +174,15 @@ func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID st
 	}{requestID, success, text})
 	return nil
 }
-func (p *fixtureProvider) Request(_ context.Context, _ *surface.Session, method string, params map[string]any) error {
+func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, method string, params map[string]any) error {
+	p.mu.Lock()
+	speaking, speakingText := p.speaking, p.speakingText
+	p.mu.Unlock()
+	if speaking != nil && method == "thread/realtime/appendText" && params["text"] == speakingText {
+		close(speaking)
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.requests = append(p.requests, method)
@@ -654,6 +664,31 @@ func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
 	case <-closed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close returned before, or never after, stopping the delegation watch")
+	}
+}
+
+func TestCloseCancelsSpeechStillWaitingOnTheOperator(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
+	}
+	f := targetSelected(t, target)
+	speaking := make(chan struct{})
+	f.provider.mu.Lock()
+	f.provider.speaking, f.provider.speakingText = speaking, "The answer."
+	f.provider.mu.Unlock()
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this session"})
+	select {
+	case <-speaking:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delegated answer never reached the operator")
+	}
+	closed := make(chan struct{})
+	go func() { f.service.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close waited on speech the operator never accepted")
 	}
 }
 

@@ -607,14 +607,16 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	return nil
 }
 
-// Close stops the service's background work. It waits for an action in
-// progress, refuses later ones, and waits for every delegation watch and event
-// poll to return, so nothing writes the state file after it returns.
+// Close stops the service's background work. It cancels first, so work that
+// holds s.mu while waiting on the service context gives the lock back, then
+// waits for an action in progress, refuses later ones, and waits for every
+// delegation watch and event poll to return, so nothing writes the state file
+// after it returns.
 func (s *Service) Close() {
+	s.stop()
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.stop()
 	s.tasks.Wait()
 }
 
@@ -797,7 +799,7 @@ func (s *Service) speakDelegation(attemptID, messageID string, target *surface.S
 	if v.AttemptID != attemptID || v.Phase != "connected" || v.Target == nil || v.Target.ID != target.ID || v.Session == nil {
 		return
 	}
-	if err := s.provider.Request(context.Background(), v.Session, "thread/realtime/appendText", map[string]any{"threadId": v.Session.ID, "text": text, "role": "developer"}); err != nil {
+	if err := s.provider.Request(s.background, v.Session, "thread/realtime/appendText", map[string]any{"threadId": v.Session.ID, "text": text, "role": "developer"}); err != nil {
 		v.Message = "Correlated " + stage + " update could not be handed to realtime audio: " + err.Error()
 		s.appendDelegationEvent(messageID, target, &delivery.Receipt{Evidence: surface.EvidenceFailed, SessionID: target.ID, TurnID: turnID}, stage+"-failed")
 		_ = s.save()
@@ -920,7 +922,7 @@ func (s *Service) observe() {
 				s.state.State.Message = "Voice event connection interrupted: " + err.Error()
 			}
 			if s.clock.now().Sub(s.lastSeen) > 40*time.Second {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(s.background, 10*time.Second)
 				_ = s.apply(ctx, s.state.Owner, Action{Action: "stop", AttemptID: s.state.State.AttemptID})
 				cancel()
 				s.state.State.Message = "Phone disconnected; audio hangup requested. Agent work remains in the operator thread."
