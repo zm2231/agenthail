@@ -299,9 +299,9 @@ func (f *voiceFixture) tick() {
 	case <-time.After(time.Second):
 		f.t.Fatal("call observer did not poll")
 	}
-	// View takes the service lock, so the cycle that polled has completed.
+	// Taking the service lock waits for the cycle that polled to complete.
 	done := make(chan struct{})
-	go func() { f.service.View(""); close(done) }()
+	go func() { f.service.mu.Lock(); f.service.unlock(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -689,6 +689,50 @@ func TestCloseCancelsSpeechStillWaitingOnTheOperator(t *testing.T) {
 	case <-closed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close waited on speech the operator never accepted")
+	}
+}
+
+func TestSpeechWaitingOnTheOperatorLeavesViewAndActionsResponsive(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
+	}
+	f := targetSelected(t, target)
+	f.service.mu.Lock()
+	f.service.speechTimeout = 300 * time.Millisecond
+	f.service.mu.Unlock()
+	speaking := make(chan struct{})
+	f.provider.mu.Lock()
+	f.provider.speaking, f.provider.speakingText = speaking, "The answer."
+	f.provider.mu.Unlock()
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this session"})
+	select {
+	case <-speaking:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delegated answer never reached the operator")
+	}
+	viewed := make(chan State, 1)
+	go func() { viewed <- f.View() }()
+	select {
+	case v := <-viewed:
+		if v.Phase != "connected" || v.Target == nil || v.Target.ID != "target-a" {
+			t.Fatalf("view during speech=%+v", v)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("View waited on speech the operator had not accepted")
+	}
+	acted := make(chan error, 1)
+	go func() { _, err := f.Apply(Action{Action: "stop", AttemptID: "call-a"}); acted <- err }()
+	select {
+	case err := <-acted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a control action waited past the speech deadline")
+	}
+	if v := f.View(); !hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
+		t.Fatalf("expired speech was not recorded before the stop: %+v", v)
 	}
 }
 
