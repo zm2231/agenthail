@@ -3,8 +3,8 @@ package surfaces
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -21,29 +21,34 @@ func writeClaudeProjectTranscript(t *testing.T, home, dir, id string) string {
 	return path
 }
 
-func TestClaudeTranscriptUsesClaudeCodeProjectDirectoryNames(t *testing.T) {
+func TestClaudeTranscriptIsFoundByConversationIDInAnyProject(t *testing.T) {
 	home := t.TempDir()
 	adapter := NewClaude("", home)
-	cases := []struct{ cwd, dir string }{
-		{"/Volumes/work/repo/.worktrees/fix-a", "-Volumes-work-repo--worktrees-fix-a"},
-		{"/Users/dev/My Project/app_v2", "-Users-dev-My-Project-app-v2"},
-		{"/Users/dev/.claude/skills/voice", "-Users-dev--claude-skills-voice"},
+	worktree := writeClaudeProjectTranscript(t, home, "-Volumes-work-repo--worktrees-fix-a", "11111111-aaaa")
+	hashed := writeClaudeProjectTranscript(t, home, "-Users-dev-very-long-name-abc123", "22222222-bbbb")
+	if got := adapter.transcriptPath(&surface.Session{ID: "11111111-aaaa", Cwd: "/Volumes/work/repo/.worktrees/fix-a"}); got != worktree {
+		t.Fatalf("worktree transcript %q, want %q", got, worktree)
 	}
-	for index, test := range cases {
-		id := []string{"11111111-aaaa", "22222222-bbbb", "33333333-cccc"}[index]
-		want := writeClaudeProjectTranscript(t, home, test.dir, id)
-		if got := adapter.transcriptPath(&surface.Session{ID: id, Cwd: test.cwd}); got != want {
-			t.Fatalf("cwd %q: transcript %q, want %q", test.cwd, got, want)
-		}
+	if got := adapter.transcriptPath(&surface.Session{ID: "22222222-bbbb", Cwd: "/Users/dev/somewhere/else"}); got != hashed {
+		t.Fatalf("transcript in a project not named after the cwd %q, want %q", got, hashed)
 	}
 }
 
-func TestClaudeTranscriptFollowsAConversationThatChangedDirectory(t *testing.T) {
+func TestClaudeTranscriptAppearsAfterTheSessionStarts(t *testing.T) {
 	home := t.TempDir()
 	adapter := NewClaude("", home)
-	want := writeClaudeProjectTranscript(t, home, "-Users-dev-launch", "moved-1")
-	if got := adapter.transcriptPath(&surface.Session{ID: "moved-1", Cwd: "/Users/dev/launch/sub"}); got != want {
-		t.Fatalf("moved conversation transcript %q, want %q", got, want)
+	writeClaudeProjectTranscript(t, home, "-Users-dev-app", "existing")
+	if got := adapter.resolveTranscript("new-1"); got != "" {
+		t.Fatalf("a conversation with no transcript resolved to %q", got)
+	}
+	dir := filepath.Join(home, ".claude", "projects", "-Users-dev-app")
+	later := time.Now().Add(2 * time.Second)
+	want := writeClaudeProjectTranscript(t, home, "-Users-dev-app", "new-1")
+	if err := os.Chtimes(dir, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if got := adapter.resolveTranscript("new-1"); got != want {
+		t.Fatalf("a transcript written after the first lookup resolved to %q, want %q", got, want)
 	}
 }
 
@@ -52,51 +57,79 @@ func TestClaudeTranscriptDoesNotGuessBetweenProjects(t *testing.T) {
 	adapter := NewClaude("", home)
 	writeClaudeProjectTranscript(t, home, "-Users-dev-one", "dup-1")
 	writeClaudeProjectTranscript(t, home, "-Users-dev-two", "dup-1")
-	want := filepath.Join(home, ".claude", "projects", "-Users-dev-three", "dup-1.jsonl")
-	if got := adapter.transcriptPath(&surface.Session{ID: "dup-1", Cwd: "/Users/dev/three"}); got != want {
-		t.Fatalf("ambiguous id resolved to %q, want the launch-directory path %q", got, want)
+	if got := adapter.resolveTranscript("dup-1"); got != "" {
+		t.Fatalf("an id present in two projects resolved to %q", got)
 	}
-	if got := adapter.transcriptPath(&surface.Session{ID: "../escape", Cwd: "/Users/dev/three"}); got != "" {
+	if got := adapter.resolveTranscript("../escape"); got != "" {
 		t.Fatalf("an id with a path separator resolved to %q", got)
 	}
 }
 
-func TestClaudeTranscriptIsNotPredictedForLongProjectNames(t *testing.T) {
+func TestClaudeTranscriptIndexRelistsOnlyChangedProjects(t *testing.T) {
 	home := t.TempDir()
-	adapter := NewClaude("", home)
-	long := "/Users/dev/" + strings.Repeat("deep/", 50) + "repo"
-	session := &surface.Session{ID: "long-1", Cwd: long}
-	if got := adapter.transcriptPath(session); got != "" {
-		t.Fatalf("a long project name was predicted as %q; Claude Code shortens it with a hash", got)
+	index := newClaudeTranscriptIndex(home)
+	for _, dir := range []string{"-a", "-b", "-c"} {
+		writeClaudeProjectTranscript(t, home, dir, "seed"+dir)
 	}
-	want := writeClaudeProjectTranscript(t, home, claudeProjectDir(long)[:claudeProjectDirLimit]+"-abc123", "long-1")
-	if got := adapter.transcriptPath(session); got != want {
-		t.Fatalf("long project transcript %q, want %q once it exists", got, want)
+	index.pass()
+	stale := filepath.Join(home, ".claude", "projects", "-b", "unindexed.jsonl")
+	if err := os.WriteFile(stale, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := index.dirs["-b"].modified
+	if err := os.Chtimes(filepath.Dir(stale), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.pass()("unindexed"); got != "" {
+		t.Fatalf("a project whose modification time did not change was listed again: %q", got)
+	}
+	if err := os.RemoveAll(filepath.Join(home, ".claude", "projects", "-c")); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.pass()("seed-c"); got != "" {
+		t.Fatalf("a removed project still resolved to %q", got)
+	}
+	if _, ok := index.dirs["-c"]; ok {
+		t.Fatal("a removed project stayed in the index")
 	}
 }
 
-func TestClaudeTranscriptLocatorListsProjectsOncePerPass(t *testing.T) {
+func TestClaudeTranscriptPassListsProjectsOnce(t *testing.T) {
+	home := t.TempDir()
+	index := newClaudeTranscriptIndex(home)
+	writeClaudeProjectTranscript(t, home, "-a", "seed")
+	lookup := index.pass()
+	created := writeClaudeProjectTranscript(t, home, "-new", "late")
+	for _, id := range []string{"missing-1", "missing-2", "late"} {
+		if got := lookup(id); got != "" {
+			t.Fatalf("a lookup within one pass listed the projects again and found %q for %s", got, id)
+		}
+	}
+	if got := index.pass()("late"); got != created {
+		t.Fatalf("the next pass resolved %q, want %q", got, created)
+	}
+}
+
+func TestClaudeTranscriptBecomesAmbiguousAndThenUniqueAgain(t *testing.T) {
 	home := t.TempDir()
 	adapter := NewClaude("", home)
-	want := writeClaudeProjectTranscript(t, home, "-Users-dev-launch", "moved-2")
-	locator := &claudeTranscriptLocator{projects: filepath.Join(home, ".claude", "projects")}
-	for _, id := range []string{"pending-a", "pending-b", "pending-c"} {
-		adapter.resolveTranscript(&surface.Session{Cwd: "/Users/dev/new"}, id, locator)
+	first := writeClaudeProjectTranscript(t, home, "-Users-dev-one", "conv-1")
+	if got := adapter.resolveTranscript("conv-1"); got != first {
+		t.Fatalf("unique transcript resolved to %q, want %q", got, first)
 	}
-	writeClaudeProjectTranscript(t, home, "-Users-dev-later", "pending-d")
-	if got := adapter.resolveTranscript(&surface.Session{Cwd: "/Users/dev/new"}, "pending-d", locator); got != filepath.Join(home, ".claude", "projects", "-Users-dev-new", "pending-d.jsonl") {
-		t.Fatalf("a project created after the pass listed projects was enumerated again: %q", got)
+	second := writeClaudeProjectTranscript(t, home, "-Users-dev-two", "conv-1")
+	if got := adapter.resolveTranscript("conv-1"); got != "" {
+		t.Fatalf("a transcript that appeared in a second project resolved to %q", got)
 	}
-	if got := adapter.resolveTranscript(&surface.Session{Cwd: "/Users/dev/launch/sub"}, "moved-2", locator); got != want {
-		t.Fatalf("moved conversation %q, want %q", got, want)
-	}
-	if got := adapter.cachedTranscript("moved-2"); got != want {
-		t.Fatalf("a located transcript was not remembered: %q", got)
-	}
-	if err := os.Remove(want); err != nil {
+	project := filepath.Dir(first)
+	if err := os.Remove(first); err != nil {
 		t.Fatal(err)
 	}
-	if got := adapter.cachedTranscript("moved-2"); got != "" {
-		t.Fatalf("a remembered transcript that was deleted is still returned: %q", got)
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(project, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if got := adapter.resolveTranscript("conv-1"); got != second {
+		t.Fatalf("after the duplicate was removed the transcript resolved to %q, want %q", got, second)
 	}
 }

@@ -54,7 +54,7 @@ func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionsDir, "bridge.json"), []byte(bridge), 0600); err != nil {
 		t.Fatal(err)
 	}
-	transcriptDir := filepath.Dir(NewClaude("", home).resolveTranscript(&surface.Session{Cwd: cwd}, "local", nil))
+	transcriptDir := filepath.Join(home, ".claude", "projects", "-launch-project")
 	if err := os.MkdirAll(transcriptDir, 0700); err != nil {
 		t.Fatal(err)
 	}
