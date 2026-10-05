@@ -34,7 +34,9 @@ Every writable Codex conversation has one owner:
 - `managed`: an `agenthail codex` terminal owns the remote-control session for its lifetime.
 - `readOnly`: the conversation is catalogued but no writable owner is available.
 
-`agenthail codex` starts the managed terminal path. `agenthail launch codex` exposes the Desktop bridge. Dashboard and `thread create codex` conversations are Desktop-owned. A conversation's original creator does not decide its current owner. A managed runtime must not be used to load or send to a Desktop-owned conversation.
+`agenthail codex` starts the managed terminal path. `agenthail launch codex` exposes the Desktop bridge.
+
+The two paths need different installs. The Desktop bridge needs only Codex Desktop. The managed path runs `codex app-server daemon`, which Codex starts only from the standalone runtime at `$CODEX_HOME/packages/standalone/current/codex`; it refuses an npm, Homebrew or ChatGPT.app `codex`. Agenthail detects the standalone runtime, Codex Desktop and every other `codex` on `PATH` or inside ChatGPT.app, and uses only the standalone runtime for the managed daemon. Runtime status carries a typed `problem` (`bridge-unavailable`, `standalone-missing`, `runtime-stopped`, `unsupervised`) that selects the repair, plus non-failing `notes`: a reachable bridge with no standalone runtime stays healthy and notes that managed terminals need `curl -fsSL https://chatgpt.com/codex/install.sh | sh`. Agenthail never runs that installer itself. Dashboard and `thread create codex` conversations are Desktop-owned. A conversation's original creator does not decide its current owner. A managed runtime must not be used to load or send to a Desktop-owned conversation.
 
 When Desktop reports that another runtime owns a conversation, Agenthail returns a terminal ownership conflict and does not keep retrying it. Once the operator has confirmed that no managed `agenthail codex` terminal is active, `agenthail codex --repair-managed-runtime` restarts the managed remote-control runtime so stale managed leases are released. It never restarts Codex Desktop.
 

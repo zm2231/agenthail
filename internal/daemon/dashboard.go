@@ -783,6 +783,13 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			entry.HealthDetail = record.Detail
 			entry.Connected = record.Health == "healthy"
 		}
+		if observed, found := d.observedSurfaceHealth(adapter.Name()); found {
+			entry.Health = observed.Health
+			entry.HealthDetail = observed.HealthDetail
+			entry.Runtime = observed.Runtime
+			entry.RepairAction = observed.RepairAction
+			entry.RepairLabel = observed.RepairLabel
+		}
 		state.Surfaces = append(state.Surfaces, entry)
 	}
 	catalogSessions := map[string]registry.CatalogSessionState{}
@@ -848,6 +855,23 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	return state, nil
 }
 
+func (d *Daemon) recordSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) {
+	entry := d.dashboardSurfaceHealth(ctx, adapter, listErr)
+	d.surfaceHealthMu.Lock()
+	defer d.surfaceHealthMu.Unlock()
+	if d.surfaceHealth == nil {
+		d.surfaceHealth = map[surface.SurfaceKind]dashboardSurface{}
+	}
+	d.surfaceHealth[adapter.Name()] = entry
+}
+
+func (d *Daemon) observedSurfaceHealth(kind surface.SurfaceKind) (dashboardSurface, bool) {
+	d.surfaceHealthMu.Lock()
+	defer d.surfaceHealthMu.Unlock()
+	entry, found := d.surfaceHealth[kind]
+	return entry, found
+}
+
 func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Surface, listErr error) dashboardSurface {
 	entry := dashboardSurface{Name: string(adapter.Name()), Connected: listErr == nil, Health: "healthy", Capabilities: adapter.Capabilities()}
 	if listErr != nil {
@@ -863,10 +887,6 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 				entry.Health = "degraded"
 			}
 			entry.HealthDetail = err.Error()
-			if adapter.Name() == surface.KindCodex {
-				entry.RepairAction = "codex-launch"
-				entry.RepairLabel = "Launch Codex through Agenthail"
-			}
 		}
 	}
 	if provider, ok := adapter.(surface.RuntimeStatusProvider); ok {
@@ -880,10 +900,14 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 				if entry.HealthDetail == "" {
 					entry.HealthDetail = runtimeStatus.Detail
 				}
-				if !runtimeStatus.Reachable && entry.RepairAction == "" {
-					entry.RepairAction = "runtime-ensure"
-					entry.RepairLabel = "Repair managed runtime"
-				}
+			}
+			switch runtimeStatus.Problem {
+			case surface.RuntimeBridgeUnavailable:
+				entry.RepairAction = "codex-launch"
+				entry.RepairLabel = "Launch Codex through Agenthail"
+			case surface.RuntimeStopped:
+				entry.RepairAction = "runtime-ensure"
+				entry.RepairLabel = "Start managed runtime"
 			}
 		}
 	}
@@ -1454,6 +1478,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, detail, http.StatusBadGateway)
 			return
 		}
+		if adapter := d.surfaceForKind(surface.KindCodex); adapter != nil {
+			d.recordSurfaceHealth(ctx, adapter, nil)
+		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": strings.TrimSpace(string(output))})
 		return
 	}
@@ -1470,6 +1497,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		d.recordSurfaceHealth(ctx, adapter, nil)
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}

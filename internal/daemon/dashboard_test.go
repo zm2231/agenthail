@@ -462,28 +462,36 @@ func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	}
 }
 
-func TestDashboardSurfaceHealthNamesDegradedCodexAndRepair(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	adapter := &healthDaemonSurface{
-		daemonSurface: &daemonSurface{kind: surface.KindCodex},
-		healthErr:     errors.New("Codex Desktop bridge is unavailable"),
-		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Durable: true, Backend: "launchd"},
-	}
-	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
-	if entry.Health != "degraded" || entry.HealthDetail != "Codex Desktop bridge is unavailable" || entry.RepairAction != "codex-launch" || entry.RepairLabel == "" {
-		t.Fatalf("entry=%+v", entry)
-	}
-}
-
-func TestDashboardSurfaceHealthNamesMissingManagedRuntime(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	adapter := &healthDaemonSurface{
-		daemonSurface: &daemonSurface{kind: surface.KindCodex},
-		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Detail: "socket missing"},
-	}
-	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
-	if entry.Health != "degraded" || entry.HealthDetail != "socket missing" || entry.RepairAction != "runtime-ensure" || entry.RepairLabel == "" {
-		t.Fatalf("entry=%+v", entry)
+func TestDashboardSnapshotCarriesCodexRuntimeProblemAndRepair(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		runtime surface.RuntimeStatus
+		health  string
+		repair  string
+	}{
+		{name: "bridge closed", runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Problem: surface.RuntimeBridgeUnavailable, Detail: "bridge closed"}, health: "degraded", repair: "codex-launch"},
+		{name: "managed runtime stopped", runtime: surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeStopped, Detail: "socket missing"}, health: "degraded", repair: "runtime-ensure"},
+		{name: "standalone missing", runtime: surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeStandaloneMissing, Detail: "no standalone"}, health: "degraded"},
+		{name: "healthy with a note", runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Notes: []surface.RuntimeNote{{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install"}}}, health: "healthy"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, registry, _, _, _ := daemonFixture(t)
+			adapter := &healthDaemonSurface{daemonSurface: &daemonSurface{kind: surface.KindCodex}, runtime: test.runtime}
+			d := New(registry, []surface.Surface{adapter})
+			d.discoverCatalog(context.Background())
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil)
+			request.Header.Set("Authorization", "Bearer secret")
+			response := httptest.NewRecorder()
+			d.dashboardHandler(&dashboardServer{token: "secret"}).ServeHTTP(response, request)
+			var snapshot dashboardState
+			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil || len(snapshot.Surfaces) != 1 {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			entry := snapshot.Surfaces[0]
+			if entry.Health != test.health || entry.RepairAction != test.repair || entry.Runtime == nil || entry.Runtime.Problem != test.runtime.Problem || len(entry.Runtime.Notes) != len(test.runtime.Notes) {
+				t.Fatalf("entry=%+v runtime=%+v", entry, entry.Runtime)
+			}
+		})
 	}
 }
 

@@ -71,11 +71,14 @@ func TestCodexCommandRejectsCustomRemote(t *testing.T) {
 func TestCodexRepairManagedRuntimeRestartsConfiguredRuntime(t *testing.T) {
 	root := t.TempDir()
 	logPath := filepath.Join(root, "args")
-	script := filepath.Join(root, "codex")
+	script := filepath.Join(root, "packages", "standalone", "current", "codex")
+	if err := os.MkdirAll(filepath.Dir(script), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$AGENTHAIL_TEST_LOG\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("AGENTHAIL_CODEX_BIN", script)
+	t.Setenv("CODEX_HOME", root)
 	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
 	if err := (&App{}).Run([]string{"codex", "--repair-managed-runtime"}); err != nil {
 		t.Fatal(err)
@@ -287,7 +290,7 @@ func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 
 func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
-	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid"}}
+	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Problem: surface.RuntimeUnsupervised}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
 	app.daemonServiceLoaded = func() bool { return true }
@@ -301,8 +304,33 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 			Runtime surface.RuntimeStatus `json:"runtime"`
 		} `json:"surfaces"`
 	}
-	if err := json.Unmarshal([]byte(output), &payload); err != nil || len(payload.Surfaces) != 1 || !payload.Surfaces[0].OK || !payload.Surfaces[0].Runtime.Durable {
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || len(payload.Surfaces) != 1 || !payload.Surfaces[0].OK || !payload.Surfaces[0].Runtime.Durable || payload.Surfaces[0].Runtime.Problem != "" {
 		t.Fatalf("output=%s err=%v", output, err)
+	}
+}
+
+func TestDoctorStaysHealthyAndShowsNotesForUnavailableManagedTerminals(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	note := surface.RuntimeNote{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install the standalone runtime"}
+	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Backend: "desktop", Notes: []surface.RuntimeNote{note}}}
+	app, _ := cliFixture(t, fake)
+	app.Surfaces[0].Surface = runtimeSurface
+	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+	if err != nil {
+		t.Fatalf("a note made doctor unhealthy: err=%v output=%s", err, output)
+	}
+	var payload struct {
+		Surfaces []struct {
+			OK      bool                  `json:"ok"`
+			Runtime surface.RuntimeStatus `json:"runtime"`
+		} `json:"surfaces"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || len(payload.Surfaces) != 1 || !payload.Surfaces[0].OK || len(payload.Surfaces[0].Runtime.Notes) != 1 || payload.Surfaces[0].Runtime.Notes[0] != note {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
+	if err != nil || !strings.Contains(text, note.Message) || !strings.Contains(text, note.Remediation) {
+		t.Fatalf("text doctor omits the note: err=%v output=%s", err, text)
 	}
 }
 

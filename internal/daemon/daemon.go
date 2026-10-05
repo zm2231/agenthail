@@ -38,6 +38,8 @@ type Daemon struct {
 	catalog           *catalogHub
 	sources           *sessionSourceManager
 	sourceHoldMu      sync.Mutex
+	surfaceHealthMu   sync.Mutex
+	surfaceHealth     map[surface.SurfaceKind]dashboardSurface
 	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
 	transportResolver *SessionTransportResolver

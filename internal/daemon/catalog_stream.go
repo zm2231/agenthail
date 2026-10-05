@@ -297,6 +297,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		sessions, err := adapter.List(operationCtx)
 		cancel()
+		d.recordSurfaceHealth(ctx, adapter, err)
 		if err != nil {
 			observedAt := time.Now().UTC()
 			if markErr := d.catalog.markDiscoveryFailure(adapter.Name(), "catalog discovery failed", observedAt); markErr != nil {
