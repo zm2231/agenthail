@@ -741,3 +741,53 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 		t.Fatalf("content=%q want=%q", body.Content, want)
 	}
 }
+
+func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
+	previous := heartbeatInterval
+	heartbeatInterval = 100 * time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = previous })
+	home, regPath := shortTempDir(t, "cp-quiet-"), filepath.Join(t.TempDir(), "registry.db")
+	s := surface.Session{ID: "quiet", Surface: surface.KindCodex, Name: "quiet", Status: surface.StatusIdle}
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	if err := reg.RegisterSession(s); err != nil {
+		t.Fatal(err)
+	}
+	worker, stop := startWorker(t, Config{Home: home, RegistryPath: regPath, Session: s, SocketDir: shortTempDir(t, "cp-socks-")})
+	defer stop()
+	path := filepath.Join(home, ".claude", "sessions", strconv.Itoa(worker.PID)+".json")
+	readRecord := func() (sessionRecord, []byte) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var record sessionRecord
+		if err := json.Unmarshal(data, &record); err != nil {
+			t.Fatal(err)
+		}
+		return record, data
+	}
+	time.Sleep(3 * heartbeatInterval)
+	_, settled := readRecord()
+	time.Sleep(5 * heartbeatInterval)
+	if _, current := readRecord(); string(current) != string(settled) {
+		t.Fatalf("unchanged record was rewritten:\nbefore %s\nafter  %s", settled, current)
+	}
+	s.Status = surface.StatusBusy
+	if err := reg.RegisterSession(s); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if record, _ := readRecord(); record.Status == "busy" && record.StatusUpdatedAt > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("status change was not published")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

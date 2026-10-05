@@ -570,18 +570,28 @@ func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *reg
 		case <-stop:
 			return
 		case now := <-t.C:
+			next := record
 			if session, err := reg.Session(id); err == nil {
-				record.Name = "agenthail/" + string(session.Surface) + ": " + session.Name
+				next.Name = "agenthail/" + string(session.Surface) + ": " + session.Name
 				if alias, err := reg.ReverseAlias(id); err == nil && alias != "" {
-					record.Name = "agenthail/" + string(session.Surface) + ": " + alias
+					next.Name = "agenthail/" + string(session.Surface) + ": " + alias
 				}
-				record.Cwd = session.Cwd
-				record.Status = status(*session)
+				next.Cwd = session.Cwd
+				next.Status = status(*session)
 			}
-			record.UpdatedAt = now.UnixMilli()
-			record.StatusUpdatedAt = record.UpdatedAt
-			if _, err := os.Lstat(path); os.IsNotExist(err) {
-				_ = writeExclusiveJSON(path, record)
+			_, statErr := os.Lstat(path)
+			missing := os.IsNotExist(statErr)
+			// Claude Code rewrites its own records only when they change, so an
+			// unchanged peer record stays put instead of being rewritten each tick.
+			if !missing && next.Name == record.Name && next.Cwd == record.Cwd && next.Status == record.Status {
+				continue
+			}
+			next.UpdatedAt = now.UnixMilli()
+			next.StatusUpdatedAt = next.UpdatedAt
+			if missing {
+				if writeExclusiveJSON(path, next) == nil {
+					record = next
+				}
 				continue
 			}
 			tmp := path + ".tmp." + strconv.Itoa(os.Getpid())
@@ -589,10 +599,10 @@ func heartbeat(stop <-chan struct{}, path string, record sessionRecord, reg *reg
 			if err != nil {
 				continue
 			}
-			encodeErr := json.NewEncoder(f).Encode(record)
+			encodeErr := json.NewEncoder(f).Encode(next)
 			closeErr := f.Close()
-			if encodeErr == nil && closeErr == nil && recordOwned(path, record) {
-				_ = os.Rename(tmp, path)
+			if encodeErr == nil && closeErr == nil && recordOwned(path, next) && os.Rename(tmp, path) == nil {
+				record = next
 			}
 			_ = os.Remove(tmp)
 		}
