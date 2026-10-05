@@ -49,6 +49,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 		}
 	}
 	write(record)
+	transcript := writeClaudeProjectTranscript(t, home, "-fixture", "local-id")
 	adapter := NewClaude("", home)
 	sessions, err := adapter.List(context.Background())
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "local-id" || sessions[0].Transport != "uds" {
@@ -58,7 +59,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil || !found || caller.ID != "local-id" {
 		t.Fatalf("caller=%+v found=%v err=%v", caller, found, err)
 	}
-	if sessions[0].Transcript != filepath.Join(home, ".claude", "projects", "-fixture", "local-id.jsonl") {
+	if sessions[0].Transcript != transcript {
 		t.Fatal("transcript escaped adapter home")
 	}
 	record["bridgeSessionId"] = "session_bridge"
