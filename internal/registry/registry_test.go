@@ -1169,8 +1169,11 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 			readsDone <- err
 			return
 		}
-		_, err := r.ReadSessionJournalPage("session", 0, 10)
-		readsDone <- err
+		if _, err := r.ReadSessionJournalPage("session", 0, 10); err != nil {
+			readsDone <- err
+			return
+		}
+		readsDone <- r.EnsureAliasAvailable("unclaimed")
 	}()
 	select {
 	case err := <-readsDone:
@@ -1185,5 +1188,33 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 	}
 	if err := <-writeDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLegacyOpenMergesDuplicateClaudeTranscripts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"claude-old", "claude-new"} {
+		if _, err := r.db.Exec(`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local) VALUES (?,?,'','',0,'idle','/transcripts/shared.jsonl',0)`, id, string(surface.KindClaude)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.db.Exec(`PRAGMA user_version=0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var count int
+	if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE transcript='/transcripts/shared.jsonl'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("sessions sharing a transcript=%d err=%v", count, err)
 	}
 }

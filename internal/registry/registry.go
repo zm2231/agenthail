@@ -62,11 +62,6 @@ func Open(path string) (*Registry, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	r := &Registry{db: db, path: path, now: time.Now}
-	if err := r.migrate(); err != nil {
-		db.Close()
-		return nil, err
-	}
 	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)")
 	if err != nil {
 		db.Close()
@@ -74,7 +69,11 @@ func Open(path string) (*Registry, error) {
 	}
 	read.SetMaxOpenConns(readConnections)
 	read.SetMaxIdleConns(readConnections)
-	r.read = read
+	r := &Registry{db: db, read: read, path: path, now: time.Now}
+	if err := r.migrate(); err != nil {
+		r.Close()
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -700,7 +699,7 @@ func (r *Registry) EnsureAliasAvailable(name string) error {
 		return nil
 	}
 	var owner string
-	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
+	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
 	if err == sql.ErrNoRows {
 		return nil
 	}
