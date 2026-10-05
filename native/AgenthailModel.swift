@@ -72,7 +72,7 @@ final class AgenthailModel: ObservableObject {
         let idempotencyKey: String
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
-    private var pendingCreation: (identity: [String], key: String)?
+    private var pendingCreation: (form: SessionLaunchForm, key: String)?
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -264,16 +264,20 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> SessionLaunchOutcome {
+    func creationModels(for agent: String) async throws -> [ModelOption] {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.creationModels(surface: agent)
+    }
+
+    func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
         guard let api else { return .failed("Agenthail isn't connected.") }
-        let identity = [agent, folder, message, launcher ?? ""]
-        if pendingCreation?.identity != identity {
-            pendingCreation = (identity, UUID().uuidString)
+        if pendingCreation?.form != form {
+            pendingCreation = (form, UUID().uuidString)
         }
         let idempotencyKey = pendingCreation?.key
         do {
-            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey, failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: launcher, agent: agent)
+            let receipt = try await api.createSession(surface: form.agent, message: form.trimmedMessage, cwd: form.cwd, model: form.modelID, alias: form.handle, turnSettings: form.turnSettings, codex: form.codexSettings, claude: form.claudeSettings, launcher: form.launcher, idempotencyKey: idempotencyKey, failureReceipts: true)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
             if decision.settlesRetry {
                 pendingCreation = nil
                 operationError = nil

@@ -142,23 +142,24 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
-        if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+    func createSession(surface: String, message: String, cwd: String, model: String, alias: String = "", turnSettings: TurnSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+        if launcher != nil && (!turnSettings.isEmpty || !codex.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
-        let payload: Data
+        var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
+        if !alias.isEmpty { body["alias"] = alias }
+        if let launcher { body["launcher"] = launcher }
         if surface == "codex" {
-            payload = try JSONEncoder().encode(SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher))
-        } else {
-            var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-            if surface == "claude" { body.merge(claude.fields) { _, value in value } }
-            if let launcher { body["launcher"] = launcher }
-            payload = try JSONSerialization.data(withJSONObject: body)
+            if let effort = turnSettings.effort { body["effort"] = effort }
+            if let mode = turnSettings.mode { body["mode"] = mode.rawValue }
+            body.merge(try codex.fields()) { _, value in value }
+        } else if surface == "claude" {
+            body.merge(claude.fields) { _, value in value }
         }
         var request = authorizedRequest(path: "/api/v1/actions")
         request.httpMethod = "POST"
         request.timeoutInterval = 65
-        request.httpBody = payload
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
@@ -464,30 +465,6 @@ private struct InstructionRequest: Encodable {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
         }
-    }
-}
-
-private struct SessionCreateRequest: Encodable {
-    let action: String
-    let surface: String
-    let message: String
-    let cwd: String
-    let model: String
-    let turnSettings: TurnSettings
-    let launcher: String?
-
-    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode; case launcher }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(action, forKey: .action)
-        try container.encode(surface, forKey: .surface)
-        try container.encode(message, forKey: .message)
-        try container.encode(cwd, forKey: .cwd)
-        try container.encode(model, forKey: .model)
-        try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
-        try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
-        try container.encodeIfPresent(launcher, forKey: .launcher)
     }
 }
 
