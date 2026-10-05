@@ -92,7 +92,7 @@ jobs:
           EOF
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/tests/session_tree_test.swift -o "$RUNNER_TEMP/session-tree-test"
           "$RUNNER_TEMP/session-tree-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/macOS/LocalSend.swift native/tests/local_send_test.swift -o "$RUNNER_TEMP/local-send-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionTree.swift native/macOS/LocalSend.swift native/macOS/PeerEnvelope.swift native/tests/local_send_test.swift -o "$RUNNER_TEMP/local-send-test"
           "$RUNNER_TEMP/local-send-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/CatalogPosition.swift native/tests/catalog_position_test.swift -o "$RUNNER_TEMP/catalog-position-test"
           "$RUNNER_TEMP/catalog-position-test"
@@ -102,7 +102,7 @@ jobs:
           "$RUNNER_TEMP/tool-run-summary-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/TranscriptBlock.swift native/tests/transcript_block_test.swift -o "$RUNNER_TEMP/transcript-block-test"
           "$RUNNER_TEMP/transcript-block-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/AgenthailModel.swift native/TurnSettings.swift native/EventRetryBackoff.swift native/SessionSelection.swift native/OperationsRefreshPolicy.swift native/StatusRefreshPolicy.swift native/macOS/SessionPane.swift native/macOS/CatalogPosition.swift native/macOS/LocalSend.swift native/macOS/SessionTree.swift native/macOS/AgenthailProcess.swift native/macOS/AgenthailLink.swift native/macOS/MetadataOverlay.swift native/macOS/SessionLaunch.swift native/macOS/ComposerDrop.swift native/tests/session_pane_test.swift -o "$RUNNER_TEMP/session-pane-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/AgenthailModel.swift native/TurnSettings.swift native/EventRetryBackoff.swift native/SessionSelection.swift native/OperationsRefreshPolicy.swift native/StatusRefreshPolicy.swift native/macOS/SessionPane.swift native/macOS/CatalogPosition.swift native/macOS/LocalSend.swift native/macOS/PeerEnvelope.swift native/macOS/SessionTree.swift native/macOS/AgenthailProcess.swift native/macOS/AgenthailLink.swift native/macOS/MetadataOverlay.swift native/macOS/SessionLaunch.swift native/macOS/ComposerDrop.swift native/tests/session_pane_test.swift -o "$RUNNER_TEMP/session-pane-test"
           "$RUNNER_TEMP/session-pane-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/AgenthailLink.swift native/tests/agenthail_link_test.swift -o "$RUNNER_TEMP/agenthail-link-test"
           "$RUNNER_TEMP/agenthail-link-test"

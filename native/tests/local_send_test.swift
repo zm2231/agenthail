@@ -19,6 +19,11 @@ struct LocalSendTest {
         let both = one + [user("c", "Run the tests", "2026-10-04T12:00:31Z")]
         expect(LocalSend.reconcile([first, second], with: both).isEmpty, "each durable message absorbs one local send")
 
+        let wrapped = "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-session=\"s\" from-name=\"agenthail/agenthail: operator\">\nRun the tests\n</cross-session-message>"
+        expect(LocalSend.reconcile([first], with: [user("e", wrapped, "2026-10-04T12:00:02Z")]).isEmpty, "a send delivered inside a peer envelope absorbs its local copy")
+        let other = wrapped.replacingOccurrences(of: "Run the tests", with: "Something else")
+        expect(LocalSend.reconcile([first], with: [user("f", other, "2026-10-04T12:00:02Z")]) == [first], "a different peer message does not absorb the send")
+
         let assistant = [TimelineItem(id: "d", kind: "message", role: "assistant", title: "assistant", text: "Run the tests", timestamp: "2026-10-04T12:00:02Z", callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)]
         expect(LocalSend.reconcile([first], with: assistant) == [first], "assistant text never absorbs a user send")
 

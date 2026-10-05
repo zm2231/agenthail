@@ -21,7 +21,7 @@ struct LocalSend: Identifiable, Equatable {
         return sends.filter { send in
             let text = send.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let index = candidates.firstIndex(where: { item in
-                guard item.text.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return false }
+                guard PeerEnvelope(item.text).body.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return false }
                 guard let raw = item.timestamp, let at = SessionTree.parseTimestamp(raw) else { return true }
                 return at >= send.sentAt.addingTimeInterval(-clockSkew)
             }) else { return true }
