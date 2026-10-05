@@ -32,6 +32,9 @@ fi
 	if err != nil || session == nil || session.ID != "real-session-id" || turn != nil {
 		t.Fatalf("session=%+v turn=%+v err=%v", session, turn, err)
 	}
+	if want := c.resolveTranscript(session, "real-session-id"); session.Transcript == "" || session.Transcript != want {
+		t.Fatalf("launch transcript=%q want %q", session.Transcript, want)
+	}
 	for _, action := range []string{"status", "logs", "stop", "resume"} {
 		if _, err := c.SessionAction(context.Background(), session, action); err != nil {
 			t.Fatal(action, err)

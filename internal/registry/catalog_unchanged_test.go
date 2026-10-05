@@ -113,3 +113,26 @@ func TestRecordCatalogDiscoveryStampsOnlySeenFreshRows(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveredClaudeAgentAbsorbsItsLaunchRecord(t *testing.T) {
+	r := openTestRegistry(t)
+	transcript := "/home/test/.claude/projects/-work/conversation-1.jsonl"
+	launch := surface.Session{ID: "conversation-1", Surface: surface.KindClaude, Name: "builder", Cwd: "/work", Status: surface.StatusUnknown, Transcript: transcript, HasLocal: true, Source: "agenthail"}
+	if err := r.RegisterSession(launch); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("builder", launch.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, event := unchangedCatalogState("session_bridge", time.Now())
+	state.Session = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Name: "builder", Cwd: "/work", PID: 4242, Status: surface.StatusBusy, Transcript: transcript, HasLocal: true, Transport: "uds", Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	if _, _, err := r.RecordCatalogSession(state, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Session(launch.ID); err == nil {
+		t.Fatal("launch record survived discovery of the same agent")
+	}
+	if owner, err := r.LookupAlias("builder"); err != nil || owner != "session_bridge" {
+		t.Fatalf("alias owner=%q err=%v", owner, err)
+	}
+}

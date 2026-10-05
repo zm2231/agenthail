@@ -89,6 +89,9 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 			for _, record := range records {
 				if record.ID == shortID && record.Kind == "background" && record.SessionID != "" {
 					session := &surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Name: record.Name, Cwd: record.Cwd, Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
+					// Discovery lists the agent under its peer bridge ID; the shared
+					// transcript lets the registry fold this launch record into it.
+					session.Transcript = c.resolveTranscript(session, record.SessionID)
 					return session, nil, nil
 				}
 			}
