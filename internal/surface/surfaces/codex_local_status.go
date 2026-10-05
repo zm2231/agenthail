@@ -2,7 +2,9 @@ package surfaces
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -27,13 +29,40 @@ func (c *Codex) reconcileLocalStatus(session *surface.Session) {
 	}
 	session.Transcript = path
 	session.HasLocal = true
-	status := codexTranscriptStatus(path, info.ModTime(), time.Now())
-	if status != surface.StatusUnknown && (session.Status == surface.StatusUnknown || session.Status == surface.SessionStatus("notLoaded")) {
-		session.Status = status
+	applyCodexTranscriptStatus(session, info)
+}
+
+// applyCodexTranscriptStatus lets the transcript's latest task lifecycle
+// override the provider status. List and LocalStatus share this rule so the
+// catalog's discovery and status passes never disagree.
+func applyCodexTranscriptStatus(session *surface.Session, info os.FileInfo) {
+	status := codexTranscriptStatus(session.Transcript, info.ModTime(), time.Now())
+	if status == surface.StatusUnknown {
+		return
 	}
+	session.Status = status
 	if status == surface.StatusBusy && info.ModTime().After(session.LastActive) {
 		session.LastActive = info.ModTime()
 	}
+}
+
+func (c *Codex) LocalStatusFiles(session surface.Session) []string {
+	if session.Transcript == "" {
+		return nil
+	}
+	return []string{session.Transcript}
+}
+
+func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
+	if session.Transcript == "" {
+		return session, fmt.Errorf("codex session %s has no local transcript", session.ID)
+	}
+	info, err := os.Stat(session.Transcript)
+	if err != nil {
+		return session, err
+	}
+	applyCodexTranscriptStatus(&session, info)
+	return session, nil
 }
 
 func codexTranscriptStatus(path string, modified, now time.Time) surface.SessionStatus {

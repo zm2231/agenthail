@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -87,10 +88,10 @@ func (h *catalogHub) updateProjection(sessionID, priorFingerprint, nextFingerpri
 	return h.flushCommittedLocked()
 }
 
-func (h *catalogHub) reconcileOmissions(kind surface.SurfaceKind, seen map[string]struct{}) error {
+func (h *catalogHub) recordDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	_, err := h.registry.ReconcileCatalogOmissions(kind, seen, 2)
+	_, err := h.registry.RecordCatalogDiscovery(kind, seen, observedAt, complete, 2)
 	if err != nil {
 		return err
 	}
@@ -272,6 +273,18 @@ func writeCatalogStreamEntry(w http.ResponseWriter, event registry.CatalogEvent)
 	return err
 }
 
+// catalogLiveSession is the last published discovery input for a session.
+// The status pass rebuilds the row from it when local status evidence changes.
+type catalogLiveSession struct {
+	adapter  surface.Surface
+	session  surface.Session
+	identity catalogIdentity
+	alias    string
+	open     bool
+	files    []string
+	stamps   []string
+}
+
 func (d *Daemon) discoverCatalog(ctx context.Context) {
 	config, err := LoadDashboardConfig()
 	if err != nil {
@@ -294,11 +307,18 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 	}
 	openClaude := claudeOpenProcesses(ctx)
 	for _, adapter := range d.Surfaces {
+		priorStamps := map[string]catalogLiveSession{}
+		for id, live := range d.catalogLive {
+			if live.adapter.Name() == adapter.Name() {
+				priorStamps[id] = catalogLiveSession{files: live.files, stamps: catalogFileStamps(live.files)}
+			}
+		}
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		sessions, err := adapter.List(operationCtx)
 		cancel()
 		health := d.recordSurfaceHealth(ctx, adapter, err)
 		if err != nil {
+			d.forgetCatalogLive(adapter.Name(), nil)
 			observedAt := time.Now().UTC()
 			if markErr := d.catalog.markDiscoveryFailure(adapter.Name(), "catalog discovery failed", observedAt); markErr != nil {
 				d.log.Printf("catalog discovery failure state: %s", markErr)
@@ -306,6 +326,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			d.publishSurfaceHealth(health, observedAt)
 			continue
 		}
+		observedAt := time.Now().UTC()
 		ids := make([]string, 0, len(sessions))
 		for _, session := range sessions {
 			ids = append(ids, session.ID)
@@ -325,62 +346,162 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		d.correlatePendingLaunches(locateCtx, sessions)
 		d.correlateObservedTerminalLaunches(locateCtx, sessions)
 		locateCancel()
+		source, _ := adapter.(surface.LocalStatusSource)
 		for _, session := range sessions {
 			if session.Runtime == nil {
 				session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 			}
 			seen[session.ID] = struct{}{}
 			identityCtx, identityCancel := context.WithTimeout(ctx, 3*time.Second)
-			identity := catalogIdentityForSession(identityCtx, session)
+			identity := d.catalogIdentities.identity(identityCtx, session, observedAt)
 			identityCancel()
-			hostProject, err := json.Marshal(identity.HostProject)
-			if err != nil {
-				continue
-			}
-			checkout, err := json.Marshal(identity.Checkout)
-			if err != nil {
-				continue
-			}
-			observedAt := time.Now().UTC()
 			open := session.Surface == surface.KindClaude && openClaude[session.PID]
-			queueCount := counts[session.ID]
-			for attempt := 0; attempt < 3; attempt++ {
-				row := d.catalogSessionProjection(adapter, session, identity, observedAt, aliasByID[session.ID], queueCount, open, config)
-				payload, err := json.Marshal(map[string]any{"session": row})
-				if err != nil {
-					break
-				}
-				projection := row
-				projection.ObservedAt = time.Time{}
-				fingerprint, err := json.Marshal(projection)
-				if err != nil {
-					break
-				}
-				key := "session.upserted:" + session.ID
-				_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
-				if publishErr == nil {
-					break
-				}
-				var conflict *registry.CatalogQueueProjectionConflict
-				if !errors.As(publishErr, &conflict) {
-					d.log.Printf("catalog session %s: %s", d.resolveDisplay(session.ID), publishErr)
-					break
-				}
-				queueCount = conflict.QueueCount
-				if attempt == 2 {
-					d.log.Printf("catalog session %s remained unstable while publishing queue projection", d.resolveDisplay(session.ID))
-				}
+			alias := aliasByID[session.ID]
+			if !d.publishCatalogSession(adapter, session, identity, alias, counts[session.ID], open, config, observedAt) {
+				delete(d.catalogLive, session.ID)
+				continue
 			}
+			if source == nil {
+				delete(d.catalogLive, session.ID)
+				continue
+			}
+			live := &catalogLiveSession{adapter: adapter, session: session, identity: identity, alias: alias, open: open, files: source.LocalStatusFiles(session)}
+			// Stamps taken before List date the evidence List used, so a file
+			// change during the pass still triggers a status refresh.
+			if prior, found := priorStamps[session.ID]; found && equalStrings(prior.files, live.files) {
+				live.stamps = prior.stamps
+			}
+			d.catalogLive[session.ID] = live
 		}
+		d.forgetCatalogLive(adapter.Name(), seen)
 		complete := true
 		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
 			complete = bounded.CatalogListComplete()
 		}
-		if complete {
-			_ = d.catalog.reconcileOmissions(adapter.Name(), seen)
+		if err := d.catalog.recordDiscovery(adapter.Name(), seen, observedAt, complete); err != nil {
+			d.log.Printf("catalog discovery %s: %s", adapter.Name(), err)
 		}
 		d.publishSurfaceHealth(health, time.Now().UTC())
 	}
+	d.catalogIdentities.prune(time.Now())
+}
+
+// forgetCatalogLive drops a surface's live sessions that are not in keep, so
+// the status pass follows only sessions the last successful pass listed.
+func (d *Daemon) forgetCatalogLive(kind surface.SurfaceKind, keep map[string]struct{}) {
+	for id, live := range d.catalogLive {
+		if live.adapter.Name() != kind {
+			continue
+		}
+		if _, found := keep[id]; !found {
+			delete(d.catalogLive, id)
+		}
+	}
+}
+
+// refreshCatalogStatus publishes a status transition as soon as a session's
+// local status files show it, without waiting for the next discovery pass.
+// Only status transitions publish; other fields follow discovery.
+func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
+	var config *DashboardConfig
+	var counts map[string]int
+	for id, live := range d.catalogLive {
+		stamps := catalogFileStamps(live.files)
+		if live.stamps != nil && equalStrings(live.stamps, stamps) {
+			continue
+		}
+		live.stamps = stamps
+		source, ok := live.adapter.(surface.LocalStatusSource)
+		if !ok {
+			continue
+		}
+		statusCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		refreshed, err := source.LocalStatus(statusCtx, live.session)
+		cancel()
+		if err != nil || refreshed.Status == live.session.Status {
+			continue
+		}
+		if config == nil {
+			loaded, err := LoadDashboardConfig()
+			if err != nil {
+				d.log.Printf("catalog config: %s", err)
+				return
+			}
+			config = &loaded
+			if counts, err = d.Registry.QueueCounts(); err != nil {
+				d.log.Printf("catalog queue counts: %s", err)
+				return
+			}
+		}
+		if d.publishCatalogSession(live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, time.Now().UTC()) {
+			live.session = refreshed
+		} else {
+			live.stamps = nil
+		}
+	}
+}
+
+// publishCatalogSession records one session row, rebuilding the projection
+// when the queue count changed under it. It reports whether the row committed.
+func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, observedAt time.Time) bool {
+	hostProject, err := json.Marshal(identity.HostProject)
+	if err != nil {
+		return false
+	}
+	checkout, err := json.Marshal(identity.Checkout)
+	if err != nil {
+		return false
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
+		payload, err := json.Marshal(map[string]any{"session": row})
+		if err != nil {
+			return false
+		}
+		projection := row
+		projection.ObservedAt = time.Time{}
+		fingerprint, err := json.Marshal(projection)
+		if err != nil {
+			return false
+		}
+		key := "session.upserted:" + session.ID
+		_, _, publishErr := d.catalog.publishSession(registry.CatalogSessionState{Session: session, HostProject: hostProject, Checkout: checkout, UnavailableReason: identity.UnavailableReason, ObservedAt: observedAt, ProjectionFingerprint: string(fingerprint)}, registry.CatalogEvent{DedupeKey: key, Type: "session.upserted", EntityID: session.ID, Payload: payload})
+		if publishErr == nil {
+			return true
+		}
+		var conflict *registry.CatalogQueueProjectionConflict
+		if !errors.As(publishErr, &conflict) {
+			d.log.Printf("catalog session %s: %s", d.resolveDisplay(session.ID), publishErr)
+			return false
+		}
+		queueCount = conflict.QueueCount
+	}
+	d.log.Printf("catalog session %s remained unstable while publishing queue projection", d.resolveDisplay(session.ID))
+	return false
+}
+
+// catalogFileStamps fingerprints each file by size and modification time; a
+// missing file has an empty stamp.
+func catalogFileStamps(paths []string) []string {
+	stamps := make([]string, len(paths))
+	for index, path := range paths {
+		if info, err := os.Stat(path); err == nil {
+			stamps[index] = fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	return stamps
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.Time) {

@@ -79,20 +79,20 @@ func TestDiscoveryFailureBreaksSuccessfulOmissionRun(t *testing.T) {
 	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-run", Surface: surface.KindCodex}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-run","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-run:initial", Type: "session.upserted", EntityID: "omission-run", Payload: []byte(`{"session":{"id":"omission-run"}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2); err != nil || len(events) != 0 {
+	if events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2); err != nil || len(events) != 0 {
 		t.Fatalf("first omission events=%+v err=%v", events, err)
 	}
 	if _, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2); err != nil || len(events) != 0 {
+	if events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2); err != nil || len(events) != 0 {
 		t.Fatalf("post-failure omission events=%+v err=%v", events, err)
 	}
 	snapshot, err := r.CatalogSnapshot()
 	if err != nil || len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].Freshness.Stale {
 		t.Fatalf("row after broken omission run=%+v err=%v", snapshot, err)
 	}
-	if events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2); err != nil || len(events) != 1 {
+	if events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2); err != nil || len(events) != 1 {
 		t.Fatalf("second post-failure omission events=%+v err=%v", events, err)
 	}
 }
@@ -132,7 +132,7 @@ func TestCatalogOmissionRequiresTwoSuccessfulReconciliations(t *testing.T) {
 		t.Fatal(err)
 	}
 	for attempt := 1; attempt <= 2; attempt++ {
-		events, err := r.ReconcileCatalogOmissions(surface.KindCodex, map[string]struct{}{}, 2)
+		events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2)
 		if err != nil {
 			t.Fatal(err)
 		}

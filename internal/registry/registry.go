@@ -568,7 +568,7 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		rows, err := tx.Query(`SELECT id FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID)
+		rows, err := tx.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
 		if err != nil {
 			return err
 		}
@@ -591,6 +591,15 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	return nil
+}
+
+// claudeDuplicateQuery finds other rows for the same Claude conversation: rows
+// sharing the transcript, and the launch record a background start registered
+// under the conversation ID before its process and transcript were known.
+const claudeDuplicateQuery = `SELECT id FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
+
+func claudeConversationID(transcript string) string {
+	return strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
 }
 
 func (r *Registry) mergeDuplicateClaudeSessions() error {
@@ -658,6 +667,8 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE delivery_history SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE delivery_history SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
+		{`UPDATE delivery_intents SET sender_session_id=? WHERE sender_session_id=?`, []any{currentID, oldID}},
+		{`UPDATE OR IGNORE delivery_intents SET target_session_id=? WHERE target_session_id=?`, []any{currentID, oldID}},
 		{`DELETE FROM session_runtime WHERE session_id=?`, []any{oldID}},
 		{`DELETE FROM aliases WHERE session_id IN (?,?)`, []any{oldID, currentID}},
 	}
@@ -671,7 +682,33 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 			return err
 		}
 	}
+	if err := removeMergedCatalogRowTx(tx, oldID, currentID); err != nil {
+		return err
+	}
 	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID)
+	return err
+}
+
+// removeMergedCatalogRowTx tells catalog subscribers that a merged session's
+// row is gone; deleting the session would otherwise drop it silently.
+func removeMergedCatalogRowTx(tx *sql.Tx, oldID, currentID string) error {
+	var cataloged bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog_sessions')`).Scan(&cataloged); err != nil || !cataloged {
+		return err
+	}
+	var kind string
+	err := tx.QueryRow(`SELECT s.surface FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, oldID).Scan(&kind)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"sessionId": oldID, "surface": kind, "reason": "merged", "mergedInto": currentID})
+	if err != nil {
+		return err
+	}
+	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + oldID + ":merged:" + currentID, Type: "session.removed", EntityID: oldID, Payload: payload})
 	return err
 }
 

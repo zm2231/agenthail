@@ -359,6 +359,8 @@ type Exchange struct {
 
 type StreamEvent struct {
 	Role             string        `json:"role,omitempty"`
+	Origin           string        `json:"origin,omitempty"`
+	Sender           string        `json:"sender,omitempty"`
 	Title            string        `json:"title,omitempty"`
 	Status           string        `json:"status,omitempty"`
 	CallID           string        `json:"callId,omitempty"`
@@ -519,6 +521,16 @@ type Surface interface {
 // exact active turn selected by the caller.
 type TurnInterrupter interface {
 	InterruptTurn(context.Context, *Session, string) error
+}
+
+// LocalStatusSource lets the catalog follow a listed session's status between
+// discovery passes from local files alone, without provider calls.
+// LocalStatusFiles names the files whose change can change the status;
+// LocalStatus re-derives Status and LastActive from them by the same rule List
+// applies, so a discovery pass never reverts a status the files still support.
+type LocalStatusSource interface {
+	LocalStatusFiles(session Session) []string
+	LocalStatus(ctx context.Context, session Session) (Session, error)
 }
 
 // CatalogListCompleteness declares whether a successful List result is a

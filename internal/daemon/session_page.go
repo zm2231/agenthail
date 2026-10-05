@@ -47,7 +47,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		if callID == "" {
 			callID = payload.TurnID
 		}
-		result.Items = append(result.Items, surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind, Role: role, Title: title, Text: payload.Body, Timestamp: payload.TS, CallID: callID, TurnID: payload.TurnID, Status: payload.Status, Truncated: payload.Truncated, TruncationReason: payload.TruncationReason, BodyRef: payload.BodyRef, Attachment: payload.Attachment})
+		result.Items = append(result.Items, surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind, Role: role, Origin: payload.Origin, Sender: payload.Sender, Title: title, Text: payload.Body, Timestamp: payload.TS, CallID: callID, TurnID: payload.TurnID, Status: payload.Status, Truncated: payload.Truncated, TruncationReason: payload.TruncationReason, BodyRef: payload.BodyRef, Attachment: payload.Attachment})
 		result.Truncated = result.Truncated || payload.Truncated
 		if payload.Kind != "message" && payload.Kind != "text" && payload.Kind != "assistant" {
 			continue
@@ -89,9 +89,18 @@ func (d *Daemon) readProviderHistoryPage(ctx context.Context, session *surface.S
 		return &surface.SessionReadResult{Source: "history", Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, UnavailableReason: boundedSessionSourceReason("Older activity could not be read: " + err.Error())}, nil
 	}
 	result := *read
-	if result.Items == nil {
-		result.Items = []surface.TimelineItem{}
+	items := make([]surface.TimelineItem, 0, len(read.Items))
+	for _, item := range read.Items {
+		// An injected prompt's queued and delivered copies share an ID; the
+		// newer copy may already be in the journal the client has paged.
+		if item.Origin != "" {
+			if _, found, err := d.Registry.SessionJournalEntryByProviderKey(session.ID, "timeline:"+item.ID); err == nil && found {
+				continue
+			}
+		}
+		items = append(items, item)
 	}
+	result.Items = items
 	if result.Exchanges == nil {
 		result.Exchanges = []surface.Exchange{}
 	}

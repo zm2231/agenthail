@@ -255,23 +255,63 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		if n, ok := m["name"].(string); ok {
 			sess.Name = n
 		}
-		if ts, ok := m["updatedAt"].(float64); ok && ts > 0 {
-			sess.LastActive = time.UnixMilli(int64(ts))
-		}
-		sess.Status = claudePeerStatus(m)
 		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"))
 		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
 		if sess.Name == "" {
 			sess.Name = c.firstUserMessage(sess.Transcript)
 		}
-		if sess.HasLocal {
-			if observation, observeErr := c.Observe(ctx, &sess); observeErr == nil && observation.Status != surface.StatusUnknown {
-				sess.Status = observation.Status
-			}
-		}
+		c.applyRecordStatus(ctx, &sess, m)
 		out = append(out, sess)
 	}
 	return out, nil
+}
+
+// applyRecordStatus derives status and last activity from the peer record,
+// then lets readable transcript evidence override the peer status.
+func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, record map[string]any) {
+	if ts, ok := record["updatedAt"].(float64); ok && ts > 0 {
+		sess.LastActive = time.UnixMilli(int64(ts))
+	}
+	sess.Status = claudePeerStatus(record)
+	if sess.HasLocal {
+		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
+			sess.Status = observation.Status
+		}
+	}
+}
+
+func (c *Claude) peerRecordPath(pid int) string {
+	return filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+}
+
+func (c *Claude) LocalStatusFiles(session surface.Session) []string {
+	if session.PID <= 0 {
+		return nil
+	}
+	files := []string{c.peerRecordPath(session.PID)}
+	if session.HasLocal && session.Transcript != "" {
+		files = append(files, session.Transcript)
+	}
+	return files
+}
+
+func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surface.Session, error) {
+	if session.PID <= 0 {
+		return session, fmt.Errorf("claude session %s has no peer process", session.ID)
+	}
+	raw, err := os.ReadFile(c.peerRecordPath(session.PID))
+	if err != nil {
+		return session, err
+	}
+	var record map[string]any
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return session, err
+	}
+	if str(record, "bridgeSessionId") != session.ID && str(record, "sessionId") != session.ID {
+		return session, fmt.Errorf("claude peer record for pid %d belongs to another session", session.PID)
+	}
+	c.applyRecordStatus(ctx, &session, record)
+	return session, nil
 }
 
 func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
@@ -578,13 +618,16 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				return nil
 			}
 			for index, item := range items {
-				key := stableTimelineItemID(recordOffset, line, index)
+				key := item.ID
+				if key == "" {
+					key = stableTimelineItemID(recordOffset, line, index)
+				}
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
 				}
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			if done && turnID != "" && !terminalTurns[turnID] {
 				terminalTurns[turnID] = true

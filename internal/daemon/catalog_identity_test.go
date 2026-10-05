@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/workspace"
@@ -27,8 +28,8 @@ func TestCatalogIdentityGroupsWorktreesByCommonDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	base := catalogIdentityForSession(context.Background(), surface.Session{Cwd: repo})
-	worktree := catalogIdentityForSession(context.Background(), surface.Session{Cwd: child})
+	base := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now())
+	worktree := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: child}, time.Now())
 	canonicalRepo, err := workspace.NormalizeCWD(repo)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +54,7 @@ func TestCatalogIdentityGroupsWorktreesByCommonDirectory(t *testing.T) {
 
 func TestCatalogIdentityRetainsNonGitWorkspace(t *testing.T) {
 	path := t.TempDir()
-	identity := catalogIdentityForSession(context.Background(), surface.Session{Cwd: path})
+	identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: path}, time.Now())
 	canonicalPath, err := workspace.NormalizeCWD(path)
 	if err != nil {
 		t.Fatal(err)
