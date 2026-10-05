@@ -44,38 +44,36 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	return func() { cancel(); <-done; manager.Close() }, nil
 }
 
+// registerRecentClaudePeers reads the catalog that discovery commits instead
+// of listing surfaces again, so a failing surface is listed once per
+// discovery pass and stale rows are not proxied.
 func (d *Daemon) registerRecentClaudePeers(ctx context.Context, ensure func(context.Context, string) error) {
+	snapshot, err := d.Registry.CatalogSnapshot()
+	if err != nil {
+		d.logRuntimeError("claude-peers:catalog", err)
+		return
+	}
+	configured := make(map[surface.SurfaceKind]bool, len(d.Surfaces))
 	for _, adapter := range d.Surfaces {
+		configured[adapter.Name()] = true
+	}
+	now := time.Now()
+	for _, record := range snapshot.Sessions {
+		session := record.Session
 		// Native Claude sessions publish their own records and socket endpoints.
-		if adapter.Name() == surface.KindClaude {
+		if session.Surface == surface.KindClaude || !configured[session.Surface] || record.Freshness.Stale || !claudePeerEligible(session, now) {
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return
 		}
 		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		sessions, err := adapter.List(operationCtx)
+		err := ensure(operationCtx, session.ID)
 		cancel()
 		if err != nil {
-			d.logRuntimeError("claude-peers:"+string(adapter.Name()), err)
-			continue
-		}
-		for _, session := range sessions {
-			if !claudePeerEligible(session, time.Now()) {
-				continue
-			}
-			if err := ctx.Err(); err != nil {
-				return
-			}
-			if err := d.Registry.RegisterSession(session); err != nil {
-				d.logRuntimeError("claude-peers:registry", err)
-				continue
-			}
-			operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-			err := ensure(operationCtx, session.ID)
-			cancel()
-			if err != nil {
-				d.logRuntimeError("claude-peers:"+session.ID, err)
-			} else {
-				d.clearObserveError("claude-peers:" + session.ID)
-			}
+			d.logRuntimeError("claude-peers:"+session.ID, err)
+		} else {
+			d.clearObserveError("claude-peers:" + session.ID)
 		}
 	}
 }
