@@ -265,21 +265,8 @@ final class AgenthailAPI: @unchecked Sendable {
         let (bytes, response) = try await session.bytes(for: request)
         try validate(response: response, data: nil)
         await onConnected()
-        var dataLine = ""
-        for try await line in bytes.lines {
-            if Task.isCancelled { return }
-            if line.hasPrefix("data: ") {
-                dataLine = String(line.dropFirst(6))
-            } else if line.isEmpty, !dataLine.isEmpty {
-                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(AgenthailEvent.self, from: data) {
-                    await onEvent(event)
-                }
-                dataLine = ""
-            }
-        }
-        if !Task.isCancelled {
-            throw AgenthailAPIError.streamClosed
-        }
+        try await Self.readEvents(bytes, as: AgenthailEvent.self, onEvent: onEvent)
+        if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
     func streamSession(id: String, after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (SessionStreamEvent) async -> Void) async throws {
@@ -295,21 +282,7 @@ final class AgenthailAPI: @unchecked Sendable {
         }
         try validate(response: response, data: nil)
         await onConnected()
-        var dataLine = ""
-        for try await line in bytes.lines {
-            if Task.isCancelled { return }
-            if line.hasPrefix("data: ") {
-                dataLine = String(line.dropFirst(6))
-            } else if line.isEmpty, !dataLine.isEmpty {
-                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(SessionStreamEvent.self, from: data) {
-                    await onEvent(event)
-                }
-                dataLine = ""
-            }
-        }
-        if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(SessionStreamEvent.self, from: data) {
-            await onEvent(event)
-        }
+        try await Self.readEvents(bytes, as: SessionStreamEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -336,21 +309,7 @@ final class AgenthailAPI: @unchecked Sendable {
         }
         try validate(response: response, data: nil)
         await onConnected()
-        var dataLine = ""
-        for try await line in bytes.lines {
-            if Task.isCancelled { return }
-            if line.hasPrefix("data: ") {
-                dataLine = String(line.dropFirst(6))
-            } else if line.isEmpty, !dataLine.isEmpty {
-                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(CatalogStreamEvent.self, from: data) {
-                    await onEvent(event)
-                }
-                dataLine = ""
-            }
-        }
-        if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(CatalogStreamEvent.self, from: data) {
-            await onEvent(event)
-        }
+        try await Self.readEvents(bytes, as: CatalogStreamEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -404,6 +363,24 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue(key ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
     }
 
+    // Lines are split here because AsyncBytes.lines drops the blank lines that end server-sent events.
+    private static func readEvents<Event: Decodable>(_ bytes: URLSession.AsyncBytes, as type: Event.Type, onEvent: (Event) async -> Void) async throws {
+        var parser = ServerSentEventParser()
+        var line: [UInt8] = []
+        for try await byte in bytes {
+            guard byte == UInt8(ascii: "\n") else {
+                line.append(byte)
+                continue
+            }
+            if Task.isCancelled { return }
+            if line.last == UInt8(ascii: "\r") { line.removeLast() }
+            if let data = parser.consume(String(decoding: line, as: UTF8.self)), let event = try? JSONDecoder().decode(type, from: Data(data.utf8)) {
+                await onEvent(event)
+            }
+            line.removeAll(keepingCapacity: true)
+        }
+    }
+
     private static func streamConflict(_ bytes: URLSession.AsyncBytes) async -> AgenthailAPIError {
         let task = bytes.task
         let deadline = Task {
@@ -450,6 +427,21 @@ final class AgenthailAPI: @unchecked Sendable {
         }
     }
 
+}
+
+struct ServerSentEventParser {
+    private var data: [String] = []
+
+    mutating func consume(_ line: String) -> String? {
+        if line.isEmpty {
+            defer { data.removeAll() }
+            return data.isEmpty ? nil : data.joined(separator: "\n")
+        }
+        guard line.hasPrefix("data:") else { return nil }
+        let value = line.dropFirst(5)
+        data.append(String(value.first == " " ? value.dropFirst() : value))
+        return nil
+    }
 }
 
 private struct InstructionRequest: Encodable {

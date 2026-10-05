@@ -131,8 +131,27 @@ struct SessionPaneTest {
         check(Date().timeIntervalSince(started) < 5, "a stalled conflict body stops waiting within a few seconds")
         stalledServer.stop()
 
+        func item(_ seq: Int) -> String {
+            "id: \(seq)\nevent: item\ndata: {\"stream\":\"session\",\"sessionId\":\"S\",\"seq\":\(seq),\"type\":\"item\",\"data\":{\"itemId\":\"i\(seq)\",\"version\":1,\"op\":\"upsert\",\"kind\":\"message\",\"ts\":\"2026-10-04T12:00:00Z\",\"truncated\":false}}\n\n"
+        }
+        let openServer = try! StubServer { _, _ in "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" + item(1) + item(2) }
+        let openPort = await openServer.ready()
+        let openAPI = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(openPort)")!, token: "t", session: URLSession(configuration: .ephemeral))
+        let received = ReceivedSequences()
+        let streaming = Task { try? await openAPI.streamSession(id: "S", after: 0, onConnected: {}, onEvent: { await received.add($0.seq) }) }
+        let deadline = Date().addingTimeInterval(5)
+        while await received.values.count < 2, Date() < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+        check(await received.values == [1, 2], "events on a stream that stays open arrive as they are sent")
+        streaming.cancel()
+        openServer.stop()
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
+    }
+
+    actor ReceivedSequences {
+        private(set) var values: [UInt64] = []
+        func add(_ value: UInt64) { values.append(value) }
     }
 
     final class StubServer: @unchecked Sendable {
