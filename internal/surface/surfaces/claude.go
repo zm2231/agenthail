@@ -36,6 +36,8 @@ type Claude struct {
 	modelsAt     time.Time
 	modelsFlight *claudeModelsFlight
 	subagents    *claudeSubagentObserver
+	transcriptMu sync.Mutex
+	transcripts  map[string]string
 	request      ClaudeRequest
 }
 
@@ -148,35 +150,99 @@ func toCse(bridgeID string) string {
 
 var claudeProjectDirPattern = regexp.MustCompile(`[^A-Za-z0-9]`)
 
+// claudeProjectDirLimit is the longest project directory name Claude Code
+// writes verbatim; longer names are cut and given a hash suffix, which
+// Agenthail does not predict.
+const claudeProjectDirLimit = 200
+
 func (c *Claude) transcriptPath(s *surface.Session) string {
-	return c.resolveTranscript(s, s.ID)
+	return c.resolveTranscript(s, s.ID, nil)
 }
 
 // resolveTranscript finds a conversation's transcript. Claude Code names the
 // project directory after the launch directory with every character outside
 // [A-Za-z0-9] replaced by '-'. A conversation that changed directory keeps
-// its launch project, so an unmatched id is looked up across projects.
-func (c *Claude) resolveTranscript(s *surface.Session, conversationID string) string {
+// its launch project, so an id missing from the predicted directory is
+// looked up across projects. The returned path may not exist yet for a new
+// conversation; it is empty when the location cannot be predicted, so
+// callers resolve again later.
+func (c *Claude) resolveTranscript(s *surface.Session, conversationID string, locator *claudeTranscriptLocator) string {
 	if conversationID == "" || strings.ContainsAny(conversationID, `/\`) {
 		return ""
 	}
 	projects := filepath.Join(c.home, ".claude", "projects")
-	if s.Cwd != "" {
-		path := filepath.Join(projects, claudeProjectDir(s.Cwd), conversationID+".jsonl")
-		if fileExists(path) {
-			return path
+	predicted := ""
+	if dir := claudeProjectDir(s.Cwd); dir != "" && len(dir) <= claudeProjectDirLimit {
+		predicted = filepath.Join(projects, dir, conversationID+".jsonl")
+		if fileExists(predicted) {
+			return predicted
 		}
 	}
-	if matches, _ := filepath.Glob(filepath.Join(projects, "*", conversationID+".jsonl")); len(matches) == 1 {
-		return matches[0]
+	if path := c.cachedTranscript(conversationID); path != "" {
+		return path
 	}
-	if s.Cwd == "" {
+	if locator == nil {
+		locator = &claudeTranscriptLocator{projects: projects}
+	}
+	if path := locator.find(conversationID); path != "" {
+		c.transcriptMu.Lock()
+		if c.transcripts == nil {
+			c.transcripts = map[string]string{}
+		}
+		c.transcripts[conversationID] = path
+		c.transcriptMu.Unlock()
+		return path
+	}
+	return predicted
+}
+
+func (c *Claude) cachedTranscript(conversationID string) string {
+	c.transcriptMu.Lock()
+	defer c.transcriptMu.Unlock()
+	path := c.transcripts[conversationID]
+	if path != "" && !fileExists(path) {
+		delete(c.transcripts, conversationID)
 		return ""
 	}
-	return filepath.Join(projects, claudeProjectDir(s.Cwd), conversationID+".jsonl")
+	return path
+}
+
+// claudeTranscriptLocator lists the project directories once and then finds
+// conversations by id, so one discovery pass enumerates projects at most once.
+type claudeTranscriptLocator struct {
+	projects string
+	dirs     []string
+	listed   bool
+}
+
+func (l *claudeTranscriptLocator) find(conversationID string) string {
+	if !l.listed {
+		l.listed = true
+		entries, _ := os.ReadDir(l.projects)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				l.dirs = append(l.dirs, entry.Name())
+			}
+		}
+	}
+	found := ""
+	for _, dir := range l.dirs {
+		path := filepath.Join(l.projects, dir, conversationID+".jsonl")
+		if !fileExists(path) {
+			continue
+		}
+		if found != "" {
+			return ""
+		}
+		found = path
+	}
+	return found
 }
 
 func claudeProjectDir(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
 	return claudeProjectDirPattern.ReplaceAllString(cwd, "-")
 }
 
@@ -240,6 +306,7 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		return nil, fmt.Errorf("read Claude session directory: %w", err)
 	}
 	var out []surface.Session
+	locator := &claudeTranscriptLocator{projects: filepath.Join(c.home, ".claude", "projects")}
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -288,7 +355,7 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 			sess.LastActive = time.UnixMilli(int64(ts))
 		}
 		sess.Status = claudePeerStatus(m)
-		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"))
+		sess.Transcript = c.resolveTranscript(&sess, str(m, "sessionId"), locator)
 		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
 		if sess.Name == "" {
 			sess.Name = c.firstUserMessage(sess.Transcript)
