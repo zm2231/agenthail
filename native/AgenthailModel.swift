@@ -537,9 +537,10 @@ final class AgenthailModel: ObservableObject {
         if settings.isEmpty { turnSettingsDrafts.removeValue(forKey: sessionID) } else { turnSettingsDrafts[sessionID] = settings }
     }
 
-    func send(_ message: String, to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
-        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    func send(_ message: String, attachments: [URL] = [], to sessionID: String, busyDelivery: String? = nil, turnSettings: TurnSettings = .init(), completion: ((Bool) -> Void)? = nil) {
+        let text = ComposerDrop.message(text: message, attachments: attachments).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let api else {
+            restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
             completion?(false)
             return
         }
@@ -562,7 +563,7 @@ final class AgenthailModel: ObservableObject {
                 completion?(true)
             } catch {
                 localSends[sessionID]?.removeAll { $0.id == pending.id }
-                restoreToComposer(text, sessionID: sessionID)
+                restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
                 operationError = error.localizedDescription
                 completion?(false)
             }
@@ -670,8 +671,8 @@ final class AgenthailModel: ObservableObject {
         restoreToComposer(problem.message, sessionID: problem.sessionId)
     }
 
-    private func restoreToComposer(_ text: String, sessionID: String) {
-        draft(for: sessionID).restore(text)
+    private func restoreToComposer(_ text: String, attachments: [URL] = [], sessionID: String) {
+        draft(for: sessionID).restore(text, attachments: attachments)
     }
 
     private func updateLocalSend(_ id: UUID, in sessionID: String, status: String) {
@@ -856,7 +857,10 @@ final class ComposerDraft: ObservableObject {
 
     var isEmpty: Bool { ComposerDrop.isEmpty(text: text, attachments: attachments) }
 
-    func restore(_ restored: String) {
-        text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
+    func restore(_ restored: String, attachments restoredAttachments: [URL] = []) {
+        if !restored.isEmpty {
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? restored : "\(text)\n\n\(restored)"
+        }
+        attachments = ComposerDrop.adding(restoredAttachments, to: attachments)
     }
 }

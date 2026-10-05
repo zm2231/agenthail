@@ -262,11 +262,12 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func submit(busyDelivery: String?) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
-        let text = ComposerDrop.message(text: composer, attachments: composerDraft.attachments)
+        let text = composer
+        let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
         let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
-        model.send(text, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
+        model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
     }
 
     static func stopAvailable(_ session: SessionState?, removed: Bool, draftEmpty: Bool) -> Bool {

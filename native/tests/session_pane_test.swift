@@ -97,6 +97,19 @@ struct SessionPaneTest {
         check(offlinePane.detailLoadError != nil && offlinePane.detail == nil, "a failed first load is shown on the pane while it retries")
         check(offline.operationError == "An action failed.", "a failed session load leaves another operation's error alone")
         offline.closePane(offlinePane)
+        let picture = URL(fileURLWithPath: "/Volumes/shared/a picture.png")
+        let sent = await withCheckedContinuation { done in
+            offline.send(" look at this ", attachments: [picture], to: "X") { done.resume(returning: $0) }
+        }
+        check(!sent && offline.draft(for: "X").text == "look at this" && offline.draft(for: "X").attachments == [picture], "a failed send returns the text and the attachments to the draft")
+        let onlyFile = await withCheckedContinuation { done in
+            offline.send("", attachments: [picture], to: "Y") { done.resume(returning: $0) }
+        }
+        check(!onlyFile && offline.draft(for: "Y").text.isEmpty && offline.draft(for: "Y").attachments == [picture], "a failed attachment-only send keeps the attachment")
+        let disconnected = AgenthailModel(connecting: false)
+        var rejected: Bool?
+        disconnected.send("look", attachments: [picture], to: "Z") { rejected = !$0 }
+        check(rejected == true && disconnected.draft(for: "Z").text == "look" && disconnected.draft(for: "Z").attachments == [picture], "a send with no connection keeps the draft")
 
         let stalledServer = try! StubServer { _, _ in "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"error\":{\"code\":\"stream_un" }
         let port = await stalledServer.ready()
