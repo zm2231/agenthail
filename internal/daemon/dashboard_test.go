@@ -65,16 +65,22 @@ func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surfac
 	return s.runs, nil
 }
 
-func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(_ context.Context, parentSessionID string) ([]surface.ClaudeSubagentLink, error) {
-	s.linkParents = append(s.linkParents, parentSessionID)
+func (s *dashboardClaudeRunSurface) ObserveClaudeSubagents(_ context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
+	s.linkParents = append(s.linkParents, session.ID+" "+session.Transcript)
 	var links []surface.ClaudeSubagentLink
 	for _, link := range s.links {
-		if link.ParentSessionID == parentSessionID {
+		if link.ParentSessionID == session.ID {
 			links = append(links, link)
 		}
 	}
 	return links, nil
 }
+
+func (s *dashboardClaudeRunSurface) ObserveAllClaudeSubagents(context.Context) ([]surface.ClaudeSubagentLink, error) {
+	return s.links, nil
+}
+
+var _ surface.ClaudeRunObserver = (*dashboardClaudeRunSurface)(nil)
 
 type sessionPageReadProbe struct {
 	*daemonSurface
@@ -196,6 +202,7 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 	_, registry, _, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
 	from.ID = "claude-session"
+	from.Transcript = "/projects/encoded-cwd/transcript-1.jsonl"
 	if err := registry.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -218,8 +225,8 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 	if len(body.Runs) != 1 || body.Runs[0].JobID != "job-1" || len(body.Links) != 1 || body.Links[0].AgentID != "agent-1" {
 		t.Fatalf("body=%+v", body)
 	}
-	if !reflect.DeepEqual(fake.linkParents, []string{from.ID}) {
-		t.Fatalf("subagent reads=%q, want only %q", fake.linkParents, from.ID)
+	if want := []string{from.ID + " " + from.Transcript}; !reflect.DeepEqual(fake.linkParents, want) {
+		t.Fatalf("subagent reads=%q, want only %q", fake.linkParents, want)
 	}
 }
 

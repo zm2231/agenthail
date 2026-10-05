@@ -612,3 +612,48 @@ func withoutQueueCatalogEvents(events []registry.CatalogEvent) []registry.Catalo
 	}
 	return filtered
 }
+
+func TestDiscoveryProjectsSubagentIdentityAndRollup(t *testing.T) {
+	d, registry, fake, from, to := daemonFixture(t)
+	from.Subagents = &surface.SubagentRollup{Count: 3, Working: 1}
+	to.Subagent = &surface.Subagent{ParentID: from.ID, RootID: from.ID, Depth: 1, Nickname: "Ada", Role: "reviewer"}
+	fake.sessions = map[string]surface.Session{from.ID: from, to.ID: to}
+	d.discoverCatalog(context.Background())
+
+	window, err := registry.CatalogEventsAfter(0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamed := map[string]dashboardSession{}
+	for _, event := range window.Events {
+		if event.Type != "session.upserted" {
+			continue
+		}
+		var payload struct {
+			Session dashboardSession `json:"session"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		streamed[payload.Session.ID] = payload.Session
+	}
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := map[string]dashboardSession{}
+	for _, session := range state.Sessions {
+		snapshot[session.ID] = session
+	}
+	for name, rows := range map[string]map[string]dashboardSession{"stream": streamed, "snapshot": snapshot} {
+		if got := rows[to.ID].Subagent; got == nil || *got != *to.Subagent {
+			t.Fatalf("%s subagent row = %+v", name, got)
+		}
+		if got := rows[from.ID].Subagents; got == nil || *got != *from.Subagents {
+			t.Fatalf("%s parent rollup = %+v", name, got)
+		}
+		if rows[from.ID].Subagent != nil || rows[to.ID].Subagents != nil {
+			t.Fatalf("%s rows carry identity they do not own: %+v %+v", name, rows[from.ID], rows[to.ID])
+		}
+	}
+}

@@ -565,7 +565,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 	if err != nil {
 		return fmt.Errorf("read Claude job records: %w", err)
 	}
-	links, err := observer.ObserveClaudeSubagentLinks(context.Background(), "")
+	links, err := observer.ObserveAllClaudeSubagents(context.Background())
 	if err != nil {
 		return fmt.Errorf("read Claude subagent records: %w", err)
 	}
@@ -616,6 +616,7 @@ func (a *App) cmdList(args []string) error {
 				surfaceErrors[string(record.Session.Surface)] = fmt.Sprintf("normalize session workspace: %s", err)
 				continue
 			}
+			session.Subagents = catalogSubagentRollup(record)
 			allSessions = append(allSessions, session)
 		}
 		for _, record := range catalog.Surfaces {
@@ -716,12 +717,19 @@ func (a *App) cmdList(args []string) error {
 		}
 		return allSessions[i].LastActive.After(allSessions[j].LastActive)
 	})
-	max := 15
+	families := 15
 	if showAll {
-		max = len(allSessions)
+		families = -1
 	}
-	if len(allSessions) > max {
-		allSessions = allSessions[:max]
+	rows := listFamilies(allSessions, families)
+	rollups := listRollups(allSessions)
+	allSessions = allSessions[:0]
+	for _, row := range rows {
+		session := row.session
+		if rollup, found := rollups[session.ID]; found {
+			session.Subagents = &rollup
+		}
+		allSessions = append(allSessions, session)
 	}
 	if jsonOut {
 		document := map[string]any{"sessions": allSessions, "errors": surfaceErrors}
@@ -769,7 +777,7 @@ func (a *App) cmdList(args []string) error {
 			return fmt.Errorf("read queue counts: %w", err)
 		}
 	}
-	for _, s := range allSessions {
+	for index, s := range allSessions {
 		stat := sessStat(s, queueCounts[s.ID])
 		agent := ""
 		if alias, ok := aliased[s.ID]; ok {
@@ -777,8 +785,15 @@ func (a *App) cmdList(args []string) error {
 		}
 		project := listProjectLabel(s, projectNames, wide)
 		last := relTime(s.LastActive)
+		name := listRowName(rows[index])
+		if rows[index].depth > 0 {
+			name = strings.Repeat("  ", rows[index].depth-1) + "└ " + name
+		}
+		if s.Subagents != nil {
+			last += fmt.Sprintf("  %d subagents, %d working", s.Subagents.Count, s.Subagents.Working)
+		}
 		fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n",
-			s.Surface, stat, truncate(agent, 14), truncate(s.Name, 28), projectWidth, project, last)
+			s.Surface, stat, truncate(agent, 14), truncate(name, 28), projectWidth, project, last)
 	}
 	if successfulSurfaces == 0 && len(surfaceErrors) > 0 {
 		return fmt.Errorf("%d surface(s) failed discovery", len(surfaceErrors))
@@ -1016,9 +1031,18 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		}
 		return session, adapter, nil
 	}
-	target = strings.TrimPrefix(target, "@")
+	subagentPath := strings.HasPrefix(target, "@") && strings.Contains(target, "/")
+	if !subagentPath {
+		target = strings.TrimPrefix(target, "@")
+	}
+	if subagentPath && a.Registry == nil {
+		return nil, nil, fmt.Errorf("subagent target %q needs the session registry", target)
+	}
 	if a.Registry != nil {
 		sid, err := a.Registry.ResolveTarget(target)
+		if err != nil && subagentPath {
+			return nil, nil, err
+		}
 		if err == nil {
 			kindText, _, _, lookupErr := a.Registry.GetSession(sid)
 			if lookupErr == nil {
