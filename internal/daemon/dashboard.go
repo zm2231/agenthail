@@ -105,6 +105,7 @@ type dashboardSession struct {
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
+	SharedWith        []dashboardSharedSession   `json:"sharedWith,omitempty"`
 }
 
 type dashboardState struct {
@@ -838,6 +839,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
 				entry.Open = saved.Open
 				entry.Subagents = saved.Subagents
+				entry.SharedWith = saved.SharedWith
 			}
 		}
 		entry.QueueCount = counts[session.ID]
@@ -1906,6 +1908,9 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	response["journalSeq"] = sessionRead.JournalSeq
+	if shared := d.sharedSessions(session.ID); len(shared) > 0 {
+		response["sharedWith"] = shared
+	}
 	if sessionReadErr != nil {
 		response["readError"] = "Session journal could not be read."
 	} else if sessionRead.UnavailableReason != "" {

@@ -38,6 +38,8 @@ type Daemon struct {
 	events            *eventHub
 	catalog           *catalogHub
 	catalogLive       map[string]*catalogLiveSession
+	sharedMu          sync.Mutex
+	shared            map[string][]dashboardSharedSession
 	catalogIdentities *catalogIdentityCache
 	sources           *sessionSourceManager
 	sourceHoldMu      sync.Mutex

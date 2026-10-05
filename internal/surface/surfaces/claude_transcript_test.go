@@ -58,7 +58,7 @@ func TestClaudeListKeepsTheFirstProcessOnASharedSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessions, err := NewClaude("", home).List(context.Background())
-	if err != nil || len(sessions) != 1 || sessions[0].PID != os.Getpid() || sessions[0].Name != "original" {
+	if err != nil || len(sessions) != 1 || sessions[0].PID != os.Getpid() || sessions[0].Name != "original" || !sessions[0].StartedAt.Equal(time.UnixMilli(100)) {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
 }
