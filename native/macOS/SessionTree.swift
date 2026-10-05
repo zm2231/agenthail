@@ -8,6 +8,54 @@ enum SessionFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum SessionStatusFilter: String, CaseIterable, Identifiable {
+    case busy
+    case idle
+    case offline
+    case unavailable
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .busy: return "Working"
+        case .idle: return "Idle"
+        case .offline: return "Offline"
+        case .unavailable: return "Unavailable"
+        }
+    }
+
+    func matches(_ session: SessionState) -> Bool {
+        switch self {
+        case .unavailable: return ["unknown", "notLoaded"].contains(session.status)
+        default: return session.status == rawValue
+        }
+    }
+}
+
+struct SessionRefinement: Equatable {
+    var status: SessionStatusFilter?
+    var surface: String?
+
+    var isActive: Bool { status != nil || surface != nil }
+
+    func matches(_ session: SessionState) -> Bool {
+        (status?.matches(session) ?? true) && (surface.map { $0 == session.surface } ?? true)
+    }
+
+    func matches(_ family: SessionFamily) -> Bool {
+        !isActive || family.sessions.contains(where: matches)
+    }
+
+    static func surfaces(_ sessions: [SessionState], configured: [SurfaceState]) -> [String] {
+        Array(Set(sessions.map(\.surface) + configured.map(\.name))).sorted()
+    }
+
+    static func surfaceLabel(_ surface: String) -> String {
+        surface.prefix(1).uppercased() + surface.dropFirst()
+    }
+}
+
 struct SessionTree: Equatable {
     struct Project: Identifiable, Equatable {
         let id: String
@@ -49,8 +97,8 @@ struct SessionTree: Equatable {
     let needsYou: [SessionState]
     let counts: [SessionFilter: Int]
 
-    static func build(_ sessions: [SessionState], filter: SessionFilter, attentionSessionIDs: Set<String>, now: Date) -> SessionTree {
-        let families = SessionFamilies.build(sessions)
+    static func build(_ sessions: [SessionState], filter: SessionFilter, refinement: SessionRefinement = SessionRefinement(), attentionSessionIDs: Set<String>, now: Date) -> SessionTree {
+        let families = SessionFamilies.build(sessions).filter(refinement.matches)
         var counts: [SessionFilter: Int] = [:]
         for candidate in SessionFilter.allCases {
             counts[candidate] = families.filter { includes($0, in: candidate, now: now) }.count

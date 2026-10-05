@@ -85,6 +85,7 @@ struct SessionSidebar: View {
                     .help(shortcuts.help(filter.rawValue, filter.command))
                 }
                 Spacer()
+                SessionRefinementMenu(model: model)
                 Button {
                     model.newSessionVisible = true
                 } label: {
@@ -134,6 +135,7 @@ struct SessionSidebar: View {
                     .keyboardShortcut(shortcuts.keyboardShortcut(.findSession))
                     .hidden()
             }
+            SessionRefinementBar(model: model)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -175,7 +177,7 @@ struct SessionSidebar: View {
                         }
                     }
                     if tree.projects.isEmpty {
-                        Text(model.sessionFilter == .running ? "Nothing is running." : "No sessions yet.")
+                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : "No sessions yet.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, 8)

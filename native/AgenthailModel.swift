@@ -40,6 +40,7 @@ final class AgenthailModel: ObservableObject {
     @Published var loading = false
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent
+    @Published var sessionRefinement = SessionRefinement()
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
 
@@ -83,7 +84,7 @@ final class AgenthailModel: ObservableObject {
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
     var attentionSessionIDs: Set<String> { Set((snapshot?.attention.map(\.sessionId) ?? []) + deliveryProblems.map(\.sessionId)) }
     var sessionTree: SessionTree {
-        SessionTree.build(knownSessions, filter: sessionFilter, attentionSessionIDs: attentionSessionIDs, now: Date())
+        SessionTree.build(knownSessions, filter: sessionFilter, refinement: sessionRefinement, attentionSessionIDs: attentionSessionIDs, now: Date())
     }
 
     init(connecting: Bool = true, api: AgenthailAPI? = nil) {
