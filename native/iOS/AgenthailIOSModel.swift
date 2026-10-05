@@ -813,7 +813,6 @@ final class AgenthailIOSModel: ObservableObject {
                     if case AgenthailAPIError.streamGap = error {
                         catalogStreamCursor = 0
                         _ = await refresh(fresh: true)
-                        continue
                     }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
@@ -913,10 +912,10 @@ final class AgenthailIOSModel: ObservableObject {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
+                    if case AgenthailAPIError.streamUnsupported = error { return }
                     if case AgenthailAPIError.streamGap = error {
                         sessionStreamCursor = 0
                         await refreshSession(id)
-                        continue
                     }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))

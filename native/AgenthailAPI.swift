@@ -405,6 +405,12 @@ final class AgenthailAPI: @unchecked Sendable {
     }
 
     private static func streamConflict(_ bytes: URLSession.AsyncBytes) async -> AgenthailAPIError {
+        let task = bytes.task
+        let deadline = Task {
+            try? await Task.sleep(for: .seconds(2))
+            task.cancel()
+        }
+        defer { deadline.cancel() }
         var data = Data()
         do {
             for try await byte in bytes {

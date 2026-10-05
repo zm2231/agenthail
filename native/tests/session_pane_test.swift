@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 @main
 struct SessionPaneTest {
@@ -69,8 +70,53 @@ struct SessionPaneTest {
         if case .request(409, "Codex is unavailable") = conflict(#"{"error":{"code":"transport_unavailable","message":"Codex is unavailable"}}"#) {} else { check(false, "other conflicts keep their message and are not gaps") }
         if case .request(409, _) = conflict("not json") {} else { check(false, "an unreadable conflict is not a gap") }
 
+        let stalledServer = try! StalledConflictServer()
+        let port = await stalledServer.ready()
+        let stalledAPI = AgenthailAPI(baseURL: URL(string: "http://127.0.0.1:\(port)")!, token: "t", session: URLSession(configuration: .ephemeral))
+        let started = Date()
+        do {
+            try await stalledAPI.streamSession(id: "S", after: 0, onConnected: {}, onEvent: { _ in })
+            check(false, "a stalled conflict ends the stream with an error")
+        } catch AgenthailAPIError.request(409, _) {
+        } catch {
+            check(false, "a stalled conflict body is reported as a plain conflict, got \(error)")
+        }
+        check(Date().timeIntervalSince(started) < 5, "a stalled conflict body stops waiting within a few seconds")
+        stalledServer.stop()
+
         let delivered = await model.reply("  answer from a notification  ", to: "D", connectionTimeout: .milliseconds(50))
         check(!delivered && model.draft(for: "D").text == "answer from a notification", "an undeliverable reply waits in the session's draft")
+    }
+
+    final class StalledConflictServer: @unchecked Sendable {
+        private let listener: NWListener
+        private var connections: [NWConnection] = []
+
+        init() throws {
+            listener = try NWListener(using: .tcp, on: .any)
+            listener.newConnectionHandler = { [self] connection in
+                connections.append(connection)
+                connection.start(queue: .main)
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
+                    let reply = "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"error\":{\"code\":\"stream_un"
+                    connection.send(content: Data(reply.utf8), completion: .contentProcessed { _ in })
+                }
+            }
+        }
+
+        func ready() async -> UInt16 {
+            await withCheckedContinuation { continuation in
+                listener.stateUpdateHandler = { [listener] state in
+                    if case .ready = state { continuation.resume(returning: listener.port!.rawValue) }
+                }
+                listener.start(queue: .main)
+            }
+        }
+
+        func stop() {
+            connections.forEach { $0.cancel() }
+            listener.cancel()
+        }
     }
 
     private static func check(_ condition: Bool, _ message: String) {

@@ -191,7 +191,6 @@ final class AgenthailModel: ObservableObject {
         if let items = loaded.timeline?.items, let sends = localSends[id] {
             localSends[id] = LocalSend.reconcile(sends, with: items)
         }
-        operationError = nil
     }
 
     func refreshCachedDetail(_ detail: SessionDetail, for id: String) {
