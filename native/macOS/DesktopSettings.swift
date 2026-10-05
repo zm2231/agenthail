@@ -7,6 +7,8 @@ struct DesktopSettings: View {
 
     var body: some View {
         TabView {
+            OverviewSettings(model: model)
+                .tabItem { Label("Overview", systemImage: "square.grid.2x2") }
             GeneralSettings(model: model)
                 .tabItem { Label("General", systemImage: "gearshape") }
             KeyboardSettings()
@@ -25,7 +27,7 @@ struct DesktopSettings: View {
     }
 }
 
-private struct SettingsError: View {
+struct SettingsError: View {
     @ObservedObject var model: AgenthailModel
 
     var body: some View {
@@ -53,17 +55,9 @@ struct GeneralSettings: View {
                 if let pid = model.snapshot?.daemon.pid {
                     LabeledContent("Process", value: String(pid))
                 }
-                ForEach(model.snapshot?.surfaces ?? []) { surface in
-                    LabeledContent(surface.name.capitalized) {
-                        Text(surface.connected ? "Connected" : surface.healthDetail ?? surface.error ?? surface.health.capitalized)
-                            .foregroundStyle(surface.connected ? DesktopPalette.text2 : DesktopPalette.amber)
-                            .lineLimit(2)
-                    }
-                    ForEach(surface.runtime?.advice ?? [], id: \.self) { line in
-                        Text(line)
-                            .font(.system(size: 12))
-                            .foregroundStyle(DesktopPalette.text2)
-                            .textSelection(.enabled)
+                if let listen = model.settings?.dashboard.listen {
+                    LabeledContent("Local listener") {
+                        Text(listen).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
                     }
                 }
                 HStack {
@@ -79,6 +73,19 @@ struct GeneralSettings: View {
                 .pickerStyle(.radioGroup)
                 .disabled(model.snapshot == nil)
                 Text("\(shortcuts.label(.sendAlternate).map { "\($0) always does" } ?? "Send the other way does") the other one. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
+            }
+            Section {
+                let hours = model.snapshot?.codexRecentHours ?? 5
+                Picker("Codex recent window", selection: Binding(get: { hours }, set: { model.setCodexRecentHours($0) })) {
+                    ForEach(CodexRecentWindow.choices(including: hours), id: \.self) { Text(CodexRecentWindow.label($0)).tag($0) }
+                }
+                .disabled(model.snapshot == nil)
+            } header: {
+                Text("Current work")
+            } footer: {
+                Text("Codex threads stay in Recent this long after their last activity.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }
@@ -121,6 +128,9 @@ struct DevicesSettings: View {
                         .foregroundStyle(remote.error == nil ? DesktopPalette.text2 : DesktopPalette.amber)
                 }
             }
+            if let remote = model.settings?.remoteAccess {
+                BrowserAccessSection(remote: remote)
+            }
             Section("Pair an iPhone") {
                 Button("Show Pairing Code") { model.createPairing() }
                     .disabled(model.settings?.remoteAccess.enabled != true)
@@ -156,7 +166,7 @@ private struct PairingCode: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            if let image = qrImage(pairing.pairingURL) {
+            if let image = QRCodeImage.make(pairing.pairingURL) {
                 Image(nsImage: image).interpolation(.none).resizable().frame(width: 128, height: 128)
             }
             VStack(alignment: .leading, spacing: 6) {
@@ -172,7 +182,10 @@ private struct PairingCode: View {
         }
     }
 
-    private func qrImage(_ value: String) -> NSImage? {
+}
+
+enum QRCodeImage {
+    static func make(_ value: String) -> NSImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(value.utf8)
         filter.correctionLevel = "M"
@@ -233,6 +246,7 @@ struct DeliverySettings: View {
     @State private var relayFrom = ""
     @State private var relayTo = ""
     @State private var relayPattern = ".*"
+    @State private var relayOnce = false
     @State private var channelName = ""
     @State private var selectedChannel = ""
     @State private var channelTarget = ""
@@ -267,6 +281,7 @@ struct DeliverySettings: View {
                     }
                 }
             }
+            RecentOutcomesSection(history: model.snapshot?.history ?? [])
             Section {
                 ForEach(model.snapshot?.relays ?? []) { relay in
                     HStack {
@@ -276,6 +291,9 @@ struct DeliverySettings: View {
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(DesktopPalette.text2)
                                 .lineLimit(1)
+                            Text(relayState(relay))
+                                .font(.system(size: 11))
+                                .foregroundStyle(DesktopPalette.text2)
                         }
                         Spacer()
                         Button("Remove") { model.performOperation(action: "relay-remove", relayID: relay.id) }
@@ -290,8 +308,9 @@ struct DeliverySettings: View {
                     Text("Choose a session").tag("")
                     ForEach(writableSessions) { Text($0.displayName).tag($0.id) }
                 }
+                Toggle("Run this handoff once", isOn: $relayOnce)
                 Button("Add Handoff") {
-                    model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern)
+                    model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, once: relayOnce)
                 }
                 .disabled(relayFrom.isEmpty || relayTo.isEmpty)
             } header: {
@@ -350,6 +369,14 @@ struct DeliverySettings: View {
             SettingsError(model: model)
         }
         .formStyle(.grouped)
+    }
+
+    private func relayState(_ relay: RelayState) -> String {
+        var parts = [relay.once ? "Once" : "Every time", relay.active ? "active" : "complete", relay.fireCount == 1 ? "fired once" : "fired \(relay.fireCount) times"]
+        if let last = relay.lastFiredAt, case let age = relativeAge(last), !age.isEmpty {
+            parts.append(age == "now" ? "last just now" : "last \(age) ago")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

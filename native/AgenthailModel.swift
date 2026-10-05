@@ -419,11 +419,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil) {
+    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, relayID: Int64? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, relayID: relayID)
+                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, relayID: relayID)
                 operationError = nil
                 _ = await refresh(fresh: true)
                 await loadAudit(reset: true)
@@ -595,16 +595,38 @@ final class AgenthailModel: ObservableObject {
     var busyDelivery: FollowUpAction { FollowUpAction(rawValue: snapshot?.busyDelivery ?? "") ?? .queue }
 
     func setBusyDelivery(_ mode: FollowUpAction) {
-        guard let api, let snapshot, mode != busyDelivery else { return }
+        guard let snapshot, mode != busyDelivery else { return }
+        updateDashboardConfig(busyDelivery: mode.rawValue, codexRecentHours: snapshot.codexRecentHours)
+    }
+
+    func setCodexRecentHours(_ hours: Int) {
+        guard let snapshot, hours != snapshot.codexRecentHours else { return }
+        updateDashboardConfig(busyDelivery: busyDelivery.rawValue, codexRecentHours: hours)
+    }
+
+    private func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) {
+        guard let api else { return }
         Task {
             do {
-                try await api.updateBusyDelivery(mode.rawValue, codexRecentHours: snapshot.codexRecentHours)
+                try await api.updateDashboardConfig(busyDelivery: busyDelivery, codexRecentHours: codexRecentHours)
+                settings = try await api.settings()
                 operationError = nil
             } catch {
                 operationError = error.localizedDescription
             }
             _ = await refresh(fresh: true)
         }
+    }
+
+    func repairSurface(_ surface: SurfaceState) async {
+        guard let api, let action = surface.repairAction else { return }
+        do {
+            try await api.action(action)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+        _ = await refresh(fresh: true)
     }
 
     func queuedItems(for sessionID: String) -> [QueueState] {
@@ -730,7 +752,9 @@ final class AgenthailModel: ObservableObject {
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health, let index = current.surfaces.firstIndex(where: { $0.name == name }) else { return }
             let previous = current.surfaces[index]
-            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime)
+            // The daemon derives the repair from the runtime problem, and health events carry no repair.
+            let repairs = event.data.runtime?.problem == previous.runtime?.problem
+            current.surfaces[index] = SurfaceState(name: name, connected: health == "healthy", error: health == "healthy" ? nil : event.data.detail, health: health, healthDetail: event.data.detail, capabilities: previous.capabilities, runtime: event.data.runtime, repairAction: repairs ? previous.repairAction : nil, repairLabel: repairs ? previous.repairLabel : nil)
         default:
             return
         }

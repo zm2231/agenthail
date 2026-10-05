@@ -47,6 +47,15 @@ struct DashboardSnapshotTest {
         precondition(codex.runtime?.advice[1].contains("chatgpt.com/codex/install.sh") == true)
         let healthy = try! JSONDecoder().decode(SurfaceState.self, from: Data(#"{"name":"claude","connected":true,"health":"healthy","capabilities":{"send":true,"stream":false,"reply":false,"goal":false,"compact":false,"model":false,"interrupt":false,"steer":false}}"#.utf8))
         precondition(!healthy.needsAttention && healthy.runtime == nil)
+        precondition(healthy.repairAction == nil && healthy.repairLabel == nil)
+        let relays = try! JSONDecoder().decode([RelayState].self, from: Data(#"[{"id":3,"from":"@research","to":"@builder","pattern":"READY","once":true,"active":false,"fireCount":1,"lastFiredAt":"2026-10-05 11:00:00"},{"id":4,"from":"@a","to":"@b","pattern":".*","once":false,"active":true,"fireCount":0}]"#.utf8))
+        precondition(relays[0].once && !relays[0].active && relays[0].fireCount == 1 && relays[0].lastFiredAt == "2026-10-05 11:00:00")
+        precondition(!relays[1].once && relays[1].active && relays[1].lastFiredAt == nil)
+        let outcome = try! JSONDecoder().decode(HistoryState.self, from: Data(#"{"id":1,"createdAt":"2026-10-05 11:00:00","kind":"deliver","evidence":"delivered"}"#.utf8))
+        precondition(outcome.evidence == "delivered")
+        let settings = try! JSONDecoder().decode(DashboardSettingsState.self, from: Data(#"{"dashboard":{"enabled":true,"listen":"127.0.0.1:7412","codexRecentHours":8,"busyDelivery":"steer","remoteAccess":{"enabled":true,"provider":"tailscale","port":7412}},"remoteAccess":{"enabled":true,"desired":true,"provider":"tailscale","url":"https://mac.example.ts.net:7412/?token=fixture#overview","dnsName":"mac.example.ts.net","port":7412},"notifications":{"enabled":false,"available":true,"authorization":"unknown","authorized":false,"alerts":false,"sounds":false},"daemon":{"pid":1,"running":true}}"#.utf8))
+        precondition(settings.dashboard.listen == "127.0.0.1:7412" && settings.dashboard.codexRecentHours == 8 && settings.dashboard.busyDelivery == "steer")
+        precondition(settings.remoteAccess.url?.hasPrefix("https://mac.example.ts.net:7412/") == true)
         print("dashboard snapshot tests passed")
     }
 }

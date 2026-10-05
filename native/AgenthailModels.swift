@@ -68,6 +68,8 @@ struct SurfaceState: Decodable, Identifiable, Equatable {
     let healthDetail: String?
     let capabilities: Capabilities
     var runtime: SurfaceRuntime? = nil
+    var repairAction: String? = nil
+    var repairLabel: String? = nil
 
     var needsAttention: Bool { health != "healthy" || !(runtime?.advice.isEmpty ?? true) }
 }
@@ -452,6 +454,10 @@ struct RelayState: Decodable, Identifiable, Equatable {
     let from: String
     let to: String
     let pattern: String
+    let once: Bool
+    let active: Bool
+    let fireCount: Int64
+    let lastFiredAt: String?
 }
 
 struct HistoryState: Decodable, Identifiable, Equatable {
@@ -466,6 +472,7 @@ struct HistoryState: Decodable, Identifiable, Equatable {
     let message: String?
     let result: String?
     let error: String?
+    var evidence: String? = nil
 }
 
 struct DaemonState: Decodable, Equatable {
@@ -687,7 +694,14 @@ struct RemoteAccessState: Decodable {
     let error: String?
 }
 
+struct DashboardConfigState: Decodable {
+    let listen: String
+    let codexRecentHours: Int
+    let busyDelivery: String
+}
+
 struct DashboardSettingsState: Decodable {
+    let dashboard: DashboardConfigState
     let remoteAccess: RemoteAccessState
     let notifications: NotificationStatusState
 }
