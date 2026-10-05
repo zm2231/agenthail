@@ -47,3 +47,44 @@ func TestWriterTransactionKeepsItsSnapshotWhileAnotherProcessWrites(t *testing.T
 		t.Fatalf("the waiting writer failed instead of waiting: %v", err)
 	}
 }
+
+func TestIdleQueueScansTakeNoWriteLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	held, err := second.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback()
+	done := make(chan error, 1)
+	go func() {
+		now := time.Now()
+		if _, err := first.ExpireMessages(now); err != nil {
+			done <- err
+			return
+		}
+		if err := first.ReconcileAttentionItems(now); err != nil {
+			done <- err
+			return
+		}
+		_, err := first.ClaimNextMessage("idle-session", now)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("an idle expiry, attention or claim scan waited for another process's write lock")
+	}
+}

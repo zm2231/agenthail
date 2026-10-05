@@ -1122,6 +1122,14 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	return id, deliveryID, nil
 }
 
+// readExists answers a periodic "is there work?" question from the read pool,
+// so an idle pass takes no write lock; the writer transaction checks again.
+func (r *Registry) readExists(query string, args ...any) (bool, error) {
+	var exists bool
+	err := r.read.QueryRow(query, args...).Scan(&exists)
+	return exists, err
+}
+
 func (r *Registry) expireMessages(now time.Time) error {
 	if _, err := r.ExpireMessages(now); err != nil {
 		return err
@@ -1130,6 +1138,9 @@ func (r *Registry) expireMessages(now time.Time) error {
 }
 
 func (r *Registry) ExpireMessages(now time.Time) (int, error) {
+	if due, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?)`, now.UnixMilli()); err != nil || !due {
+		return 0, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
@@ -1531,6 +1542,9 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 // ReconcileAttentionItems materializes attention rows from queue state. It is
 // called by queue state writers and the background scan, never by snapshot reads.
 func (r *Registry) ReconcileAttentionItems(now time.Time) error {
+	if open, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='dead') OR EXISTS(SELECT 1 FROM attention_items WHERE resolved_at='')`); err != nil || !open {
+		return err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -1663,6 +1677,9 @@ func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*Queu
 
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	if err := r.expireMessages(now); err != nil {
+		return nil, err
+	}
+	if queued, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status IN ('pending','inflight'))`, sessionID); err != nil || !queued {
 		return nil, err
 	}
 	tx, err := r.db.Begin()
