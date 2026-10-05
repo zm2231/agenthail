@@ -3,7 +3,11 @@ set -Eeuo pipefail
 report_failure() {
 	status=$?
 	echo "error: package install test failed at line $1: $2" >&2
-	tail -n 120 /var/log/install.log 2>/dev/null >&2 || true
+	tail -n 120 /var/log/install.log >&2 2>/dev/null || true
+	tail -n 120 "${TMPDIR:-/tmp}/agenthail-pkg-menu.log" >&2 2>/dev/null || true
+	for report in "$HOME"/Library/Logs/DiagnosticReports/Agenthail*.ips; do
+		[ ! -f "$report" ] || cat "$report" >&2
+	done
 	exit "$status"
 }
 trap 'report_failure "$LINENO" "$BASH_COMMAND"' ERR
