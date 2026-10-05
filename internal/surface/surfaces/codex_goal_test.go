@@ -1,57 +1,13 @@
 package surfaces
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
-
-func TestCodexGoalSetParamsUsesTypedNullableProtocolFields(t *testing.T) {
-	objective := "verify release"
-	status := surface.GoalStatusPaused
-	budget := int64(50000)
-	params, err := codexGoalSetParams("thread", surface.GoalUpdate{Objective: &objective, Status: &status, TokenBudget: &budget})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{"threadId": "thread", "objective": objective, "status": status, "tokenBudget": budget}
-	if !reflect.DeepEqual(params, want) {
-		t.Fatalf("params=%#v want=%#v", params, want)
-	}
-	params, err = codexGoalSetParams("thread", surface.GoalUpdate{Objective: &objective})
-	if err != nil || params["status"] != nil {
-		t.Fatalf("edit params=%#v err=%v", params, err)
-	}
-	params, err = codexGoalSetParams("thread", surface.GoalUpdate{ClearTokenBudget: true})
-	if err != nil || params["tokenBudget"] != nil {
-		t.Fatalf("clear params=%#v err=%v", params, err)
-	}
-}
-
-func TestCodexGoalSetParamsRejectsUnknownStatusAndNegativeBudget(t *testing.T) {
-	status := "running"
-	if _, err := codexGoalSetParams("thread", surface.GoalUpdate{Status: &status}); err == nil {
-		t.Fatal("unknown status accepted")
-	}
-	budget := int64(-1)
-	if _, err := codexGoalSetParams("thread", surface.GoalUpdate{TokenBudget: &budget}); err == nil {
-		t.Fatal("negative budget accepted")
-	}
-}
-
-func TestCodexGoalStatusesAreExactlyTheSupportedSix(t *testing.T) {
-	statuses := []string{surface.GoalStatusActive, surface.GoalStatusPaused, surface.GoalStatusBlocked, surface.GoalStatusUsageLimited, surface.GoalStatusBudgetLimited, surface.GoalStatusComplete}
-	if len(statuses) != 6 {
-		t.Fatalf("status count=%d", len(statuses))
-	}
-	for _, status := range statuses {
-		if !validCodexGoalStatus(status) {
-			t.Fatalf("status %q is not accepted", status)
-		}
-	}
-}
 
 func TestParseCodexGoalNotificationsPreservesUpdatedAndCleared(t *testing.T) {
 	updated, ok := ParseCodexGoalNotification("thread/goal/updated", map[string]any{
@@ -67,12 +23,53 @@ func TestParseCodexGoalNotificationsPreservesUpdatedAndCleared(t *testing.T) {
 	}
 }
 
-func TestCodexGoalNotificationsBecomeStreamEvents(t *testing.T) {
-	event, ok := codexGoalStreamEvent(codexEvent{Sequence: 9, Method: "thread/goal/cleared", Params: map[string]any{"threadId": "thread"}})
-	if !ok || event.Kind != "goal" || event.Operation != "replace" || event.Version != 9 || event.Goal != nil {
-		t.Fatalf("event=%+v ok=%v", event, ok)
+func TestCodexUpdateGoalSendsTypedNullableProtocolFields(t *testing.T) {
+	fake := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+		if method == "thread/resume" {
+			return map[string]any{"thread": map[string]any{"id": "thread"}}
+		}
+		return nil
+	})
+	codex := isolatedManagedRuntime(t)
+	objective := "verify release"
+	status := surface.GoalStatusPaused
+	budget := int64(50000)
+	for _, update := range []surface.GoalUpdate{
+		{Objective: &objective, Status: &status, TokenBudget: &budget},
+		{Objective: &objective},
+		{ClearTokenBudget: true},
+	} {
+		if err := codex.UpdateGoal(context.Background(), managedSession(), update); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, ok := codexGoalStreamEvent(codexEvent{Method: "thread/status/changed", Params: map[string]any{"threadId": "thread"}}); ok {
-		t.Fatal("non-goal notification was emitted as a goal event")
+	sets := fake.Calls("thread/goal/set")
+	if len(sets) != 3 {
+		t.Fatalf("methods=%v", fake.Methods())
+	}
+	want := map[string]any{"threadId": "thread", "objective": objective, "status": status, "tokenBudget": float64(budget)}
+	if !reflect.DeepEqual(sets[0], want) {
+		t.Fatalf("params=%#v want=%#v", sets[0], want)
+	}
+	if _, present := sets[1]["status"]; present {
+		t.Fatalf("objective edit changed status: %#v", sets[1])
+	}
+	if value, present := sets[2]["tokenBudget"]; !present || value != nil {
+		t.Fatalf("budget clear was not an explicit null: %#v", sets[2])
+	}
+}
+
+func TestCodexUpdateGoalRejectsUnknownStatusAndNegativeBudgetBeforeDelivery(t *testing.T) {
+	fake := startManagedCodex(t, func(string, map[string]any) map[string]any { return nil })
+	codex := isolatedManagedRuntime(t)
+	status := "running"
+	budget := int64(-1)
+	for _, update := range []surface.GoalUpdate{{Status: &status}, {TokenBudget: &budget}, {}} {
+		if err := codex.UpdateGoal(context.Background(), managedSession(), update); err == nil {
+			t.Fatalf("invalid goal update accepted: %+v", update)
+		}
+	}
+	if methods := fake.Methods(); len(methods) != 0 {
+		t.Fatalf("invalid goal updates reached the app-server: %v", methods)
 	}
 }

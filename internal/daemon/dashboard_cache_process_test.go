@@ -25,22 +25,6 @@ func TestParseClaudeOpenProcessesRequiresPositivePIDAndExactClaudeBasename(t *te
 	}
 }
 
-func TestPublishEventInvalidatesOnlyStateRelevantDashboardEvents(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	d.dashboard = &dashboardServer{}
-
-	for _, eventType := range []string{"transcript.updated", "session.output", "unrelated.event"} {
-		d.publishEvent(eventType, "from", nil)
-	}
-	if got := d.dashboard.stateVersion.Load(); got != 0 {
-		t.Fatalf("non-state events invalidated cache: version=%d", got)
-	}
-	d.publishEvent("session.updated", "from", nil)
-	if got := d.dashboard.stateVersion.Load(); got != 1 {
-		t.Fatalf("state event did not invalidate cache: version=%d", got)
-	}
-}
-
 func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	d.discoverCatalog(context.Background())

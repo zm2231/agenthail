@@ -117,44 +117,6 @@ esac
 	}
 }
 
-func TestEventHubReplaysAndDisconnectsSlowSubscribers(t *testing.T) {
-	hub := newEventHub(nil)
-	first, err := hub.publish("session.updated", "one", map[string]string{"status": "busy"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := hub.publish("turn.completed", "one", map[string]string{"turnId": "two"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	initial, initialEvents, initialReset, initialCancel := hub.subscribe(0)
-	if initialReset || len(initial) != 2 || initial[0].ID != first.ID || initial[1].ID != second.ID {
-		t.Fatalf("initial reset=%v backlog=%+v", initialReset, initial)
-	}
-	initialCancel()
-	for range initialEvents {
-	}
-	backlog, events, reset, cancel := hub.subscribe(first.ID)
-	defer cancel()
-	if reset || len(backlog) != 1 || backlog[0].ID != second.ID {
-		t.Fatalf("reset=%v backlog=%+v", reset, backlog)
-	}
-	for index := 0; index < cap(events)+1; index++ {
-		if _, err := hub.publish("state.changed", "", index); err != nil {
-			t.Fatal(err)
-		}
-	}
-	select {
-	case _, open := <-events:
-		if open {
-			for range events {
-			}
-		}
-	case <-time.After(time.Second):
-		t.Fatal("slow subscriber remained connected")
-	}
-}
-
 func TestAPIV1EventStreamResumesFromLastEventID(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	first, err := d.events.publish("session.updated", "one", map[string]string{"status": "busy"})
@@ -262,54 +224,41 @@ func TestAPIV1SnapshotCursorClosesBootstrapGap(t *testing.T) {
 	}
 }
 
-func TestAPIV1ZeroSnapshotCursorReplaysFirstEvent(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
-	request.Header.Set("Authorization", "Bearer secret")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("snapshot status=%d body=%s", response.Code, response.Body.String())
-	}
-	var snapshot struct {
-		EventCursor uint64 `json:"eventCursor"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.EventCursor != 0 {
-		t.Fatalf("snapshot cursor=%d want=0", snapshot.EventCursor)
-	}
-	first, err := d.events.publish("turn.completed", "one", map[string]string{"turnId": "first"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	backlog, _, reset, cancel := d.events.subscribe(snapshot.EventCursor)
-	defer cancel()
-	if reset || len(backlog) != 1 || backlog[0].ID != first.ID {
-		t.Fatalf("reset=%v backlog=%+v", reset, backlog)
-	}
-}
-
 func TestEventHubReplaysAcrossDaemonRestart(t *testing.T) {
-	d, reg, _, _, _ := daemonFixture(t)
-	first, err := d.events.publish("session.updated", "one", map[string]string{"status": "busy"})
+	d, reg, fake, _, _ := daemonFixture(t)
+	if response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"alias","sessionId":"from","alias":"before"}`); response.Code != http.StatusOK {
+		t.Fatalf("alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	first := snapshotEventCursor(t, d.dashboardHandler(&dashboardServer{token: "secret"}))
+	if first == 0 {
+		t.Fatal("action did not publish an event")
+	}
+	restarted := dashboardRouter(New(reg, []surface.Surface{fake}))
+	if response := serveDashboardRequest(restarted, http.MethodPost, "/api/action", `{"action":"alias","sessionId":"from","alias":"after"}`); response.Code != http.StatusOK {
+		t.Fatalf("alias after restart status=%d body=%s", response.Code, response.Body.String())
+	}
+	server := httptest.NewServer(restarted)
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/events", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	request.Header.Set("Last-Event-ID", strconv.FormatUint(first, 10))
+	response, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted := newEventHub(reg)
-	second, err := restarted.publish("turn.completed", "one", map[string]string{"turnId": "done"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.ID <= first.ID {
-		t.Fatalf("event ids did not survive restart: first=%d second=%d", first.ID, second.ID)
-	}
-	backlog, _, reset, cancel := restarted.subscribe(first.ID)
-	defer cancel()
-	if reset || len(backlog) != 1 || backlog[0].ID != second.ID {
-		t.Fatalf("reset=%v backlog=%+v", reset, backlog)
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id, found := strings.CutPrefix(strings.TrimSpace(line), "id: "); found {
+			if next, err := strconv.ParseUint(id, 10, 64); err != nil || next <= first {
+				t.Fatalf("event id after restart=%q, want greater than %d", id, first)
+			}
+			return
+		}
 	}
 }
 
@@ -337,21 +286,6 @@ func TestAPIV1LegacyHandlerErrorsUseTypedJSON(t *testing.T) {
 	}
 	if envelope.Error.Code == "" || envelope.Error.Message == "" {
 		t.Fatalf("envelope=%+v", envelope)
-	}
-}
-
-func TestAPIV1JSONHandlerStreamsSuccessfulResponses(t *testing.T) {
-	called := false
-	handler := apiV1JSONHandler(func(w http.ResponseWriter, _ *http.Request) {
-		called = true
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-	response := httptest.NewRecorder()
-	handler(response, httptest.NewRequest(http.MethodGet, "/", nil))
-	if !called || response.Code != http.StatusCreated || response.Body.String() != `{"ok":true}` {
-		t.Fatalf("called=%v status=%d body=%q", called, response.Code, response.Body.String())
 	}
 }
 
@@ -615,19 +549,35 @@ func assertAPIV1Error(t *testing.T, response *httptest.ResponseRecorder, status 
 	}
 }
 
+func snapshotEventCursor(t *testing.T, handler http.Handler) uint64 {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot?fresh=1", nil)
+	request.Header.Set("Authorization", "Bearer secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	var snapshot struct {
+		EventCursor uint64 `json:"eventCursor"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil {
+		t.Fatalf("snapshot status=%d body=%s", response.Code, response.Body.String())
+	}
+	return snapshot.EventCursor
+}
+
 func TestAPIV1RejectsMutationWithoutPublishingChange(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
-	before := len(d.events.history)
+	if _, err := d.events.publish("session.updated", "one", nil); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotEventCursor(t, handler)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", strings.NewReader(`{"action":`))
 	request.Header.Set("Authorization", "Bearer secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
-	}
-	if len(d.events.history) != before {
-		t.Fatalf("rejected mutation published %d event(s)", len(d.events.history)-before)
+	assertAPIV1Error(t, response, http.StatusBadRequest, "invalid_request")
+	if after := snapshotEventCursor(t, handler); after != before {
+		t.Fatalf("rejected mutation advanced event cursor %d -> %d", before, after)
 	}
 }
 

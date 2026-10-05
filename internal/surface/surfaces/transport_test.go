@@ -6,255 +6,66 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func resetCookieHeaderCache(t *testing.T) {
+// sendToReadyClaude delivers one message through the public Send to a session
+// whose transcript proves the previous turn completed, with the HTTP exchange
+// answered by respond.
+func sendToReadyClaude(t *testing.T, respond ClaudeRequest) error {
 	t.Helper()
-	cookieHeaderCache.Lock()
-	cookieHeaderCache.entries = map[string]cookieHeaderCacheEntry{}
-	cookieHeaderCache.Unlock()
-	t.Cleanup(func() {
-		cookieHeaderCache.Lock()
-		cookieHeaderCache.entries = map[string]cookieHeaderCacheEntry{}
-		cookieHeaderCache.Unlock()
-	})
+	path := writeTranscript(t, `
+{"type":"user","uuid":"u1","message":{"content":"one"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	claude := NewClaudeWithRequest("Default", t.TempDir(), respond)
+	_, err := claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusIdle, Transcript: path}, "message")
+	return err
 }
 
-func TestLoadCookieHeaderCachesAndInvalidates(t *testing.T) {
-	resetCookieHeaderCache(t)
-	root := t.TempDir()
-	countPath := filepath.Join(root, "count")
-	node := filepath.Join(root, "node")
-	if err := os.WriteFile(node, []byte("#!/bin/sh\ncount=0\n[ -f \"$AGENTHAIL_TEST_COOKIE_COUNT\" ] && count=$(cat \"$AGENTHAIL_TEST_COOKIE_COUNT\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$AGENTHAIL_TEST_COOKIE_COUNT\"\nprintf 'session=cached'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
-	t.Setenv("AGENTHAIL_TEST_COOKIE_COUNT", countPath)
-	bridge := filepath.Join(root, "cookie.mjs")
-	if err := os.WriteFile(bridge, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		header, err := loadCookieHeader(context.Background(), bridge, "https://claude.ai/")
-		if err != nil || header != "session=cached" {
-			t.Fatalf("header=%q err=%v", header, err)
-		}
-	}
-	data, err := os.ReadFile(countPath)
-	if err != nil || string(data) != "1" {
-		t.Fatalf("calls=%q err=%v", data, err)
-	}
-	invalidateCookieHeader(bridge, "https://claude.ai/")
-	if _, err := loadCookieHeader(context.Background(), bridge, "https://claude.ai/"); err != nil {
-		t.Fatal(err)
-	}
-	data, err = os.ReadFile(countPath)
-	if err != nil || string(data) != "2" {
-		t.Fatalf("calls=%q err=%v", data, err)
-	}
-}
-
-func TestLoadCookieHeaderCachesBridgeFailure(t *testing.T) {
-	resetCookieHeaderCache(t)
-	root := t.TempDir()
-	countPath := filepath.Join(root, "count")
-	node := filepath.Join(root, "node")
-	if err := os.WriteFile(node, []byte("#!/bin/sh\ncount=0\n[ -f \"$AGENTHAIL_TEST_COOKIE_COUNT\" ] && count=$(cat \"$AGENTHAIL_TEST_COOKIE_COUNT\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$AGENTHAIL_TEST_COOKIE_COUNT\"\nexit 2\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
-	t.Setenv("AGENTHAIL_TEST_COOKIE_COUNT", countPath)
-	bridge := filepath.Join(root, "cookie.mjs")
-	if err := os.WriteFile(bridge, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if _, err := loadCookieHeader(context.Background(), bridge, "https://claude.ai/"); err == nil {
-			t.Fatal("expected cookie bridge failure")
-		}
-	}
-	data, err := os.ReadFile(countPath)
-	if err != nil || string(data) != "1" {
-		t.Fatalf("calls=%q err=%v", data, err)
-	}
-}
-
-func TestSidecarRequestUsesCachedCookieWithoutBridgeFallback(t *testing.T) {
-	resetCookieHeaderCache(t)
-	root := t.TempDir()
-	countPath := filepath.Join(root, "count")
-	node := filepath.Join(root, "node")
-	if err := os.WriteFile(node, []byte("#!/bin/sh\ncount=0\n[ -f \"$AGENTHAIL_TEST_COOKIE_COUNT\" ] && count=$(cat \"$AGENTHAIL_TEST_COOKIE_COUNT\")\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"$AGENTHAIL_TEST_COOKIE_COUNT\"\nprintf 'session=cached'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	python := filepath.Join(root, "python")
-	if err := os.WriteFile(python, []byte("#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then exit 0; fi\ncat >/dev/null\nprintf '{\"status\":200,\"body\":\"ok\",\"error\":\"\"}'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	bridge := filepath.Join(root, "cookie.mjs")
-	worker := filepath.Join(root, "sidecar.py")
-	if err := os.WriteFile(bridge, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(worker, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", root+":"+os.Getenv("PATH"))
-	t.Setenv("AGENTHAIL_TEST_COOKIE_COUNT", countPath)
-	t.Setenv("AGENTHAIL_PYTHON", python)
-	t.Setenv("AGENTHAIL_SIDECAR", worker)
-	t.Setenv("AGENTHAIL_COOKIE_BRIDGE", bridge)
-	for range 2 {
-		status, body, err := sidecarRequestWithCookies(context.Background(), "GET", "https://claude.ai/api/organizations", nil, "", bridge, "https://claude.ai/", time.Second)
-		if err != nil || status != 200 || body != "ok" {
-			t.Fatalf("status=%d body=%q err=%v", status, body, err)
-		}
-	}
-	data, err := os.ReadFile(countPath)
-	if err != nil || string(data) != "1" {
-		t.Fatalf("cookie bridge calls=%q err=%v", data, err)
-	}
-}
-
-func TestProcessGroupCommandKillsDescendantsOnTimeout(t *testing.T) {
-	root := t.TempDir()
-	childPath := filepath.Join(root, "child.pid")
-	script := filepath.Join(root, "worker")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 30 &\nprintf '%s' \"$!\" > \"$AGENTHAIL_TEST_CHILD_PID\"\nwait\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_TEST_CHILD_PID", childPath)
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	defer cancel()
-	if err := processGroupCommand(ctx, script).Run(); err == nil {
-		t.Fatal("expected timeout")
-	}
-	data, err := os.ReadFile(childPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		err = syscall.Kill(pid, 0)
-		if err == syscall.ESRCH {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("child %d survived timeout: %v", pid, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func TestSidecarPythonRejectsConfiguredUnsupportedRuntime(t *testing.T) {
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTHAIL_PYTHON", executable)
-	if _, err := sidecarPython(); err == nil || !strings.Contains(err.Error(), "Python 3.10+") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestSidecarPythonUsesConfiguredSupportedRuntime(t *testing.T) {
-	for _, candidate := range []string{"python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3"} {
-		t.Setenv("AGENTHAIL_PYTHON", candidate)
-		if path, err := sidecarPython(); err == nil {
-			if path == "" {
-				t.Fatal("empty interpreter path")
-			}
-			return
-		}
-	}
-	t.Skip("no Python 3.10+ interpreter available")
-}
-
-func TestClaudePostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
-	original := claudeSendRequest
-	t.Cleanup(func() { claudeSendRequest = original })
+func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		status int
-		body   string
-		err    error
+		name     string
+		status   int
+		body     string
+		err      error
+		terminal surface.DeliveryTerminalKind
 	}{
-		{name: "transport", err: context.DeadlineExceeded},
-		{name: "http", status: 500, body: "upstream failed"},
-		{name: "challenge", status: 200, body: "Just a moment"},
+		{name: "transport failure after dispatch", err: context.DeadlineExceeded},
+		{name: "server error", status: http.StatusInternalServerError, body: "upstream failed"},
+		{name: "challenge page", status: http.StatusOK, body: "Just a moment"},
+		{name: "rate limited", status: http.StatusTooManyRequests, body: "try later"},
+		{name: "bad request", status: http.StatusBadRequest, body: "rejected", terminal: surface.DeliveryInvalidRequest},
+		{name: "unauthorized", status: http.StatusUnauthorized, body: "rejected", terminal: surface.DeliveryAuthenticationNeeded},
+		{name: "forbidden", status: http.StatusForbidden, body: "rejected", terminal: surface.DeliveryAccessDenied},
+		{name: "not found", status: http.StatusNotFound, body: "rejected", terminal: surface.DeliveryTargetMissing},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+			err := sendToReadyClaude(t, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 				return test.status, test.body, test.err
+			})
+			if test.terminal == "" {
+				if !surface.IsDeliveryOutcomeUnknown(err) || surface.IsDeliveryTerminal(err) {
+					t.Fatalf("err=%v, want unknown outcome", err)
+				}
+				return
 			}
-			_, err := (&Claude{}).postMessage(context.Background(), &surface.Session{ID: "session_test"}, "message")
-			if !surface.IsDeliveryOutcomeUnknown(err) {
-				t.Fatalf("err=%v", err)
-			}
-		})
-	}
-}
-
-func TestClaudePostClientFailuresAreTerminal(t *testing.T) {
-	original := claudeSendRequest
-	t.Cleanup(func() { claudeSendRequest = original })
-	for _, test := range []struct {
-		status int
-		reason surface.DeliveryTerminalKind
-	}{
-		{http.StatusBadRequest, surface.DeliveryInvalidRequest},
-		{http.StatusUnauthorized, surface.DeliveryAuthenticationNeeded},
-		{http.StatusForbidden, surface.DeliveryAccessDenied},
-		{http.StatusNotFound, surface.DeliveryTargetMissing},
-	} {
-		t.Run(http.StatusText(test.status), func(t *testing.T) {
-			claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
-				return test.status, "rejected", nil
-			}
-			_, err := (&Claude{}).postMessage(context.Background(), &surface.Session{ID: "session_test"}, "message")
-			if !surface.IsDeliveryTerminal(err) || surface.IsDeliveryOutcomeUnknown(err) {
-				t.Fatalf("status=%d err=%v", test.status, err)
-			}
-			if surface.DeliveryTerminalReason(err) != test.reason {
-				t.Fatalf("status=%d reason=%q", test.status, surface.DeliveryTerminalReason(err))
+			if !surface.IsDeliveryTerminal(err) || surface.IsDeliveryOutcomeUnknown(err) || surface.DeliveryTerminalReason(err) != test.terminal {
+				t.Fatalf("err=%v reason=%q, want terminal %q", err, surface.DeliveryTerminalReason(err), test.terminal)
 			}
 		})
-	}
-}
-
-func TestClaudePostRateLimitOutcomeRemainsUnknown(t *testing.T) {
-	original := claudeSendRequest
-	t.Cleanup(func() { claudeSendRequest = original })
-	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
-		return http.StatusTooManyRequests, "try later", nil
-	}
-	_, err := (&Claude{}).postMessage(context.Background(), &surface.Session{ID: "session_test"}, "message")
-	if !surface.IsDeliveryOutcomeUnknown(err) || surface.IsDeliveryTerminal(err) {
-		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
-	original := claudeSendRequest
-	t.Cleanup(func() { claudeSendRequest = original })
 	calls := 0
-	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		calls++
 		return 200, `{}`, nil
-	}
-	claude := NewClaude("Default", t.TempDir())
+	})
 	recent := writeTranscript(t, `
 {"type":"user","uuid":"u0","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a0","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"previous answer"}]}}`)
@@ -286,11 +97,9 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 }
 
 func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
-	original := claudeSendRequest
-	t.Cleanup(func() { claudeSendRequest = original })
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
-	claudeSendRequest = func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -317,8 +126,8 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 		return 200, `{}`, nil
-	}
-	if err := (&Claude{}).Compact(context.Background(), &surface.Session{ID: "session_test", Transcript: path}); err != nil {
+	})
+	if err := claude.Compact(context.Background(), &surface.Session{ID: "session_test", Transcript: path}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(body, `"content":"/compact"`) {
@@ -351,15 +160,13 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 }
 
 func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *testing.T) {
-	original := claudeSendRequest
-	t.Cleanup(func() { claudeSendRequest = original })
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
-	claudeSendRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest("", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		return 200, `{}`, nil
-	}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	err := (&Claude{}).Compact(ctx, &surface.Session{ID: "session_test", Transcript: path})
+	err := claude.Compact(ctx, &surface.Session{ID: "session_test", Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}

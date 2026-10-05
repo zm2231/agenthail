@@ -39,20 +39,6 @@ func (c *Codex) ReadAttachment(ctx context.Context, s *surface.Session, id strin
 	return readTranscriptAttachment(ctx, s, id, "codex")
 }
 
-func readBoundedLine(reader *bufio.Reader) ([]byte, error) {
-	var line []byte
-	for {
-		part, err := reader.ReadSlice('\n')
-		if int64(len(line))+int64(len(part)) > maxAttachmentRecordBytes {
-			return nil, ErrAttachmentTooLarge
-		}
-		line = append(line, part...)
-		if err != bufio.ErrBufferFull {
-			return line, err
-		}
-	}
-}
-
 func readTranscriptAttachment(ctx context.Context, s *surface.Session, id, source string) (*surface.Attachment, []byte, error) {
 	path := s.Transcript
 	if path == "" {

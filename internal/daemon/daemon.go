@@ -17,12 +17,13 @@ import (
 )
 
 const (
-	pollInterval             = 5 * time.Second
+	defaultPollInterval      = 5 * time.Second
 	catalogDiscoveryInterval = 30 * time.Second
 )
 
 type Daemon struct {
 	Registry          *registry.Registry
+	pollInterval      time.Duration
 	Surfaces          []surface.Surface
 	log               *log.Logger
 	errorMu           sync.Mutex
@@ -73,6 +74,7 @@ func (d *Daemon) resolveDisplay(sessionID string) string {
 func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	d := &Daemon{
 		Registry:          reg,
+		pollInterval:      defaultPollInterval,
 		Surfaces:          surfaces,
 		log:               log.New(os.Stderr, "[daemon] ", log.LstdFlags),
 		observeErrors:     map[string]observedError{},
@@ -180,7 +182,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if recovered > 0 {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
-	observerTicker := time.NewTicker(pollInterval)
+	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
 	catalogTicker := time.NewTicker(catalogDiscoveryInterval)
 	defer catalogTicker.Stop()

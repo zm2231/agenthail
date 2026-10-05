@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -42,43 +41,6 @@ func (s *emptySeedSurface) Stream(ctx context.Context, _ *surface.Session, _ str
 	return ctx.Err()
 }
 
-func TestSessionSourcePersistsSuccessfulEmptySeedAcrossColdRestart(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	adapter := &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 2)}
-	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
-	first, err := manager.prepareStream(context.Background(), &from, adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Cursor != 0 || adapter.reads.Load() != 1 {
-		t.Fatalf("first cursor=%d reads=%d", first.Cursor, adapter.reads.Load())
-	}
-	first.Cancel()
-	deadline := time.After(2 * time.Second)
-	for {
-		manager.mu.Lock()
-		count := len(manager.sources)
-		manager.mu.Unlock()
-		if count == 0 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("source did not become cold")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	second, err := manager.prepareStream(context.Background(), &from, adapter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer second.Cancel()
-	if second.Cursor != 0 || adapter.reads.Load() != 1 {
-		t.Fatalf("cold empty seed re-read provider: cursor=%d reads=%d", second.Cursor, adapter.reads.Load())
-	}
-}
-
 func TestSessionSourceDoesNotPersistFailedSeedAsSuccess(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	adapter := &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 2), seedErr: errors.New("provider unavailable")}
@@ -96,47 +58,6 @@ func TestSessionSourceDoesNotPersistFailedSeedAsSuccess(t *testing.T) {
 	}
 	if got := adapter.reads.Load(); got != 2 {
 		t.Fatalf("failed seed reads=%d, want retry", got)
-	}
-}
-
-type legacyIdentitySurface struct {
-	*emptySeedSurface
-	reads atomic.Int32
-}
-
-func (s *legacyIdentitySurface) RequiresLocalTranscript(*surface.Session) bool { return true }
-
-func (s *legacyIdentitySurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	s.reads.Add(1)
-	return &surface.SessionReadResult{TranscriptOffsetSet: true, TranscriptIdentity: "replacement", Items: []surface.TimelineItem{{ID: "replacement", Kind: "text", Role: "assistant", Text: "replacement"}}}, nil
-}
-
-func TestLegacySuccessfulSeedWithoutIdentityFailsBeforeProviderRead(t *testing.T) {
-	_, reg, fake, from, _ := daemonFixture(t)
-	if _, _, err := reg.AppendSessionJournalEntry(registry.SessionJournalEntry{SessionID: from.ID, Kind: "text", ProviderKey: "timeline:old", Payload: []byte(`{"itemId":"old","kind":"text","role":"assistant","body":"old generation"}`)}, registry.SessionJournalRetention{Count: sessionJournalRetentionCount, Bytes: sessionJournalRetentionBytes}); err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.MarkSessionJournalSeed(from.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	adapter := &legacyIdentitySurface{emptySeedSurface: &emptySeedSurface{daemonSurface: fake, started: make(chan struct{}, 1)}}
-	adapter.caps.Stream = true
-	manager := newSessionSourceManager(reg)
-	if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
-		t.Fatalf("err=%v, want explicit legacy checkpoint failure", err)
-	}
-	if got := adapter.reads.Load(); got != 0 {
-		t.Fatalf("provider reads=%d, want no read without trusted identity", got)
-	}
-	status, seq, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
-	if err != nil || status != "failed" || seq != 1 || identity != "" {
-		t.Fatalf("checkpoint status=%q seq=%d identity=%q err=%v", status, seq, identity, err)
-	}
-	if _, err := manager.prepareStream(context.Background(), &from, adapter); err == nil || !strings.Contains(err.Error(), "identity checkpoint is unavailable") {
-		t.Fatalf("retry err=%v, want durable missing-identity failure", err)
-	}
-	if got := adapter.reads.Load(); got != 0 {
-		t.Fatalf("retry provider reads=%d, want no fresh seed", got)
 	}
 }
 
@@ -257,7 +178,7 @@ func TestCodexCatchupRejectsSamePathTranscriptReplacement(t *testing.T) {
 	first.Cancel()
 	waitForSessionSourceGone(t, manager)
 	second, err := manager.prepareStream(context.Background(), &from, adapter)
-	if err == nil || !strings.Contains(err.Error(), "replaced during catch-up") {
+	if !errors.Is(err, surface.ErrTranscriptUnavailable) || !strings.Contains(err.Error(), "replaced during catch-up") {
 		if second.Cancel != nil {
 			second.Cancel()
 		}

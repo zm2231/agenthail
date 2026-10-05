@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -13,115 +15,8 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 )
-
-func TestActionIdempotencyReplaysCanonicalRequestAndRejectsMismatch(t *testing.T) {
-	r := openActionTestRegistry(t)
-	d := New(r, nil)
-	var effects atomic.Int32
-	next := func(w http.ResponseWriter, _ *http.Request) {
-		effects.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"ok":true,"receipt":"r1"}`))
-	}
-	handler := d.idempotentActionHandler(next)
-	first := actionRequest(`{"b":2,"a":1}`)
-	first.Header.Set("Idempotency-Key", "key-1")
-	first = first.WithContext(context.WithValue(first.Context(), actionPrincipalContextKey{}, "device-a"))
-	firstResponse := httptest.NewRecorder()
-	handler.ServeHTTP(firstResponse, first)
-	if firstResponse.Code != http.StatusCreated || effects.Load() != 1 {
-		t.Fatalf("first status=%d effects=%d body=%s", firstResponse.Code, effects.Load(), firstResponse.Body.String())
-	}
-	second := actionRequest(`{"a":1,"b":2}`)
-	second.Header.Set("Idempotency-Key", "key-1")
-	second = second.WithContext(context.WithValue(second.Context(), actionPrincipalContextKey{}, "device-a"))
-	secondResponse := httptest.NewRecorder()
-	handler.ServeHTTP(secondResponse, second)
-	if secondResponse.Code != http.StatusCreated || secondResponse.Body.String() != firstResponse.Body.String() || effects.Load() != 1 {
-		t.Fatalf("replay status=%d effects=%d body=%s", secondResponse.Code, effects.Load(), secondResponse.Body.String())
-	}
-	mismatch := actionRequest(`{"a":2,"b":1}`)
-	mismatch.Header.Set("Idempotency-Key", "key-1")
-	mismatch = mismatch.WithContext(context.WithValue(mismatch.Context(), actionPrincipalContextKey{}, "device-a"))
-	mismatchResponse := httptest.NewRecorder()
-	handler.ServeHTTP(mismatchResponse, mismatch)
-	if mismatchResponse.Code != http.StatusConflict || effects.Load() != 1 {
-		t.Fatalf("mismatch status=%d effects=%d body=%s", mismatchResponse.Code, effects.Load(), mismatchResponse.Body.String())
-	}
-}
-
-func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
-	r, err := registry.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := New(r, nil)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var effects atomic.Int32
-	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
-		effects.Add(1)
-		close(started)
-		<-release
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-	firstResponse := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		request := actionRequest(`{"action":"send","message":"one"}`)
-		request.Header.Set("Idempotency-Key", "inflight")
-		firstResponse <- serveAction(handler, request, "device-a")
-	}()
-	<-started
-	pending := serveAction(handler, actionRequestWithKey(`{"action":"send","message":"one"}`, "inflight"), "device-a")
-	if pending.Code != http.StatusAccepted || effects.Load() != 1 {
-		t.Fatalf("pending status=%d effects=%d body=%s", pending.Code, effects.Load(), pending.Body.String())
-	}
-	if pending.Body.String() != `{"ok":true,"status":"submitted"}
-` {
-		t.Fatalf("pending body=%q", pending.Body.String())
-	}
-	close(release)
-	if response := <-firstResponse; response.Code != http.StatusOK {
-		t.Fatalf("first completion status=%d", response.Code)
-	}
-
-	if err := r.Close(); err != nil {
-		t.Fatal(err)
-	}
-	second, err := registry.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer second.Close()
-	hash := sha256.Sum256([]byte(`{"action":"send"}`))
-	if _, err := second.ReserveActionReceipt("device-b", "restart", hex.EncodeToString(hash[:]), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	var restartedEffects atomic.Int32
-	restarted := New(second, nil).idempotentActionHandler(func(http.ResponseWriter, *http.Request) { restartedEffects.Add(1) })
-	response := serveAction(restarted, actionRequestWithKey(`{"action":"send"}`, "restart"), "device-b")
-	if response.Code != http.StatusAccepted || restartedEffects.Load() != 0 {
-		t.Fatalf("restart status=%d effects=%d body=%s", response.Code, restartedEffects.Load(), response.Body.String())
-	}
-}
-
-func TestActionIdempotencyReplaysTextFailureContentType(t *testing.T) {
-	r := openActionTestRegistry(t)
-	d := New(r, nil)
-	var effects atomic.Int32
-	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
-		effects.Add(1)
-		http.Error(w, "provider unavailable", http.StatusBadGateway)
-	})
-	first := serveAction(handler, actionRequestWithKey(`{"action":"send"}`, "text-failure"), "device-a")
-	second := serveAction(handler, actionRequestWithKey(`{"action":"send"}`, "text-failure"), "device-a")
-	if first.Code != http.StatusBadGateway || second.Code != first.Code || second.Body.String() != first.Body.String() || second.Header().Get("Content-Type") != first.Header().Get("Content-Type") || effects.Load() != 1 {
-		t.Fatalf("first=%d/%q second=%d/%q content-type=%q/%q effects=%d", first.Code, first.Body.String(), second.Code, second.Body.String(), first.Header().Get("Content-Type"), second.Header().Get("Content-Type"), effects.Load())
-	}
-}
 
 func TestActionIdempotencyResponseOverflowLeavesPending(t *testing.T) {
 	r := openActionTestRegistry(t)
@@ -139,30 +34,6 @@ func TestActionIdempotencyResponseOverflowLeavesPending(t *testing.T) {
 	if first.Body.String() != `{"ok":true,"status":"submitted"}
 ` || second.Body.String() != first.Body.String() {
 		t.Fatalf("first body=%q second body=%q", first.Body.String(), second.Body.String())
-	}
-}
-
-func TestActionIdempotencyRunsAfterAPIAuthorization(t *testing.T) {
-	r := openActionTestRegistry(t)
-	d := New(r, nil)
-	dashboard := &dashboardServer{token: "dashboard-secret"}
-	var effects atomic.Int32
-	next := d.apiV1Guard(dashboard, "control", d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
-		effects.Add(1)
-		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
-	}))
-	unauthorized := actionRequestWithKey(`{"action":"send"}`, "auth-order")
-	unauthorizedResponse := httptest.NewRecorder()
-	next(unauthorizedResponse, unauthorized)
-	if unauthorizedResponse.Code != http.StatusUnauthorized || effects.Load() != 0 {
-		t.Fatalf("unauthorized status=%d effects=%d", unauthorizedResponse.Code, effects.Load())
-	}
-	authorized := actionRequestWithKey(`{"action":"send"}`, "auth-order")
-	authorized.Header.Set("Authorization", "Bearer dashboard-secret")
-	authorizedResponse := httptest.NewRecorder()
-	next(authorizedResponse, authorized)
-	if authorizedResponse.Code != http.StatusOK || effects.Load() != 1 {
-		t.Fatalf("authorized status=%d effects=%d body=%s", authorizedResponse.Code, effects.Load(), authorizedResponse.Body.String())
 	}
 }
 
@@ -198,36 +69,6 @@ func dashboardActionRequestWithKey(body, key string) *http.Request {
 	return request
 }
 
-func TestActionIdempotencyCompletionFailureLeavesPending(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "registry.db")
-	r, err := registry.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var effects atomic.Int32
-	d := New(r, nil)
-	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
-		effects.Add(1)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-		_ = r.Close()
-	})
-	response := serveAction(handler, actionRequestWithKey(`{"action":"send"}`, "write-fails"), "device-a")
-	if response.Code != http.StatusAccepted || effects.Load() != 1 {
-		t.Fatalf("completion failure status=%d effects=%d body=%s", response.Code, effects.Load(), response.Body.String())
-	}
-	second, err := registry.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer second.Close()
-	retriedEffects := atomic.Int32{}
-	retried := New(second, nil).idempotentActionHandler(func(http.ResponseWriter, *http.Request) { retriedEffects.Add(1) })
-	retryResponse := serveAction(retried, actionRequestWithKey(`{"action":"send"}`, "write-fails"), "device-a")
-	if retryResponse.Code != http.StatusAccepted || retriedEffects.Load() != 0 {
-		t.Fatalf("retry status=%d effects=%d body=%s", retryResponse.Code, retriedEffects.Load(), retryResponse.Body.String())
-	}
-}
-
 func openActionTestRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
@@ -253,4 +94,183 @@ func serveAction(handler http.HandlerFunc, request *http.Request, principal stri
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+type hookedSendSurface struct {
+	*daemonSurface
+	beforeSend func()
+}
+
+func (s *hookedSendSurface) Send(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
+	s.beforeSend()
+	return s.daemonSurface.Send(ctx, session, message)
+}
+
+func (s *hookedSendSurface) SendWithOptions(ctx context.Context, session *surface.Session, message string, options surface.SendOptions) (*surface.SendResult, error) {
+	s.beforeSend()
+	return s.daemonSurface.SendWithOptions(ctx, session, message, options)
+}
+
+func openIdempotencyFixture(t *testing.T, path string, adapter surface.Surface) (*registry.Registry, http.Handler) {
+	t.Helper()
+	r, err := registry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	if err := r.RegisterSession(surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
+		t.Fatal(err)
+	}
+	return r, dashboardRouter(New(r, []surface.Surface{adapter}))
+}
+
+func idempotencyFake() *daemonSurface {
+	session := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	return &daemonSurface{sessions: map[string]surface.Session{"from": session}, observations: map[string]*surface.TurnObservation{}, accepted: true}
+}
+
+func pairedControlToken(t *testing.T, r *registry.Registry) string {
+	t.Helper()
+	pairing, err := r.CreateDevicePairing("Phone", []string{"read", "control"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func serveV1Action(handler http.Handler, body, key, token string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewBufferString(body))
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	request.Header.Set(actionIdempotencyHeader, key)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func assertActionSubmitted(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	var body struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+	}
+	if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &body) != nil || !body.OK || body.Status != "submitted" {
+		t.Fatalf("status=%d body=%s, want submitted receipt", response.Code, response.Body.String())
+	}
+}
+
+func TestActionIdempotencyReplaysCanonicalRequestAndRejectsMismatch(t *testing.T) {
+	fake := idempotencyFake()
+	r, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	token := pairedControlToken(t, r)
+	first := serveV1Action(handler, `{"message":"one","sessionId":"from","action":"send"}`, "key-1", token)
+	if first.Code != http.StatusOK || len(fake.sent) != 1 {
+		t.Fatalf("first status=%d sends=%d body=%s", first.Code, len(fake.sent), first.Body.String())
+	}
+	replay := serveV1Action(handler, `{"action":"send","sessionId":"from","message":"one"}`, "key-1", token)
+	if replay.Code != first.Code || replay.Body.String() != first.Body.String() || len(fake.sent) != 1 {
+		t.Fatalf("replay status=%d sends=%d body=%s", replay.Code, len(fake.sent), replay.Body.String())
+	}
+	mismatch := serveV1Action(handler, `{"action":"send","sessionId":"from","message":"two"}`, "key-1", token)
+	assertAPIV1Error(t, mismatch, http.StatusConflict, "action_idempotency_mismatch")
+	if len(fake.sent) != 1 {
+		t.Fatalf("mismatch sends=%d", len(fake.sent))
+	}
+}
+
+func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	fake := idempotencyFake()
+	adapter := &hookedSendSurface{daemonSurface: fake, beforeSend: func() {
+		close(started)
+		<-release
+	}}
+	r, handler := openIdempotencyFixture(t, path, adapter)
+	token := pairedControlToken(t, r)
+	const body = `{"action":"send","sessionId":"from","message":"one"}`
+	firstResponse := make(chan *httptest.ResponseRecorder, 1)
+	go func() { firstResponse <- serveV1Action(handler, body, "inflight", token) }()
+	<-started
+	assertActionSubmitted(t, serveV1Action(handler, body, "inflight", token))
+	close(release)
+	if response := <-firstResponse; response.Code != http.StatusOK || len(fake.sent) != 1 {
+		t.Fatalf("first completion status=%d sends=%d body=%s", response.Code, len(fake.sent), response.Body.String())
+	}
+
+	device, err := r.AuthenticateDevice(token, "control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256([]byte(`{"action":"send","message":"restart","sessionId":"from"}`))
+	if _, err := r.ReserveActionReceipt(device.ID, "restart", hex.EncodeToString(hash[:]), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restartedFake := idempotencyFake()
+	_, restarted := openIdempotencyFixture(t, path, restartedFake)
+	assertActionSubmitted(t, serveV1Action(restarted, `{"action":"send","sessionId":"from","message":"restart"}`, "restart", token))
+	if len(restartedFake.sent) != 0 {
+		t.Fatalf("restarted daemon re-dispatched a reserved action: sends=%d", len(restartedFake.sent))
+	}
+}
+
+func TestActionIdempotencyReplaysTextFailureContentType(t *testing.T) {
+	fake := idempotencyFake()
+	fake.sendErr = surface.DeliveryTerminal(errors.New("provider unavailable"), surface.DeliveryInvalidRequest)
+	_, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	send := func() *httptest.ResponseRecorder {
+		request := dashboardActionRequestWithKey(`{"action":"send","sessionId":"from","message":"one"}`, "text-failure")
+		request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	first := send()
+	second := send()
+	if first.Code < 400 || second.Code != first.Code || second.Body.String() != first.Body.String() || second.Header().Get("Content-Type") != first.Header().Get("Content-Type") || len(fake.sent) != 1 {
+		t.Fatalf("first=%d/%q second=%d/%q content-type=%q/%q sends=%d", first.Code, first.Body.String(), second.Code, second.Body.String(), first.Header().Get("Content-Type"), second.Header().Get("Content-Type"), len(fake.sent))
+	}
+}
+
+func TestActionIdempotencyRunsAfterAPIAuthorization(t *testing.T) {
+	fake := idempotencyFake()
+	r, handler := openIdempotencyFixture(t, filepath.Join(t.TempDir(), "registry.db"), fake)
+	token := pairedControlToken(t, r)
+	const body = `{"action":"send","sessionId":"from","message":"one"}`
+	assertAPIV1Error(t, serveV1Action(handler, body, "auth-order", ""), http.StatusUnauthorized, "unauthorized")
+	if len(fake.sent) != 0 {
+		t.Fatalf("unauthorized request sent=%d", len(fake.sent))
+	}
+	if response := serveV1Action(handler, body, "auth-order", token); response.Code != http.StatusOK || len(fake.sent) != 1 {
+		t.Fatalf("authorized status=%d sends=%d body=%s", response.Code, len(fake.sent), response.Body.String())
+	}
+}
+
+func TestActionIdempotencyCompletionFailureLeavesPending(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	fake := idempotencyFake()
+	var r *registry.Registry
+	adapter := &hookedSendSurface{daemonSurface: fake, beforeSend: func() { _ = r.Close() }}
+	r, handler := openIdempotencyFixture(t, path, adapter)
+	token := pairedControlToken(t, r)
+	const body = `{"action":"send","sessionId":"from","message":"one"}`
+	assertActionSubmitted(t, serveV1Action(handler, body, "write-fails", token))
+	if len(fake.sent) != 1 {
+		t.Fatalf("sends=%d", len(fake.sent))
+	}
+	retriedFake := idempotencyFake()
+	_, retried := openIdempotencyFixture(t, path, retriedFake)
+	assertActionSubmitted(t, serveV1Action(retried, body, "write-fails", token))
+	if len(retriedFake.sent) != 0 {
+		t.Fatalf("retry after lost completion re-dispatched: sends=%d", len(retriedFake.sent))
+	}
 }

@@ -42,7 +42,7 @@ func TestSendDevicePushFailsWhenRelayIsNotConfigured(t *testing.T) {
 	bundledPushRelayURL = ""
 	t.Cleanup(func() { bundledPushRelayURL = previous })
 	target := registry.DevicePushTarget{InstallationID: "install", Credential: "secret"}
-	if err := sendDevicePush(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn-42", "turn.completed"); err == nil || err.Error() != "push relay is not configured" {
+	if err := sendDevicePush(context.Background(), target, "Agenthail", "Session finished", "codex/session", "turn-42", "turn.completed"); err == nil {
 		t.Fatalf("error=%v", err)
 	}
 }

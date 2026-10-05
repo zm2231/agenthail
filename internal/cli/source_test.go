@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -46,26 +44,6 @@ func TestSourceIdentityUsesExplicitSenderBeforeEnvironment(t *testing.T) {
 	}
 	if _, err := app.sourceSessionID(context.Background(), "codex:missing"); err == nil {
 		t.Fatal("unresolvable sender accepted")
-	}
-}
-
-func TestSourceIdentityUsesRegisteredSessionWithoutOpeningItsTransport(t *testing.T) {
-	t.Setenv("AGENTHAIL_SESSION_ID", "")
-	t.Setenv("CODEX_THREAD_ID", "current")
-	t.Setenv("CLAUDE_SESSION_ID", "")
-	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	if err := store.RegisterSession(surface.Session{ID: "current", Surface: surface.KindCodex, Name: "voice source"}); err != nil {
-		t.Fatal(err)
-	}
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
-	app := App{Registry: store, Surfaces: []SurfaceEntry{{Name: "codex", Surface: fake}}}
-	got, err := app.sourceSessionID(context.Background(), "")
-	if err != nil || got != "current" {
-		t.Fatalf("got=%q err=%v", got, err)
 	}
 }
 
@@ -141,23 +119,5 @@ func TestSourceIdentityLeavesStandaloneCLICallerUnbound(t *testing.T) {
 	got, err := app.sourceSessionID(context.Background(), "")
 	if err != nil || got != "" {
 		t.Fatalf("source=%q err=%v", got, err)
-	}
-}
-
-func TestSourceIdentityKeepsExplicitBindingAheadOfClaudeCaller(t *testing.T) {
-	self := os.Getpid()
-	withProcessSnapshot(t, []processIdentity{{pid: self, ppid: 1, uid: uint32(os.Getuid())}})
-	fake := &callerCLISurface{
-		cliSurface:  &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"explicit": {ID: "explicit", Surface: surface.KindClaude}}},
-		caller:      &surface.Session{ID: "inferred", Surface: surface.KindClaude},
-		callerFound: true,
-	}
-	app := App{Surfaces: []SurfaceEntry{{Name: "claude", Surface: fake}}}
-	got, err := app.sourceSessionID(context.Background(), "claude:explicit")
-	if err != nil || got != "explicit" {
-		t.Fatalf("source=%q err=%v", got, err)
-	}
-	if len(fake.ancestorPIDs) != 0 {
-		t.Fatalf("caller discovery ran for explicit binding: %v", fake.ancestorPIDs)
 	}
 }

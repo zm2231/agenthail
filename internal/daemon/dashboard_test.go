@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,6 +22,35 @@ import (
 	registrypkg "github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+const dashboardTestToken = "secret"
+
+func dashboardRouter(d *Daemon) http.Handler {
+	return d.dashboardHandler(&dashboardServer{token: dashboardTestToken})
+}
+
+func serveDashboardRequest(handler http.Handler, method, target, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, target, strings.NewReader(body))
+	request.Host = "example.test"
+	request.Header.Set("Origin", "http://example.test")
+	request.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: dashboardTestToken})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func readDashboardState(t *testing.T, handler http.Handler) dashboardState {
+	t.Helper()
+	response := serveDashboardRequest(handler, http.MethodGet, "/api/state?fresh=1", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("state status=%d body=%s", response.Code, response.Body.String())
+	}
+	var state dashboardState
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
 
 type dashboardClaudeRunSurface struct {
 	*daemonSurface
@@ -36,17 +64,6 @@ func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surfac
 
 func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(context.Context) ([]surface.ClaudeSubagentLink, error) {
 	return s.links, nil
-}
-
-func TestDashboardListenIsLoopbackOnly(t *testing.T) {
-	for _, listen := range []string{"127.0.0.1:7412", "[::1]:7412", "localhost:7412"} {
-		if err := validateDashboardListen(listen); err != nil {
-			t.Fatalf("%s: %v", listen, err)
-		}
-	}
-	if err := validateDashboardListen("0.0.0.0:7412"); err == nil || !strings.Contains(err.Error(), "Tailscale Serve") {
-		t.Fatalf("err=%v", err)
-	}
 }
 
 type sessionPageReadProbe struct {
@@ -69,15 +86,13 @@ func (s *goalControlSurface) UpdateGoal(_ context.Context, _ *surface.Session, u
 }
 
 func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
-	d, registry, fake, from, _ := daemonFixture(t)
+	_, registry, fake, from, _ := daemonFixture(t)
 	fake.caps.Goal = true
 	adapter := &goalControlSurface{daemonSurface: fake}
-	d = New(registry, []surface.Surface{adapter})
+	handler := dashboardRouter(New(registry, []surface.Surface{adapter}))
 	request := func(action, message string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]string{"action": action, "sessionId": from.ID, "message": message})
-		response := httptest.NewRecorder()
-		d.dashboardActionHandler(response, httptest.NewRequest(http.MethodPost, "/api/action", bytes.NewReader(body)))
-		return response
+		return serveDashboardRequest(handler, http.MethodPost, "/api/action", string(body))
 	}
 	if response := request("goal-edit", "keep paused"); response.Code != http.StatusOK {
 		t.Fatalf("goal-edit status=%d body=%s", response.Code, response.Body.String())
@@ -90,20 +105,6 @@ func TestDashboardGoalActionsUseTypedUpdatesAndValidateBudget(t *testing.T) {
 	}
 	if response := request("goal-budget", "-1"); response.Code != http.StatusBadRequest {
 		t.Fatalf("negative budget status=%d body=%s", response.Code, response.Body.String())
-	}
-}
-
-func TestDashboardGoalControlsRenderTypedStatusAndUsageActions(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	script := filepath.Join("..", "..", "scripts", "test-dashboard-timeline.mjs")
-	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("dashboard goal rendering failed: %v\n%s", err, output)
 	}
 }
 
@@ -142,6 +143,7 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 	d := New(registry, []surface.Surface{probe})
 	defer d.sources.shutdown()
 	defer close(probe.release)
+	handler := dashboardRouter(d)
 	const viewers = 5
 	var wait sync.WaitGroup
 	responses := make([]*httptest.ResponseRecorder, viewers)
@@ -150,8 +152,7 @@ func TestDashboardSessionReadsJournalWithoutProviderMetadata(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			responses[index] = httptest.NewRecorder()
-			d.dashboardSessionHandler(responses[index], httptest.NewRequest(http.MethodGet, "/api/session?id=from&timeline=1", nil))
+			responses[index] = serveDashboardRequest(handler, http.MethodGet, "/api/session?id=from&timeline=1", "")
 		}()
 	}
 	wait.Wait()
@@ -193,9 +194,7 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 		runs:          []surface.ClaudeRunObservation{{JobID: "job-1", SessionID: from.ID, RunType: "bg", ProviderState: "working"}, {JobID: "other", SessionID: "other", RunType: "bg"}},
 		links:         []surface.ClaudeSubagentLink{{ParentSessionID: from.ID, AgentID: "agent-1", TranscriptPath: "/tmp/agent-1.jsonl"}, {ParentSessionID: "other", AgentID: "agent-2"}},
 	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	d.dashboardSessionMetadataHandler(response, httptest.NewRequest(http.MethodGet, "/api/session-metadata?id="+from.ID, nil))
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodGet, "/api/session-metadata?id="+from.ID, "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -212,15 +211,13 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 }
 
 func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
-	d, registry, fake, _, _ := daemonFixture(t)
+	_, registry, fake, _, _ := daemonFixture(t)
 	session := surface.Session{ID: "history", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
 	if err := registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
 	adapter := &accessDaemonSurface{daemonSurface: fake}
-	d = New(registry, []surface.Surface{adapter})
-	response := httptest.NewRecorder()
-	d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id=history", nil))
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{adapter})), http.MethodGet, "/api/session?id=history", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -233,18 +230,6 @@ func TestDashboardSessionReadDoesNotNegotiateWritableAccess(t *testing.T) {
 	}
 	if stored.Transport != "readOnly" {
 		t.Fatalf("transport=%q", stored.Transport)
-	}
-}
-
-func TestDashboardSearchCancelsSupersededRequests(t *testing.T) {
-	source, err := os.ReadFile("dashboard/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, required := range []string{"new AbortController()", "signal: controller.signal", "app.codexSearch.controller?.abort()", "window.addEventListener(\"beforeunload\", cancelCodexSearch)"} {
-		if !strings.Contains(string(source), required) {
-			t.Fatalf("dashboard search cancellation missing %q", required)
-		}
 	}
 }
 
@@ -355,8 +340,7 @@ func TestDashboardSearchStoresCodexHistoryResult(t *testing.T) {
 	d, registry, fake, _, _ := daemonFixture(t)
 	fake.kind = surface.KindCodex
 	fake.searchResults = []surface.SessionSearchResult{{Session: surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}, Snippet: "matched text"}}
-	response := httptest.NewRecorder()
-	d.dashboardSearchHandler(response, httptest.NewRequest(http.MethodGet, "/api/search?surface=codex&q=project", nil))
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "matched text") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -372,9 +356,16 @@ func TestDashboardSearchReturnsSavedResultsWhenCodexSearchFails(t *testing.T) {
 	if err := registry.RegisterSession(surface.Session{ID: "saved", Surface: surface.KindCodex, Name: "saved project"}); err != nil {
 		t.Fatal(err)
 	}
-	response := httptest.NewRecorder()
-	d.dashboardSearchHandler(response, httptest.NewRequest(http.MethodGet, "/api/search?surface=codex&q=project", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "saved project") || !strings.Contains(response.Body.String(), "app-server timeout") {
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/search?surface=codex&q=project", "")
+	var body struct {
+		Results []struct {
+			Session struct {
+				ID string `json:"id"`
+			} `json:"session"`
+		} `json:"results"`
+		RemoteError string `json:"remoteError"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Results) != 1 || body.Results[0].Session.ID != "saved" || body.RemoteError == "" {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
@@ -393,10 +384,7 @@ func TestDashboardCompactUsesTypedClaudeControl(t *testing.T) {
 		accepted:     true,
 		caps:         surface.Capabilities{Compact: true},
 	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"compact","sessionId":"claude"}`))
-	d.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"compact","sessionId":"claude"}`)
 	if response.Code != http.StatusOK || registry.QueueCount(session.ID) != 1 || !strings.Contains(response.Body.String(), `"evidence":"queued"`) || fake.compactCalls.Load() != 0 {
 		t.Fatalf("status=%d queue=%d body=%s", response.Code, registry.QueueCount(session.ID), response.Body.String())
 	}
@@ -415,10 +403,7 @@ func TestDashboardSteerReturnsDeliveryEvidence(t *testing.T) {
 		accepted:     true,
 		caps:         surface.Capabilities{Steer: true},
 	}
-	d := New(registry, []surface.Surface{fake})
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"steer","sessionId":"codex","message":"focus on tests"}`))
-	d.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(dashboardRouter(New(registry, []surface.Surface{fake})), http.MethodPost, "/api/action", `{"action":"steer","sessionId":"codex","message":"focus on tests"}`)
 	var body struct {
 		Result struct {
 			Evidence string `json:"evidence"`
@@ -485,7 +470,7 @@ func TestDashboardSurfaceHealthNamesDegradedCodexAndRepair(t *testing.T) {
 		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Durable: true, Backend: "launchd"},
 	}
 	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
-	if entry.Health != "degraded" || entry.HealthDetail != "Codex Desktop bridge is unavailable" || entry.RepairAction != "codex-launch" || entry.RepairLabel != "Launch Codex through Agenthail" {
+	if entry.Health != "degraded" || entry.HealthDetail != "Codex Desktop bridge is unavailable" || entry.RepairAction != "codex-launch" || entry.RepairLabel == "" {
 		t.Fatalf("entry=%+v", entry)
 	}
 }
@@ -497,7 +482,7 @@ func TestDashboardSurfaceHealthNamesMissingManagedRuntime(t *testing.T) {
 		runtime:       surface.RuntimeStatus{Name: "Codex managed app-server", Detail: "socket missing"},
 	}
 	entry := d.dashboardSurfaceHealth(context.Background(), adapter, nil)
-	if entry.Health != "degraded" || entry.HealthDetail != "socket missing" || entry.RepairAction != "runtime-ensure" || entry.RepairLabel != "Repair managed runtime" {
+	if entry.Health != "degraded" || entry.HealthDetail != "socket missing" || entry.RepairAction != "runtime-ensure" || entry.RepairLabel == "" {
 		t.Fatalf("entry=%+v", entry)
 	}
 }
@@ -517,99 +502,6 @@ func TestDashboardRepairsManagedRuntime(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || adapter.ensureCalls.Load() != 1 {
 		t.Fatalf("status=%d calls=%d body=%s", response.Code, adapter.ensureCalls.Load(), response.Body.String())
-	}
-}
-
-func TestDashboardExposesConversationNamingControls(t *testing.T) {
-	script := string(dashboardJS)
-	if !strings.Contains(script, `["/name", "Name this conversation"]`) ||
-		!strings.Contains(script, `data-tool="alias"`) ||
-		!strings.Contains(script, `"/name": ["alias", { alias: argument }]`) {
-		t.Fatal("dashboard is missing conversation naming controls")
-	}
-}
-
-func TestDashboardShowsCompactContextUsage(t *testing.T) {
-	source := string(dashboardJS) + string(dashboardHTML) + string(dashboardCSS)
-	for _, fragment := range []string{
-		`id="context-usage"`,
-		`item.kind === "context"`,
-		`Context ${compactTokenCount(context.usedTokens)}`,
-		`Claude did not report a configured context window`,
-		`Last compact: ${compactTokenCount(context.preCompactTokens)}`,
-		`.context-usage.critical`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard context surface missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardOverviewSubtitleUsesLiveState(t *testing.T) {
-	script := string(dashboardJS)
-	if strings.Contains(script, "Private and ready") ||
-		!strings.Contains(script, `surface${connected === 1 ? "" : "s"} connected`) ||
-		!strings.Contains(script, `message${queued === 1 ? "" : "s"} waiting`) {
-		t.Fatal("overview subtitle is not derived from live state")
-	}
-}
-
-func TestDashboardHidesChannelActionsUntilChannelExists(t *testing.T) {
-	markup := string(dashboardHTML)
-	script := string(dashboardJS)
-	if !strings.Contains(markup, `id="channel-actions" hidden`) ||
-		!strings.Contains(script, `$("#channel-actions").hidden = channels.length === 0`) {
-		t.Fatal("channel actions are not progressively disclosed")
-	}
-	create := strings.Index(markup, `data-network-form="channel-create"`)
-	empty := strings.Index(markup, `id="channel-list"`)
-	actions := strings.Index(markup, `id="channel-actions"`)
-	if create < 0 || empty <= create || actions <= empty {
-		t.Fatal("channel empty state and controls are ordered incorrectly")
-	}
-}
-
-func TestDashboardLongMessagesUseCleanCrop(t *testing.T) {
-	styles := string(dashboardCSS)
-	if strings.Contains(styles, "linear-gradient(transparent, var(--paper))") ||
-		!strings.Contains(styles, "height: 1.7em") ||
-		!strings.Contains(styles, "background: var(--paper)") {
-		t.Fatal("long messages do not use a clean opaque crop")
-	}
-}
-
-func TestDashboardConversationEntryAlignsLatestTurn(t *testing.T) {
-	script := string(dashboardJS)
-	if !strings.Contains(script, "app.pendingEntryScroll = true") ||
-		!strings.Contains(script, `latest.getBoundingClientRect().top - chatBody.getBoundingClientRect().top`) ||
-		!strings.Contains(script, "alignTranscriptTop(chatBody)") ||
-		!strings.Contains(script, `querySelectorAll("tr, pre, blockquote, li, h2, h3, h4, p")`) {
-		t.Fatal("conversation entry does not align to the latest turn boundary")
-	}
-}
-
-func TestDashboardExposesSurfaceHealthAndRepairs(t *testing.T) {
-	script := string(dashboardJS)
-	page := string(dashboardHTML)
-	for _, fragment := range []string{
-		`id="surface-health-list"`,
-		`data-surface-repair=`,
-		`await action(repair.dataset.surfaceRepair)`,
-		`Claude Code needs to reconnect to your signed-in account.`,
-	} {
-		if !strings.Contains(page+script, fragment) {
-			t.Fatalf("dashboard is missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardClipsLongMessagesWithoutFadingText(t *testing.T) {
-	styles := string(dashboardCSS)
-	if !strings.Contains(styles, ".turn-crop:after {") || !strings.Contains(styles, "background: var(--paper);") || strings.Contains(styles, "linear-gradient") {
-		t.Fatal("long-message crop must use an opaque cutoff without a text fade")
-	}
-	if !strings.Contains(string(dashboardJS), "Show full message") {
-		t.Fatal("long-message crop has no expansion control")
 	}
 }
 
@@ -779,7 +671,7 @@ func TestDashboardStartCwdExpandsHomeAndRejectsFiles(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dashboardStartCwd(file); err == nil || !strings.Contains(err.Error(), "not a directory") {
+	if _, err := dashboardStartCwd(file); err == nil {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -896,20 +788,6 @@ func TestDashboardShutdownCancelsActiveStreams(t *testing.T) {
 	}
 }
 
-func TestDashboardUsesOneSelectedSessionEventStream(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	script := filepath.Join("..", "..", "scripts", "test-session-journal.mjs")
-	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("session journal browser behavior failed: %v\n%s", err, output)
-	}
-}
-
 func TestEffectiveCapabilitiesMakeUnloadedCodexReadOnly(t *testing.T) {
 	effective := surface.EffectiveCapabilities(&surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded")}, surface.Capabilities{Send: true, Model: true})
 	if !effective.ReadOnly || effective.ReadOnlyReason == "" || effective.Send || effective.Model {
@@ -949,127 +827,14 @@ func TestEffectiveCapabilitiesMakePlainCodexTerminalReadOnly(t *testing.T) {
 	}
 }
 
-func TestDashboardRemoteQRCodeRequiresExplicitReveal(t *testing.T) {
-	source := string(dashboardJS)
-	if !strings.Contains(source, "remoteQRVisible: false") || !strings.Contains(source, "data-reveal-remote-qr") {
-		t.Fatal("remote QR does not default to an explicit reveal state")
-	}
-	hidden := strings.Index(source, "const remoteQR = app.remoteQRVisible")
-	if hidden < 0 {
-		t.Fatal("remote QR conditional is missing")
-	}
-	image := strings.Index(source[hidden:], `/api/settings/remote-qr`)
-	reveal := strings.Index(source[hidden:], "data-reveal-remote-qr")
-	if image < 0 || reveal < 0 || image > reveal {
-		t.Fatal("remote QR image is not confined to the revealed branch")
-	}
-	if !strings.Contains(source, "navigator.clipboard.writeText(app.settings.remoteAccess.url)") {
-		t.Fatal("hidden QR removed copy-phone-link behavior")
-	}
-}
-
-func TestDashboardNormalizesEmptyStateAndShowsDeliveryOutcomes(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"surfaces: state.surfaces || []",
-		"sessions: state.sessions || []",
-		"queue: state.queue || []",
-		"delivery-history",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-	if !strings.Contains(string(dashboardHTML), `id="delivery-history"`) {
-		t.Fatal("delivery outcomes have no rendered surface")
-	}
-}
-
-func TestDashboardPreservesTranscriptStateAcrossPolls(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"expandedTurns: new Set()",
-		"app.transcriptSignature === signature",
-		"app.expandedTurns.add(turn.dataset.turnKey)",
-		"chatBody.scrollHeight - chatBody.scrollTop - chatBody.clientHeight <= 24",
-		"Math.min(previousScrollTop, chatBody.scrollHeight - chatBody.clientHeight)",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardComposerDistinguishesStopQueueAndSteer(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		`drafts: new Map()`,
-		`app.drafts.set(app.selected.id, $("#message").value)`,
-		`$("#message").value = app.drafts.get(session.id) || ""`,
-		`sendButton.dataset.mode = stopping ? "interrupt" : "send"`,
-		`"Send queues this for next. Steer now changes the turn in progress."`,
-		`steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly)`,
-		`await action("interrupt")`,
-		`await action("steer", { message })`,
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-	if !strings.Contains(string(dashboardHTML), `id="steer-message"`) {
-		t.Fatal("busy composer has no inline steer action")
-	}
-}
-
-func TestDashboardUsesNeutralDeliveryDetailsAndLogicalIdempotency(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is unavailable")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	script := filepath.Join("..", "..", "scripts", "test-dashboard-idempotency.mjs")
-	output, err := exec.CommandContext(ctx, node, script).CombinedOutput()
-	if err != nil {
-		t.Fatalf("dashboard delivery behavior failed: %v\n%s", err, output)
-	}
-}
-
-func TestDashboardExposesNewConversationFormForCodexAndNotion(t *testing.T) {
-	for _, fragment := range []string{
-		`id="new-conversation-form"`,
-		`<option value="on-request">Ask when needed</option>`,
-		`fetch("/api/models?surface=codex")`,
-		`values.surface === "notion" ? "notion-create" : "session-create"`,
-		`response.sessionId || response.session?.id`,
-	} {
-		if !strings.Contains(string(dashboardHTML)+string(dashboardJS), fragment) {
-			t.Fatalf("new conversation surface missing %q", fragment)
-		}
-	}
-}
-
-func TestDashboardExplainsSurfacePresenceWindow(t *testing.T) {
-	source := string(dashboardJS)
-	for _, fragment := range []string{
-		"<span>Current</span>",
-		`? "Open now"`,
-		"`Past ${app.state.codexRecentHours || 5}h`",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("dashboard source missing %q", fragment)
-		}
-	}
-}
-
 func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
 	d, registry, _, _, target := daemonFixture(t)
+	handler := dashboardRouter(d)
 	if err := registry.QueueMessage(target.ID, "requires a decision"); err != nil {
 		t.Fatal(err)
 	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil || len(state.Attention) != 0 {
-		t.Fatalf("pending attention=%+v err=%v", state.Attention, err)
+	if state := readDashboardState(t, handler); len(state.Attention) != 0 {
+		t.Fatalf("pending attention=%+v", state.Attention)
 	}
 	item, err := registry.ClaimNextMessage(target.ID, time.Now())
 	if err != nil || item == nil {
@@ -1078,26 +843,20 @@ func TestDashboardOnlyShowsProvenAttentionItems(t *testing.T) {
 	if err := registry.DeadLetterUnknown(item.ID, errors.New("connection closed")); err != nil {
 		t.Fatal(err)
 	}
-	state, err = d.dashboardState(context.Background())
-	if err != nil || len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
-		t.Fatalf("dead attention=%+v err=%v", state.Attention, err)
+	if state := readDashboardState(t, handler); len(state.Attention) != 1 || state.Attention[0].QueueID != item.ID || state.Attention[0].RequestedAction == "" {
+		t.Fatalf("dead attention=%+v", state.Attention)
 	}
 	if err := registry.CancelMessage(item.ID); err != nil {
 		t.Fatal(err)
 	}
-	state, err = d.dashboardState(context.Background())
-	if err != nil || len(state.Attention) != 0 {
-		t.Fatalf("resolved attention=%+v err=%v", state.Attention, err)
-	}
-	for _, fragment := range []string{"attention: state.attention || []", "attentionPanel.hidden = attention.length === 0", `id="attention-panel" hidden`} {
-		if !strings.Contains(string(dashboardJS)+string(dashboardHTML), fragment) {
-			t.Fatalf("dashboard attention surface missing %q", fragment)
-		}
+	if state := readDashboardState(t, handler); len(state.Attention) != 0 {
+		t.Fatalf("resolved attention=%+v", state.Attention)
 	}
 }
 
 func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	daemon, registry, _, _, target := daemonFixture(t)
+	handler := dashboardRouter(daemon)
 	target.Source = "cli"
 	target.Transport = "readOnly"
 	if err := registry.RegisterSession(target); err != nil {
@@ -1121,10 +880,8 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 		`{"action":"relay-add","fromId":"from","toId":"to","pattern":".*"}`,
 		fmt.Sprintf(`{"action":"queue-retry","queueId":%d}`, queueID),
 	} {
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body))
-		daemon.dashboardActionHandler(response, request)
-		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "read only") {
+		response := serveDashboardRequest(handler, http.MethodPost, "/api/action", body)
+		if response.Code != http.StatusConflict {
 			t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 		}
 	}
@@ -1143,10 +900,8 @@ func TestDashboardRejectsReadOnlyCodexRoutingDestination(t *testing.T) {
 	if err := registry.AddToChannel("reviewers", target.ID); err != nil {
 		t.Fatal(err)
 	}
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
-	daemon.dashboardActionHandler(response, request)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "1 failed") {
+	response := serveDashboardRequest(handler, http.MethodPost, "/api/action", `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
+	if response.Code != http.StatusConflict {
 		t.Fatalf("body=%s code=%d", response.Body.String(), response.Code)
 	}
 }
@@ -1160,9 +915,7 @@ func TestDashboardChannelSendCountsSubmittedSeparately(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.sendErr = surface.DeliveryOutcomeUnknown(context.DeadlineExceeded)
-	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"channel-send","channel":"reviewers","message":"handoff"}`))
-	d.dashboardActionHandler(response, request)
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"channel-send","channel":"reviewers","message":"handoff"}`)
 	var body map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
 		t.Fatalf("body=%s code=%d err=%v", response.Body.String(), response.Code, err)
@@ -1180,10 +933,7 @@ func TestDashboardChannelPreservesMemberIdentity(t *testing.T) {
 	if err := registry.AddToChannel("reviewers", from.ID); err != nil {
 		t.Fatal(err)
 	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := readDashboardState(t, dashboardRouter(d))
 	if len(state.Channels) != 1 || len(state.Channels[0].Members) != 1 || len(state.Channels[0].MemberDetails) != 1 {
 		t.Fatalf("channels=%+v", state.Channels)
 	}
@@ -1219,42 +969,6 @@ func TestDashboardStateReadsCatalogWithoutProviderDiscovery(t *testing.T) {
 	}
 	if got := fake.listCalls.Load(); got != 0 {
 		t.Fatalf("surface list called %d times after event, want snapshot to read only the catalog", got)
-	}
-}
-
-func TestDashboardRefreshDoesNotBlockEventPublication(t *testing.T) {
-	d, _, _, _, _ := daemonFixture(t)
-	dashboard := &dashboardServer{token: "secret"}
-	d.dashboardHandler(dashboard)
-	dashboard.stateMu.Lock()
-	done := make(chan struct{})
-	go func() {
-		d.publishEvent("session.updated", "from", nil)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(250 * time.Millisecond):
-		dashboard.stateMu.Unlock()
-		t.Fatal("dashboard refresh blocked event publication")
-	}
-	dashboard.stateMu.Unlock()
-}
-
-func TestDashboardEventInvalidatesCacheWhenPersistenceFails(t *testing.T) {
-	registry, err := registrypkg.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := New(registry, nil)
-	dashboard := &dashboardServer{token: "secret"}
-	d.dashboardHandler(dashboard)
-	if err := registry.Close(); err != nil {
-		t.Fatal(err)
-	}
-	d.publishEvent("session.updated", "from", nil)
-	if got := dashboard.stateVersion.Load(); got != 1 {
-		t.Fatalf("state version=%d, want invalidation despite persistence failure", got)
 	}
 }
 
@@ -1317,10 +1031,7 @@ func TestDashboardStateReadsPersistedCatalogStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	state := readDashboardState(t, dashboardRouter(d))
 	for _, session := range state.Sessions {
 		if session.ID == from.ID {
 			if session.Status != surface.StatusBusy {

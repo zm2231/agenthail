@@ -62,23 +62,6 @@ func (c *Codex) Health(ctx context.Context) error {
 	return nil
 }
 
-type codexOpener func(context.Context) (codexClient, error)
-
-func codexHealth(ctx context.Context, managed bool, desktop, managedRuntime codexOpener) error {
-	client, desktopErr := desktop(ctx)
-	if desktopErr == nil {
-		return client.Close()
-	}
-	if managed {
-		client, managedErr := managedRuntime(ctx)
-		if managedErr == nil {
-			return client.Close()
-		}
-		return fmt.Errorf("Codex Desktop bridge is unavailable: %v; managed Codex app-server is unavailable: %w", desktopErr, managedErr)
-	}
-	return fmt.Errorf("Codex Desktop bridge is unavailable: %w", desktopErr)
-}
-
 type cdpConn struct {
 	ws     *websocket.Conn
 	mu     sync.Mutex
@@ -703,10 +686,6 @@ func (c *Codex) StartSession(ctx context.Context, options surface.SessionStartOp
 	}
 }
 
-func (c *Codex) startSession(ctx context.Context, client codexClient, options surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
-	return c.startSessionOnTransport(ctx, client, options, codexTransportManaged)
-}
-
 // PrepareManagedTerminalSession creates the provider-owned thread that the
 // interactive terminal will resume. It does not start a model turn.
 func (c *Codex) PrepareManagedTerminalSession(ctx context.Context, cwd, model string) (*surface.Session, error) {
@@ -962,19 +941,6 @@ func (c *Codex) streamManaged(ctx context.Context, sess *surface.Session, uuid s
 	return c.streamManagedClient(ctx, client, sess, uuid, onEvent, timeout)
 }
 
-func codexStreamEvent(sequence int64, kind, text string, contextUsage *surface.ContextUsage, turnID string) surface.StreamEvent {
-	key := fmt.Sprintf("renderer:%d", sequence)
-	operation := "append"
-	if kind == "context" || kind == "done" {
-		operation = "upsert"
-	}
-	return surface.StreamEvent{ID: key, ProviderKey: key, Cursor: uint64(sequence), Version: 1, Operation: operation, TurnID: turnID, Kind: kind, Text: text, Context: contextUsage}
-}
-
-func codexAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
-	return codexAuthoritativeStreamEventWithKey("codex:"+turnID+":assistant", turnID, item)
-}
-
 func codexManagedAuthoritativeStreamEvent(turnID string, item codexAssistantItem) surface.StreamEvent {
 	return codexAuthoritativeStreamEventWithKey("managed:"+turnID+":text", turnID, item)
 }
@@ -986,19 +952,6 @@ func codexAuthoritativeStreamEventWithKey(key, turnID string, item codexAssistan
 		}
 	}
 	return surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: "upsert", Final: true, TurnID: turnID, Kind: "text", Text: item.Text}
-}
-
-func codexCompletionStreamEvents(sequence int64, turnID string, turn *codexTurn, emitted string) []surface.StreamEvent {
-	assistant, ok := turn.authoritativeAssistant()
-	if !ok || assistant.Text == "" {
-		return nil
-	}
-	events := make([]surface.StreamEvent, 0, 2)
-	if emitted != "" && assistant.Text != emitted && strings.HasPrefix(assistant.Text, emitted) {
-		events = append(events, codexStreamEvent(sequence, "text", strings.TrimPrefix(assistant.Text, emitted), nil, turnID))
-	}
-	events = append(events, codexAuthoritativeStreamEvent(turnID, assistant))
-	return events
 }
 
 func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, sess *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
@@ -1086,7 +1039,7 @@ func (c *Codex) streamManagedClient(ctx context.Context, client codexClient, ses
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(transcriptPollInterval):
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)

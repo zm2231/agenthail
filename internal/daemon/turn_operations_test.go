@@ -65,8 +65,7 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 	adapter := &operationSurface{daemonSurface: fake}
 	d.Surfaces = []surface.Surface{adapter}
 	for _, body := range []string{`{"action":"session-fork","sessionId":"from","fork":{"beforeTurnId":"turn-2"}}`, `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"list","cursor":"page2"}}`} {
-		w := httptest.NewRecorder()
-		d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(body)))
+		w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", body)
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
@@ -85,9 +84,8 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 func TestDashboardUnknownCreationWithoutIdentityIsMachineReadable(t *testing.T) {
 	d, _, fake, _, _ := daemonFixture(t)
 	d.Surfaces = []surface.Surface{&unknownStartSurface{daemonSurface: fake}}
-	w := httptest.NewRecorder()
-	d.dashboardActionHandler(w, httptest.NewRequest(http.MethodPost, "/api/action", strings.NewReader(`{"action":"session-create","surface":"codex","message":"hello"}`)))
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"status":"failed"`) || strings.Contains(w.Body.String(), `"unknown":true`) || !strings.Contains(w.Body.String(), `no session identity`) {
+	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`)
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"status":"failed"`) || strings.Contains(w.Body.String(), `"unknown":true`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

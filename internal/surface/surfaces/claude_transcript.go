@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -41,29 +40,6 @@ type claudeRecord struct {
 		Content    any    `json:"content"`
 		ToolUseID  string `json:"tool_use_id"`
 	} `json:"message"`
-}
-
-func readClaudeTurns(path string) ([]claudeTurn, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var turns []claudeTurn
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
-	for scanner.Scan() {
-		var record claudeRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			continue
-		}
-		turns = appendClaudeTurn(turns, record)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan Claude transcript: %w", err)
-	}
-	return turns, nil
 }
 
 func readClaudeTailTurns(ctx context.Context, path string) ([]claudeTurn, error) {
@@ -145,87 +121,6 @@ func claudeTerminalInterruption(reason string) bool {
 	default:
 		return false
 	}
-}
-
-func claudeCompactPending(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	var latestCommandAt, latestCompletedAt time.Time
-	pendingWithoutTime := 0
-	markersWithoutTime := 0
-	completedWithoutTime := 0
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxClaudeTranscriptRecordBytes)
-	for scanner.Scan() {
-		var record claudeRecord
-		if json.Unmarshal(scanner.Bytes(), &record) != nil {
-			continue
-		}
-		at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
-		if record.Type == "assistant" && (record.Message.StopReason == "end_turn" || claudeTerminalInterruption(record.Message.StopReason)) && !at.IsZero() {
-			if latestCompletedAt.IsZero() || at.After(latestCompletedAt) {
-				latestCompletedAt = at
-			}
-		}
-		if record.Type == "user" {
-			content := strings.TrimSpace(transcriptText(record.Message.Content))
-			if at.IsZero() {
-				switch {
-				case content == "/compact":
-					pendingWithoutTime++
-				case strings.Contains(content, "<command-name>/compact</command-name>"):
-					markersWithoutTime++
-				case markersWithoutTime > 0 && strings.HasPrefix(content, "<local-command-stdout>"):
-					markersWithoutTime--
-					if completedWithoutTime > 0 {
-						completedWithoutTime--
-					} else if pendingWithoutTime > 0 {
-						pendingWithoutTime--
-					}
-				}
-				continue
-			}
-			switch {
-			case content == "/compact", strings.Contains(content, "<command-name>/compact</command-name>"):
-				if !at.IsZero() && (latestCommandAt.IsZero() || at.After(latestCommandAt)) {
-					latestCommandAt = at
-				}
-			case strings.HasPrefix(content, "<local-command-stdout>"):
-				if !at.IsZero() && (latestCompletedAt.IsZero() || at.After(latestCompletedAt)) {
-					latestCompletedAt = at
-				}
-			}
-			continue
-		}
-		if record.Type == "system" && (record.Subtype == "compact_boundary" || record.Subtype == "local_command" || record.Subtype == "turn_duration") {
-			if at.IsZero() {
-				if record.Subtype == "compact_boundary" && pendingWithoutTime > 0 {
-					pendingWithoutTime--
-					completedWithoutTime++
-				} else if record.Subtype == "local_command" && markersWithoutTime > 0 {
-					markersWithoutTime--
-					if completedWithoutTime > 0 {
-						completedWithoutTime--
-					} else if pendingWithoutTime > 0 {
-						pendingWithoutTime--
-					}
-				}
-				continue
-			}
-			if !at.IsZero() && (latestCompletedAt.IsZero() || at.After(latestCompletedAt)) {
-				latestCompletedAt = at
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return false, fmt.Errorf("scan Claude transcript: %w", err)
-	}
-	timestampPending := !latestCommandAt.IsZero() && (latestCompletedAt.IsZero() || latestCommandAt.After(latestCompletedAt))
-	return timestampPending || pendingWithoutTime > 0, nil
 }
 
 func isClaudeInterruptMarker(text string) bool {

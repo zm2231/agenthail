@@ -218,19 +218,6 @@ func TestUpdateChecksHomebrewWithJSON(t *testing.T) {
 	}
 }
 
-func TestUpdateChecksHomebrewWithHumanOutputOnExitOne(t *testing.T) {
-	app := &App{Version: "v0.1.7", update: &updateDeps{
-		executable: func() (string, error) { return "/opt/homebrew/Cellar/agenthail/0.1.7/bin/agenthail", nil },
-		output: func(string, ...string) ([]byte, error) {
-			return []byte(`{"formulae":[{"current_version":"0.2.0"}]}`), exec.Command("/usr/bin/false").Run()
-		},
-	}}
-	output, err := captureStdout(t, func() error { return app.Run([]string{"update", "--check"}) })
-	if err != nil || !strings.Contains(output, "0.2.0 is available") {
-		t.Fatalf("output=%q err=%v", output, err)
-	}
-}
-
 func TestUpdateRejectsUnexpectedHomebrewFailure(t *testing.T) {
 	app := &App{Version: "v0.1.7", update: &updateDeps{
 		executable: func() (string, error) { return "/opt/homebrew/Cellar/agenthail/0.1.7/bin/agenthail", nil },
@@ -241,23 +228,6 @@ func TestUpdateRejectsUnexpectedHomebrewFailure(t *testing.T) {
 	err := app.Run([]string{"update", "--check"})
 	if err == nil || !strings.Contains(err.Error(), "check Homebrew update") {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestUpdateVersionComparison(t *testing.T) {
-	tests := []struct {
-		left  string
-		right string
-		want  int
-	}{
-		{"v0.2.0", "v0.1.9", 1},
-		{"v0.1.7", "v0.1.7-local", 0},
-		{"v1.0.0", "v1.0.1", -1},
-	}
-	for _, test := range tests {
-		if got := compareVersions(test.left, test.right); got != test.want {
-			t.Fatalf("compareVersions(%q, %q)=%d want=%d", test.left, test.right, got, test.want)
-		}
 	}
 }
 

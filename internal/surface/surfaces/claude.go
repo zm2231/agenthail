@@ -140,14 +140,6 @@ func toCse(bridgeID string) string {
 	return "cse_" + s
 }
 
-func projectDir(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects", strings.ReplaceAll(cwd, "/", "-"))
-}
-
 func (c *Claude) transcriptPath(s *surface.Session) string {
 	return c.resolveTranscript(s, s.ID)
 }
@@ -619,7 +611,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(transcriptPollInterval):
 		}
 	}
 	return fmt.Errorf("stream timed out after %s: %w", timeout, surface.ErrStreamWindow)

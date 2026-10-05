@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,24 +10,11 @@ import (
 	"github.com/zm2231/agenthail/internal/daemon"
 )
 
-func TestDaemonLogPathMatchesInstallChannel(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	if got := daemonLogPathForExecutable("/opt/homebrew/Cellar/agenthail/0.2.8/libexec/agenthail"); got != "/opt/homebrew/var/log/agenthail.log" {
-		t.Fatalf("Homebrew log path=%q", got)
-	}
-	if got := daemonLogPathForExecutable("/usr/local/Cellar/agenthail/0.2.8/libexec/agenthail"); got != "/usr/local/var/log/agenthail.log" {
-		t.Fatalf("Intel Homebrew log path=%q", got)
-	}
-	if got := daemonLogPathForExecutable("/usr/local/bin/agenthail"); got != daemon.LogFilePath() {
-		t.Fatalf("package log path=%q", got)
-	}
-}
-
 func TestDashboardConfigCommandSetsCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := &App{}
 	output, err := captureStdout(t, func() error {
-		return app.cmdDashboard([]string{"config", "--codex-recent-hours", "7"})
+		return app.Run([]string{"dashboard", "config", "--codex-recent-hours", "7"})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,13 +40,17 @@ func TestDashboardRemoteStatusDispatchesMultiwordCommand(t *testing.T) {
 	}
 	app := &App{}
 	output, err := captureStdout(t, func() error {
-		return app.cmdDashboard([]string{"remote", "status", "--tailscale", script})
+		return app.Run([]string{"dashboard", "remote", "status", "--json", "--tailscale", script})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "remote dashboard access: off") || strings.Contains(output, "opened dashboard") {
-		t.Fatalf("output=%q", output)
+	var status struct {
+		Enabled *bool  `json:"enabled"`
+		DNSName string `json:"dnsName"`
+	}
+	if err := json.Unmarshal([]byte(output), &status); err != nil || status.Enabled == nil || *status.Enabled || status.DNSName != "agent.tailnet.ts.net" {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 
@@ -75,7 +67,7 @@ func TestDashboardRemoteOffClearsDesiredStateWithoutRoute(t *testing.T) {
 	}
 	app := &App{}
 	if _, err := captureStdout(t, func() error {
-		return app.cmdDashboard([]string{"remote", "off", "--tailscale", script})
+		return app.Run([]string{"dashboard", "remote", "off", "--tailscale", script})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +83,7 @@ func TestDashboardRemoteOffClearsDesiredStateWithoutRoute(t *testing.T) {
 func TestDashboardConfigCommandRejectsInvalidCodexRecency(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	app := &App{}
-	if err := app.cmdDashboard([]string{"config", "--codex-recent-hours", "0"}); err == nil {
+	if err := app.Run([]string{"dashboard", "config", "--codex-recent-hours", "0"}); err == nil {
 		t.Fatal("zero-hour Codex window accepted")
 	}
 }

@@ -41,19 +41,8 @@ func TestNotionObservationIsUnknownWithoutAProvenLifecycleState(t *testing.T) {
 func TestNotionMalformedConfiguredSpaceFailsWithoutPanic(t *testing.T) {
 	notion := NewNotion("not-a-uuid", "user")
 	_, err := notion.Send(context.Background(), &surface.Session{ID: "new"}, "message")
-	if err == nil || !strings.Contains(err.Error(), "AGENTHAIL_NOTION_SPACE must be a UUID") {
+	if err == nil || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), "AGENTHAIL_NOTION_SPACE") {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestNewNotionThreadIDPreservesSpacePortalSegment(t *testing.T) {
-	threadID, err := newNotionThreadID("3978aba0-0606-80ac-a1ae-00a9eb229fc0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parts := strings.Split(threadID, "-")
-	if len(parts) != 5 || parts[1] != "0606" {
-		t.Fatalf("threadID=%q", threadID)
 	}
 }
 
@@ -68,7 +57,11 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 	}{
 		{name: "transport", err: context.DeadlineExceeded},
 		{name: "http", status: 500, body: "upstream failed"},
-		{name: "validation", status: 200, body: `{"type":"error","error":{"message":"failed"}}`},
+		{name: "error", status: 200, body: `{"type":"error","error":{"message":"failed"}}`},
+		{name: "notionError", status: 200, body: `{"isNotionError":true,"message":"denied"}`},
+		{name: "empty", status: 200, body: ``},
+		{name: "malformed", status: 200, body: `{`},
+		{name: "oversized error", status: 200, body: `{"type":"error","error":"` + strings.Repeat("界", 1_000_000) + `"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			notionInferenceRequest = func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
@@ -86,34 +79,10 @@ func TestNotionPostDispatchFailuresHaveUnknownOutcome(t *testing.T) {
 			if !surface.IsDeliveryOutcomeUnknown(err) {
 				t.Fatalf("err=%v", err)
 			}
-		})
-	}
-}
-
-func TestValidateNotionInferenceResponse(t *testing.T) {
-	success := `{"type":"agent-inference","value":[]}`
-	if err := validateNotionInferenceResponse(success); err != nil {
-		t.Fatal(err)
-	}
-	for name, payload := range map[string]string{
-		"error":       `{"type":"error","error":{"message":"invalid model"}}`,
-		"notionError": `{"isNotionError":true,"message":"denied"}`,
-		"empty":       ``,
-		"malformed":   `{`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := validateNotionInferenceResponse(payload); err == nil {
-				t.Fatal("invalid response accepted")
+			if len(err.Error()) > maxDiagnosticBytes+400 {
+				t.Fatalf("unbounded diagnostic: %d bytes", len(err.Error()))
 			}
 		})
-	}
-}
-
-func TestNotionErrorDiagnosticIsBounded(t *testing.T) {
-	payload := `{"type":"error","error":"` + strings.Repeat("界", 1_000_000) + `"}`
-	err := validateNotionInferenceResponse(payload)
-	if err == nil || len(err.Error()) > maxDiagnosticBytes+200 {
-		t.Fatalf("error bytes=%d", len(err.Error()))
 	}
 }
 

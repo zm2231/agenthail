@@ -209,11 +209,16 @@ test ! -e "$SKILL_HOME/.claude/skills/agenthail-operations"
 test ! -e "$SKILL_HOME/.codex/skills/agenthail-operations"
 test ! -e "$SKILL_HOME/.hermes/skills/agenthail-operations"
 
+mkdir -p "$TMP/checkout/skills/agenthail-operations" "$SKILL_HOME/.codex/skills" "$SKILL_HOME/.hermes/skills"
+ln -s "$TMP/checkout/skills/agenthail-operations" "$SKILL_HOME/.codex/skills/agenthail-operations"
+ln -s "$TMP/removed-install/skills/agenthail-operations" "$SKILL_HOME/.hermes/skills/agenthail-operations"
 mkdir -p "$SKILL_HOME/.claude/skills/agenthail-operations"
 printf 'mine\n' >"$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >"$TMP/skill-collision.log" 2>&1
 grep -Fq 'is not an agenthail symlink' "$TMP/skill-collision.log"
 grep -Fqx 'mine' "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
+test "$(readlink "$SKILL_HOME/.codex/skills/agenthail-operations")" = "$TMP/checkout/skills/agenthail-operations"
+test "$(readlink "$SKILL_HOME/.hermes/skills/agenthail-operations")" = "$SKILL_DATA/skills/agenthail-operations"
 
 install_once "$CUSTOM_HOME" "$CUSTOM_BIN" "$CUSTOM_DATA_1" >/dev/null
 CUSTOM_PID_1="$(cat "$CUSTOM_HOME/.agenthail/daemon.pid")"

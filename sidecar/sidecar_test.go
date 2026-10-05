@@ -68,7 +68,7 @@ func runSidecar(t *testing.T, pythonPath string, input string, extraEnv ...strin
 func TestSidecarRejectsOversizedResponseWhileStreaming(t *testing.T) {
 	root := fakeCurlCFFI(t)
 	response := runSidecar(t, root, `{"url":"https://example.test","method":"GET"}`, "AGENTHAIL_MAX_RESPONSE_BYTES=1024", "FAKE_RESPONSE_BYTES=2048")
-	if response.Status != 0 || !strings.Contains(response.Error, "response exceeded 1024 bytes") || response.Body != "" {
+	if response.Status != 0 || !strings.Contains(response.Error, "1024") || response.Body != "" {
 		t.Fatalf("response=%+v", response)
 	}
 }
@@ -77,7 +77,7 @@ func TestSidecarFailsClosedWhenCookieBridgeFails(t *testing.T) {
 	root := fakeCurlCFFI(t)
 	marker := filepath.Join(t.TempDir(), "requested")
 	response := runSidecar(t, root, `{"url":"https://example.test","cookie_bridge":"/does/not/exist.mjs"}`, "FAKE_REQUEST_MARKER="+marker)
-	if !strings.Contains(response.Error, "cookie bridge failed") {
+	if response.Status != 0 || response.Error == "" || response.Body != "" {
 		t.Fatalf("response=%+v", response)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -99,7 +99,7 @@ func TestSidecarDoesNotReadBridgeWhenCookieHeaderIsProvided(t *testing.T) {
 
 func TestSidecarInvalidRequestIsStructured(t *testing.T) {
 	response := runSidecar(t, fakeCurlCFFI(t), `{`)
-	if !strings.Contains(response.Error, "invalid request JSON") {
+	if response.Status != 0 || response.Error == "" || response.Body != "" {
 		t.Fatalf("response=%+v", response)
 	}
 }

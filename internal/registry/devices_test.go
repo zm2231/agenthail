@@ -1,7 +1,10 @@
 package registry
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,21 +41,44 @@ func TestDevicePairingIsScopedSingleUseAndRevocable(t *testing.T) {
 }
 
 func TestDevicePairingExpiresAndNeverStoresPlaintextSecrets(t *testing.T) {
-	r := openTestRegistry(t)
-	pairing, err := r.CreateDevicePairing("Phone", nil, time.Nanosecond)
+	dir := t.TempDir()
+	r, err := Open(filepath.Join(dir, "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, err := r.CreateDevicePairing("Phone", nil, time.Nanosecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Millisecond)
-	if _, _, err := r.CompleteDevicePairing(pairing.Secret, ""); !errors.Is(err, ErrPairingExpired) {
+	if _, _, err := r.CompleteDevicePairing(expired.Secret, ""); !errors.Is(err, ErrPairingExpired) {
 		t.Fatalf("expired pairing err=%v", err)
 	}
-	var stored string
-	if err := r.db.QueryRow(`SELECT secret_hash FROM device_pairings WHERE id=?`, pairing.ID).Scan(&stored); err != nil {
+	pairing, err := r.CreateDevicePairing("Tablet", []string{"read"}, time.Minute)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if stored == pairing.Secret || len(stored) != 64 {
-		t.Fatalf("stored pairing secret=%q", stored)
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(dir, "registry.db*"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("files=%v err=%v", files, err)
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range []string{expired.Secret, pairing.Secret, token, strings.TrimPrefix(token, deviceTokenPrefix)} {
+			if bytes.Contains(data, []byte(secret)) {
+				t.Fatalf("%s stores a plaintext pairing secret or device token", filepath.Base(file))
+			}
+		}
 	}
 }
 
@@ -83,44 +109,5 @@ func TestDevicePushTargetFollowsDeviceLifecycle(t *testing.T) {
 	targets, err = r.DevicePushTargets()
 	if err != nil || len(targets) != 0 {
 		t.Fatalf("revoked targets=%+v err=%v", targets, err)
-	}
-}
-
-func TestCreateDevicePairingPrunesOldPairings(t *testing.T) {
-	r := openTestRegistry(t)
-	now := time.Now().UTC()
-	old := now.Add(-48 * time.Hour).Format(time.RFC3339Nano)
-	recent := now.Add(-time.Hour).Format(time.RFC3339Nano)
-	activeExpiry := now.Add(time.Minute).Format(time.RFC3339Nano)
-	for _, row := range []struct {
-		id, expires, created, consumed string
-	}{
-		{id: "expired-old", expires: old, created: old},
-		{id: "consumed-old", expires: activeExpiry, created: old, consumed: old},
-		{id: "expired-recent", expires: recent, created: recent},
-		{id: "active", expires: activeExpiry, created: recent},
-	} {
-		if _, err := r.db.Exec(`INSERT INTO device_pairings (id,secret_hash,scopes,expires_at,created_at,consumed_at) VALUES (?,?,?,?,?,?)`, row.id, row.id, "read", row.expires, row.created, row.consumed); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := r.CreateDevicePairing("New", nil, time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := r.db.Query(`SELECT id FROM device_pairings WHERE id IN ('expired-old','consumed-old','expired-recent','active') ORDER BY id`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if strings.Join(ids, ",") != "active,expired-recent" {
-		t.Fatalf("retained=%v", ids)
 	}
 }

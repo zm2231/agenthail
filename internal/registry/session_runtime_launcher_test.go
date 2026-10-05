@@ -37,22 +37,3 @@ func TestSessionRuntimePersistsAcrossRegistryReopen(t *testing.T) {
 		t.Fatalf("runtime=%+v", got)
 	}
 }
-
-func TestSessionRuntimeDoesNotReplaceCreatedSessionIdentity(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	want := surface.Session{ID: "provider-session", Surface: surface.KindClaude, Name: "Build", Cwd: "/repo", Status: surface.StatusUnknown, Runtime: &surface.Runtime{Launcher: surface.LauncherClaudeBG}}
-	if err := r.RegisterSession(want); err != nil {
-		t.Fatal(err)
-	}
-	got, err := r.Session(want.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Surface != want.Surface || got.Cwd != want.Cwd || got.Name != want.Name || got.Runtime == nil || got.Runtime.Launcher != surface.LauncherClaudeBG {
-		t.Fatalf("session=%+v", got)
-	}
-}

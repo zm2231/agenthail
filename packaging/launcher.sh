@@ -16,10 +16,8 @@ if [ -f "$skill/SKILL.md" ]; then
 		[ -d "$runtime" ] || continue
 		link="$runtime/skills/agenthail-operations"
 		mkdir -p "$runtime/skills"
-		if [ -L "$link" ]; then
-			continue
-		elif [ ! -e "$link" ]; then
-			ln -s "$skill" "$link"
+		if [ ! -e "$link" ]; then
+			ln -sfn "$skill" "$link"
 		fi
 	done
 fi

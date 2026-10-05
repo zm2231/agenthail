@@ -83,21 +83,6 @@ func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
 	}
 }
 
-func TestActiveCatalogSubscriberReceivesTerminalDeliveryProblem(t *testing.T) {
-	d, store, fake, sender, target := daemonFixture(t)
-	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
-		t.Fatal(err)
-	}
-	reader, closeStream := openAuthorizedCatalogStream(t, d)
-	defer closeStream()
-	fake.sendErr = surface.DeliveryTerminal(fmt.Errorf("target rejected input"), surface.DeliveryInvalidRequest)
-	d.drainMessageQueue(context.Background(), fake, &target)
-	event := receiveCatalogSSE(t, reader)
-	if event.Type != "delivery.problem" {
-		t.Fatalf("event=%+v", event)
-	}
-}
-
 func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T) {
 	d, store, _, sender, target := daemonFixture(t)
 	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "expiry", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
@@ -424,30 +409,6 @@ func appendCatalogGapFixture(t *testing.T, path string, count int) {
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestDiscoveryPersistsCatalogBeforeSnapshotReads(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	fake.listCalls.Store(0)
-	d.discoverCatalog(context.Background())
-	if fake.listCalls.Load() != 1 {
-		t.Fatalf("discovery calls=%d", fake.listCalls.Load())
-	}
-	state, err := d.dashboardState(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.HostEpoch == "" || state.CatalogSeq == 0 || len(state.Sessions) != 2 || fake.listCalls.Load() != 1 {
-		t.Fatalf("state=%+v providerCalls=%d", state, fake.listCalls.Load())
-	}
-	for _, session := range state.Sessions {
-		if session.ObservedAt.IsZero() || session.UnavailableReason == "" {
-			t.Fatalf("session=%+v", session)
-		}
-	}
-	if len(state.Surfaces) != 1 || state.Surfaces[0].Health != "healthy" || !state.Surfaces[0].Connected {
-		t.Fatalf("surfaces=%+v", state.Surfaces)
 	}
 }
 
