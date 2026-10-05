@@ -609,11 +609,15 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 // claudeDuplicateQuery finds other rows for the same Claude conversation: rows
 // sharing the transcript, and the launch record a background start registered
 // under the conversation ID before its process and transcript were known. Only
-// rows whose process has exited are absorbed: Claude Code lets one
-// conversation stay open in several processes, and each live one keeps its
-// own row, alias, and queue.
+// rows whose process has exited, or that belong to the registering process
+// under an earlier id, are absorbed: Claude Code lets one conversation stay
+// open in several processes, and each live one keeps its own row, alias, and
+// queue.
 const claudeDuplicateQuery = `SELECT id,pid FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
 
+// claudeExitedDuplicates returns the rows registration absorbs into s: rows of
+// the same conversation whose process has exited, and rows of s's own process
+// left under an earlier id.
 func claudeExitedDuplicates(q catalogQuerier, s surface.Session) ([]string, error) {
 	rows, err := q.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
 	if err != nil {
@@ -627,7 +631,7 @@ func claudeExitedDuplicates(q catalogQuerier, s surface.Session) ([]string, erro
 		if err := rows.Scan(&id, &pid); err != nil {
 			return nil, err
 		}
-		if !processAlive(pid) {
+		if !processAlive(pid) || (s.PID > 0 && pid == s.PID) {
 			exited = append(exited, id)
 		}
 	}
@@ -680,9 +684,10 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 	return nil
 }
 
-// claudeTranscriptRows picks the row that absorbs the exited rows sharing a
+// claudeTranscriptRows picks the row that absorbs the other rows sharing a
 // transcript: the most recent live row, or the most recent row when none is
-// live. Other live rows are left alone.
+// live. It absorbs exited rows and rows of the survivor's own process; rows
+// of other live processes are left alone.
 func (r *Registry) claudeTranscriptRows(transcript string) (string, []string, error) {
 	rows, err := r.db.Query(`SELECT id,pid FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
 	if err != nil {
@@ -690,21 +695,37 @@ func (r *Registry) claudeTranscriptRows(transcript string) (string, []string, er
 	}
 	defer rows.Close()
 	var survivor string
+	var survivorPID int
 	var exited []string
+	var live []struct {
+		id  string
+		pid int
+	}
 	for rows.Next() {
 		var id string
 		var pid int
 		if err := rows.Scan(&id, &pid); err != nil {
 			return "", nil, err
 		}
-		if !processAlive(pid) {
+		switch {
+		case !processAlive(pid):
 			exited = append(exited, id)
-		} else if survivor == "" {
-			survivor = id
+		case survivor == "":
+			survivor, survivorPID = id, pid
+		default:
+			live = append(live, struct {
+				id  string
+				pid int
+			}{id, pid})
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return "", nil, err
+	}
+	for _, row := range live {
+		if row.pid == survivorPID {
+			exited = append(exited, row.id)
+		}
 	}
 	if survivor == "" && len(exited) > 0 {
 		survivor, exited = exited[0], exited[1:]
