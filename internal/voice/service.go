@@ -139,6 +139,7 @@ type Service struct {
 	background              context.Context
 	stop                    context.CancelFunc
 	tasks                   sync.WaitGroup
+	closed                  bool
 }
 
 type clock struct {
@@ -279,6 +280,9 @@ func (s *Service) save() error {
 func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return s.view(owner), errors.New("voice is shutting down")
+	}
 	if s.loadErr != nil && a.Action != "stop" {
 		return s.view(owner), s.loadErr
 	}
@@ -556,11 +560,9 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
 	attemptID, targetID, turnID := v.AttemptID, target.Session.ID, receipt.TurnID
-	s.tasks.Add(1)
-	go func() {
-		defer s.tasks.Done()
-		s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription)
-	}()
+	if !s.spawn(func() { s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription) }) && streamSubscription.Cancel != nil {
+		streamSubscription.Cancel()
+	}
 	return s.save()
 }
 
@@ -605,11 +607,29 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	return nil
 }
 
-// Close stops the service's background work, waiting for a delegation watch
-// or event poll in progress to return so nothing writes the state file after.
+// Close stops the service's background work. It waits for an action in
+// progress, refuses later ones, and waits for every delegation watch and event
+// poll to return, so nothing writes the state file after it returns.
 func (s *Service) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	s.stop()
 	s.tasks.Wait()
+}
+
+// spawn starts background work the service owns, unless it is closed. The
+// caller holds s.mu.
+func (s *Service) spawn(task func()) bool {
+	if s.closed {
+		return false
+	}
+	s.tasks.Add(1)
+	go func() {
+		defer s.tasks.Done()
+		task()
+	}()
+	return true
 }
 
 func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string, subscription sessionstream.Subscription) {
@@ -869,10 +889,7 @@ func (s *Service) observe() {
 	if s.running {
 		return
 	}
-	s.running = true
-	s.tasks.Add(1)
-	go func() {
-		defer s.tasks.Done()
+	s.running = s.spawn(func() {
 		ticks, stop := s.clock.ticker()
 		defer stop()
 		for {
@@ -884,6 +901,9 @@ func (s *Service) observe() {
 				return
 			case _, open := <-ticks:
 				if !open {
+					s.mu.Lock()
+					s.running = false
+					s.mu.Unlock()
 					return
 				}
 			}
@@ -910,7 +930,7 @@ func (s *Service) observe() {
 			}
 			s.mu.Unlock()
 		}
-	}()
+	})
 }
 
 func (s *Service) poll(ctx context.Context) error {

@@ -657,6 +657,34 @@ func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestCloseWaitsForAnActionInProgressAndRefusesLaterWork(t *testing.T) {
+	f := newFixture(t, fixtureOptions{})
+	f.service.mu.Lock()
+	closed := make(chan struct{})
+	go func() { f.service.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while an action held the service")
+	case <-time.After(100 * time.Millisecond):
+	}
+	f.service.mu.Unlock()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after the action finished")
+	}
+	if _, err := f.Apply(Action{Action: "prepare"}); err == nil {
+		t.Fatal("an action was accepted after Close")
+	}
+	f.service.mu.Lock()
+	f.service.observe()
+	running := f.service.running
+	f.service.mu.Unlock()
+	if running {
+		t.Fatal("event polling started after Close")
+	}
+}
+
 func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}}
 	f := newFixture(t, fixtureOptions{target: target})
