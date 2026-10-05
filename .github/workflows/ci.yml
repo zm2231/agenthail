@@ -121,6 +121,8 @@ jobs:
           "$RUNNER_TEMP/spotlight-index-test"
           swiftc -parse-as-library native/macOS/ComposerDrop.swift native/tests/composer_drop_test.swift -o "$RUNNER_TEMP/composer-drop-test"
           "$RUNNER_TEMP/composer-drop-test"
+          swiftc -parse-as-library native/macOS/BoundedDock.swift native/tests/bounded_dock_test.swift -o "$RUNNER_TEMP/bounded-dock-test"
+          "$RUNNER_TEMP/bounded-dock-test"
           swiftc -parse-as-library native/macOS/SessionHandle.swift native/tests/session_handle_test.swift -o "$RUNNER_TEMP/session-handle-test"
           "$RUNNER_TEMP/session-handle-test"
       - name: Mac app build
