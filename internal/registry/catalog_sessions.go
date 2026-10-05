@@ -268,12 +268,13 @@ func sessionRowMatchesTx(tx *sql.Tx, s surface.Session) (bool, error) {
 		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		var duplicates int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID).Scan(&duplicates); err != nil {
-			return false, err
-		}
-		if duplicates > 0 {
+		var duplicate string
+		err := tx.QueryRow(claudeDuplicateQuery+` LIMIT 1`, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript)).Scan(&duplicate)
+		if err == nil {
 			return false, nil
+		}
+		if err != sql.ErrNoRows {
+			return false, err
 		}
 	}
 	return true, nil

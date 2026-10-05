@@ -568,7 +568,7 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		rows, err := tx.Query(`SELECT id FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID)
+		rows, err := tx.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
 		if err != nil {
 			return err
 		}
@@ -591,6 +591,15 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	return nil
+}
+
+// claudeDuplicateQuery finds other rows for the same Claude conversation: rows
+// sharing the transcript, and the launch record a background start registered
+// under the conversation ID before its process and transcript were known.
+const claudeDuplicateQuery = `SELECT id FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
+
+func claudeConversationID(transcript string) string {
+	return strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
 }
 
 func (r *Registry) mergeDuplicateClaudeSessions() error {

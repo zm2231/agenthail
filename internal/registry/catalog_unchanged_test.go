@@ -117,7 +117,7 @@ func TestRecordCatalogDiscoveryStampsOnlySeenFreshRows(t *testing.T) {
 func TestDiscoveredClaudeAgentAbsorbsItsLaunchRecord(t *testing.T) {
 	r := openTestRegistry(t)
 	transcript := "/home/test/.claude/projects/-work/conversation-1.jsonl"
-	launch := surface.Session{ID: "conversation-1", Surface: surface.KindClaude, Name: "builder", Cwd: "/work", Status: surface.StatusUnknown, Transcript: transcript, HasLocal: true, Source: "agenthail"}
+	launch := surface.Session{ID: "conversation-1", Surface: surface.KindClaude, Name: "builder", Cwd: "/work", Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail"}
 	if err := r.RegisterSession(launch); err != nil {
 		t.Fatal(err)
 	}
@@ -134,5 +134,20 @@ func TestDiscoveredClaudeAgentAbsorbsItsLaunchRecord(t *testing.T) {
 	}
 	if owner, err := r.LookupAlias("builder"); err != nil || owner != "session_bridge" {
 		t.Fatalf("alias owner=%q err=%v", owner, err)
+	}
+}
+
+func TestDiscoveredClaudeAgentKeepsUnrelatedConversationRows(t *testing.T) {
+	r := openTestRegistry(t)
+	live := surface.Session{ID: "conversation-2", Surface: surface.KindClaude, Name: "other", Cwd: "/work", PID: 99, Status: surface.StatusIdle}
+	if err := r.RegisterSession(live); err != nil {
+		t.Fatal(err)
+	}
+	discovered := surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Cwd: "/work", PID: 4242, Transcript: "/home/test/.claude/projects/-work/conversation-2.jsonl", HasLocal: true}
+	if err := r.RegisterSession(discovered); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Session(live.ID); err != nil {
+		t.Fatalf("row with a live process was merged: %v", err)
 	}
 }
