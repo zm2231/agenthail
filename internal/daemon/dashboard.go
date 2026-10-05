@@ -1951,14 +1951,11 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 			return filtered, err
 		}
 		requests["claudeSubagents"] = func() (any, error) {
-			links, err := observer.ObserveClaudeSubagentLinks(ctx)
-			filtered := []surface.ClaudeSubagentLink{}
-			for _, link := range links {
-				if link.ParentSessionID == session.ID {
-					filtered = append(filtered, link)
-				}
+			links, err := observer.ObserveClaudeSubagentLinks(ctx, session.ID)
+			if links == nil {
+				links = []surface.ClaudeSubagentLink{}
 			}
-			return filtered, err
+			return links, err
 		}
 	}
 	response := map[string]any{"sessionId": session.ID}

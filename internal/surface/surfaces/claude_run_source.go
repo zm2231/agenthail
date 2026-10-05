@@ -141,7 +141,9 @@ func parseClaudeRunTime(value, field, path string) (time.Time, error) {
 
 // ObserveClaudeSubagentLinks reads the installed Claude Code subagent
 // transcript topology without invoking Claude Code or changing any session.
-func ObserveClaudeSubagentLinks(ctx context.Context, home string) ([]ClaudeSubagentLink, error) {
+// A non-empty parentSessionID reads only that session's subagent directory;
+// an empty one reads every session.
+func ObserveClaudeSubagentLinks(ctx context.Context, home, parentSessionID string) ([]ClaudeSubagentLink, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -152,7 +154,14 @@ func ObserveClaudeSubagentLinks(ctx context.Context, home string) ([]ClaudeSubag
 			return nil, fmt.Errorf("resolve home: %w", err)
 		}
 	}
-	paths, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", "*", "subagents", "agent-*.jsonl"))
+	parent := "*"
+	if parentSessionID != "" {
+		if parentSessionID == "." || parentSessionID == ".." || strings.ContainsAny(parentSessionID, `*?[]\/`) {
+			return nil, fmt.Errorf("invalid Claude session ID %q", parentSessionID)
+		}
+		parent = parentSessionID
+	}
+	paths, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", parent, "subagents", "agent-*.jsonl"))
 	if err != nil {
 		return nil, fmt.Errorf("discover Claude subagent transcripts: %w", err)
 	}

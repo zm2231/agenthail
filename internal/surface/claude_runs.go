@@ -24,5 +24,5 @@ type ClaudeSubagentLink struct {
 
 type ClaudeRunObserver interface {
 	ObserveClaudeRuns(context.Context) ([]ClaudeRunObservation, error)
-	ObserveClaudeSubagentLinks(context.Context) ([]ClaudeSubagentLink, error)
+	ObserveClaudeSubagentLinks(ctx context.Context, parentSessionID string) ([]ClaudeSubagentLink, error)
 }

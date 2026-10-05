@@ -116,7 +116,7 @@ func TestObserveClaudeSubagentLinksValidatesPathAndRecord(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"type":"user","sessionId":"parent-session","agentId":"a123","message":{"content":"waiting for something"}}`+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ObserveClaudeSubagentLinks(context.Background(), home)
+	got, err := ObserveClaudeSubagentLinks(context.Background(), home, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,35 @@ func TestObserveClaudeSubagentLinksRejectsMismatchedIdentity(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"sessionId":"other-session","agentId":"a123"}`+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ObserveClaudeSubagentLinks(context.Background(), home); err == nil {
+	if _, err := ObserveClaudeSubagentLinks(context.Background(), home, ""); err == nil {
 		t.Fatal("expected mismatched identity error")
+	}
+}
+
+func TestObserveClaudeSubagentLinksReadsOnlyTheRequestedParent(t *testing.T) {
+	home := t.TempDir()
+	wanted := filepath.Join(home, ".claude", "projects", "encoded-cwd", "parent-session", "subagents", "agent-a123.jsonl")
+	other := filepath.Join(home, ".claude", "projects", "encoded-cwd", "other-session", "subagents", "agent-b456.jsonl")
+	for path, record := range map[string]string{
+		wanted: `{"sessionId":"parent-session","agentId":"a123"}`,
+		other:  `{"sessionId":"mismatched","agentId":"b456"}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(record+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ObserveClaudeSubagentLinks(context.Background(), home, "parent-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ClaudeSubagentLink{{ParentSessionID: "parent-session", AgentID: "a123", TranscriptPath: wanted}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("links=%+v want=%+v", got, want)
+	}
+	if _, err := ObserveClaudeSubagentLinks(context.Background(), home, "../other-session"); err == nil {
+		t.Fatal("expected a path-shaped session ID to be rejected")
 	}
 }
