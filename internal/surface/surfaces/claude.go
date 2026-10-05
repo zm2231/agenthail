@@ -147,7 +147,28 @@ func toCse(bridgeID string) string {
 }
 
 func (c *Claude) transcriptPath(s *surface.Session) string {
-	return c.resolveTranscript(s.ID)
+	return c.resolveTranscript(c.conversationID(s))
+}
+
+// conversationID is the id Claude Code names a session's transcript after.
+// A bridge session's public id differs from it, so it is read from the
+// session record of the process that still owns the session.
+func (c *Claude) conversationID(s *surface.Session) string {
+	if s.PID <= 0 {
+		return s.ID
+	}
+	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(s.PID)+".json"))
+	if err != nil {
+		return s.ID
+	}
+	var record map[string]any
+	if json.Unmarshal(data, &record) != nil || s.ID != str(record, "bridgeSessionId") {
+		return s.ID
+	}
+	if local := str(record, "sessionId"); local != "" {
+		return local
+	}
+	return s.ID
 }
 
 // resolveTranscript returns the transcript Claude Code wrote for a

@@ -1,8 +1,11 @@
 package surfaces
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -131,5 +134,34 @@ func TestClaudeTranscriptBecomesAmbiguousAndThenUniqueAgain(t *testing.T) {
 	}
 	if got := adapter.resolveTranscript("conv-1"); got != second {
 		t.Fatalf("after the duplicate was removed the transcript resolved to %q, want %q", got, second)
+	}
+}
+
+func TestClaudeBridgeSessionFindsItsTranscriptCreatedAfterDiscovery(t *testing.T) {
+	home := t.TempDir()
+	sessionsDir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(map[string]any{"bridgeSessionId": "bridge", "sessionId": "local", "cwd": "/fixture", "pid": os.Getpid(), "status": "idle"})
+	if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(os.Getpid())+".json"), record, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := NewClaude("", home)
+	sessions, err := adapter.List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "bridge" || sessions[0].Transcript != "" {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+	session := sessions[0]
+	path := writeClaudeProjectTranscript(t, home, "-fixture", "local")
+	if err := os.WriteFile(path, []byte(`{"type":"user","uuid":"u1","message":{"content":"hello"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := adapter.transcriptPath(&session); got != path {
+		t.Fatalf("bridge session transcript %q, want %q", got, path)
+	}
+	read, err := adapter.ReadSession(context.Background(), &session, surface.SessionReadRequest{Limit: 5})
+	if err != nil || len(read.Items) != 1 {
+		t.Fatalf("read=%+v err=%v", read, err)
 	}
 }
