@@ -144,6 +144,9 @@ func TestAPIV1EventStreamResumesFromLastEventID(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if strings.HasPrefix(line, ":") || (line == "\n" && body.Len() == 0) {
+			continue
+		}
 		body.WriteString(line)
 	}
 	if response.StatusCode != http.StatusOK || !strings.Contains(body.String(), "id: "+strconv.FormatUint(second.ID, 10)) || !strings.Contains(body.String(), "event: turn.completed") {

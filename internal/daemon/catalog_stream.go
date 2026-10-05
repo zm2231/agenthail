@@ -223,6 +223,7 @@ func (d *Daemon) apiCatalogStreamHandler(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
+	writeSSEOpen(w)
 	for _, event := range window.Events {
 		if !d.apiEventStreamAuthorized(r) || writeCatalogStreamEntry(w, event) != nil {
 			return

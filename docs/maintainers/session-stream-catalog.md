@@ -160,7 +160,7 @@ retained sequence bounds so the client can reload from the retained window.
 Missing sessions return `404`; unavailable session content returns a typed
 availability error without synthesizing history. Every stream validates the
 initial device scope and rechecks it before writing events or keepalives; a
-revoked device stream closes. The implementation records uncertain provider
+revoked device stream closes. Each stream writes a `: connected` comment as soon as it opens, before any replay, because clients such as URLSession return a streaming response only once body bytes arrive. The implementation records uncertain provider
 effects for reconciliation but never blindly retries external actions.
 
 ## Behavioral checks
