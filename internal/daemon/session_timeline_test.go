@@ -108,6 +108,7 @@ type providerHistorySurface struct {
 	mu      sync.Mutex
 	befores []int64
 	fail    bool
+	shared  *surface.TimelineItem
 }
 
 func (s *providerHistorySurface) ReadSession(_ context.Context, _ *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
@@ -115,12 +116,62 @@ func (s *providerHistorySurface) ReadSession(_ context.Context, _ *surface.Sessi
 	defer s.mu.Unlock()
 	s.befores = append(s.befores, request.Before)
 	if request.Before == 0 {
-		return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "recent-1", Kind: "message", Role: "user", Text: "recent ask"}, {ID: "recent-2", Kind: "message", Role: "assistant", Text: "recent answer"}}, NextBefore: 7, Source: "local-transcript"}, nil
+		items := []surface.TimelineItem{{ID: "recent-1", Kind: "message", Role: "user", Text: "recent ask"}, {ID: "recent-2", Kind: "message", Role: "assistant", Text: "recent answer"}}
+		if s.shared != nil {
+			items = append(items, *s.shared)
+		}
+		return &surface.SessionReadResult{Items: items, NextBefore: 7, Source: "local-transcript"}, nil
 	}
 	if s.fail {
 		return nil, errors.New("transcript unreadable")
 	}
-	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "older-1", Kind: "message", Role: "user", Text: "older ask"}}, NextBefore: 0, Source: "local-transcript"}, nil
+	items := []surface.TimelineItem{{ID: "older-1", Kind: "message", Role: "user", Text: "older ask"}}
+	if s.shared != nil {
+		items = append(items, *s.shared)
+	}
+	return &surface.SessionReadResult{Items: items, NextBefore: 0, Source: "local-transcript"}, nil
+}
+
+func TestProviderHistoryOmitsInjectedPromptAlreadyJournaled(t *testing.T) {
+	_, registry, fake, _, _ := daemonFixture(t)
+	shared := surface.TimelineItem{ID: "task-notification:task-1:completed", Kind: "event", Role: "system", Origin: "task-notification", Title: "Task notification", Text: "Synthetic job done", Status: "completed"}
+	adapter := &providerHistorySurface{daemonSurface: fake, shared: &shared}
+	d := New(registry, []surface.Surface{adapter})
+	defer d.sources.shutdown()
+	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+	read := func(query string) surface.SessionTimeline {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id=from&timeline=1&limit=40"+query, nil)
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatal(response.Body.String())
+		}
+		var body struct {
+			Timeline surface.SessionTimeline `json:"timeline"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Timeline
+	}
+	first := read("")
+	count := 0
+	for _, item := range first.Items {
+		if item.ID == shared.ID {
+			count++
+		}
+	}
+	older := read(fmt.Sprintf("&timelineBefore=%d", first.NextBefore))
+	for _, item := range older.Items {
+		if item.ID == shared.ID {
+			count++
+		}
+	}
+	if count != 1 || len(older.Items) != 1 || older.Items[0].ID != "older-1" {
+		t.Fatalf("shared copies=%d first=%+v older=%+v", count, first.Items, older.Items)
+	}
 }
 
 func TestSessionPageContinuesIntoProviderHistoryPastSeed(t *testing.T) {
