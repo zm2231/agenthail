@@ -56,21 +56,15 @@ func sharedClaudeSessions(sessions []surface.Session) map[string][]dashboardShar
 // savedSharedSessions reads the relation from the session's committed catalog
 // projection, the row snapshots serve, so detail and snapshots always agree.
 func (d *Daemon) savedSharedSessions(sessionID string) ([]dashboardSharedSession, error) {
-	snapshot, err := d.Registry.CatalogSnapshot()
-	if err != nil {
+	fingerprint, found, err := d.Registry.CatalogProjectionFingerprint(sessionID)
+	if err != nil || !found {
 		return nil, err
 	}
-	for _, record := range snapshot.Sessions {
-		if record.Session.ID != sessionID {
-			continue
-		}
-		var saved dashboardSession
-		if err := json.Unmarshal([]byte(record.ProjectionFingerprint), &saved); err != nil {
-			return nil, err
-		}
-		return saved.SharedWith, nil
+	var saved dashboardSession
+	if err := json.Unmarshal([]byte(fingerprint), &saved); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return saved.SharedWith, nil
 }
 
 // refreshCatalogShared republishes live Claude rows whose shared-process list
