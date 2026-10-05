@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -145,15 +146,38 @@ func toCse(bridgeID string) string {
 	return "cse_" + s
 }
 
+var claudeProjectDirPattern = regexp.MustCompile(`[^A-Za-z0-9]`)
+
 func (c *Claude) transcriptPath(s *surface.Session) string {
 	return c.resolveTranscript(s, s.ID)
 }
 
+// resolveTranscript finds a conversation's transcript. Claude Code names the
+// project directory after the launch directory with every character outside
+// [A-Za-z0-9] replaced by '-'. A conversation that changed directory keeps
+// its launch project, so an unmatched id is looked up across projects.
 func (c *Claude) resolveTranscript(s *surface.Session, conversationID string) string {
-	if s.Cwd == "" || conversationID == "" {
+	if conversationID == "" || strings.ContainsAny(conversationID, `/\`) {
 		return ""
 	}
-	return filepath.Join(c.home, ".claude", "projects", strings.ReplaceAll(s.Cwd, "/", "-"), conversationID+".jsonl")
+	projects := filepath.Join(c.home, ".claude", "projects")
+	if s.Cwd != "" {
+		path := filepath.Join(projects, claudeProjectDir(s.Cwd), conversationID+".jsonl")
+		if fileExists(path) {
+			return path
+		}
+	}
+	if matches, _ := filepath.Glob(filepath.Join(projects, "*", conversationID+".jsonl")); len(matches) == 1 {
+		return matches[0]
+	}
+	if s.Cwd == "" {
+		return ""
+	}
+	return filepath.Join(projects, claudeProjectDir(s.Cwd), conversationID+".jsonl")
+}
+
+func claudeProjectDir(cwd string) string {
+	return claudeProjectDirPattern.ReplaceAllString(cwd, "-")
 }
 
 func (c *Claude) firstUserMessage(path string) string {
