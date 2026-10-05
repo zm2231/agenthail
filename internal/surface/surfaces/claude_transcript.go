@@ -2,8 +2,10 @@ package surfaces
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -42,20 +44,82 @@ type claudeRecord struct {
 	} `json:"message"`
 }
 
-func readClaudeTailTurns(ctx context.Context, path string) ([]claudeTurn, error) {
-	lines, _, err := readRecentJSONLLines(ctx, path, 0, initialClaudeObservationBytes, maxClaudeTranscriptRecordBytes)
+var claudeModelScanChunkBytes int64 = 256 << 10
+
+// readClaudeLatestModel returns the model of the newest complete assistant
+// record within the observation tail. It scans backward and decodes only
+// records that mention a model, so a long transcript costs one short read.
+func readClaudeLatestModel(ctx context.Context, path string) (string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	turns := make([]claudeTurn, 0)
-	for _, line := range lines {
-		var record claudeRecord
-		if json.Unmarshal(line, &record) != nil {
-			continue
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	minimum := max(0, info.Size()-initialClaudeObservationBytes)
+	position := info.Size()
+	trailing := true
+	var carry []byte
+	for position > minimum {
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
-		turns = appendClaudeTurn(turns, record)
+		start := max(minimum, position-claudeModelScanChunkBytes)
+		data := make([]byte, position-start, position-start+int64(len(carry)))
+		if _, err := file.ReadAt(data, start); err != nil && err != io.EOF {
+			return "", err
+		}
+		data = append(data, carry...)
+		position = start
+		if trailing {
+			last := bytes.LastIndexByte(data, '\n')
+			if last < 0 {
+				carry = nil
+				continue
+			}
+			data, trailing = data[:last+1], false
+		}
+		lineEnd := len(data)
+		for {
+			newline := bytes.LastIndexByte(data[:lineEnd], '\n')
+			if newline < 0 {
+				break
+			}
+			if model := claudeAssistantModel(data[newline+1 : lineEnd]); model != "" {
+				return model, nil
+			}
+			lineEnd = newline
+		}
+		if lineEnd > maxClaudeTranscriptRecordBytes {
+			return "", fmt.Errorf("transcript record exceeds %d bytes", maxClaudeTranscriptRecordBytes)
+		}
+		carry = data[:lineEnd]
 	}
-	return turns, nil
+	if minimum == 0 && !trailing {
+		if model := claudeAssistantModel(carry); model != "" {
+			return model, nil
+		}
+	}
+	return "", fmt.Errorf("model unavailable: no assistant turn recorded")
+}
+
+func claudeAssistantModel(line []byte) string {
+	if !bytes.Contains(line, []byte(`"model"`)) {
+		return ""
+	}
+	var record struct {
+		Type    string `json:"type"`
+		Message struct {
+			Model string `json:"model"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &record) != nil || record.Type != "assistant" {
+		return ""
+	}
+	return record.Message.Model
 }
 
 func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
