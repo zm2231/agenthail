@@ -359,6 +359,8 @@ type Exchange struct {
 
 type StreamEvent struct {
 	Role             string        `json:"role,omitempty"`
+	Origin           string        `json:"origin,omitempty"`
+	Sender           string        `json:"sender,omitempty"`
 	Title            string        `json:"title,omitempty"`
 	Status           string        `json:"status,omitempty"`
 	CallID           string        `json:"callId,omitempty"`

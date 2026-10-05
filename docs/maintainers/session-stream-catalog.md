@@ -88,6 +88,24 @@ does not advance that item's provider cursor or body state, so a replay of the
 same provider cursor is persisted. A provider absence or partial read never deletes
 historical journal content.
 
+Claude records prompts it injected on the user's behalf as user-role records
+with an `origin.kind`. Only `human` prompts, and legacy records with no origin
+that are not a task notification envelope, are user messages. The others carry
+`origin` on the session event and timeline item:
+
+- `task-notification`: `kind` `event`, `role` `system`, `body` the summary,
+  `status` the task status, `callId` the tool use that started the task. The
+  item ID is `task-notification:<task-id>:<status>`.
+- `peer`: `kind` `message`, `role` `peer`, `sender` the sending agent's name,
+  `body` the message without its envelope. The item ID is `peer:<msg_id>`.
+- `auto-continuation` and any other origin: `kind` `event`, `role` `system`.
+
+A notification or peer message queued into a running turn is also recorded as
+a `queued_command` attachment. Both copies share the item ID above, so the
+journal and timeline pages show it once. Queued human prompts are not rendered
+from the attachment. Turn and exchange boundaries are unchanged, so delivery
+reconciliation still sees every injected prompt as the turn's input.
+
 Body range reads use byte offsets with UTF-8 boundaries: `start` must begin at
 a code-point boundary, while `end` is reduced to the preceding boundary when
 needed. The response's `end` is the actual returned byte offset, so clients can

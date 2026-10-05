@@ -47,7 +47,7 @@ func (d *Daemon) readJournalPage(sessionID string, before uint64, limit int) (*s
 		if callID == "" {
 			callID = payload.TurnID
 		}
-		result.Items = append(result.Items, surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind, Role: role, Title: title, Text: payload.Body, Timestamp: payload.TS, CallID: callID, TurnID: payload.TurnID, Status: payload.Status, Truncated: payload.Truncated, TruncationReason: payload.TruncationReason, BodyRef: payload.BodyRef, Attachment: payload.Attachment})
+		result.Items = append(result.Items, surface.TimelineItem{ID: payload.ItemID, Kind: payload.Kind, Role: role, Origin: payload.Origin, Sender: payload.Sender, Title: title, Text: payload.Body, Timestamp: payload.TS, CallID: callID, TurnID: payload.TurnID, Status: payload.Status, Truncated: payload.Truncated, TruncationReason: payload.TruncationReason, BodyRef: payload.BodyRef, Attachment: payload.Attachment})
 		result.Truncated = result.Truncated || payload.Truncated
 		if payload.Kind != "message" && payload.Kind != "text" && payload.Kind != "assistant" {
 			continue

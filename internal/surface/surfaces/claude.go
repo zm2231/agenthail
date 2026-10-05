@@ -618,13 +618,16 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				return nil
 			}
 			for index, item := range items {
-				key := stableTimelineItemID(recordOffset, line, index)
+				key := item.ID
+				if key == "" {
+					key = stableTimelineItemID(recordOffset, line, index)
+				}
 				version := uint64(len(item.Text))
 				if version == 0 {
 					version = 1
 				}
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
 			if done && turnID != "" && !terminalTurns[turnID] {
 				terminalTurns[turnID] = true
