@@ -104,3 +104,21 @@ func TestClaudeLocalStatusRereadsPeerRecord(t *testing.T) {
 		t.Fatal("reused pid record was applied to another session")
 	}
 }
+
+func TestCodexListAndLocalStatusShareTranscriptPrecedence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-synthetic.jsonl")
+	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_started"}}`)
+	codex := &Codex{}
+	listed := surface.Session{ID: "synthetic", Surface: surface.KindCodex, Status: surface.StatusIdle, Transcript: path}
+	codex.reconcileLocalStatus(&listed)
+	local, err := codex.LocalStatus(context.Background(), surface.Session{ID: "synthetic", Surface: surface.KindCodex, Status: surface.StatusIdle, Transcript: path})
+	if err != nil || listed.Status != surface.StatusBusy || local.Status != listed.Status {
+		t.Fatalf("listed=%s local=%s err=%v", listed.Status, local.Status, err)
+	}
+	appendLine(t, path, `{"type":"event_msg","payload":{"type":"task_complete"}}`)
+	listed.Status = surface.StatusBusy
+	codex.reconcileLocalStatus(&listed)
+	if listed.Status != surface.StatusIdle {
+		t.Fatalf("provider busy overrode completed transcript: %s", listed.Status)
+	}
+}

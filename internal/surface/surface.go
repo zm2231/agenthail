@@ -524,7 +524,8 @@ type TurnInterrupter interface {
 // LocalStatusSource lets the catalog follow a listed session's status between
 // discovery passes from local files alone, without provider calls.
 // LocalStatusFiles names the files whose change can change the status;
-// LocalStatus re-derives Status and LastActive from them.
+// LocalStatus re-derives Status and LastActive from them by the same rule List
+// applies, so a discovery pass never reverts a status the files still support.
 type LocalStatusSource interface {
 	LocalStatusFiles(session Session) []string
 	LocalStatus(ctx context.Context, session Session) (Session, error)

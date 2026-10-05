@@ -110,7 +110,7 @@ func catalogGitStamp(gitDir string) string {
 // it with the checkout's git directory, which is empty outside a repository.
 func resolveCatalogIdentity(ctx context.Context, path string) (catalogIdentity, string) {
 	identity := catalogIdentity{HostProject: catalogHostProject{ID: catalogPathID("project", path), DisplayName: filepath.Base(path), Path: path}, Checkout: catalogCheckout{ID: catalogPathID("checkout", path), Path: path}}
-	paths, err := catalogGit(ctx, path, "rev-parse", "--show-toplevel", "--path-format=absolute", "--git-common-dir", "--absolute-git-dir")
+	root, err := catalogGit(ctx, path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		if isCatalogNonGit(err) {
 			return identity, ""
@@ -118,12 +118,7 @@ func resolveCatalogIdentity(ctx context.Context, path string) (catalogIdentity, 
 		identity.UnavailableReason = "repository identity is unavailable"
 		return identity, ""
 	}
-	lines := strings.Split(paths, "\n")
-	if len(lines) != 3 {
-		identity.UnavailableReason = "repository identity is unavailable"
-		return identity, ""
-	}
-	root, err := canonicalCatalogPath(strings.TrimSpace(lines[0]))
+	root, err = canonicalCatalogPath(root)
 	if err != nil {
 		identity.UnavailableReason = "repository root is unavailable"
 		return identity, ""
@@ -131,12 +126,18 @@ func resolveCatalogIdentity(ctx context.Context, path string) (catalogIdentity, 
 	identity.Checkout.Path = root
 	identity.Checkout.ID = catalogPathID("checkout", root)
 	identity.HostProject.DisplayName = filepath.Base(root)
-	commonDir, err := canonicalCatalogPath(strings.TrimSpace(lines[1]))
+	commonDir, err := catalogGit(ctx, root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err == nil {
+		commonDir, err = canonicalCatalogPath(commonDir)
+	}
 	if err != nil {
 		identity.UnavailableReason = "repository common directory is unavailable"
 		return identity, ""
 	}
-	gitDir, err := canonicalCatalogPath(strings.TrimSpace(lines[2]))
+	gitDir, err := catalogGit(ctx, root, "rev-parse", "--absolute-git-dir")
+	if err == nil {
+		gitDir, err = canonicalCatalogPath(gitDir)
+	}
 	if err != nil {
 		identity.UnavailableReason = "repository directory is unavailable"
 		return identity, ""

@@ -7,9 +7,8 @@ The immediate send status in CLI JSON and dashboard/mobile API results is `sent`
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
 discovery; the command fails only when every configured surface failed. Codex
-rows reconcile shared database state with the local transcript's latest task
-lifecycle; between daemon discovery passes the catalog follows the transcript
-lifecycle alone. Claude peer `idle` is trusted only from peers advertising idle
+rows take the local transcript's latest task lifecycle when it is known and the
+shared database state otherwise. Claude peer `idle` is trusted only from peers advertising idle
 notifications or from a readable transcript; otherwise the state is unknown.
 
 `agenthail list --cwd <path>` retains sessions whose normalized workspace is that

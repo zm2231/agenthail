@@ -29,10 +29,18 @@ func (c *Codex) reconcileLocalStatus(session *surface.Session) {
 	}
 	session.Transcript = path
 	session.HasLocal = true
-	status := codexTranscriptStatus(path, info.ModTime(), time.Now())
-	if status != surface.StatusUnknown && (session.Status == surface.StatusUnknown || session.Status == surface.SessionStatus("notLoaded")) {
-		session.Status = status
+	applyCodexTranscriptStatus(session, info)
+}
+
+// applyCodexTranscriptStatus lets the transcript's latest task lifecycle
+// override the provider status. List and LocalStatus share this rule so the
+// catalog's discovery and status passes never disagree.
+func applyCodexTranscriptStatus(session *surface.Session, info os.FileInfo) {
+	status := codexTranscriptStatus(session.Transcript, info.ModTime(), time.Now())
+	if status == surface.StatusUnknown {
+		return
 	}
+	session.Status = status
 	if status == surface.StatusBusy && info.ModTime().After(session.LastActive) {
 		session.LastActive = info.ModTime()
 	}
@@ -45,9 +53,6 @@ func (c *Codex) LocalStatusFiles(session surface.Session) []string {
 	return []string{session.Transcript}
 }
 
-// LocalStatus applies the transcript's latest task lifecycle. Between
-// discovery passes it is the newest evidence, so it takes precedence over the
-// provider status the last pass reported.
 func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface.Session, error) {
 	if session.Transcript == "" {
 		return session, fmt.Errorf("codex session %s has no local transcript", session.ID)
@@ -56,14 +61,7 @@ func (c *Codex) LocalStatus(_ context.Context, session surface.Session) (surface
 	if err != nil {
 		return session, err
 	}
-	status := codexTranscriptStatus(session.Transcript, info.ModTime(), time.Now())
-	if status == surface.StatusUnknown {
-		return session, nil
-	}
-	session.Status = status
-	if status == surface.StatusBusy && info.ModTime().After(session.LastActive) {
-		session.LastActive = info.ModTime()
-	}
+	applyCodexTranscriptStatus(&session, info)
 	return session, nil
 }
 

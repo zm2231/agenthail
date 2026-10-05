@@ -27,10 +27,16 @@ type localStatusSurface struct {
 }
 
 func (s *localStatusSurface) List(ctx context.Context) ([]surface.Session, error) {
+	sessions, err := s.daemonSurface.List(ctx)
+	for index := range sessions {
+		if local, localErr := s.LocalStatus(ctx, sessions[index]); localErr == nil {
+			sessions[index] = local
+		}
+	}
 	if s.duringList != nil {
 		s.duringList()
 	}
-	return s.daemonSurface.List(ctx)
+	return sessions, err
 }
 
 func (s *localStatusSurface) statusPath(id string) string {
@@ -161,8 +167,7 @@ func TestStatusPassRefreshesEvidenceThatChangedDuringDiscovery(t *testing.T) {
 	d.discoverCatalog(context.Background())
 	d.refreshCatalogStatus(context.Background())
 	after := latestCatalogSeq(t, store)
-	// The provider still reports idle while the transcript records the next
-	// turn after the pass stamped its files.
+	// The transcript records the next turn after List read it.
 	source.duringList = func() { source.writeStatus(t, "from", surface.StatusBusy) }
 	d.discoverCatalog(context.Background())
 	source.duringList = nil
@@ -172,6 +177,23 @@ func TestStatusPassRefreshesEvidenceThatChangedDuringDiscovery(t *testing.T) {
 	d.refreshCatalogStatus(context.Background())
 	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) != 1 || statuses[0] != string(surface.StatusBusy) {
 		t.Fatalf("events=%v", statuses)
+	}
+}
+
+func TestDiscoveryKeepsLocalStatusTheProviderHasNotCaughtUpWith(t *testing.T) {
+	d, store, source := localStatusFixture(t)
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	after := latestCatalogSeq(t, store)
+	source.writeStatus(t, "from", surface.StatusBusy)
+	d.refreshCatalogStatus(context.Background())
+	if source.sessions["from"].Status != surface.StatusIdle {
+		t.Fatal("provider fixture must still report idle")
+	}
+	d.discoverCatalog(context.Background())
+	d.refreshCatalogStatus(context.Background())
+	if statuses := catalogStatusEvents(t, store, after, "from"); len(statuses) != 1 || statuses[0] != string(surface.StatusBusy) {
+		t.Fatalf("events=%v want only the busy transition", statuses)
 	}
 }
 
@@ -314,6 +336,18 @@ func TestUnchangedDiscoveryPassWritesNoSessionRows(t *testing.T) {
 	d.discoverCatalog(context.Background())
 	if writes := commits.Load() - before; writes != 3 {
 		t.Fatalf("write transactions with one changed session=%d want 3", writes)
+	}
+}
+
+func TestCatalogIdentityResolvesPathWithNewline(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "line\nbreak")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-b", "main")
+	identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now())
+	if identity.UnavailableReason != "" || identity.HostProject.CommonDir == "" || filepath.Base(identity.Checkout.Path) != "line\nbreak" {
+		t.Fatalf("identity=%+v", identity)
 	}
 }
 
