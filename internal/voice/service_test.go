@@ -46,6 +46,7 @@ type targetFixture struct {
 	activeTurnID    string
 	capabilities    surface.Capabilities
 	watchDone       chan struct{}
+	streaming       chan struct{}
 }
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
@@ -85,6 +86,11 @@ func (f *targetFixture) Stream(ctx context.Context, _ *surface.Session, turnID s
 	}
 	if turnID != "target-turn" {
 		return errors.New("wrong turn")
+	}
+	if f.streaming != nil {
+		close(f.streaming)
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	if f.stream != nil {
 		f.stream(callback)
@@ -255,6 +261,7 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	}
 	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
 	t.Cleanup(func() { close(f.ticks) })
+	t.Cleanup(f.service.Close)
 	return f
 }
 
@@ -629,6 +636,24 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 	f.observe(spoken)
 	if !reflect.DeepEqual(target.sent, []string{"Inspect this session"}) {
 		t.Fatalf("spoken transcript was not delivered exactly once: %v", target.sent)
+	}
+}
+
+func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}, streaming: make(chan struct{})}
+	f := targetSelected(t, target)
+	f.observe(Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}})
+	select {
+	case <-target.streaming:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delegation never started watching its target")
+	}
+	closed := make(chan struct{})
+	go func() { f.service.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close returned before, or never after, stopping the delegation watch")
 	}
 }
 

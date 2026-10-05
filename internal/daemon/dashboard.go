@@ -25,6 +25,7 @@ import (
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/voice"
 )
 
 //go:embed dashboard/index.html
@@ -60,6 +61,7 @@ type dashboardServer struct {
 	stateVersion  atomic.Uint64
 	cachedVersion uint64
 	state         dashboardState
+	voice         *voice.Service
 }
 
 func (d *dashboardServer) invalidate() {
@@ -231,7 +233,11 @@ func (d *dashboardServer) shutdown() error {
 	if d.cancel != nil {
 		d.cancel()
 	}
-	return d.server.Close()
+	err := d.server.Close()
+	if d.voice != nil {
+		d.voice.Close()
+	}
+	return err
 }
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {

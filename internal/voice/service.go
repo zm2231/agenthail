@@ -136,6 +136,9 @@ type Service struct {
 	stream                  SessionStreamProvider
 	operatorSourceActive    bool
 	clock                   clock
+	background              context.Context
+	stop                    context.CancelFunc
+	tasks                   sync.WaitGroup
 }
 
 type clock struct {
@@ -169,6 +172,7 @@ func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, re
 
 func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
 	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock}
+	s.background, s.stop = context.WithCancel(context.Background())
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -552,7 +556,11 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
 	attemptID, targetID, turnID := v.AttemptID, target.Session.ID, receipt.TurnID
-	go s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription)
+	s.tasks.Add(1)
+	go func() {
+		defer s.tasks.Done()
+		s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription)
+	}()
 	return s.save()
 }
 
@@ -597,8 +605,15 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	return nil
 }
 
+// Close stops the service's background work, waiting for a delegation watch
+// or event poll in progress to return so nothing writes the state file after.
+func (s *Service) Close() {
+	s.stop()
+	s.tasks.Wait()
+}
+
 func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string, subscription sessionstream.Subscription) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.background, 5*time.Minute)
 	defer cancel()
 	s.mu.Lock()
 	if s.target == nil || s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
@@ -855,17 +870,30 @@ func (s *Service) observe() {
 		return
 	}
 	s.running = true
+	s.tasks.Add(1)
 	go func() {
+		defer s.tasks.Done()
 		ticks, stop := s.clock.ticker()
 		defer stop()
-		for range ticks {
+		for {
+			select {
+			case <-s.background.Done():
+				s.mu.Lock()
+				s.running = false
+				s.mu.Unlock()
+				return
+			case _, open := <-ticks:
+				if !open {
+					return
+				}
+			}
 			s.mu.Lock()
 			if !s.active() {
 				s.running = false
 				s.mu.Unlock()
 				return
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			ctx, cancel := context.WithTimeout(s.background, 8*time.Second)
 			err := s.poll(ctx)
 			cancel()
 			if err != nil {
