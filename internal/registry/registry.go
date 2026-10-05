@@ -1675,12 +1675,52 @@ func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*Queu
 	return r.claimNextMessage(sessionID, now, "steer")
 }
 
+// claimCandidateFilter selects the session's next queued message, the one a
+// claim acts on.
+func claimCandidateFilter(sessionID, busyDelivery string) (string, []any) {
+	filter := `session_id=? AND status IN ('pending','inflight')`
+	args := []any{sessionID}
+	if busyDelivery != "" {
+		filter += ` AND busy_delivery=?`
+		args = append(args, busyDelivery)
+		if busyDelivery == "steer" {
+			filter += ` AND model='' AND (turn_options='' OR turn_options='{}')`
+		}
+	}
+	return filter + ` ORDER BY id LIMIT 1`, args
+}
+
+func claimInflightExpired(status string, operation QueueOperation, inflightAt int64, now time.Time) bool {
+	inflightTimeout := time.Minute
+	if operation == QueueOperationCompact {
+		inflightTimeout = 10 * time.Minute
+	}
+	return status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli()
+}
+
+// claimNeedsWrite reports whether a claim of this candidate changes it: an
+// in-flight delivery that timed out, or a pending message that is available.
+func claimNeedsWrite(status string, operation QueueOperation, availableAt, inflightAt int64, now time.Time) bool {
+	return claimInflightExpired(status, operation, inflightAt, now) || status == "pending" && availableAt <= now.UnixMilli()
+}
+
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	if err := r.expireMessages(now); err != nil {
 		return nil, err
 	}
-	if queued, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE session_id=? AND status IN ('pending','inflight'))`, sessionID); err != nil || !queued {
+	filter, args := claimCandidateFilter(sessionID, busyDelivery)
+	var peekStatus string
+	var peekOperation QueueOperation
+	var peekAvailableAt, peekInflightAt int64
+	err := r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
+	}
+	if !claimNeedsWrite(peekStatus, peekOperation, peekAvailableAt, peekInflightAt, now) {
+		return nil, nil
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -1691,28 +1731,14 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	query := `SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`
-	args := []any{sessionID}
-	if busyDelivery != "" {
-		query += ` AND busy_delivery=?`
-		args = append(args, busyDelivery)
-		if busyDelivery == "steer" {
-			query += ` AND model='' AND (turn_options='' OR turn_options='{}')`
-		}
-	}
-	query += ` ORDER BY id LIMIT 1`
-	err = tx.QueryRow(query, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	inflightTimeout := time.Minute
-	if item.Operation == QueueOperationCompact {
-		inflightTimeout = 10 * time.Minute
-	}
-	if status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli() {
+	if claimInflightExpired(status, item.Operation, inflightAt, now) {
 		if err := markQueuedDeliveryIntent(tx, item.ID, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 			return nil, err
 		}
