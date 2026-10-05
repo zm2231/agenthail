@@ -70,6 +70,13 @@ struct SessionTreeTest {
         let capFamily = allFamilies.projects[0].limited(to: 1, keeping: "euclid")
         expect(capFamily.checkouts.flatMap(\.families).map(\.id) == ["lead"], "selecting a subagent keeps its family visible past the cap")
 
+        let mixed = [
+            session("whole", status: "idle", lastActive: "2026-10-04T15:58:00Z", project: "agenthail", checkout: "main", branch: "main"),
+            session("short-fraction", status: "idle", lastActive: "2026-10-04T11:59:58.03-04:00", project: "agenthail", checkout: "main", branch: "main"),
+            session("sqlite", status: "idle", lastActive: "2026-10-04 15:59:00", project: "agenthail", checkout: "main", branch: "main"),
+            session("unparsed", status: "idle", lastActive: "yesterday", project: "agenthail", checkout: "main", branch: "main")
+        ]
+        expect(SessionTree.newestFirst(mixed).map(\.id) == ["short-fraction", "sqlite", "whole", "unparsed"], "newest first across timestamp formats, unparsed last")
         print("session tree tests passed")
     }
 

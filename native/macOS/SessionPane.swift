@@ -33,6 +33,7 @@ final class SessionPane: ObservableObject, Identifiable {
     private var frozenOlderCursor: Int64?
     private var sessionStreamTask: Task<Void, Never>?
     private var sessionCursor: UInt64 = 0
+    private var streamAwaitsCursor = false
     private var detailReloadTask: Task<Void, Never>?
     private var detailLoadTask: Task<Void, Never>?
     @Published private(set) var detailLoadError: String?
@@ -43,7 +44,6 @@ final class SessionPane: ObservableObject, Identifiable {
     private var closed = false
     private var detailReloadPending = false
     private var detailReloadOwner: UUID?
-    private var detailLoadedAt: Date?
     private var selectionGeneration: UInt64 = 0
     private var detailRequestGeneration: UInt64 = 0
     private var detailAppliedGeneration: UInt64 = 0
@@ -86,18 +86,18 @@ final class SessionPane: ObservableObject, Identifiable {
         detailStale = detail != nil
         detailRefreshFailed = false
         detailLoadError = nil
-        detailLoadedAt = nil
         detailReloadPending = false
         detailReloadTask?.cancel()
         detailReloadTask = nil
         metadata = MetadataOverlay(seed: detail)
-        startSessionStream(id)
+        awaitStreamCursor()
         startDetailLoad(id)
         startMetadataLoad(id)
     }
 
     func close() {
         closed = true
+        streamAwaitsCursor = false
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()
         detailLoadTask?.cancel()
@@ -117,8 +117,6 @@ final class SessionPane: ObservableObject, Identifiable {
         detailRequestGeneration &+= 1
         let generation = detailRequestGeneration
         do {
-            let startedAt = Date()
-            if selectedSessionID == id { detailLoadedAt = startedAt }
             let loaded = try await api.sessionDetail(id: id, includeTimeline: true)
             guard sessionLoadIsCurrent(id, selectedID: selectedSessionID), generation > detailAppliedGeneration, removedSession?.id != id else { return true }
             detailAppliedGeneration = generation
@@ -135,6 +133,10 @@ final class SessionPane: ObservableObject, Identifiable {
             detailRefreshFailed = false
             model.detailLoaded(merged, for: id)
             detailLoadError = nil
+            if streamAwaitsCursor {
+                streamAwaitsCursor = false
+                startSessionStream(id, after: loaded.journalSeq ?? 0)
+            }
             return true
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
@@ -195,7 +197,7 @@ final class SessionPane: ObservableObject, Identifiable {
                     removedSession = nil
                     olderCursor = frozenOlderCursor
                     frozenOlderCursor = nil
-                    startSessionStream(selected)
+                    awaitStreamCursor()
                     startDetailLoad(selected)
                     startMetadataLoad(selected)
                 }
@@ -283,6 +285,7 @@ final class SessionPane: ObservableObject, Identifiable {
     }
 
     private func freezeRemovedSession() {
+        streamAwaitsCursor = false
         sessionStreamTask?.cancel()
         metadataTask?.cancel()
         detailReloadTask?.cancel()
@@ -348,10 +351,16 @@ final class SessionPane: ObservableObject, Identifiable {
         }
     }
 
-    private func startSessionStream(_ id: String) {
+    private func awaitStreamCursor() {
+        sessionStreamTask?.cancel()
+        sessionStreamTask = nil
+        streamAwaitsCursor = true
+    }
+
+    private func startSessionStream(_ id: String, after cursor: UInt64) {
         sessionStreamTask?.cancel()
         guard !closed else { return }
-        sessionCursor = 0
+        sessionCursor = cursor
         sessionStreamTask = Task {
             let backoff = EventRetryBackoff()
             while !Task.isCancelled, selectedSessionID == id {
@@ -365,8 +374,9 @@ final class SessionPane: ObservableObject, Identifiable {
                     if Task.isCancelled || selectedSessionID != id { return }
                     if case AgenthailAPIError.streamUnsupported = error { return }
                     if case AgenthailAPIError.streamGap = error {
-                        sessionCursor = 0
-                        scheduleDetailReload(id)
+                        streamAwaitsCursor = true
+                        startDetailLoad(id)
+                        return
                     }
                     try? await Task.sleep(for: .seconds(backoff.nextDelay()))
                 }
@@ -381,9 +391,6 @@ final class SessionPane: ObservableObject, Identifiable {
             guard removedSession == nil else { return }
             if event.data.kind == "context" { metadata.stream(context: event.data.context) } else { metadata.stream(goal: event.data.goal) }
             applyMetadata(to: event.sessionId)
-            return
-        }
-        if let loadedAt = detailLoadedAt, let changedAt = SessionTree.parseTimestamp(event.data.ts), changedAt < loadedAt {
             return
         }
         scheduleDetailReload(event.sessionId)

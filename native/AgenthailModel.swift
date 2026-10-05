@@ -140,6 +140,7 @@ final class AgenthailModel: ObservableObject {
                     lastEventID = 0
                     if await refresh(fresh: true) {
                         startEvents()
+                        startCatalogStream()
                         startStatusRefresh()
                         return
                     }
@@ -812,7 +813,6 @@ final class AgenthailModel: ObservableObject {
     private func eventStreamConnected() {
         reconnecting = false
         clearConnectionError()
-        startCatalogStream()
     }
 
     private func reconcilePanes() {

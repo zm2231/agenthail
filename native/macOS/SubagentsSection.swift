@@ -8,9 +8,7 @@ struct SubagentsSection: View {
     var body: some View {
         let sessions = model.knownSessions
         let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } }
-        let children = sessions
-            .filter { $0.subagent?.parentId == session.id }
-            .sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+        let children = SessionTree.newestFirst(sessions.filter { $0.subagent?.parentId == session.id })
         let observed = pane.detail?.session.id == session.id ? pane.detail?.claudeSubagents ?? [] : []
         if parent != nil || !children.isEmpty || !observed.isEmpty {
             VStack(alignment: .leading, spacing: 6) {

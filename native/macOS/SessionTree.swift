@@ -17,7 +17,7 @@ struct SessionTree: Equatable {
         var sessionCount: Int { checkouts.reduce(0) { $0 + $1.families.count } }
 
         func limited(to limit: Int, keeping selectedID: String?) -> Project {
-            let ordered = checkouts.flatMap(\.families).sorted { SessionTree.activity($0) > SessionTree.activity($1) }
+            let ordered = SessionTree.newestFirst(checkouts.flatMap(\.families), by: SessionTree.activity)
             var visible = Set(ordered.prefix(limit).map(\.id))
             if let selected = ordered.first(where: { $0.contains(selectedID) }) { visible.insert(selected.id) }
             var copy = self
@@ -55,9 +55,7 @@ struct SessionTree: Equatable {
         for candidate in SessionFilter.allCases {
             counts[candidate] = families.filter { includes($0, in: candidate, now: now) }.count
         }
-        let visible = families
-            .filter { includes($0, in: filter, now: now) }
-            .sorted { activity($0) > activity($1) }
+        let visible = newestFirst(families.filter { includes($0, in: filter, now: now) }, by: activity)
         var projects: [Project] = []
         for family in visible {
             let session = family.root
@@ -77,17 +75,29 @@ struct SessionTree: Equatable {
     }
 
     static func needsYou(_ sessions: [SessionState], attentionSessionIDs: Set<String>) -> [SessionState] {
-        sessions
-            .filter { attentionSessionIDs.contains($0.id) }
-            .sorted { activity($0) > activity($1) }
+        newestFirst(sessions.filter { attentionSessionIDs.contains($0.id) })
+    }
+
+    static func newestFirst(_ sessions: [SessionState]) -> [SessionState] {
+        newestFirst(sessions, by: activity)
+    }
+
+    /// Sorts newest first, reading each item's activity once rather than in
+    /// every comparison.
+    static func newestFirst<Item>(_ items: [Item], by activity: (Item) -> Date) -> [Item] {
+        items.map { (item: $0, activity: activity($0)) }.sorted { $0.activity > $1.activity }.map(\.item)
     }
 
     static func includes(_ session: SessionState, in filter: SessionFilter, now: Date) -> Bool {
+        includes(session, in: filter, activity: activity(session), now: now)
+    }
+
+    private static func includes(_ session: SessionState, in filter: SessionFilter, activity: Date, now: Date) -> Bool {
         switch filter {
         case .running:
             return session.isWorking
         case .recent:
-            return session.isWorking || session.current || now.timeIntervalSince(activity(session)) <= recentWindow
+            return session.isWorking || session.current || now.timeIntervalSince(activity) <= recentWindow
         case .all:
             return true
         }
@@ -112,12 +122,13 @@ struct SessionTree: Equatable {
     }
 
     static func parseTimestamp(_ raw: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: raw) { return date }
-        if let date = ISO8601DateFormatter().date(from: raw) { return date }
+        if let date = try? fractionalTimestamp.parse(raw) { return date }
+        if let date = try? wholeSecondTimestamp.parse(raw) { return date }
         return sqliteTimestamp.date(from: raw)
     }
+
+    private static let fractionalTimestamp = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecondTimestamp = Date.ISO8601FormatStyle()
 
     private static let sqliteTimestamp: DateFormatter = {
         let formatter = DateFormatter()
