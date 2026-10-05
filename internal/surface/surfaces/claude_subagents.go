@@ -42,6 +42,7 @@ type claudeSubagentFile struct {
 	meta      claudeSubagentMeta
 	hasMeta   bool
 	validated bool
+	read      bool
 	info      os.FileInfo
 	offset    int64
 	done      bool
@@ -141,7 +142,7 @@ func (o *claudeSubagentObserver) observe(ctx context.Context, parentSessionID, t
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := agent.refresh(ctx, transcriptID); err != nil {
+		if err := agent.refresh(ctx, transcriptID, now); err != nil {
 			return nil, err
 		}
 		links = append(links, agent.link(parentSessionID, now))
@@ -201,7 +202,7 @@ func (f *claudeSubagentFile) readMeta() {
 	f.hasMeta = true
 }
 
-func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string) error {
+func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string, now time.Time) error {
 	info, err := os.Stat(f.path)
 	if err != nil {
 		return fmt.Errorf("stat Claude subagent transcript %s: %w", f.path, err)
@@ -210,31 +211,38 @@ func (f *claudeSubagentFile) refresh(ctx context.Context, transcriptID string) e
 		return nil
 	}
 	if f.info == nil || !os.SameFile(f.info, info) || info.Size() < f.offset {
-		f.validated, f.offset, f.done = false, 0, false
+		f.validated, f.read, f.offset, f.done = false, false, 0, false
 	}
 	if !f.validated {
 		if err := f.validate(transcriptID); err != nil {
 			return err
 		}
+	}
+	f.info = info
+	if now.Sub(info.ModTime()) >= claudeSubagentStaleAfter {
+		f.read = false
+		return nil
+	}
+	if !f.read {
 		lines, end, err := readRecentJSONLLines(ctx, f.path, 0, claudeSubagentTailBytes, maxClaudeTranscriptRecordBytes)
 		if err != nil {
 			return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
 		}
+		f.done = false
 		for _, line := range lines {
 			f.apply(line)
 		}
-		f.offset = end
-	} else {
-		offset, err := scanAppendedJSONL(ctx, f.path, f.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
-			f.apply(line)
-			return nil
-		})
-		f.offset = offset
-		if err != nil {
-			return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
-		}
+		f.offset, f.read = end, true
+		return nil
 	}
-	f.info = info
+	offset, err := scanAppendedJSONL(ctx, f.path, f.offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
+		f.apply(line)
+		return nil
+	})
+	f.offset = offset
+	if err != nil {
+		return fmt.Errorf("read Claude subagent transcript %s: %w", f.path, err)
+	}
 	return nil
 }
 
@@ -292,7 +300,7 @@ func (f *claudeSubagentFile) link(parentSessionID string, now time.Time) surface
 	}
 	if f.info != nil {
 		link.LastActive = f.info.ModTime()
-		link.Working = !f.done && now.Sub(link.LastActive) < claudeSubagentStaleAfter
+		link.Working = f.read && !f.done && now.Sub(link.LastActive) < claudeSubagentStaleAfter
 	}
 	return link
 }
