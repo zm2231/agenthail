@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -345,6 +346,11 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 		return nil, fmt.Errorf("read Claude session directory: %w", err)
 	}
 	var out []surface.Session
+	// A conversation resumed in a second process without Remote Control
+	// carries the same session id. The process that opened it first keeps the
+	// id, so the later one never takes over its row.
+	owner := map[string]int{}
+	started := map[string]float64{}
 	transcript := c.transcripts.pass()
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
@@ -401,6 +407,17 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 				sess.Subagents = rollup
 			}
 		}
+		startedAt, ok := m["startedAt"].(float64)
+		if !ok {
+			startedAt = math.MaxFloat64
+		}
+		if index, seen := owner[sess.ID]; seen {
+			if startedAt < started[sess.ID] {
+				out[index], started[sess.ID] = sess, startedAt
+			}
+			continue
+		}
+		owner[sess.ID], started[sess.ID] = len(out), startedAt
 		out = append(out, sess)
 	}
 	return out, nil

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -592,20 +593,8 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		rows, err := tx.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
+		duplicates, err := claudeExitedDuplicates(tx, s)
 		if err != nil {
-			return err
-		}
-		var duplicates []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			duplicates = append(duplicates, id)
-		}
-		if err := rows.Close(); err != nil {
 			return err
 		}
 		for _, duplicate := range duplicates {
@@ -619,8 +608,31 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 
 // claudeDuplicateQuery finds other rows for the same Claude conversation: rows
 // sharing the transcript, and the launch record a background start registered
-// under the conversation ID before its process and transcript were known.
-const claudeDuplicateQuery = `SELECT id FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
+// under the conversation ID before its process and transcript were known. Only
+// rows whose process has exited are absorbed: Claude Code lets one
+// conversation stay open in several processes, and each live one keeps its
+// own row, alias, and queue.
+const claudeDuplicateQuery = `SELECT id,pid FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
+
+func claudeExitedDuplicates(q catalogQuerier, s surface.Session) ([]string, error) {
+	rows, err := q.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var exited []string
+	for rows.Next() {
+		var id string
+		var pid int
+		if err := rows.Scan(&id, &pid); err != nil {
+			return nil, err
+		}
+		if !processAlive(pid) {
+			exited = append(exited, id)
+		}
+	}
+	return exited, rows.Err()
+}
 
 func claudeConversationID(transcript string) string {
 	return strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
@@ -644,19 +656,19 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 		return err
 	}
 	for _, transcript := range transcripts {
-		ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
+		survivor, exited, err := r.claudeTranscriptRows(transcript)
 		if err != nil {
 			return err
 		}
-		if len(ids) < 2 {
+		if len(exited) == 0 {
 			continue
 		}
 		tx, err := r.db.Begin()
 		if err != nil {
 			return err
 		}
-		for _, duplicate := range ids[1:] {
-			if err := mergeSessionTx(tx, duplicate, ids[0]); err != nil {
+		for _, duplicate := range exited {
+			if err := mergeSessionTx(tx, duplicate, survivor); err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -666,6 +678,48 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 		}
 	}
 	return nil
+}
+
+// claudeTranscriptRows picks the row that absorbs the exited rows sharing a
+// transcript: the most recent live row, or the most recent row when none is
+// live. Other live rows are left alone.
+func (r *Registry) claudeTranscriptRows(transcript string) (string, []string, error) {
+	rows, err := r.db.Query(`SELECT id,pid FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	var survivor string
+	var exited []string
+	for rows.Next() {
+		var id string
+		var pid int
+		if err := rows.Scan(&id, &pid); err != nil {
+			return "", nil, err
+		}
+		if !processAlive(pid) {
+			exited = append(exited, id)
+		} else if survivor == "" {
+			survivor = id
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, err
+	}
+	if survivor == "" && len(exited) > 0 {
+		survivor, exited = exited[0], exited[1:]
+	}
+	return survivor, exited, nil
+}
+
+// processAlive reports whether pid names a running process. A process owned by
+// another user still counts.
+var processAlive = func(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {

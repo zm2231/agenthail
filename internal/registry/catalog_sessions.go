@@ -79,6 +79,7 @@ func queueCountInCatalogEvent(raw []byte) (int, bool) {
 
 // catalogQuerier is a write transaction or the read pool.
 type catalogQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
 	QueryRow(query string, args ...any) *sql.Row
 }
 
@@ -314,12 +315,8 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		var duplicate string
-		err := tx.QueryRow(claudeDuplicateQuery+` LIMIT 1`, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript)).Scan(&duplicate)
-		if err == nil {
-			return false, nil
-		}
-		if err != sql.ErrNoRows {
+		exited, err := claudeExitedDuplicates(tx, s)
+		if err != nil || len(exited) > 0 {
 			return false, err
 		}
 	}
