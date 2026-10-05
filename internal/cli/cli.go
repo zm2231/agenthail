@@ -565,7 +565,7 @@ func (a *App) cmdClaudeRuns(args []string) error {
 	if err != nil {
 		return fmt.Errorf("read Claude job records: %w", err)
 	}
-	links, err := observer.ObserveClaudeSubagentLinks(context.Background())
+	links, err := observer.ObserveClaudeSubagentLinks(context.Background(), "")
 	if err != nil {
 		return fmt.Errorf("read Claude subagent records: %w", err)
 	}

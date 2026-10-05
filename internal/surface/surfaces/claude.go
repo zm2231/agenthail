@@ -63,8 +63,8 @@ func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObse
 	return ObserveClaudeRuns(ctx, c.home)
 }
 
-func (c *Claude) ObserveClaudeSubagentLinks(ctx context.Context) ([]surface.ClaudeSubagentLink, error) {
-	return ObserveClaudeSubagentLinks(ctx, c.home)
+func (c *Claude) ObserveClaudeSubagentLinks(ctx context.Context, parentSessionID string) ([]surface.ClaudeSubagentLink, error) {
+	return ObserveClaudeSubagentLinks(ctx, c.home, parentSessionID)
 }
 
 func (c *Claude) Capabilities() surface.Capabilities {

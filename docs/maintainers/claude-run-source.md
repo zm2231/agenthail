@@ -38,8 +38,9 @@ Subagent relationships use a separate local producer. The Claude
 session-metadata API exposes only links whose validated parent ID matches the
 requested session:
 `~/.claude/projects/<encoded-cwd>/<parent-session-id>/subagents/agent-<agent-id>.jsonl`.
-`ObserveClaudeSubagentLinks` derives the parent session and agent ID from that
-path, then requires a JSONL record with matching exact `sessionId` and
+`ObserveClaudeSubagentLinks` reads only the requested parent's `subagents`
+directory (the `agenthail runs` listing reads every parent), derives the parent
+session and agent ID from that path, then requires a JSONL record with matching exact `sessionId` and
 `agentId`. This yields a validated parent-session -> local-agent link without
 deriving state from transcript content.
 

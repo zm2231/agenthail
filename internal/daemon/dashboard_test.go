@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,16 +55,24 @@ func readDashboardState(t *testing.T, handler http.Handler) dashboardState {
 
 type dashboardClaudeRunSurface struct {
 	*daemonSurface
-	runs  []surface.ClaudeRunObservation
-	links []surface.ClaudeSubagentLink
+	runs        []surface.ClaudeRunObservation
+	links       []surface.ClaudeSubagentLink
+	linkParents []string
 }
 
 func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeRunObservation, error) {
 	return s.runs, nil
 }
 
-func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(context.Context) ([]surface.ClaudeSubagentLink, error) {
-	return s.links, nil
+func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(_ context.Context, parentSessionID string) ([]surface.ClaudeSubagentLink, error) {
+	s.linkParents = append(s.linkParents, parentSessionID)
+	var links []surface.ClaudeSubagentLink
+	for _, link := range s.links {
+		if link.ParentSessionID == parentSessionID {
+			links = append(links, link)
+		}
+	}
+	return links, nil
 }
 
 type sessionPageReadProbe struct {
@@ -207,6 +216,9 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 	}
 	if len(body.Runs) != 1 || body.Runs[0].JobID != "job-1" || len(body.Links) != 1 || body.Links[0].AgentID != "agent-1" {
 		t.Fatalf("body=%+v", body)
+	}
+	if !reflect.DeepEqual(fake.linkParents, []string{from.ID}) {
+		t.Fatalf("subagent reads=%q, want only %q", fake.linkParents, from.ID)
 	}
 }
 
