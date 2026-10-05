@@ -70,6 +70,30 @@ struct SessionTreeTest {
         let capFamily = allFamilies.projects[0].limited(to: 1, keeping: "euclid")
         expect(capFamily.checkouts.flatMap(\.families).map(\.id) == ["lead"], "selecting a subagent keeps its family visible past the cap")
 
+        var offline = session("gone", status: "offline", lastActive: "2026-10-04T11:30:00Z", project: "agenthail", checkout: "main", branch: "main")
+        offline = SessionState(id: offline.id, surface: "claude", name: "gone", alias: nil, status: "offline", lastActive: offline.lastActive, queueCount: 0, open: false, current: false, currentReason: nil, capabilities: caps, readOnly: nil, readOnlyReason: nil, cwd: offline.cwd, hostProject: offline.hostProject, checkout: offline.checkout)
+        let notLoaded = session("cold", status: "notLoaded", lastActive: "2026-10-04T11:40:00Z", project: "agenthail", checkout: "main", branch: "main")
+        let unknown = session("lost", status: "unknown", lastActive: "2026-10-04T11:41:00Z", project: "agenthail", checkout: "main", branch: "main")
+        let refined = sessions + [offline, notLoaded, unknown]
+        func ids(_ tree: SessionTree) -> [String] { tree.projects.flatMap { $0.checkouts.flatMap(\.sessions) }.map(\.id).sorted() }
+        let idleOnly = SessionTree.build(refined, filter: .all, refinement: SessionRefinement(status: .idle), attentionSessionIDs: ["busy"], now: now)
+        expect(ids(idleOnly) == ["idle", "old", "other"], "the idle filter keeps idle sessions: \(ids(idleOnly))")
+        expect(idleOnly.counts == [.running: 0, .recent: 2, .all: 3], "scope counts follow the refinement: \(idleOnly.counts)")
+        expect(idleOnly.needsYou.map(\.id) == ["busy"], "Needs you is not narrowed by the refinement")
+        let unavailable = SessionTree.build(refined, filter: .all, refinement: SessionRefinement(status: .unavailable), attentionSessionIDs: [], now: now)
+        expect(ids(unavailable) == ["cold", "lost"], "unavailable covers unknown and not loaded: \(ids(unavailable))")
+        let claudeOnly = SessionTree.build(refined, filter: .all, refinement: SessionRefinement(surface: "claude"), attentionSessionIDs: [], now: now)
+        expect(ids(claudeOnly) == ["gone"], "the surface filter keeps one surface: \(ids(claudeOnly))")
+        let offlineCodex = SessionTree.build(refined, filter: .all, refinement: SessionRefinement(status: .offline, surface: "codex"), attentionSessionIDs: [], now: now)
+        expect(offlineCodex.projects.isEmpty, "status and surface combine")
+        let busyRunning = SessionTree.build(refined, filter: .running, refinement: SessionRefinement(status: .busy), attentionSessionIDs: [], now: now)
+        expect(ids(busyRunning) == ["busy"], "Running with Working shows the working session")
+        expect(SessionTree.build(refined, filter: .all, refinement: SessionRefinement(), attentionSessionIDs: [], now: now).counts[.all] == 7, "no refinement keeps every family")
+        let workingMember = SessionTree.build(family, filter: .all, refinement: SessionRefinement(status: .busy), attentionSessionIDs: [], now: now)
+        expect(workingMember.projects.flatMap { $0.checkouts.flatMap(\.families) }.map(\.id) == ["lead"], "a family matches when any member matches")
+        expect(SessionRefinement.surfaces(refined, configured: [SurfaceState(name: "notion", connected: false, error: nil, health: "unavailable", healthDetail: nil, capabilities: caps)]) == ["claude", "codex", "notion"], "surface choices merge configured surfaces and sessions")
+        expect(SessionRefinement.surfaceLabel("codex") == "Codex", "surface labels are capitalized")
+
         let mixed = [
             session("whole", status: "idle", lastActive: "2026-10-04T15:58:00Z", project: "agenthail", checkout: "main", branch: "main"),
             session("short-fraction", status: "idle", lastActive: "2026-10-04T11:59:58.03-04:00", project: "agenthail", checkout: "main", branch: "main"),
