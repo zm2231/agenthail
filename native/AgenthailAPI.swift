@@ -142,7 +142,7 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, alias: String = "", turnSettings: TurnSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, alias: String = "", turnSettings: TurnSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) throws -> Data {
         if launcher != nil && (!turnSettings.isEmpty || !codex.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
@@ -156,10 +156,18 @@ final class AgenthailAPI: @unchecked Sendable {
         } else if surface == "claude" {
             body.merge(claude.fields) { _, value in value }
         }
+        return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+    }
+
+    func createSession(surface: String, message: String, cwd: String, model: String, alias: String = "", turnSettings: TurnSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, alias: alias, turnSettings: turnSettings, codex: codex, claude: claude, launcher: launcher), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
+    }
+
+    func createSession(body: Data, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
         var request = authorizedRequest(path: "/api/v1/actions")
         request.httpMethod = "POST"
         request.timeoutInterval = 65
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: idempotencyKey)
         let (data, response) = try await session.data(for: request)

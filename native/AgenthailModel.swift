@@ -45,6 +45,7 @@ final class AgenthailModel: ObservableObject {
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
 
     private(set) var api: AgenthailAPI?
+    private var creationKey = SessionLaunchKey()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
@@ -72,7 +73,6 @@ final class AgenthailModel: ObservableObject {
         let idempotencyKey: String
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
-    private var pendingCreation: (form: SessionLaunchForm, key: String)?
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -270,34 +270,43 @@ final class AgenthailModel: ObservableObject {
     }
 
     func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
+        let outcome = await createSession(form)
+        creationKey.record(outcome)
+        return outcome
+    }
+
+    private func createSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
         guard let api else { return .failed("Agenthail isn't connected.") }
-        if pendingCreation?.form != form {
-            pendingCreation = (form, UUID().uuidString)
-        }
-        let idempotencyKey = pendingCreation?.key
         do {
-            let receipt = try await api.createSession(surface: form.agent, message: form.trimmedMessage, cwd: form.cwd, model: form.modelID, alias: form.handle, turnSettings: form.turnSettings, codex: form.codexSettings, claude: form.claudeSettings, launcher: form.launcher, idempotencyKey: idempotencyKey, failureReceipts: true)
+            let body = try form.creationBody()
+            let receipt = try await api.createSession(body: body, idempotencyKey: creationKey.key(for: body), failureReceipts: true)
             let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
-            if decision.settlesRetry {
-                pendingCreation = nil
-                operationError = nil
-            }
             switch decision {
             case .open(let id):
+                operationError = nil
                 await openCreatedSession(id)
                 return .opened
             case .submitted(let note):
+                operationError = nil
                 return .submitted(note)
+            case .starting:
+                return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
                 if let id { await openCreatedSession(id) }
-                return .failed("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
+                return .uncertain("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):
                 return .failed(message)
             }
-        } catch {
+        } catch AgenthailAPIError.request(_, let message) {
+            return .failed(message)
+        } catch AgenthailAPIError.unavailable(let message) {
+            return .failed(message)
+        } catch let error as CodexCreationSettingsError {
             return .failed(error.localizedDescription)
+        } catch {
+            return .uncertain(error.localizedDescription)
         }
     }
 

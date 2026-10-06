@@ -3,13 +3,38 @@ import Foundation
 enum SessionLaunchOutcome: Equatable {
     case opened
     case submitted(String)
+    case starting(String)
     case halted(String)
+    case uncertain(String)
     case failed(String)
+
+    var keepsRetryKey: Bool {
+        switch self {
+        case .starting, .halted, .uncertain: return true
+        case .opened, .submitted, .failed: return false
+        }
+    }
+}
+
+struct SessionLaunchKey {
+    private var pending: (body: Data, key: String)?
+
+    mutating func key(for body: Data) -> String {
+        if let pending, pending.body == body { return pending.key }
+        let key = UUID().uuidString
+        pending = (body, key)
+        return key
+    }
+
+    mutating func record(_ outcome: SessionLaunchOutcome) {
+        if !outcome.keepsRetryKey { pending = nil }
+    }
 }
 
 enum SessionLaunchDecision: Equatable {
     case open(String)
     case submitted(String)
+    case starting
     case unconfirmed(String?)
     case halted(String)
     case failed(String)
@@ -31,16 +56,13 @@ enum SessionLaunchDecision: Equatable {
             self = .open(id)
             return
         }
+        if receipt.accepted == nil {
+            self = .starting
+            return
+        }
         let target = receipt.launcher ?? launcher ?? agent
         let note = "Submitted to \(target). It appears in the sidebar once it starts."
         self = .submitted([note, receipt.warning].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"))
-    }
-
-    var settlesRetry: Bool {
-        switch self {
-        case .open, .submitted: return true
-        case .unconfirmed, .halted, .failed: return false
-        }
     }
 }
 
@@ -118,6 +140,10 @@ struct SessionLaunchForm: Equatable {
 
     var cwd: String { usesFolder ? folder : "" }
     var modelID: String { listsModels ? model.trimmingCharacters(in: .whitespacesAndNewlines) : "" }
+
+    func creationBody() throws -> Data {
+        try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, alias: handle, turnSettings: turnSettings, codex: codexSettings, claude: claudeSettings, launcher: launcher)
+    }
 
     func efforts(models: [ModelOption]) -> [String] {
         let accepted = agent == "codex" ? Self.codexEfforts : agent == "claude" ? Self.claudeEfforts : []
