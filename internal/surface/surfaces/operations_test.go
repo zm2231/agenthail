@@ -16,8 +16,13 @@ func TestClaudeBackgroundCreationUsesReturnedIdentityAndLifecycle(t *testing.T) 
 	script := `#!/bin/sh
 printf '%s\n' "$@" >> "$HOME/argv"
 if [ "$1" = agents ]; then
- printf '[{"id":"ab12cd34","sessionId":"real-session-id","kind":"background","name":"builder","cwd":"%s","state":"done"}]\n' "$HOME"
+ printf '[{"id":"ab12cd34","sessionId":"real-session-id","kind":"background","name":"builder","cwd":"%s","state":"%s"}]\n' "$HOME" "$(cat "$HOME/state" 2>/dev/null || printf done)"
 elif [ "$1" = --bg ]; then
+ if [ "$2" = --resume ]; then
+  printf working > "$HOME/state"
+  mkdir -p "$HOME/.claude/jobs/ab12cd34"
+  printf '{"state":"working","updatedAt":"2999-01-01T00:00:00Z"}' > "$HOME/.claude/jobs/ab12cd34/state.json"
+ fi
  printf '\033[32mbackgrounded · ab12cd34\033[0m\n'
 else
  printf 'operation complete\n'

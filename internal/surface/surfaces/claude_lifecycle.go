@@ -31,8 +31,21 @@ func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...stri
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "HOME="+c.home)
+	cmd.Env = claudeCommandEnv(c.home)
 	return cmd.CombinedOutput()
+}
+
+// cmux's claude wrapper keys on CMUX_SURFACE_ID to inject a temporary
+// --settings file that background jobs persist and replay on resume, after
+// the file is gone. Without CMUX_ variables the wrapper passes through.
+func claudeCommandEnv(home string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CMUX_") {
+			env = append(env, entry)
+		}
+	}
+	return append(env, "HOME="+home)
 }
 func (c *Claude) backgroundSessions(ctx context.Context) ([]claudeBackground, error) {
 	data, err := c.backgroundCommand(ctx, "", "agents", "--json", "--all")
@@ -125,6 +138,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		if action == "resume" {
 			args = []string{"--bg", "--resume", record.SessionID}
 		}
+		started := time.Now()
 		output, err := c.backgroundCommand(ctx, record.Cwd, args...)
 		if err != nil {
 			if action != "logs" {
@@ -137,10 +151,70 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			if parseErr != nil || resumedID != record.ID {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume identity was not confirmed; inspect claude agents: %s", string(output)))
 			}
+			state, settleErr := c.awaitResumed(ctx, record.ID, started)
+			if settleErr != nil {
+				return nil, settleErr
+			}
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "state": state, "output": string(output)}, nil
 		}
 		return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "output": string(output)}, nil
 	}
 	return nil, fmt.Errorf("session is not a Claude background agent")
+}
+
+var claudeResumeSettleTimeout = 10 * time.Second
+
+// claude --bg --resume prints its backgrounded line and exits 0 before the
+// session initializes, so only the job state shows whether it started. The job
+// record holds the state, its updatedAt and the failure detail in one write; a
+// state counts only once that record was written by this resume, not left over
+// from before it. Claude records updatedAt to the millisecond.
+func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
+	started = started.Truncate(time.Millisecond)
+	deadline := time.NewTimer(claudeResumeSettleTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	state := ""
+	for {
+		if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
+			state = job.State
+			switch state {
+			case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
+				return state, nil
+			case "failed", "crashed", "stopped", "done":
+				detail := job.Detail
+				if strings.TrimSpace(detail) == "" {
+					detail = "no job detail recorded"
+				}
+				return "", fmt.Errorf("Claude background job %s is %s after resume: %s", id, state, detail)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", surface.DeliveryOutcomeUnknown(ctx.Err())
+		case <-deadline.C:
+			return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s did not reach a running state after resume (last state %q); inspect claude agents", id, state))
+		case <-ticker.C:
+		}
+	}
+}
+
+type claudeJob struct {
+	State     string    `json:"state"`
+	Detail    string    `json:"detail"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// claude agents --json omits the failure detail and update time that the job
+// record holds.
+func (c *Claude) backgroundJob(id string) (claudeJob, bool) {
+	var job claudeJob
+	raw, err := os.ReadFile(filepath.Join(c.home, ".claude", "jobs", id, "state.json"))
+	if err != nil || json.Unmarshal(raw, &job) != nil {
+		return job, false
+	}
+	return job, true
 }
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
