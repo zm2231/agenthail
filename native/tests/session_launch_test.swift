@@ -27,8 +27,14 @@ struct SessionLaunchTest {
         let storage = try decide(#"{"ok":false,"status":"storage_failed","retryable":false,"session":{"id":"s3","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"session was created, but local registration failed: disk full; do not retry automatically"}"#)
         check(storage == .halted("session was created, but local registration failed: disk full; do not retry automatically"), "a created session with a storage failure halts with the daemon message")
 
-        let ambiguous = try decide(#"{"ok":false,"status":"failed","retryable":false,"error":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"}"#)
-        check(ambiguous == .halted("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"), "an ambiguous outcome without a session halts")
+        let ambiguous = try decide(#"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: timeout"}"#)
+        check(ambiguous == .unconfirmed(nil), "an ambiguous outcome without a session stays unconfirmed")
+
+        let initial = try decide(#"{"ok":false,"status":"failed","retryable":false,"session":{"id":"s4","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"initial message rejected"}"#)
+        check(initial == .halted("initial message rejected"), "a created session whose first turn failed halts")
+
+        let definite = try decide(#"{"ok":false,"status":"failed","retryable":false,"unknown":false,"error":"model rejected"}"#)
+        check(definite == .failed("model rejected"), "a definite failure without a session is a failure")
 
         let failed = try decide(#"{"ok":false,"error":"no such folder"}"#)
         check(failed == .failed("no such folder"), "a failure shows the daemon's error")

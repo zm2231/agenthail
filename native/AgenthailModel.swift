@@ -293,7 +293,7 @@ final class AgenthailModel: ObservableObject {
                 return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
                 if let id { await openCreatedSession(id) }
-                return .uncertain("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
+                return .starting("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):

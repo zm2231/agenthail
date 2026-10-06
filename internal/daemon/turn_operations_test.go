@@ -81,17 +81,35 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 	}
 }
 
-func TestDashboardUnknownCreationWithoutIdentityIsMachineReadable(t *testing.T) {
-	d, _, fake, _, _ := daemonFixture(t)
-	d.Surfaces = []surface.Surface{&unknownStartSurface{daemonSurface: fake}}
-	w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`)
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"status":"failed"`) || strings.Contains(w.Body.String(), `"unknown":true`) {
-		t.Fatal(w.Code, w.Body.String())
+func TestDashboardCreationWithoutIdentityMarksUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		unknown bool
+	}{
+		{name: "ambiguous", err: surface.DeliveryOutcomeUnknown(fmt.Errorf("native response lost")), unknown: true},
+		{name: "definite", err: fmt.Errorf("model rejected"), unknown: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _, fake, _, _ := daemonFixture(t)
+			d.Surfaces = []surface.Surface{&noSessionStartSurface{daemonSurface: fake, err: tc.err}}
+			w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", `{"action":"session-create","surface":"codex","message":"hello"}`)
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err, w.Body.String())
+			}
+			if w.Code != http.StatusBadGateway || body["ok"] != false || body["status"] != "failed" || body["retryable"] != false || body["unknown"] != tc.unknown || body["session"] != nil {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
-type unknownStartSurface struct{ *daemonSurface }
+type noSessionStartSurface struct {
+	*daemonSurface
+	err error
+}
 
-func (*unknownStartSurface) StartSession(context.Context, surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
-	return nil, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("native response lost"))
+func (f *noSessionStartSurface) StartSession(context.Context, surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
+	return nil, nil, f.err
 }

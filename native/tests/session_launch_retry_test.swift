@@ -16,7 +16,7 @@ struct SessionLaunchRetryTest {
         model = makeModel([.unknown, .unknown])
         let unknown = await model.launchSession(a)
         _ = await model.launchSession(a)
-        check(unknown == .uncertain("Agenthail couldn't confirm the session started. Check the sidebar before trying again."), "an unknown receipt is uncertain")
+        check(unknown == .starting("This session may still be starting. It will appear in the sidebar when ready."), "an unknown receipt says the session may still be starting")
         check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after an unknown receipt reuses the key")
 
         model = makeModel([.lost, .lost, .lost])
@@ -44,6 +44,12 @@ struct SessionLaunchRetryTest {
         _ = await model.launchSession(a)
         check(failed == .failed("synthetic start failure"), "a failure receipt is a definite failure")
         check(ScriptedProtocol.keys[0] != ScriptedProtocol.keys[1], "a retry after a failure receipt uses a new key")
+
+        model = makeModel([.createdFailure, .lost])
+        let created = await model.launchSession(a)
+        _ = await model.launchSession(a)
+        check(created == .halted("synthetic first turn failure"), "a created session whose first turn failed halts")
+        check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after a created session reuses the key")
 
         model = makeModel([.replayedSubmission, .lost])
         let replayed = await model.launchSession(a)
@@ -82,6 +88,7 @@ final class ScriptedProtocol: URLProtocol {
         case unknown
         case refused
         case failedReceipt
+        case createdFailure
         case replayedSubmission
         case accepted
     }
@@ -98,11 +105,13 @@ final class ScriptedProtocol: URLProtocol {
         case .lost:
             client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
         case .unknown:
-            reply(200, #"{"ok":false,"unknown":true}"#)
+            reply(502, #"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"synthetic ambiguous start"}"#)
         case .refused:
             reply(400, "no such folder")
         case .failedReceipt:
-            reply(502, #"{"ok":false,"status":"failed","error":"synthetic start failure"}"#)
+            reply(502, #"{"ok":false,"status":"failed","retryable":false,"unknown":false,"error":"synthetic start failure"}"#)
+        case .createdFailure:
+            reply(502, #"{"ok":false,"status":"failed","retryable":false,"session":{"id":"s1","surface":"claude","name":"","status":"idle","lastActive":"2026-10-04T12:00:00Z"},"error":"synthetic first turn failure"}"#)
         case .replayedSubmission:
             reply(202, #"{"ok":true,"status":"submitted"}"#)
         case .accepted:

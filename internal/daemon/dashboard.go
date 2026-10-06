@@ -1257,7 +1257,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			kind = "unknown"
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: request.Message, Error: startErr.Error()})
-		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "error": func() string {
+		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": func() string {
 			if unknown {
 				return fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 			}
