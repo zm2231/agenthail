@@ -43,6 +43,26 @@ func TestClaudeListOmitsDeadBridgeProcesses(t *testing.T) {
 	}
 }
 
+func TestClaudeListKeepsTheFirstProcessOnASharedSessionID(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	original := `{"bridgeSessionId":"shared","pid":` + fmt.Sprint(os.Getpid()) + `,"startedAt":100,"name":"original","status":"idle"}`
+	resumed := `{"bridgeSessionId":"shared","pid":` + fmt.Sprint(os.Getppid()) + `,"startedAt":200,"name":"resumed","status":"idle"}`
+	if err := os.WriteFile(filepath.Join(dir, "a.json"), []byte(resumed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.json"), []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewClaude("", home).List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].PID != os.Getpid() || sessions[0].Name != "original" || !sessions[0].StartedAt.Equal(time.UnixMilli(100)) {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+}
+
 func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	home := t.TempDir()
 	cwd := t.TempDir()
@@ -54,7 +74,7 @@ func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessionsDir, "bridge.json"), []byte(bridge), 0600); err != nil {
 		t.Fatal(err)
 	}
-	transcriptDir := filepath.Dir(NewClaude("", home).resolveTranscript(&surface.Session{Cwd: cwd}, "local"))
+	transcriptDir := filepath.Join(home, ".claude", "projects", "-launch-project")
 	if err := os.MkdirAll(transcriptDir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -752,5 +772,41 @@ func TestClaudeTranscriptPreservesMultiMegabyteUnicodeReply(t *testing.T) {
 	}
 	if observation.Reply.Text != reply {
 		t.Fatalf("reply_bytes=%d want=%d", len(observation.Reply.Text), len(reply))
+	}
+}
+
+func TestClaudeLatestModelScansBackwardAcrossChunks(t *testing.T) {
+	originalChunk, originalBudget := claudeModelScanChunkBytes, initialClaudeObservationBytes
+	t.Cleanup(func() { claudeModelScanChunkBytes, initialClaudeObservationBytes = originalChunk, originalBudget })
+	claudeModelScanChunkBytes = 7
+	older := `{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-old","content":"x"}}`
+	newer := `{"type":"assistant","uuid":"a2","message":{"id":"m2","model":"model-new","content":"y"}}`
+	later := `{"type":"user","uuid":"u3","message":{"content":"mentions \"model\" in prose"}}`
+	partial := `{"type":"assistant","uuid":"a4","message":{"model":"model-unfinished"}}`
+	path := writeTranscript(t, older+"\n"+newer+"\n"+later)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(partial); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	claude := NewClaude("Default", t.TempDir())
+	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: path}
+	if model, err := claude.Model(context.Background(), session, ""); err != nil || model != "model-new" {
+		t.Fatalf("model=%q err=%v", model, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialClaudeObservationBytes = info.Size() - int64(len(older)) + 3
+	if model, err := claude.Model(context.Background(), session, ""); err != nil || model != "model-new" {
+		t.Fatalf("bounded model=%q err=%v", model, err)
+	}
+	initialClaudeObservationBytes = int64(len(later)+len(partial)) + 4
+	if model, err := claude.Model(context.Background(), session, ""); err == nil {
+		t.Fatalf("model outside the observation tail was returned: %q", model)
 	}
 }

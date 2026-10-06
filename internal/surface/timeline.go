@@ -12,6 +12,8 @@ type TimelineItem struct {
 	ID               string      `json:"id"`
 	Kind             string      `json:"kind"`
 	Role             string      `json:"role,omitempty"`
+	Origin           string      `json:"origin,omitempty"`
+	Sender           string      `json:"sender,omitempty"`
 	Title            string      `json:"title"`
 	Text             string      `json:"text"`
 	Timestamp        string      `json:"timestamp,omitempty"`

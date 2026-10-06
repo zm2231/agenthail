@@ -111,3 +111,37 @@ func TestDevicePushTargetFollowsDeviceLifecycle(t *testing.T) {
 		t.Fatalf("revoked targets=%+v err=%v", targets, err)
 	}
 }
+
+func TestDeviceAuthenticationRecordsLastSeenAtMostOncePerMinute(t *testing.T) {
+	r := openTestRegistry(t)
+	pairing, err := r.CreateDevicePairing("Test iPhone", []string{"read"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := r.CompleteDevicePairing(pairing.Secret, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := r.AuthenticateDevice(token, "read")
+	if err != nil || first.LastSeenAt == "" {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	if _, err := r.db.Exec(`CREATE TRIGGER reject_device_touch BEFORE UPDATE ON paired_devices BEGIN SELECT RAISE(ABORT, 'unexpected last-seen write'); END`); err != nil {
+		t.Fatal(err)
+	}
+	repeat, err := r.AuthenticateDevice(token, "read")
+	if err != nil || repeat.LastSeenAt != first.LastSeenAt {
+		t.Fatalf("repeat=%+v err=%v", repeat, err)
+	}
+	if _, err := r.db.Exec(`DROP TRIGGER reject_device_touch`); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().UTC().Add(-2 * deviceLastSeenResolution).Format(time.RFC3339Nano)
+	if _, err := r.db.Exec(`UPDATE paired_devices SET last_seen_at=?`, stale); err != nil {
+		t.Fatal(err)
+	}
+	refreshed, err := r.AuthenticateDevice(token, "read")
+	if err != nil || refreshed.LastSeenAt == stale {
+		t.Fatalf("refreshed=%+v err=%v", refreshed, err)
+	}
+}

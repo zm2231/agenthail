@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -85,5 +87,29 @@ func TestDashboardConfigCommandRejectsInvalidCodexRecency(t *testing.T) {
 	app := &App{}
 	if err := app.Run([]string{"dashboard", "config", "--codex-recent-hours", "0"}); err == nil {
 		t.Fatal("zero-hour Codex window accepted")
+	}
+}
+
+func TestDaemonServicePlistRunsAtStandardProcessType(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd plists are validated with macOS plutil")
+	}
+	path := filepath.Join(t.TempDir(), "service.plist")
+	plist := daemonServicePlist("/opt/agenthail & tools/agenthail", "    <key>PATH</key><string>/usr/bin</string>\n", "/tmp/agenthail.log")
+	if err := os.WriteFile(path, []byte(plist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"ProcessType":               "Standard",
+		"ProgramArguments.0":        "/opt/agenthail & tools/agenthail",
+		"EnvironmentVariables.PATH": "/usr/bin",
+	} {
+		output, err := exec.Command("plutil", "-extract", key, "raw", "-o", "-", path).CombinedOutput()
+		if err != nil {
+			t.Fatalf("plutil -extract %s: %v: %s", key, err, output)
+		}
+		if got := strings.TrimSpace(string(output)); got != want {
+			t.Fatalf("%s=%q, want %q", key, got, want)
+		}
 	}
 }

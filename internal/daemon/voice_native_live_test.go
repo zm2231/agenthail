@@ -77,7 +77,10 @@ func TestNativeVoiceHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := New(reg, []surface.Surface{codex})
-	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: uuid.NewString()}))
+	dashboard := &dashboardServer{token: uuid.NewString()}
+	handler := d.dashboardHandler(dashboard)
+	defer dashboard.voice.Close()
+	server := httptest.NewServer(handler)
 	defer server.Close()
 	defer server.CloseClientConnections()
 	defer func() {

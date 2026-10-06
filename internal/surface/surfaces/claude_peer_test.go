@@ -49,6 +49,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 		}
 	}
 	write(record)
+	transcript := writeClaudeProjectTranscript(t, home, "-fixture", "local-id")
 	adapter := NewClaude("", home)
 	sessions, err := adapter.List(context.Background())
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "local-id" || sessions[0].Transport != "uds" {
@@ -58,7 +59,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil || !found || caller.ID != "local-id" {
 		t.Fatalf("caller=%+v found=%v err=%v", caller, found, err)
 	}
-	if sessions[0].Transcript != filepath.Join(home, ".claude", "projects", "-fixture", "local-id.jsonl") {
+	if sessions[0].Transcript != transcript {
 		t.Fatal("transcript escaped adapter home")
 	}
 	record["bridgeSessionId"] = "session_bridge"
@@ -144,6 +145,68 @@ func TestResolveCallerPicksInnermostNestedClaude(t *testing.T) {
 	caller, found, err = adapter.ResolveCaller(context.Background(), []int{outerPID, innerPID})
 	if err != nil || !found || caller.ID != "outer-session" {
 		t.Fatalf("reversed caller=%+v found=%v err=%v", caller, found, err)
+	}
+}
+
+func TestLaterProcessSharingASessionIDResolvesAsItself(t *testing.T) {
+	home := t.TempDir()
+	sessionsDir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
+		t.Fatal(err)
+	}
+	first := exec.Command("/bin/sh", "-c", "sleep 10")
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = first.Process.Kill()
+		_ = first.Wait()
+	}()
+	write := func(pid int, startedAt int64) string {
+		command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+		start, err := command.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock")
+		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
+			t.Fatalf("test socket already exists %s: %v", socket, err)
+		}
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { listener.Close() })
+		record := map[string]any{"pid": pid, "sessionId": "shared", "startedAt": startedAt, "name": "shared", "cwd": "/fixture", "status": "idle", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": socket}
+		data, _ := json.Marshal(record)
+		if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(pid)+".json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return socket
+	}
+	firstPID, laterPID := first.Process.Pid, os.Getpid()
+	write(firstPID, 100)
+	write(laterPID, 200)
+
+	adapter := NewClaude("", home)
+	sessions, err := adapter.List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].PID != firstPID {
+		t.Fatalf("listed=%+v err=%v", sessions, err)
+	}
+	caller, found, err := adapter.ResolveCaller(context.Background(), []int{laterPID})
+	if err != nil || !found || caller.ID != "shared" || caller.PID != laterPID {
+		t.Fatalf("later caller=%+v found=%v err=%v", caller, found, err)
+	}
+	if _, _, found, err := adapter.nativeCaller(context.Background(), "shared"); err != nil || found {
+		t.Fatalf("a shared session id picked one process's socket: found=%v err=%v", found, err)
+	}
+	resolved, err := adapter.Resolve(context.Background(), strconv.Itoa(laterPID))
+	if err != nil || resolved.PID != laterPID {
+		t.Fatalf("pid target=%+v err=%v", resolved, err)
 	}
 }
 

@@ -110,6 +110,7 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
+	writeSSEOpen(w)
 	if reset {
 		writeSSEEvent(w, apiEvent{Type: "stream.reset", Timestamp: time.Now().UTC(), Data: json.RawMessage(`{"reason":"cursor_expired"}`)})
 	} else {
@@ -141,6 +142,13 @@ func (d *Daemon) apiEventsHandler(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// writeSSEOpen sends a comment as soon as a stream opens. URLSession returns
+// a streaming response only once body bytes arrive, so a client with nothing
+// to replay would otherwise wait for the first keepalive.
+func writeSSEOpen(w http.ResponseWriter) {
+	fmt.Fprint(w, ": connected\n\n")
 }
 
 func (d *Daemon) apiEventStreamAuthorized(r *http.Request) bool {

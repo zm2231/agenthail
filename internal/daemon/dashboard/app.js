@@ -262,7 +262,7 @@ function startLiveStream() {
     app.history.transcriptWarning = "";
     const items = app.history.timeline?.items || [];
     const index = items.findIndex((value) => value.id === item.itemId);
-    const projected = { id: item.itemId, kind: item.kind, role: item.role, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId };
+    const projected = { id: item.itemId, kind: item.kind, role: item.role, origin: item.origin, sender: item.sender, title: item.title || item.kind, text: item.body || "", timestamp: item.ts, status: item.status, truncated: item.truncated, bodyRef: item.bodyRef, attachment: item.attachment, callId: item.callId };
     if (item.op === "remove") { if (index >= 0) items.splice(index, 1); }
     else if (index >= 0) items[index] = projected;
     else items.push(projected);
@@ -395,6 +395,34 @@ function presenceTone(session) {
   if (session.status === "busy" || ["working", "open"].includes(session.currentReason)) return "active";
   if (session.status === "idle" || ["queued", "blocked"].includes(session.currentReason)) return "idle";
   return session.status;
+}
+function sharedPeers(session) {
+  return Array.isArray(session?.sharedWith) ? session.sharedWith : [];
+}
+function sharedBadge(session) {
+  const count = sharedPeers(session).length + 1;
+  if (count < 2) return "";
+  const label = `Open in ${count} processes`;
+  return `<span class="shared-badge" title="${label}" aria-label="${label}">⧉${count}</span>`;
+}
+function processStarted(value) {
+  const started = value ? new Date(value) : null;
+  if (!started || Number.isNaN(started.getTime())) return "start time unknown";
+  return `started ${started.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+}
+function renderSharedNote(session) {
+  const note = $("#chat-shared");
+  const peers = sharedPeers(session);
+  const open = (peer) => `<button class="soft-button" type="button" data-session="${escape(peer.id)}" aria-label="Open other process, pid ${escape(peer.pid)}">Open other</button>`;
+  const html = peers.length === 1
+    ? `<p>Also open in pid ${escape(peers[0].pid)} (${escape(processStarted(peers[0].startedAt))}). Messages here go to this process.</p>${open(peers[0])}`
+    : peers.length
+      ? `<p>Also open in ${peers.length} other processes. Messages here go to this process.</p><ul>${peers.map((peer) => `<li><span>pid ${escape(peer.pid)} (${escape(processStarted(peer.startedAt))})</span>${open(peer)}</li>`).join("")}</ul>`
+      : "";
+  if (note.sharedSignature === html) return;
+  note.sharedSignature = html;
+  note.innerHTML = html;
+  note.hidden = !peers.length;
 }
 function conversationMeta(session, model = "") {
   const parts = [statusLabel(session.status), `${session.queueCount || 0} queued`];
@@ -568,7 +596,7 @@ function renderSessions() {
     visible
       .map(
         (session) =>
-          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
+          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span>${sharedBadge(session)}</div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
       .join("");
   const historyItems = historyResults
@@ -924,6 +952,7 @@ async function selectSession(id, focus = false) {
   $("#chat-surface").textContent = labels[session.surface] || session.surface;
   $("#chat-title").textContent = displayName(session);
   $("#chat-subtitle").textContent = conversationMeta(session);
+  renderSharedNote(session);
   $("#message").disabled = Boolean(session.readOnly);
   $("#message").value = app.drafts.get(session.id) || "";
   resizeComposer();
@@ -1003,6 +1032,9 @@ function renderTimelineItem(item, session) {
   if (kind === "attachment") {
     return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderImageAttachment(item, session)}${metadata}</section>`;
   }
+  if (kind === "message" && item.role === "peer") {
+    return `<section class="timeline-item timeline-${kindClass}" ${attributes}>${renderMessage(item.text, "peer", `From ${item.sender || "another agent"}`, `${session.id}:${item.id}`)}${metadata}</section>`;
+  }
   if (["text", "message", "assistant"].includes(kind)) {
     const user = item.role === "user";
     const content = user ? handoffMessage(item.text) : { text: item.text, label: labels[session.surface] || session.surface };
@@ -1011,7 +1043,8 @@ function renderTimelineItem(item, session) {
   if (["toolCall", "toolResult", "reasoning"].includes(kind)) {
     const title = item.title || kind;
     const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
-    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div></details>`;
+    const copy = kind === "toolResult" && item.text ? `<button class="soft-button copy-output" type="button" data-copy-text="${escape(item.text)}">Copy output</button>` : "";
+    return `<details class="timeline-item timeline-${kindClass} timeline-collapsible" ${attributes}><summary>${escape(title)} <span class="timeline-kind">${escape(kind)}</span></summary>${metadata}<div class="turn-content">${body}</div>${copy}</details>`;
   }
   const title = item.title || "Unknown timeline item";
   const body = item.text ? markdown(item.text) : '<p class="timeline-empty">No recorded content.</p>';
@@ -1076,6 +1109,7 @@ function renderChat() {
   syncComposerAction();
   renderSlashMenu();
   $("#chat-subtitle").textContent = conversationMeta(session, model);
+  renderSharedNote(session);
   $("#thread-count").textContent =
     `${exchanges.length} recent exchange${exchanges.length === 1 ? "" : "s"}`;
   renderContextUsage(context);
@@ -1168,6 +1202,17 @@ function formatGoalDuration(seconds) {
   if (minutes < 60) return `${minutes}m ${value % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
+function contextBreakdown(context) {
+  const count = (value) => Number(value).toLocaleString();
+  const window = context.windowEstimated ? "Estimated window" : context.contextWindowSource === "configured" ? "Configured window" : "Context window";
+  const rows = [["Used tokens", count(context.usedTokens || 0)], [window, context.contextWindow > 0 ? count(context.contextWindow) : "Unavailable"]];
+  for (const [label, key] of [["Input", "inputTokens"], ["Cached input", "cachedInputTokens"], ["Output", "outputTokens"], ["Reasoning output", "reasoningOutputTokens"], ["Cumulative tokens", "cumulativeTokens"]]) {
+    if (Number.isFinite(context[key])) rows.push([label, count(context[key])]);
+  }
+  rows.push(["Compactions", count(context.compactionCount || 0)]);
+  if (Number.isFinite(context.reclaimedTokens)) rows.push(["Tokens reclaimed", count(context.reclaimedTokens)]);
+  return rows;
+}
 function renderContextUsage(context) {
   const indicator = $("#context-usage");
   if (!context || (!context.contextWindow && !context.compactionCount && !context.usedTokens)) {
@@ -1201,7 +1246,8 @@ function renderContextUsage(context) {
   if (context.compactionCount) details.push(`${context.compactionCount} compaction${context.compactionCount === 1 ? "" : "s"}`);
   if (context.preCompactTokens && context.postCompactTokens)
     details.push(`Last compact: ${compactTokenCount(context.preCompactTokens)} to ${compactTokenCount(context.postCompactTokens)}, ${compactTokenCount(context.reclaimedTokens)} reclaimed`);
-  indicator.title = details.join(". ");
+  const breakdown = contextBreakdown(context).map(([label, value]) => `${label}: ${value}`).join("\n");
+  indicator.title = details.length ? `${details.join(". ")}\n\n${breakdown}` : breakdown;
 }
 function isNetworkFailure(error) {
   return error?.networkFailure === true || error?.name === "TypeError";
@@ -1474,6 +1520,16 @@ function renderSlashMenu() {
     .join("");
 }
 document.addEventListener("click", async (event) => {
+  const copyOutput = event.target.closest("[data-copy-text]");
+  if (copyOutput) {
+    try {
+      await navigator.clipboard.writeText(copyOutput.dataset.copyText);
+      toast("Output copied.");
+    } catch (error) {
+      toast("Couldn't copy the output.");
+    }
+    return;
+  }
   const modelOption = event.target.closest("[data-model-option]");
   if (modelOption) {
     $("#message").value = `/model ${modelOption.dataset.modelOption}`;

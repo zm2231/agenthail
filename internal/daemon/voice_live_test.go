@@ -46,6 +46,7 @@ func TestLiveCodexVoice(t *testing.T) {
 		t.Fatal("AGENTHAIL_VOICE_SMOKE_CLI must name the matching built CLI by absolute path")
 	}
 	s := voice.New(statePath, &surfaces.CodexVoice{Codex: codex}, nil, commandPath)
+	defer s.Close()
 	if s.View("").Session == nil {
 		t.Fatal("provide an existing test-owned operator state; this evaluation must not create tasks")
 	}

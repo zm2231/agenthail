@@ -3,19 +3,25 @@ package registry
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
 	_ "modernc.org/sqlite"
 )
 
+// Registry serializes writes through one connection and serves reads from a
+// separate pool. In WAL mode readers never wait for the write lock, so a write
+// blocked on another process's lock does not stall API reads.
 type Registry struct {
 	db   *sql.DB
+	read *sql.DB
 	path string
 	now  func() time.Time
 }
@@ -25,6 +31,7 @@ var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 const (
 	schemaVersion   = 12
 	queueMessageTTL = time.Hour
+	readConnections = 4
 )
 
 func queueMessageTTLLabel() string {
@@ -50,15 +57,22 @@ func Open(path string) (*Registry, error) {
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
+	db, err := sql.Open("sqlite", path+sep+"_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	r := &Registry{db: db, path: path, now: time.Now}
-	if err := r.migrate(); err != nil {
+	read, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(15000)&_pragma=query_only(1)")
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	read.SetMaxOpenConns(readConnections)
+	read.SetMaxIdleConns(readConnections)
+	r := &Registry{db: db, read: read, path: path, now: time.Now}
+	if err := r.migrate(); err != nil {
+		r.Close()
 		return nil, err
 	}
 	return r, nil
@@ -66,7 +80,7 @@ func Open(path string) (*Registry, error) {
 
 func (r *Registry) Path() string { return r.path }
 
-func (r *Registry) Close() error { return r.db.Close() }
+func (r *Registry) Close() error { return errors.Join(r.read.Close(), r.db.Close()) }
 
 func (r *Registry) migrate() error {
 	var version int
@@ -114,6 +128,11 @@ func (r *Registry) migrate() error {
 		{"transport", `TEXT NOT NULL DEFAULT ''`},
 		{"configured_model", `TEXT NOT NULL DEFAULT ''`},
 		{"last_active_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"parent_session_id", `TEXT NOT NULL DEFAULT ''`},
+		{"root_session_id", `TEXT NOT NULL DEFAULT ''`},
+		{"subagent_depth", `INTEGER NOT NULL DEFAULT 0`},
+		{"agent_nickname", `TEXT NOT NULL DEFAULT ''`},
+		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
 			return err
@@ -533,9 +552,10 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	if !s.LastActive.IsZero() {
 		lastActiveMS = s.LastActive.UnixMilli()
 	}
+	parentID, rootID, depth, nickname, role := subagentValues(s)
 	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms,updated_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
@@ -553,8 +573,13 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 			   END,
 			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
 			   last_active_ms=excluded.last_active_ms,
+		   parent_session_id=CASE WHEN excluded.parent_session_id<>'' THEN excluded.parent_session_id ELSE sessions.parent_session_id END,
+		   root_session_id=CASE WHEN excluded.root_session_id<>'' THEN excluded.root_session_id ELSE sessions.root_session_id END,
+		   subagent_depth=CASE WHEN excluded.parent_session_id<>'' THEN excluded.subagent_depth ELSE sessions.subagent_depth END,
+		   agent_nickname=CASE WHEN excluded.agent_nickname<>'' THEN excluded.agent_nickname ELSE sessions.agent_nickname END,
+		   agent_role=CASE WHEN excluded.agent_role<>'' THEN excluded.agent_role ELSE sessions.agent_role END,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, lastActiveMS)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role)
 	if err != nil {
 		return err
 	}
@@ -568,20 +593,8 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		rows, err := tx.Query(`SELECT id FROM sessions WHERE surface=? AND transcript=? AND id<>?`, string(surface.KindClaude), s.Transcript, s.ID)
+		duplicates, err := claudeExitedDuplicates(tx, s)
 		if err != nil {
-			return err
-		}
-		var duplicates []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			duplicates = append(duplicates, id)
-		}
-		if err := rows.Close(); err != nil {
 			return err
 		}
 		for _, duplicate := range duplicates {
@@ -591,6 +604,42 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		}
 	}
 	return nil
+}
+
+// claudeDuplicateQuery finds other rows for the same Claude conversation: rows
+// sharing the transcript, and the launch record a background start registered
+// under the conversation ID before its process and transcript were known. Only
+// rows whose process has exited, or that belong to the registering process
+// under an earlier id, are absorbed: Claude Code lets one conversation stay
+// open in several processes, and each live one keeps its own row, alias, and
+// queue.
+const claudeDuplicateQuery = `SELECT id,pid FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
+
+// claudeExitedDuplicates returns the rows registration absorbs into s: rows of
+// the same conversation whose process has exited, and rows of s's own process
+// left under an earlier id.
+func claudeExitedDuplicates(q catalogQuerier, s surface.Session) ([]string, error) {
+	rows, err := q.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var exited []string
+	for rows.Next() {
+		var id string
+		var pid int
+		if err := rows.Scan(&id, &pid); err != nil {
+			return nil, err
+		}
+		if !processAlive(pid) || (s.PID > 0 && pid == s.PID) {
+			exited = append(exited, id)
+		}
+	}
+	return exited, rows.Err()
+}
+
+func claudeConversationID(transcript string) string {
+	return strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
 }
 
 func (r *Registry) mergeDuplicateClaudeSessions() error {
@@ -611,19 +660,19 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 		return err
 	}
 	for _, transcript := range transcripts {
-		ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
+		survivor, exited, err := r.claudeTranscriptRows(transcript)
 		if err != nil {
 			return err
 		}
-		if len(ids) < 2 {
+		if len(exited) == 0 {
 			continue
 		}
 		tx, err := r.db.Begin()
 		if err != nil {
 			return err
 		}
-		for _, duplicate := range ids[1:] {
-			if err := mergeSessionTx(tx, duplicate, ids[0]); err != nil {
+		for _, duplicate := range exited {
+			if err := mergeSessionTx(tx, duplicate, survivor); err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -633,6 +682,65 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 		}
 	}
 	return nil
+}
+
+// claudeTranscriptRows picks the row that absorbs the other rows sharing a
+// transcript: the most recent live row, or the most recent row when none is
+// live. It absorbs exited rows and rows of the survivor's own process; rows
+// of other live processes are left alone.
+func (r *Registry) claudeTranscriptRows(transcript string) (string, []string, error) {
+	rows, err := r.db.Query(`SELECT id,pid FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	var survivor string
+	var survivorPID int
+	var exited []string
+	var live []struct {
+		id  string
+		pid int
+	}
+	for rows.Next() {
+		var id string
+		var pid int
+		if err := rows.Scan(&id, &pid); err != nil {
+			return "", nil, err
+		}
+		switch {
+		case !processAlive(pid):
+			exited = append(exited, id)
+		case survivor == "":
+			survivor, survivorPID = id, pid
+		default:
+			live = append(live, struct {
+				id  string
+				pid int
+			}{id, pid})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, err
+	}
+	for _, row := range live {
+		if row.pid == survivorPID {
+			exited = append(exited, row.id)
+		}
+	}
+	if survivor == "" && len(exited) > 0 {
+		survivor, exited = exited[0], exited[1:]
+	}
+	return survivor, exited, nil
+}
+
+// processAlive reports whether pid names a running process. A process owned by
+// another user still counts.
+var processAlive = func(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
@@ -658,6 +766,8 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE delivery_history SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE delivery_history SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
+		{`UPDATE delivery_intents SET sender_session_id=? WHERE sender_session_id=?`, []any{currentID, oldID}},
+		{`UPDATE OR IGNORE delivery_intents SET target_session_id=? WHERE target_session_id=?`, []any{currentID, oldID}},
 		{`DELETE FROM session_runtime WHERE session_id=?`, []any{oldID}},
 		{`DELETE FROM aliases WHERE session_id IN (?,?)`, []any{oldID, currentID}},
 	}
@@ -671,13 +781,39 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 			return err
 		}
 	}
+	if err := removeMergedCatalogRowTx(tx, oldID, currentID); err != nil {
+		return err
+	}
 	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID)
+	return err
+}
+
+// removeMergedCatalogRowTx tells catalog subscribers that a merged session's
+// row is gone; deleting the session would otherwise drop it silently.
+func removeMergedCatalogRowTx(tx *sql.Tx, oldID, currentID string) error {
+	var cataloged bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog_sessions')`).Scan(&cataloged); err != nil || !cataloged {
+		return err
+	}
+	var kind string
+	err := tx.QueryRow(`SELECT s.surface FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, oldID).Scan(&kind)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"sessionId": oldID, "surface": kind, "reason": "merged", "mergedInto": currentID})
+	if err != nil {
+		return err
+	}
+	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + oldID + ":merged:" + currentID, Type: "session.removed", EntityID: oldID, Payload: payload})
 	return err
 }
 
 func (r *Registry) LookupAlias(name string) (string, error) {
 	var sid string
-	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&sid)
+	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&sid)
 	return sid, err
 }
 
@@ -686,7 +822,7 @@ func (r *Registry) EnsureAliasAvailable(name string) error {
 		return nil
 	}
 	var owner string
-	err := r.db.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
+	err := r.read.QueryRow(`SELECT session_id FROM aliases WHERE name = ?`, name).Scan(&owner)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -733,28 +869,6 @@ func setAliasTx(tx *sql.Tx, name, sessionID string) error {
 	return err
 }
 
-func (r *Registry) ReplaceAlias(name, sessionID string) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := replaceAliasTx(tx, name, sessionID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func replaceAliasTx(tx *sql.Tx, name, sessionID string) error {
-	if _, err := tx.Exec(`DELETE FROM aliases WHERE session_id = ?`, sessionID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT INTO aliases (name,session_id) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, name, sessionID); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -786,12 +900,20 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 	return "", fmt.Errorf("reserve generated alias: exhausted candidates for %q", base)
 }
 
+// ResolveTarget resolves an alias, an exact ID, a unique ID prefix, or a
+// name/cwd fragment. Name and cwd fragments match only family roots, so a
+// family resolves to its root. "@<parent>/<child>[/<child>...]" walks
+// subagents: <parent> is any other target form and each <child> is a direct
+// subagent's nickname (case-insensitive), ID, or unique ID prefix.
 func (r *Registry) ResolveTarget(target string) (string, error) {
-	if sid, err := r.LookupAlias(target); err == nil {
+	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
+		return r.resolveSubagentPath(path)
+	}
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
 		return sid, nil
 	}
 	var exact string
-	if err := r.db.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
+	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
 		return exact, nil
 	}
 	prefix := escapeLike(target) + "%"
@@ -803,7 +925,7 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
 	}
 	contains := "%" + escapeLike(target) + "%"
-	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\' ORDER BY updated_at DESC, id LIMIT 2`, contains, contains)
+	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') ORDER BY updated_at DESC, id LIMIT 2`, contains, contains)
 	if err != nil {
 		return "", err
 	}
@@ -816,6 +938,64 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 	return ids[0], nil
 }
 
+func (r *Registry) resolveSubagentPath(path string) (string, error) {
+	segments := strings.Split(path, "/")
+	for _, segment := range segments {
+		if strings.TrimSpace(segment) == "" {
+			return "", fmt.Errorf("invalid subagent target %q: use @<parent>/<nickname>", "@"+path)
+		}
+	}
+	current, err := r.ResolveTarget(segments[0])
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("subagent target %q: no session matched %q", "@"+path, segments[0])
+	}
+	if err != nil {
+		return "", fmt.Errorf("subagent target %q: %w", "@"+path, err)
+	}
+	for _, segment := range segments[1:] {
+		rows, err := r.read.Query(`SELECT id,agent_nickname FROM sessions WHERE parent_session_id=? ORDER BY id`, current)
+		if err != nil {
+			return "", err
+		}
+		var nicknameMatches, idMatches, prefixMatches []string
+		for rows.Next() {
+			var id, nickname string
+			if err := rows.Scan(&id, &nickname); err != nil {
+				rows.Close()
+				return "", err
+			}
+			switch {
+			case id == segment:
+				idMatches = append(idMatches, id)
+			case nickname != "" && strings.EqualFold(nickname, segment):
+				nicknameMatches = append(nicknameMatches, id)
+			case strings.HasPrefix(id, segment):
+				prefixMatches = append(prefixMatches, id)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return "", err
+		}
+		var matches []string
+		switch {
+		case len(idMatches) > 0:
+			matches = idMatches
+		case len(nicknameMatches) > 0:
+			matches = nicknameMatches
+		default:
+			matches = prefixMatches
+		}
+		if len(matches) == 0 {
+			return "", fmt.Errorf("subagent target %q: %s has no subagent %q", "@"+path, current, segment)
+		}
+		if len(matches) > 1 {
+			return "", fmt.Errorf("ambiguous subagent target %q: %q matches %s; use a subagent ID", "@"+path, segment, strings.Join(matches, ", "))
+		}
+		current = matches[0]
+	}
+	return current, nil
+}
+
 func escapeLike(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `%`, `\%`)
@@ -823,7 +1003,7 @@ func escapeLike(value string) string {
 }
 
 func (r *Registry) matchingIDs(query string, args ...any) ([]string, error) {
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1017,6 +1197,14 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	return id, deliveryID, nil
 }
 
+// readExists answers a periodic "is there work?" question from the read pool,
+// so an idle pass takes no write lock; the writer transaction checks again.
+func (r *Registry) readExists(query string, args ...any) (bool, error) {
+	var exists bool
+	err := r.read.QueryRow(query, args...).Scan(&exists)
+	return exists, err
+}
+
 func (r *Registry) expireMessages(now time.Time) error {
 	if _, err := r.ExpireMessages(now); err != nil {
 		return err
@@ -1025,6 +1213,9 @@ func (r *Registry) expireMessages(now time.Time) error {
 }
 
 func (r *Registry) ExpireMessages(now time.Time) (int, error) {
+	if due, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?)`, now.UnixMilli()); err != nil || !due {
+		return 0, err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, err
@@ -1068,18 +1259,18 @@ func (r *Registry) ExpireMessages(now time.Time) (int, error) {
 
 func (r *Registry) QueueCount(sessionID string) int {
 	var n int
-	r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, r.now().UnixMilli()).Scan(&n)
+	r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, r.now().UnixMilli()).Scan(&n)
 	return n
 }
 
 func (r *Registry) PendingSteer(sessionID string) (bool, error) {
 	var found int
-	err := r.db.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
+	err := r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND busy_delivery=? AND model='' AND (turn_options='' OR turn_options='{}')`, sessionID, "steer").Scan(&found)
 	return found > 0, err
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	rows, err := r.db.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, r.now().UnixMilli())
+	rows, err := r.read.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, r.now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -1172,7 +1363,7 @@ func (r *Registry) ListHistory(limit int, sessionID string) ([]HistoryEntry, err
 	}
 	query += ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit)
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1219,7 +1410,7 @@ func (r *Registry) ListHistoryPage(limit int, beforeID int64, kind, queryText st
 	}
 	query += ` ORDER BY h.id DESC LIMIT ?`
 	args = append(args, limit+1)
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1281,7 +1472,7 @@ func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 }
 
 func (r *Registry) ListHistoryKinds() ([]string, error) {
-	rows, err := r.db.Query(`SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
+	rows, err := r.read.Query(`SELECT DISTINCT kind FROM delivery_history ORDER BY kind`)
 	if err != nil {
 		return nil, err
 	}
@@ -1339,7 +1530,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	if !includeDelivered {
 		args = append(args, now.UnixMilli())
 	}
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,7 +1553,7 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	now := r.now()
 	var row QueueRow
 	var evidence string
-	err := r.db.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
+	err := r.read.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -1407,7 +1598,7 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 		query += ` WHERE resolved_at=''`
 	}
 	query += ` ORDER BY created_at DESC,id DESC`
-	rows, err := r.db.Query(query)
+	rows, err := r.read.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -1426,6 +1617,9 @@ func (r *Registry) ListAttentionItems(includeResolved bool) ([]AttentionItem, er
 // ReconcileAttentionItems materializes attention rows from queue state. It is
 // called by queue state writers and the background scan, never by snapshot reads.
 func (r *Registry) ReconcileAttentionItems(now time.Time) error {
+	if open, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='dead') OR EXISTS(SELECT 1 FROM attention_items WHERE resolved_at='')`); err != nil || !open {
+		return err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -1556,9 +1750,52 @@ func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*Queu
 	return r.claimNextMessage(sessionID, now, "steer")
 }
 
+// claimCandidateFilter selects the session's next queued message, the one a
+// claim acts on.
+func claimCandidateFilter(sessionID, busyDelivery string) (string, []any) {
+	filter := `session_id=? AND status IN ('pending','inflight')`
+	args := []any{sessionID}
+	if busyDelivery != "" {
+		filter += ` AND busy_delivery=?`
+		args = append(args, busyDelivery)
+		if busyDelivery == "steer" {
+			filter += ` AND model='' AND (turn_options='' OR turn_options='{}')`
+		}
+	}
+	return filter + ` ORDER BY id LIMIT 1`, args
+}
+
+func claimInflightExpired(status string, operation QueueOperation, inflightAt int64, now time.Time) bool {
+	inflightTimeout := time.Minute
+	if operation == QueueOperationCompact {
+		inflightTimeout = 10 * time.Minute
+	}
+	return status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli()
+}
+
+// claimNeedsWrite reports whether a claim of this candidate changes it: an
+// in-flight delivery that timed out, or a pending message that is available.
+func claimNeedsWrite(status string, operation QueueOperation, availableAt, inflightAt int64, now time.Time) bool {
+	return claimInflightExpired(status, operation, inflightAt, now) || status == "pending" && availableAt <= now.UnixMilli()
+}
+
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
 	if err := r.expireMessages(now); err != nil {
 		return nil, err
+	}
+	filter, args := claimCandidateFilter(sessionID, busyDelivery)
+	var peekStatus string
+	var peekOperation QueueOperation
+	var peekAvailableAt, peekInflightAt int64
+	err := r.read.QueryRow(`SELECT status,available_at_ms,inflight_at_ms,operation FROM message_queue WHERE `+filter, args...).Scan(&peekStatus, &peekAvailableAt, &peekInflightAt, &peekOperation)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !claimNeedsWrite(peekStatus, peekOperation, peekAvailableAt, peekInflightAt, now) {
+		return nil, nil
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -1569,28 +1806,14 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	query := `SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`
-	args := []any{sessionID}
-	if busyDelivery != "" {
-		query += ` AND busy_delivery=?`
-		args = append(args, busyDelivery)
-		if busyDelivery == "steer" {
-			query += ` AND model='' AND (turn_options='' OR turn_options='{}')`
-		}
-	}
-	query += ` ORDER BY id LIMIT 1`
-	err = tx.QueryRow(query, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	inflightTimeout := time.Minute
-	if item.Operation == QueueOperationCompact {
-		inflightTimeout = 10 * time.Minute
-	}
-	if status == "inflight" && inflightAt > 0 && inflightAt < now.Add(-inflightTimeout).UnixMilli() {
+	if claimInflightExpired(status, item.Operation, inflightAt, now) {
 		if err := markQueuedDeliveryIntent(tx, item.ID, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 			return nil, err
 		}
@@ -1828,7 +2051,7 @@ func (r *Registry) RuntimeState(sessionID string) (RuntimeState, bool, error) {
 	var state RuntimeState
 	var status, updatedAt string
 	var notificationArmed int
-	err := r.db.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
+	err := r.read.QueryRow(`SELECT last_status,active_turn_id,completed_turn_id,relay_hops,notification_armed,updated_at FROM session_runtime WHERE session_id=? AND turn_observed=1`, sessionID).Scan(&status, &state.ActiveTurnID, &state.CompletedTurnID, &state.RelayHops, &notificationArmed, &updatedAt)
 	if err == sql.ErrNoRows {
 		return state, false, nil
 	}
@@ -1881,7 +2104,7 @@ type WatchedSession struct {
 }
 
 func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
 		WHERE s.id IN (
@@ -1930,7 +2153,7 @@ type RouteRow struct {
 }
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
-	rows, err := r.db.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
+	rows, err := r.read.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
 		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), '')
 		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
 		GROUP BY r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active
@@ -1969,7 +2192,7 @@ type AliasRow struct {
 }
 
 func (r *Registry) ListAliases() ([]AliasRow, error) {
-	rows, err := r.db.Query(`SELECT name, session_id FROM aliases ORDER BY name`)
+	rows, err := r.read.Query(`SELECT name, session_id FROM aliases ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -1991,7 +2214,7 @@ type ChannelRow struct {
 }
 
 func (r *Registry) ListChannels() ([]ChannelRow, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT c.name, COALESCE(count(cm.session_id),0) as n
 		FROM channels c
 		LEFT JOIN channel_members cm ON cm.channel_id = c.id
@@ -2016,7 +2239,7 @@ func (r *Registry) ListChannels() ([]ChannelRow, error) {
 }
 
 func (r *Registry) ChannelMembers(channelName string) ([]string, error) {
-	rows, err := r.db.Query(`
+	rows, err := r.read.Query(`
 		SELECT cm.session_id FROM channel_members cm
 		JOIN channels c ON c.id = cm.channel_id
 		WHERE c.name = ?`, channelName)
@@ -2042,7 +2265,7 @@ func b2i(b bool) int {
 }
 
 func (r *Registry) GetSession(id string) (surface, name, cwd string, err error) {
-	err = r.db.QueryRow(`SELECT surface, name, cwd FROM sessions WHERE id = ?`, id).Scan(&surface, &name, &cwd)
+	err = r.read.QueryRow(`SELECT surface, name, cwd FROM sessions WHERE id = ?`, id).Scan(&surface, &name, &cwd)
 	return
 }
 
@@ -2054,9 +2277,10 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var launcher string
 	var location []byte
 	var focusable int
-	err := r.db.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0) FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(
+	var subagent subagentColumns
+	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
 		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable,
-	)
+	}, subagent.targets()...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -2066,6 +2290,7 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	if lastActiveMS > 0 {
 		session.LastActive = time.UnixMilli(lastActiveMS)
 	}
+	subagent.apply(&session)
 	if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
 		return nil, err
 	} else {
@@ -2083,7 +2308,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.db.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0)
+	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
@@ -2100,9 +2325,11 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var launcher string
 		var location []byte
 		var focusable int
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable); err != nil {
+		var subagent subagentColumns
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
+		subagent.apply(&session)
 		session.Surface = surface.SurfaceKind(kindText)
 		session.Status = surface.SessionStatus(status)
 		session.HasLocal = hasLocal != 0
@@ -2126,13 +2353,13 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0) FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.read.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2146,9 +2373,11 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var launcher string
 		var location []byte
 		var focusable int
-		if err := rows.Scan(&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable); err != nil {
+		var subagent subagentColumns
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
+		subagent.apply(&session)
 		session.Surface = surface.SurfaceKind(kindText)
 		session.Status = surface.SessionStatus(status)
 		session.HasLocal = hasLocal != 0
@@ -2173,13 +2402,13 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 
 func (r *Registry) SessionUpdatedBefore(id string, before time.Time) (bool, error) {
 	var stale bool
-	err := r.db.QueryRow(`SELECT updated_at < datetime(?,'unixepoch') FROM sessions WHERE id=?`, before.Unix(), id).Scan(&stale)
+	err := r.read.QueryRow(`SELECT updated_at < datetime(?,'unixepoch') FROM sessions WHERE id=?`, before.Unix(), id).Scan(&stale)
 	return stale, err
 }
 
 func (r *Registry) ReverseAlias(sessionID string) (string, error) {
 	var name string
-	err := r.db.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name)
+	err := r.read.QueryRow(`SELECT name FROM aliases WHERE session_id = ?`, sessionID).Scan(&name)
 	return name, err
 }
 

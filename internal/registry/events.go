@@ -45,7 +45,7 @@ func (r *Registry) RecentDaemonEvents(limit int) ([]DaemonEvent, error) {
 	if limit < 1 {
 		return []DaemonEvent{}, nil
 	}
-	rows, err := r.db.Query(`SELECT id,event_type,entity_id,payload,created_at FROM (SELECT id,event_type,entity_id,payload,created_at FROM daemon_events ORDER BY id DESC LIMIT ?) ORDER BY id`, limit)
+	rows, err := r.read.Query(`SELECT id,event_type,entity_id,payload,created_at FROM (SELECT id,event_type,entity_id,payload,created_at FROM daemon_events ORDER BY id DESC LIMIT ?) ORDER BY id`, limit)
 	if err != nil {
 		return nil, err
 	}

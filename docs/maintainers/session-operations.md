@@ -7,8 +7,8 @@ The immediate send status in CLI JSON and dashboard/mobile API results is `sent`
 `agenthail list --json` returns discovered sessions together with an `errors`
 object. A failed optional surface is a warning when at least one surface completed
 discovery; the command fails only when every configured surface failed. Codex
-rows reconcile shared database state with the local transcript's latest task
-lifecycle. Claude peer `idle` is trusted only from peers advertising idle
+rows take the local transcript's latest task lifecycle when it is known and the
+shared database state otherwise. Claude peer `idle` is trusted only from peers advertising idle
 notifications or from a readable transcript; otherwise the state is unknown.
 
 `agenthail list --cwd <path>` retains sessions whose normalized workspace is that
@@ -80,6 +80,8 @@ command, the row becomes `unknown` for operator review instead of being retried
 as either a control or a message.
 
 Claude assigns the background ID. Agenthail parses that ID from the native launch response, then resolves the full session ID through `claude agents --json --all`. It never assumes that a supplied `--session-id` controls background identity. The registered session and optional alias become the targets for later messages. A successful launch confirms registration, not completion of the first model turn; there is no fabricated turn receipt.
+
+Claude Code lets one conversation stay open in several processes; resuming it elsewhere only warns. With Remote Control each process has its own session ID, and each live one keeps its own row, alias and queue. Registration absorbs a row that shares the conversation's transcript only once that row's process has exited or when it is the registering process under an earlier ID, and a launch record only while it has no process or transcript. Without Remote Control the processes share the conversation's session ID and one row: the process that opened it first owns the row, sends to the session reach it, and a later process is addressed by its PID. Commands run from either process still resolve to that session. Because a sender's process is unknown when several share its ID, replies to it are addressed to the session rather than to one process's socket.
 
 Status, logs, stop and resume operate only on native background records. A registered alias or `claude:<full-session-id>` can address a stopped session. Resume is a no-op when the native catalog reports working, running, starting or blocked. Otherwise it invokes `--bg --resume` and checks the returned identity. Interactive sessions do not acquire background lifecycle controls merely by appearing in discovery. Destructive removal is not exposed.
 

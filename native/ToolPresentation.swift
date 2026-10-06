@@ -9,6 +9,7 @@ struct ToolPresentation {
     }
     let content: Content
     let name: String
+    var intent: String? = nil
     var summary: String {
         switch content {
         case .command(let command, _): return command
@@ -69,6 +70,9 @@ struct ToolPresentation {
               let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             content = .raw(text)
             return
+        }
+        if let description = input["description"] as? String, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            intent = description
         }
         if let command = input["command"] as? String ?? input["cmd"] as? String {
             content = .command(command, input["workdir"] as? String ?? input["cwd"] as? String)

@@ -233,7 +233,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	if desktopNotificationMessage != "" {
 		go func(desktopMessage, mobileMessage, sessionID, turnID string) {
-			if err := Notify("Agenthail", desktopMessage); err != nil {
+			if err := Notify("Agenthail", desktopMessage, sessionID); err != nil {
 				d.log.Printf("desktop notification: %s", err)
 			}
 			notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

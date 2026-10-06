@@ -15,7 +15,7 @@ struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
     let surfaces: [Surface]
     let workspaces: [String]
-    let launchers: [LauncherOption]?
+    var launchers: [LauncherOption]? = nil
 }
 struct CreationModels: Decodable { let models: [ModelOption] }
 struct QueueResponse: Decodable { let items: [QueueState] }
@@ -114,7 +114,12 @@ struct SessionState: Codable, Identifiable, Hashable {
     let readOnly: Bool?
     let readOnlyReason: String?
     var cwd: String? = nil
+    var hostProject: HostProjectIdentity? = nil
+    var checkout: CheckoutIdentity? = nil
     var runtime: SessionRuntime? = nil
+    var subagent: SubagentIdentity? = nil
+    var subagents: SubagentRollup? = nil
+    var sharedWith: [SharedProcess]? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -125,6 +130,156 @@ struct SessionState: Codable, Identifiable, Hashable {
     var isReadOnly: Bool { readOnly == true }
 }
 
+struct SubagentIdentity: Codable, Hashable {
+    let parentId: String
+    let rootId: String
+    let depth: Int
+    var nickname: String? = nil
+    var role: String? = nil
+}
+
+struct SubagentRollup: Codable, Hashable {
+    let count: Int
+    let working: Int
+}
+
+struct SharedProcess: Codable, Hashable, Identifiable {
+    let id: String
+    var name: String? = nil
+    let pid: Int
+    let status: String
+    var startedAt: String? = nil
+}
+
+enum SharedConversation {
+    static func peers(_ session: SessionState) -> [SharedProcess] {
+        session.sharedWith ?? []
+    }
+
+    static func processCount(_ session: SessionState) -> Int {
+        peers(session).isEmpty ? 0 : peers(session).count + 1
+    }
+
+    static func badge(_ session: SessionState) -> String? {
+        let count = processCount(session)
+        return count > 1 ? "⧉\(count)" : nil
+    }
+
+    static func badgeLabel(_ session: SessionState) -> String {
+        "Open in \(processCount(session)) processes"
+    }
+
+    static func started(_ peer: SharedProcess) -> String {
+        guard let raw = peer.startedAt, let date = parse(raw) else { return "start time unknown" }
+        return "started \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    static func note(_ session: SessionState) -> String? {
+        let peers = peers(session)
+        guard !peers.isEmpty else { return nil }
+        if peers.count == 1 {
+            return "Also open in pid \(peers[0].pid) (\(started(peers[0]))). Messages here go to this process."
+        }
+        return "Also open in \(peers.count) other processes. Messages here go to this process."
+    }
+
+    static func openLabel(_ peer: SharedProcess) -> String {
+        "Open other process, pid \(peer.pid)"
+    }
+
+    static func peerLabel(_ peer: SharedProcess) -> String {
+        "pid \(peer.pid) (\(started(peer)))"
+    }
+
+    private static func parse(_ raw: String) -> Date? {
+        (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(raw)) ?? (try? Date.ISO8601FormatStyle().parse(raw))
+    }
+}
+
+struct SessionFamily: Identifiable, Equatable {
+    struct Member: Identifiable, Equatable {
+        let session: SessionState
+        let depth: Int
+        var id: String { session.id }
+    }
+
+    let root: SessionState
+    let members: [Member]
+    let subagentCount: Int
+    let workingSubagents: Int
+
+    var id: String { root.id }
+    var isWorking: Bool { root.isWorking || workingSubagents > 0 }
+    var isCurrent: Bool { isWorking || sessions.contains(where: \.current) }
+    var sessions: [SessionState] { [root] + members.map(\.session) }
+
+    func contains(_ sessionID: String?) -> Bool {
+        guard let sessionID else { return false }
+        return root.id == sessionID || members.contains { $0.id == sessionID }
+    }
+}
+
+enum SessionFamilies {
+    static func build(_ sessions: [SessionState]) -> [SessionFamily] {
+        let ids = Set(sessions.map(\.id))
+        var children: [String: [SessionState]] = [:]
+        var roots: [SessionState] = []
+        for session in sessions {
+            if let parent = session.subagent?.parentId, parent != session.id, ids.contains(parent) {
+                children[parent, default: []].append(session)
+            } else {
+                roots.append(session)
+            }
+        }
+        var placed: Set<String> = []
+        return roots.map { root in
+            placed.insert(root.id)
+            var members: [SessionFamily.Member] = []
+            func walk(_ parentID: String, depth: Int) {
+                for child in children[parentID] ?? [] where !placed.contains(child.id) {
+                    placed.insert(child.id)
+                    members.append(SessionFamily.Member(session: child, depth: depth))
+                    walk(child.id, depth: depth + 1)
+                }
+            }
+            walk(root.id, depth: 1)
+            let observed = root.subagents ?? SubagentRollup(count: 0, working: 0)
+            return SessionFamily(
+                root: root,
+                members: members,
+                subagentCount: members.count + observed.count,
+                workingSubagents: members.filter { $0.session.isWorking }.count + observed.working
+            )
+        }
+    }
+
+    static func subagentSummary(_ family: SessionFamily) -> String {
+        let noun = family.subagentCount == 1 ? "subagent" : "subagents"
+        return family.workingSubagents > 0 ? "\(family.subagentCount) \(noun), \(family.workingSubagents) working" : "\(family.subagentCount) \(noun)"
+    }
+
+    static func label(_ session: SessionState) -> String {
+        guard let nickname = session.subagent?.nickname, !nickname.isEmpty else { return session.title }
+        if let role = session.subagent?.role, !role.isEmpty { return "\(nickname) (\(role))" }
+        return nickname
+    }
+
+    static func title(_ session: SessionState, in sessions: [SessionState]) -> String {
+        guard let parentID = session.subagent?.parentId else { return session.title }
+        guard let parent = sessions.first(where: { $0.id == parentID }) else { return label(session) }
+        return "\(title(parent, in: sessions)) > \(label(session))"
+    }
+}
+
+extension SessionState {
+    var title: String {
+        if let alias, !alias.isEmpty { return "@\(alias)" }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == id || UUID(uuidString: trimmed) != nil { return "Untitled conversation" }
+        return trimmed
+    }
+}
+
 struct SessionRuntime: Codable, Hashable {
     struct Location: Codable, Hashable {
         var workspace: String? = nil
@@ -132,9 +287,18 @@ struct SessionRuntime: Codable, Hashable {
         var session: String? = nil
         var pane: String? = nil
     }
+
     let launcher: String
     var location: Location? = nil
     var focusable: Bool? = nil
+
+    var hostName: String? {
+        switch launcher {
+        case "cmux": return "cmux"
+        case "tmux": return "tmux"
+        default: return nil
+        }
+    }
 }
 
 struct GoalEditorState: Equatable {
@@ -172,6 +336,22 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+}
+
+struct HostProjectIdentity: Codable, Hashable {
+    let id: String?
+    let displayName: String?
+    let commonDir: String?
+    let path: String?
+}
+
+struct CheckoutIdentity: Codable, Hashable {
+    let id: String?
+    let path: String?
+    let branch: String?
+    let detachedHead: String?
+    let isMain: Bool?
+    let dirty: Bool?
 }
 
 struct QueueState: Decodable, Identifiable, Equatable {
@@ -247,6 +427,12 @@ struct DeliveryProblem: Decodable, Identifiable, Equatable {
     let at: String
 
     var id: Int64 { deliveryId }
+
+    var reasonText: String {
+        let words = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = words.first else { return "The message was not delivered." }
+        return first.uppercased() + words.dropFirst()
+    }
 }
 
 struct ChannelState: Decodable, Identifiable, Equatable {
@@ -317,7 +503,7 @@ struct DashboardSnapshot: Decodable {
             relays == other.relays &&
             history == other.history &&
             attention == other.attention &&
-			deliveryProblems == other.deliveryProblems &&
+            deliveryProblems == other.deliveryProblems &&
             codexRecentHours == other.codexRecentHours &&
             busyDelivery == other.busyDelivery
     }
@@ -391,6 +577,12 @@ struct ClaudeRunObservation: Decodable, Identifiable, Equatable {
 struct ClaudeSubagentLink: Decodable, Identifiable, Equatable {
     let parentSessionId: String
     let agentId: String
+    var agentType: String? = nil
+    var description: String? = nil
+    var toolUseId: String? = nil
+    var depth: Int? = nil
+    var working: Bool? = nil
+    var lastActive: String? = nil
     let transcriptPath: String
 
     var id: String { agentId + transcriptPath }
@@ -539,20 +731,6 @@ struct AgenthailEvent: Decodable {
     let entityId: String?
 }
 
-enum AppSection: String, CaseIterable, Identifiable {
-    case overview = "Overview"
-    case conversations = "Conversations"
-    case operations = "Operations"
-    var id: String { rawValue }
-    var symbol: String {
-        switch self {
-        case .overview: return "square.grid.2x2"
-        case .conversations: return "bubble.left.and.bubble.right"
-        case .operations: return "slider.horizontal.3"
-        }
-    }
-}
-
 struct SessionTimeline: Decodable {
     let nextBefore: Int64?
     var items: [TimelineItem]
@@ -567,6 +745,8 @@ struct SessionAttachment: Decodable, Equatable, Hashable {
     let width: Int?
     let height: Int?
     let bytes: Int?
+
+    var isImage: Bool { mediaType.hasPrefix("image/") }
 }
 
 struct SessionStreamItem: Decodable {
@@ -581,6 +761,7 @@ struct SessionStreamItem: Decodable {
     let context: ContextState?
     let goal: GoalState?
     let role: String?
+    let sender: String?
     let title: String?
     let status: String?
     let truncated: Bool
@@ -648,7 +829,12 @@ struct TimelineItem: Decodable, Identifiable, Equatable {
     let truncated: Bool
     let truncationReason: String?
     let bodyRef: String?
-    let attachment: SessionAttachment?
+    var attachment: SessionAttachment? = nil
+    var sender: String? = nil
+
+    var isPeerMessage: Bool { kind == "message" && role == "peer" }
+    var peerSender: String { sender.flatMap { $0.isEmpty ? nil : $0 } ?? "another agent" }
+    var peerLabel: String { "From \(peerSender)" }
 }
 
 struct SessionSearchResponse: Decodable {

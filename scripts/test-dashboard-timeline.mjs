@@ -46,6 +46,7 @@ const context = {
   syncComposerAction: () => {},
   renderSlashMenu: () => {},
   conversationMeta: () => "Claude Code",
+  renderSharedNote: () => {},
   renderContextUsage: () => {},
   startLiveStream: () => {},
   renderGoalAttention: () => "",
@@ -66,7 +67,8 @@ globalThis.renderClaudeMetadata = renderClaudeMetadata;
 ${source.slice(chatStart, chatEnd)}
 ${source.slice(goalStart, goalEnd)}
 globalThis.renderChat = renderChat;
-globalThis.goalStatusLabel = goalStatusLabel;`, context);
+globalThis.goalStatusLabel = goalStatusLabel;
+globalThis.contextBreakdown = contextBreakdown;`, context);
 
 const session = { id: "session-1", surface: "claude" };
 const items = [
@@ -82,6 +84,10 @@ for (const expected of ["Read the report", "report.md", "report contents", "call
   assert(html.includes(expected), `timeline omitted ${expected}`);
 }
 assert(html.includes("<details"), "tool and reasoning items should be collapsible");
+assert(html.includes('data-copy-text="report contents"'), "tool results should offer their raw text for copying");
+assert.equal((html.match(/data-copy-text=/g) || []).length, 1, "only tool results with text offer Copy output");
+const quoted = context.renderTimeline([{ id: "result-2", kind: "toolResult", title: "Result", text: `say "hi" <b>` }], session);
+assert(quoted.includes('data-copy-text="say &quot;hi&quot; &lt;b&gt;"'), "copied text must be attribute-escaped");
 assert(!html.includes("<script>alert"), "timeline body must not permit arbitrary HTML");
 assert(html.includes("&lt;script&gt;"), "unknown body should use the escaped fallback");
 
@@ -136,5 +142,11 @@ assert.notEqual(
   context.timelineSignature(session, [], null, {}, "", refreshed, [], []),
   "timeline signature must change when a tool item changes",
 );
+
+const full = context.contextBreakdown({ usedTokens: 86400, contextWindow: 200000, cumulativeTokens: 312000, compactionCount: 1, reclaimedTokens: 42000, inputTokens: 83000, cachedInputTokens: 60000, outputTokens: 3400, reasoningOutputTokens: 900 });
+assert.equal(JSON.stringify(full.map(([label]) => label)), JSON.stringify(["Used tokens", "Context window", "Input", "Cached input", "Output", "Reasoning output", "Cumulative tokens", "Compactions", "Tokens reclaimed"]), "every reported figure appears in order");
+assert.equal(JSON.stringify(context.contextBreakdown({ usedTokens: 0, contextWindow: 0, compactionCount: 0 }).map(([label, value]) => `${label}=${value}`)), JSON.stringify(["Used tokens=0", "Context window=Unavailable", "Compactions=0"]), "unreported figures are left out and an unknown window says so");
+assert.equal(context.contextBreakdown({ usedTokens: 1, contextWindow: 9, compactionCount: 0, windowEstimated: true })[1][0], "Estimated window", "an estimated window is labeled");
+assert.equal(context.contextBreakdown({ usedTokens: 1, contextWindow: 9, compactionCount: 0, contextWindowSource: "configured" })[1][0], "Configured window", "a configured window is labeled");
 
 console.log("dashboard timeline VM tests passed");

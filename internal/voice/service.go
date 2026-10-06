@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/delivery"
@@ -123,7 +124,8 @@ type Service struct {
 	path                    string
 	state                   diskState
 	cursor                  Cursor
-	lastSeen                time.Time
+	lastSeen                atomic.Int64
+	published               atomic.Pointer[snapshot]
 	running                 bool
 	register                func(surface.Session) error
 	loadErr                 error
@@ -136,6 +138,28 @@ type Service struct {
 	stream                  SessionStreamProvider
 	operatorSourceActive    bool
 	clock                   clock
+	background              context.Context
+	stop                    context.CancelFunc
+	tasks                   sync.WaitGroup
+	closed                  bool
+	speechTimeout           time.Duration
+}
+
+// snapshot is the state as of the last release of s.mu. View reads it without
+// the lock, because actions and the event poll hold s.mu across provider I/O.
+type snapshot struct {
+	state  State
+	owner  string
+	active bool
+}
+
+func (p *snapshot) view(owner string) State {
+	v := p.state
+	v.Occupied = p.active && p.owner != owner
+	if v.Occupied {
+		v.SDP = ""
+	}
+	return v
 }
 
 type clock struct {
@@ -168,7 +192,8 @@ func NewWithTargetsAndOperatorSourceAndStream(path string, provider Provider, re
 }
 
 func newService(path string, provider Provider, register func(surface.Session) error, commandPath string, target TargetResolver, dispatcher delivery.Dispatcher, setOperatorSourceActive func(session *surface.Session, active bool), stream SessionStreamProvider, clock clock) *Service {
-	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock}
+	s := &Service{path: path, provider: provider, register: register, commandPath: commandPath, target: target, dispatcher: dispatcher, setOperatorSourceActive: setOperatorSourceActive, stream: stream, clock: clock, speechTimeout: delegatedSpeechTimeout}
+	s.background, s.stop = context.WithCancel(context.Background())
 	s.state.State = State{Protocol: 1, Phase: "idle", Events: []Event{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -188,6 +213,7 @@ func newService(path string, provider Provider, register func(surface.Session) e
 		s.loadErr = err
 	}
 	s.syncOperatorSourceActive()
+	s.published.Store(s.capture())
 	return s
 }
 
@@ -211,19 +237,29 @@ func (s *Service) syncOperatorSourceActive() {
 	s.setOperatorSourceActive(s.state.State.Session, active)
 }
 
+// View never waits on s.mu. The owner's view starts the event poll when no one
+// holds the lock; a held lock means an action or the poll itself is running.
 func (s *Service) View(owner string) State {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state.Owner == owner {
-		s.lastSeen = s.clock.now()
-		if s.active() && s.cursor.Source != "" && s.provider != nil && s.loadErr == nil {
-			s.observe()
+	current := s.published.Load()
+	if current.owner == owner {
+		s.seen()
+		if current.active && s.mu.TryLock() {
+			if s.active() && s.cursor.Source != "" && s.provider != nil && s.loadErr == nil {
+				s.observe()
+			}
+			s.unlock()
+			current = s.published.Load()
 		}
 	}
-	return s.view(owner)
+	return current.view(owner)
 }
 
 func (s *Service) view(owner string) State {
+	return s.capture().view(owner)
+}
+
+// capture copies the state for readers outside s.mu. The caller holds s.mu.
+func (s *Service) capture() *snapshot {
 	v := s.state.State
 	if s.loadErr != nil {
 		v.Phase = "blocked"
@@ -233,15 +269,21 @@ func (s *Service) view(owner string) State {
 		v.Phase = "blocked"
 		v.Message = "Codex Desktop voice is not configured on this host."
 	}
-	v.Occupied = s.active() && s.state.Owner != owner
-	if v.Occupied {
-		v.SDP = ""
-	}
 	// HTTP encoding must not race the observer's mutation of the retained events.
 	data, _ := json.Marshal(v)
-	var result State
-	_ = json.Unmarshal(data, &result)
-	return result
+	var copy State
+	_ = json.Unmarshal(data, &copy)
+	return &snapshot{state: copy, owner: s.state.Owner, active: s.active()}
+}
+
+// unlock publishes the state for View and releases s.mu.
+func (s *Service) unlock() {
+	s.published.Store(s.capture())
+	s.mu.Unlock()
+}
+
+func (s *Service) seen() {
+	s.lastSeen.Store(s.clock.now().UnixNano())
 }
 
 func (s *Service) save() error {
@@ -274,7 +316,10 @@ func (s *Service) save() error {
 
 func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.unlock()
+	if s.closed {
+		return s.view(owner), errors.New("voice is shutting down")
+	}
 	if s.loadErr != nil && a.Action != "stop" {
 		return s.view(owner), s.loadErr
 	}
@@ -287,7 +332,7 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 	if s.active() && s.state.Owner != owner {
 		return s.view(owner), errors.New("another device owns this call")
 	}
-	s.lastSeen = s.clock.now()
+	s.seen()
 	err := s.apply(ctx, owner, a)
 	return s.view(owner), err
 }
@@ -552,7 +597,9 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
 	attemptID, targetID, turnID := v.AttemptID, target.Session.ID, receipt.TurnID
-	go s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription)
+	if !s.spawn(func() { s.watchDelegation(attemptID, a.MessageID, targetID, turnID, streamSubscription) }) && streamSubscription.Cancel != nil {
+		streamSubscription.Cancel()
+	}
 	return s.save()
 }
 
@@ -597,19 +644,46 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	return nil
 }
 
+// Close stops the service's background work. It cancels first, so work that
+// holds s.mu while waiting on the service context gives the lock back, then
+// waits for an action in progress, refuses later ones, and waits for every
+// delegation watch and event poll to return, so nothing writes the state file
+// after it returns.
+func (s *Service) Close() {
+	s.stop()
+	s.mu.Lock()
+	s.closed = true
+	s.unlock()
+	s.tasks.Wait()
+}
+
+// spawn starts background work the service owns, unless it is closed. The
+// caller holds s.mu.
+func (s *Service) spawn(task func()) bool {
+	if s.closed {
+		return false
+	}
+	s.tasks.Add(1)
+	go func() {
+		defer s.tasks.Done()
+		task()
+	}()
+	return true
+}
+
 func (s *Service) watchDelegation(attemptID, messageID, targetID, turnID string, subscription sessionstream.Subscription) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.background, 5*time.Minute)
 	defer cancel()
 	s.mu.Lock()
 	if s.target == nil || s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
 		if subscription.Cancel != nil {
 			subscription.Cancel()
 		}
-		s.mu.Unlock()
+		s.unlock()
 		return
 	}
+	s.unlock()
 	target, err := s.target(ctx, targetID)
-	s.mu.Unlock()
 	if err != nil || target == nil || target.Session == nil || target.Adapter == nil {
 		if subscription.Cancel != nil {
 			subscription.Cancel()
@@ -755,14 +829,20 @@ func (s *Service) watchJournalDelegation(ctx context.Context, attemptID, message
 	}
 }
 
+// delegatedSpeechTimeout bounds how long a target update waits for the Codex
+// write lock while it holds s.mu, so actions queue behind it only briefly.
+const delegatedSpeechTimeout = 15 * time.Second
+
 func (s *Service) speakDelegation(attemptID, messageID string, target *surface.Session, turnID, text, stage string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.unlock()
 	v := &s.state.State
 	if v.AttemptID != attemptID || v.Phase != "connected" || v.Target == nil || v.Target.ID != target.ID || v.Session == nil {
 		return
 	}
-	if err := s.provider.Request(context.Background(), v.Session, "thread/realtime/appendText", map[string]any{"threadId": v.Session.ID, "text": text, "role": "developer"}); err != nil {
+	ctx, cancel := context.WithTimeout(s.background, s.speechTimeout)
+	defer cancel()
+	if err := s.provider.Request(ctx, v.Session, "thread/realtime/appendText", map[string]any{"threadId": v.Session.ID, "text": text, "role": "developer"}); err != nil {
 		v.Message = "Correlated " + stage + " update could not be handed to realtime audio: " + err.Error()
 		s.appendDelegationEvent(messageID, target, &delivery.Receipt{Evidence: surface.EvidenceFailed, SessionID: target.ID, TurnID: turnID}, stage+"-failed")
 		_ = s.save()
@@ -774,7 +854,7 @@ func (s *Service) speakDelegation(attemptID, messageID string, target *surface.S
 
 func (s *Service) recordDelegationFailure(attemptID, messageID, targetID string, err error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.unlock()
 	if s.state.State.AttemptID != attemptID || s.state.State.Target == nil || s.state.State.Target.ID != targetID {
 		return
 	}
@@ -854,35 +934,48 @@ func (s *Service) observe() {
 	if s.running {
 		return
 	}
-	s.running = true
-	go func() {
+	s.running = s.spawn(func() {
 		ticks, stop := s.clock.ticker()
 		defer stop()
-		for range ticks {
+		for {
+			select {
+			case <-s.background.Done():
+				s.mu.Lock()
+				s.running = false
+				s.unlock()
+				return
+			case _, open := <-ticks:
+				if !open {
+					s.mu.Lock()
+					s.running = false
+					s.unlock()
+					return
+				}
+			}
 			s.mu.Lock()
 			if !s.active() {
 				s.running = false
-				s.mu.Unlock()
+				s.unlock()
 				return
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			ctx, cancel := context.WithTimeout(s.background, 8*time.Second)
 			err := s.poll(ctx)
 			cancel()
 			if err != nil {
 				s.state.State.Message = "Voice event connection interrupted: " + err.Error()
 			}
-			if s.clock.now().Sub(s.lastSeen) > 40*time.Second {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > 40*time.Second {
+				ctx, cancel := context.WithTimeout(s.background, 10*time.Second)
 				_ = s.apply(ctx, s.state.Owner, Action{Action: "stop", AttemptID: s.state.State.AttemptID})
 				cancel()
 				s.state.State.Message = "Phone disconnected; audio hangup requested. Agent work remains in the operator thread."
 				s.running = false
-				s.mu.Unlock()
+				s.unlock()
 				return
 			}
-			s.mu.Unlock()
+			s.unlock()
 		}
-	}()
+	})
 }
 
 func (s *Service) poll(ctx context.Context) error {

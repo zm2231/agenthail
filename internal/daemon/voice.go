@@ -34,6 +34,10 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, d.dispatcher(), func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")
 	}, daemonVoiceStreamProvider{daemon: d})
+	if dashboard.voice != nil {
+		dashboard.voice.Close()
+	}
+	dashboard.voice = s
 	mux.HandleFunc("/api/v1/voice", d.voiceBearerGuard(dashboard, voiceHandler(s)))
 	mux.HandleFunc("/api/v1/voice/peer", d.voiceBearerGuard(dashboard, voicePeerHandler))
 	mux.HandleFunc("/api/voice", dashboard.guard(dashboardVoiceHandler(s, dashboard.token)))

@@ -26,27 +26,48 @@ const (
 )
 
 type Session struct {
-	ID                    string        `json:"id"`
-	Surface               SurfaceKind   `json:"surface"`
-	Name                  string        `json:"name"`
-	Cwd                   string        `json:"cwd"`
-	PID                   int           `json:"pid"`
-	Status                SessionStatus `json:"status"`
-	Transcript            string        `json:"transcript"`
-	HasLocal              bool          `json:"hasLocal"`
-	Source                string        `json:"source,omitempty"`
-	Transport             string        `json:"transport,omitempty"`
-	ConfiguredModel       string        `json:"configuredModel,omitempty"`
-	LastActive            time.Time     `json:"lastActive"`
-	Runtime               *Runtime      `json:"runtime,omitempty"`
-	StreamCursor          uint64        `json:"-"`
-	StreamCursorSet       bool          `json:"-"`
-	TranscriptOffset      int64         `json:"-"`
-	TranscriptOffsetSet   bool          `json:"-"`
-	TranscriptIdentity    string        `json:"-"`
-	CodexPendingEventUser bool          `json:"-"`
-	CodexPendingEventTurn string        `json:"-"`
-	CodexCurrentTurnID    string        `json:"-"`
+	ID                    string          `json:"id"`
+	Surface               SurfaceKind     `json:"surface"`
+	Name                  string          `json:"name"`
+	Cwd                   string          `json:"cwd"`
+	PID                   int             `json:"pid"`
+	Status                SessionStatus   `json:"status"`
+	Transcript            string          `json:"transcript"`
+	HasLocal              bool            `json:"hasLocal"`
+	Source                string          `json:"source,omitempty"`
+	Transport             string          `json:"transport,omitempty"`
+	ConfiguredModel       string          `json:"configuredModel,omitempty"`
+	LastActive            time.Time       `json:"lastActive"`
+	StartedAt             time.Time       `json:"startedAt,omitzero"`
+	Runtime               *Runtime        `json:"runtime,omitempty"`
+	Subagent              *Subagent       `json:"subagent,omitempty"`
+	Subagents             *SubagentRollup `json:"subagents,omitempty"`
+	StreamCursor          uint64          `json:"-"`
+	StreamCursorSet       bool            `json:"-"`
+	TranscriptOffset      int64           `json:"-"`
+	TranscriptOffsetSet   bool            `json:"-"`
+	TranscriptIdentity    string          `json:"-"`
+	CodexPendingEventUser bool            `json:"-"`
+	CodexPendingEventTurn string          `json:"-"`
+	CodexCurrentTurnID    string          `json:"-"`
+}
+
+// Subagent identifies a session spawned by another session. RootID is the
+// family's top-level session: the single destination for messages sent to the
+// family. Depth counts spawn hops from the root, so a direct child is 1.
+type Subagent struct {
+	ParentID string `json:"parentId"`
+	RootID   string `json:"rootId"`
+	Depth    int    `json:"depth"`
+	Nickname string `json:"nickname,omitempty"`
+	Role     string `json:"role,omitempty"`
+}
+
+// SubagentRollup summarizes subagents a provider observes for a session
+// without exposing them as sessions of their own (Claude Code subagents).
+type SubagentRollup struct {
+	Count   int `json:"count"`
+	Working int `json:"working"`
 }
 
 type SessionSearchResult struct {
@@ -359,6 +380,8 @@ type Exchange struct {
 
 type StreamEvent struct {
 	Role             string        `json:"role,omitempty"`
+	Origin           string        `json:"origin,omitempty"`
+	Sender           string        `json:"sender,omitempty"`
 	Title            string        `json:"title,omitempty"`
 	Status           string        `json:"status,omitempty"`
 	CallID           string        `json:"callId,omitempty"`
@@ -519,6 +542,16 @@ type Surface interface {
 // exact active turn selected by the caller.
 type TurnInterrupter interface {
 	InterruptTurn(context.Context, *Session, string) error
+}
+
+// LocalStatusSource lets the catalog follow a listed session's status between
+// discovery passes from local files alone, without provider calls.
+// LocalStatusFiles names the files whose change can change the status;
+// LocalStatus re-derives Status and LastActive from them by the same rule List
+// applies, so a discovery pass never reverts a status the files still support.
+type LocalStatusSource interface {
+	LocalStatusFiles(session Session) []string
+	LocalStatus(ctx context.Context, session Session) (Session, error)
 }
 
 // CatalogListCompleteness declares whether a successful List result is a

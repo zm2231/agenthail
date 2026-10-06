@@ -77,6 +77,7 @@ func (d *Daemon) writeSessionStream(w http.ResponseWriter, r *http.Request, flus
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
+	writeSSEOpen(w)
 	watermark := window.LatestSeq
 	if watermark < after {
 		watermark = after

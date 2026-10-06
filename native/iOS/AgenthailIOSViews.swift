@@ -121,7 +121,7 @@ struct MainTabs: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .agenthailNotificationOpened)) { notification in
             guard let sessionID = notification.object as? String else { return }
-            model.openNotification(sessionID)
+            model.openSession(sessionID)
             selection = 0
         }
     }
@@ -203,22 +203,24 @@ struct ConversationListView: View {
     @State private var showingNewSession = false
     @State private var search = ""
     @State private var collapsedWorkspaces: Set<String> = []
+    @State private var expandedFamilies: Set<String> = []
 
     private enum SessionScope: String, CaseIterable {
         case running = "Running", recent = "Recent", all = "All"
     }
 
-    private var sessions: [SessionState] {
-        let source = model.snapshot?.sessions ?? []
-        return source.filter { session in
-            let matchesScope = scope == .all || (scope == .running ? session.isWorking : session.current)
-            let matchesSearch = search.isEmpty || session.displayName.localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
+    private var families: [SessionFamily] {
+        SessionFamilies.build(model.snapshot?.sessions ?? []).filter { family in
+            let matchesScope = scope == .all || (scope == .running ? family.isWorking : family.isCurrent)
+            let matchesSearch = search.isEmpty || family.sessions.contains { session in
+                session.displayName.localizedCaseInsensitiveContains(search) || SessionFamilies.label(session).localizedCaseInsensitiveContains(search) || session.surface.localizedCaseInsensitiveContains(search) || (session.cwd?.localizedCaseInsensitiveContains(search) ?? false)
+            }
             return matchesScope && matchesSearch
         }
     }
 
     private var workspaces: [WorkspaceGroup] {
-        WorkspaceHierarchy.groups(for: sessions.map { $0.cwd ?? "" })
+        WorkspaceHierarchy.groups(for: families.map { $0.root.cwd ?? "" })
     }
 
     var body: some View {
@@ -241,7 +243,7 @@ struct ConversationListView: View {
                 let workspace = group.path
                 Section {
                     if !collapsedWorkspaces.contains(workspace) {
-                        ForEach(sessions.filter { WorkspaceHierarchy.normalize($0.cwd ?? "") == workspace }) { session in sessionButton(session) }
+                        ForEach(families.filter { WorkspaceHierarchy.normalize($0.root.cwd ?? "") == workspace }) { family in familyRows(family) }
                     }
                 } header: {
                     Button {
@@ -272,7 +274,7 @@ struct ConversationListView: View {
                     .accessibilityIdentifier("workspace-" + workspace)
                 }
             }
-            if sessions.isEmpty && !model.searching {
+            if families.isEmpty && !model.searching {
                 ContentUnavailableView {
                     Label(scope == .running ? "No agents working" : "No sessions here", systemImage: "bubble.left.and.bubble.right")
                 } description: {
@@ -286,7 +288,7 @@ struct ConversationListView: View {
                 Section("From saved history") {
                     if model.searching { ProgressView("Searching") }
                     if let error = model.searchError { Text(error).font(.footnote).foregroundStyle(.secondary) }
-                    ForEach(model.searchResults.filter { result in !sessions.contains(where: { $0.id == result.id }) }) { result in
+                    ForEach(model.searchResults.filter { result in !families.contains(where: { $0.contains(result.id) }) }) { result in
                         sessionButton(result.session, snippet: result.snippet)
                     }
                 }
@@ -308,11 +310,40 @@ struct ConversationListView: View {
         .refreshable { await model.refresh(fresh: true) }
     }
 
-    private func sessionButton(_ session: SessionState, snippet: String? = nil) -> some View {
+    @ViewBuilder
+    private func familyRows(_ family: SessionFamily) -> some View {
+        let expanded = !family.members.isEmpty && (expandedFamilies.contains(family.id) || family.members.contains { $0.id == selectedID })
+        sessionButton(family.root, family: family)
+        if !family.members.isEmpty {
+            Button { toggle(family) } label: {
+                Label(expanded ? "Hide subagents" : "Show \(family.members.count == 1 ? "1 subagent" : "\(family.members.count) subagents")",
+                      systemImage: expanded ? "chevron.down" : "chevron.right")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 16)
+            .accessibilityIdentifier("subagents-" + family.id)
+        }
+        if expanded {
+            ForEach(family.members) { member in
+                sessionButton(member.session, title: SessionFamilies.label(member.session))
+                    .padding(.leading, CGFloat(member.depth) * 16)
+            }
+        }
+    }
+
+    private func toggle(_ family: SessionFamily) {
+        if !expandedFamilies.insert(family.id).inserted { expandedFamilies.remove(family.id) }
+    }
+
+    private func sessionButton(_ session: SessionState, title: String? = nil, family: SessionFamily? = nil, snippet: String? = nil) -> some View {
         Button { openSession(session.id) } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
-                    IOSSessionRow(session: session)
+                    IOSSessionRow(session: session, title: title, family: family)
                     if let snippet, !snippet.isEmpty {
                         Text(snippet).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
@@ -384,7 +415,9 @@ struct SessionScreen: View {
     @State private var atLatest = true
     @State private var userScrolling = false
 
-    private var displayTitle: String { SessionStyle.title(session) }
+    private var displayTitle: String {
+        session.subagent == nil ? SessionStyle.title(session) : SessionFamilies.title(session, in: model.snapshot?.sessions ?? [])
+    }
 
     private var detail: SessionDetail? {
         model.selectedDetail?.session.id == session.id ? model.selectedDetail : nil
@@ -493,7 +526,12 @@ struct SessionScreen: View {
             }
             .refreshable { await model.refreshSession(session.id) }
             .safeAreaInset(edge: .top, spacing: 0) {
-                if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+                VStack(spacing: 0) {
+                    if let detail { SessionSummary(detail: detail) { showingInfo = true } }
+                    if let note = SharedConversation.note(session) {
+                        SharedConversationNote(note: note, peers: SharedConversation.peers(session), onOpen: model.openSession)
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
@@ -829,13 +867,14 @@ struct IOSTimelineRow: View {
 
     private var messageLabel: String {
         if item.role == "user" { return "You" }
+        if item.isPeerMessage { return item.peerLabel }
         if item.role == "system" || item.role == "developer" { return "Context" }
         if item.title.contains("commentary") { return "Update" }
         if item.title.contains("analysis") { return "Reasoning" }
         return "Assistant"
     }
     private var eventLabel: String {
-        let title = item.title.replacingOccurrences(of: "_", with: " ").capitalized
+        let title = [item.title.replacingOccurrences(of: "_", with: " ").capitalized, item.status ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
         return item.text.isEmpty ? title : "\(title) · \(item.text)"
     }
     private var shortened: some View {
@@ -929,6 +968,38 @@ struct SessionSummary: View {
     }
 }
 
+struct SharedConversationNote: View {
+    let note: String
+    let peers: [SharedProcess]
+    let onOpen: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(note, systemImage: "square.on.square")
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(peers) { peer in
+                HStack {
+                    if peers.count > 1 { Text(SharedConversation.peerLabel(peer)).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    Button("Open other") { onOpen(peer.id) }
+                        .font(.footnote.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .accessibilityLabel(SharedConversation.openLabel(peer))
+                        .accessibilityIdentifier("open-shared-" + peer.id)
+                }
+            }
+        }
+        .font(.footnote)
+        .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("shared-conversation-note")
+    }
+}
+
 struct SessionInspector: View {
     @ObservedObject var model: AgenthailIOSModel
     let session: SessionState
@@ -974,7 +1045,7 @@ struct SessionInspector: View {
                     NavigationLink {
                         QueueListView(model: model, sessionID: session.id) { id in
                             dismiss()
-                            model.openNotification(id)
+                            model.openSession(id)
                         }
                     } label: { Label("Session inbox", systemImage: "tray") }
                 }
@@ -1007,7 +1078,12 @@ struct SessionInspector: View {
                     Section("Claude subagents") {
                         ForEach(links) { link in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                HStack {
+                                    Text(link.agentType.flatMap { $0.isEmpty ? nil : $0 } ?? link.agentId).font(.body.weight(.medium)).textSelection(.enabled)
+                                    Spacer(minLength: 0)
+                                    if link.working == true { Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent) }
+                                }
+                                if let description = link.description, !description.isEmpty { Text(description).font(.subheadline).foregroundStyle(.secondary) }
                                 if !link.transcriptPath.isEmpty { Text(link.transcriptPath).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled) }
                             }
                         }
@@ -1066,25 +1142,34 @@ func formatGoalDuration(_ seconds: Int) -> String {
 
 extension ISO8601DateFormatter {
     static func sessionDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        (try? fractionalSessionDate.parse(value)) ?? (try? wholeSecondSessionDate.parse(value))
     }
+
+    private static let fractionalSessionDate = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecondSessionDate = Date.ISO8601FormatStyle()
 }
 
 struct IOSSessionRow: View {
     let session: SessionState
+    var title: String? = nil
+    var family: SessionFamily? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    private var title: String {
-        SessionStyle.title(session)
+    private var displayTitle: String {
+        title ?? SessionStyle.title(session)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.body.weight(.medium)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
+            Text(displayTitle).font(.body.weight(.medium)).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2).foregroundStyle(.primary)
             let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
             layout {
                 Text(SessionStyle.agentName(session.surface)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if let shared = SharedConversation.badge(session) {
+                    Text(shared)
+                        .font(.caption.monospaced().weight(.semibold))
+                        .foregroundStyle(SessionStyle.accent)
+                        .accessibilityLabel(SharedConversation.badgeLabel(session))
+                }
                 if session.isWorking {
                     Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
                 }
@@ -1093,8 +1178,13 @@ struct IOSSessionRow: View {
                     Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if session.queueCount > 0 || session.isReadOnly {
+            if session.queueCount > 0 || session.isReadOnly || (family?.subagentCount ?? 0) > 0 {
                 layout {
+                    if let family, family.subagentCount > 0 {
+                        Label(SessionFamilies.subagentSummary(family), systemImage: "person.2")
+                            .font(.caption)
+                            .foregroundStyle(family.workingSubagents > 0 ? SessionStyle.accent : .secondary)
+                    }
                     if session.queueCount > 0 { Label("\(session.queueCount) waiting", systemImage: "tray").font(.caption) }
                     if session.isReadOnly { Label("Read only", systemImage: "lock").font(.caption) }
                 }.foregroundStyle(.secondary)

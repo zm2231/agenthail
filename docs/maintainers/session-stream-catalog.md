@@ -16,11 +16,19 @@ and `q` filters plus a stable page cursor, and returns saved rows plus
 Each row retains the existing session summary fields and adds
 `hostProject` (`id`, `displayName`, and `commonDir` or `path`), `checkout`
 (`id`, `path`, `branch` or `detachedHead`, `isMain`, and `dirty`), and
-`freshness` (`generation`, `observedAt`, and `stale`). A failed
+`freshness` (`generation`, `observedAt`, and `stale`). A Claude row whose
+transcript is open in other live processes adds `sharedWith`: one entry per
+other row (`id`, `name`, `pid`, `status`, `startedAt`), ordered by process
+start, and omitted when only one process has the conversation open. Discovery
+republishes every row of the conversation when a process opens or closes, the
+status pass republishes them when one changes status, and `/api/v1/session`
+returns the same `sharedWith`. A failed
 Git query records typed unavailable identity and never hides the session. A
 surface discoverer performs provider `List` calls in the background and emits
 full-row `session.upserted`, `session.removed`, `session.unavailable`, and
-`surface.health` catalog deltas. A proven delivery problem is one idempotent
+`surface.health` catalog deltas. A status pass publishes a session's busy or
+idle transition from its local status files within about a second, between
+discovery passes (see `catalog-bounded-freshness.md`). A proven delivery problem is one idempotent
 `delivery.problem` catalog event with `deliveryId`, target and source session
 IDs, bounded message or body reference, reason and timestamp; it is committed
 with the delivery failure/notice state. Every queue mutation that changes a
@@ -67,6 +75,8 @@ timestamp, and the persisted status/evidence fields. `POST /api/action` with
 problem dismissed; the operation is idempotent and never resends the message.
 
 `GET /api/v1/session?id=<id>` returns a bounded page from the session journal.
+When `id` is not a session ID, an exact, case-sensitive handle (with or
+without `@`) is accepted, matching CLI target resolution; the response always carries the resolved session ID.
 `GET /api/v1/session-stream?id=<id>&after=<sessionSeq>` is an SSE view over the
 same journal. `Last-Event-ID` is accepted as the same per-session cursor.
 Replay emits entries strictly after the cursor. When retention cannot satisfy a
@@ -85,6 +95,24 @@ expires with journal retention; it never names a host path. A source failure
 does not advance that item's provider cursor or body state, so a replay of the
 same provider cursor is persisted. A provider absence or partial read never deletes
 historical journal content.
+
+Claude records prompts it injected on the user's behalf as user-role records
+with an `origin.kind`. Only `human` prompts, and legacy records with no origin
+that are not a task notification envelope, are user messages. The others carry
+`origin` on the session event and timeline item:
+
+- `task-notification`: `kind` `event`, `role` `system`, `body` the summary,
+  `status` the task status, `callId` the tool use that started the task. The
+  item ID is `task-notification:<task-id>:<status>`.
+- `peer`: `kind` `message`, `role` `peer`, `sender` the sending agent's name,
+  `body` the message without its envelope. The item ID is `peer:<msg_id>`.
+- `auto-continuation` and any other origin: `kind` `event`, `role` `system`.
+
+A notification or peer message queued into a running turn is also recorded as
+a `queued_command` attachment. Both copies share the item ID above, so the
+journal and timeline pages show it once. Queued human prompts are not rendered
+from the attachment. Turn and exchange boundaries are unchanged, so delivery
+reconciliation still sees every injected prompt as the turn's input.
 
 Body range reads use byte offsets with UTF-8 boundaries: `start` must begin at
 a code-point boundary, while `end` is reduced to the preceding boundary when
@@ -138,7 +166,7 @@ retained sequence bounds so the client can reload from the retained window.
 Missing sessions return `404`; unavailable session content returns a typed
 availability error without synthesizing history. Every stream validates the
 initial device scope and rechecks it before writing events or keepalives; a
-revoked device stream closes. The implementation records uncertain provider
+revoked device stream closes. Each stream writes a `: connected` comment as soon as it opens, before any replay, because clients such as URLSession return a streaming response only once body bytes arrive. The implementation records uncertain provider
 effects for reconciliation but never blindly retries external actions.
 
 ## Behavioral checks

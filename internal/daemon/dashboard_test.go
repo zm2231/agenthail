@@ -11,8 +11,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,17 +56,31 @@ func readDashboardState(t *testing.T, handler http.Handler) dashboardState {
 
 type dashboardClaudeRunSurface struct {
 	*daemonSurface
-	runs  []surface.ClaudeRunObservation
-	links []surface.ClaudeSubagentLink
+	runs        []surface.ClaudeRunObservation
+	links       []surface.ClaudeSubagentLink
+	linkParents []string
 }
 
 func (s *dashboardClaudeRunSurface) ObserveClaudeRuns(context.Context) ([]surface.ClaudeRunObservation, error) {
 	return s.runs, nil
 }
 
-func (s *dashboardClaudeRunSurface) ObserveClaudeSubagentLinks(context.Context) ([]surface.ClaudeSubagentLink, error) {
+func (s *dashboardClaudeRunSurface) ObserveClaudeSubagents(_ context.Context, session *surface.Session) ([]surface.ClaudeSubagentLink, error) {
+	s.linkParents = append(s.linkParents, session.ID+" "+session.Transcript)
+	var links []surface.ClaudeSubagentLink
+	for _, link := range s.links {
+		if link.ParentSessionID == session.ID {
+			links = append(links, link)
+		}
+	}
+	return links, nil
+}
+
+func (s *dashboardClaudeRunSurface) ObserveAllClaudeSubagents(context.Context) ([]surface.ClaudeSubagentLink, error) {
 	return s.links, nil
 }
+
+var _ surface.ClaudeRunObserver = (*dashboardClaudeRunSurface)(nil)
 
 type sessionPageReadProbe struct {
 	*daemonSurface
@@ -186,6 +202,7 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 	_, registry, _, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
 	from.ID = "claude-session"
+	from.Transcript = "/projects/encoded-cwd/transcript-1.jsonl"
 	if err := registry.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +224,41 @@ func TestDashboardSessionMetadataExposesValidatedClaudeRunObservations(t *testin
 	}
 	if len(body.Runs) != 1 || body.Runs[0].JobID != "job-1" || len(body.Links) != 1 || body.Links[0].AgentID != "agent-1" {
 		t.Fatalf("body=%+v", body)
+	}
+	if want := []string{from.ID + " " + from.Transcript}; !reflect.DeepEqual(fake.linkParents, want) {
+		t.Fatalf("subagent reads=%q, want only %q", fake.linkParents, want)
+	}
+}
+
+func TestDashboardSessionResolvesExactAlias(t *testing.T) {
+	d, registry, _, _, _ := daemonFixture(t)
+	if err := registry.SetAlias("reviewer", "from"); err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{"reviewer", "@reviewer"} {
+		response := httptest.NewRecorder()
+		d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+url.QueryEscape(reference), nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: status=%d body=%s", reference, response.Code, response.Body.String())
+		}
+		var body struct {
+			Session struct {
+				ID string `json:"id"`
+			} `json:"session"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Session.ID != "from" {
+			t.Fatalf("%s: resolved %q", reference, body.Session.ID)
+		}
+	}
+	for _, reference := range []string{"revi", "@Reviewer"} {
+		response := httptest.NewRecorder()
+		d.dashboardSessionHandler(response, httptest.NewRequest(http.MethodGet, "/api/session?id="+url.QueryEscape(reference), nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s: status=%d", reference, response.Code)
+		}
 	}
 }
 
@@ -438,6 +490,15 @@ func TestDashboardAliasesAndRealiasesSession(t *testing.T) {
 	}
 	if response := setAlias("shipper"); response.Code != http.StatusOK {
 		t.Fatalf("second alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := registry.SetAlias("taken", "to"); err != nil {
+		t.Fatal(err)
+	}
+	if response := setAlias("@taken"); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "@taken is already used by another session") {
+		t.Fatalf("taken alias status=%d body=%s", response.Code, response.Body.String())
+	}
+	if owner, err := registry.LookupAlias("taken"); err != nil || owner != "to" {
+		t.Fatalf("taken alias moved: owner=%q err=%v", owner, err)
 	}
 	if _, err := registry.LookupAlias("reviewer"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("old alias still resolves: %v", err)

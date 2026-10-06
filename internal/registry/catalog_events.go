@@ -67,7 +67,7 @@ func (r *Registry) EnsureCatalogState() error {
 }
 
 func (r *Registry) CatalogState() (string, uint64, error) {
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return "", 0, err
 	}
@@ -152,7 +152,7 @@ func (r *Registry) CatalogEventsAfter(after uint64, limit int) (CatalogEventWind
 	if limit < 1 {
 		return CatalogEventWindow{Events: []CatalogEvent{}}, nil
 	}
-	tx, err := r.db.Begin()
+	tx, err := r.read.Begin()
 	if err != nil {
 		return CatalogEventWindow{}, err
 	}
@@ -227,12 +227,20 @@ func (r *Registry) BeginSessionJournalSource(sessionID string) (string, error) {
 }
 
 func (r *Registry) catalogHostEpoch(create bool) (string, error) {
+	var epoch string
+	err := r.read.QueryRow(`SELECT host_epoch FROM catalog_state WHERE id=1`).Scan(&epoch)
+	if err == nil {
+		return epoch, nil
+	}
+	if err != sql.ErrNoRows || !create {
+		return "", err
+	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
-	epoch, err := catalogHostEpochTx(tx, create)
+	epoch, err = catalogHostEpochTx(tx, create)
 	if err != nil {
 		return "", err
 	}

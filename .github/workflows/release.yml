@@ -68,7 +68,7 @@ jobs:
   macos-package:
     needs: guard
     if: needs.guard.outputs.run == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5

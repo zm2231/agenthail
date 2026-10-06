@@ -52,7 +52,17 @@ cat >"$OUTPUT/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>APP_VERSION</string>
   <key>CFBundleVersion</key><string>APP_BUILD</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSServices</key><array><dict>
+    <key>NSMenuItem</key><dict><key>default</key><string>Send to Agenthail</string></dict>
+    <key>NSMessage</key><string>sendToAgenthail</string>
+    <key>NSPortName</key><string>Agenthail</string>
+    <key>NSSendTypes</key><array><string>public.utf8-plain-text</string></array>
+  </dict></array>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>com.agenthail.app</string>
+    <key>CFBundleURLSchemes</key><array><string>agenthail</string></array>
+  </dict></array>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><true/>
   <key>NSUserNotificationAlertStyle</key><string>alert</string>
 </dict></plist>
@@ -79,20 +89,19 @@ cp "$MENU_ICON_2X_SOURCE" "$OUTPUT/Contents/Resources/AgenthailMenuBarIcon@2x.pn
 
 cp "$CLI_SOURCE" "$OUTPUT/Contents/Resources/agenthail"
 "$ROOT/scripts/codesign-with-retry.sh" --force --options runtime --sign "$IDENTITY" "$OUTPUT/Contents/Resources/agenthail"
-/usr/bin/swiftc -parse-as-library -O -target "${ARCH}-apple-macos13.0" \
-	"$ROOT/native/AgenthailApp.swift" \
-	"$ROOT/native/DuplicateApplicationPolicy.swift" \
-	"$ROOT/native/ResponsivePairLayout.swift" \
-	"$ROOT/native/StatusRefreshPolicy.swift" \
-	"$ROOT/native/AgenthailModels.swift" \
-	"$ROOT/native/TurnSettings.swift" \
-	"$ROOT/native/AgenthailAPI.swift" \
-	"$ROOT/native/SessionSelection.swift" \
-	"$ROOT/native/EventRetryBackoff.swift" \
-	"$ROOT/native/OperationsRefreshPolicy.swift" \
-	"$ROOT/native/AgenthailModel.swift" \
-	"$ROOT/native/AgenthailViews.swift" \
-	-o "$OUTPUT/Contents/MacOS/Agenthail"
+SWIFT_ARCH="$ARCH"
+[ "$SWIFT_ARCH" = "amd64" ] && SWIFT_ARCH="x86_64"
+# Dependencies must share the app's deployment target, or mismatched async specializations abort (swiftlang/swift#86204).
+# Swift Build reads it from --triple, the native build system from -Xswiftc -target.
+SWIFT_TARGET="$SWIFT_ARCH-apple-macosx15.0"
+SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --triple "$SWIFT_TARGET" -Xswiftc -target -Xswiftc "$SWIFT_TARGET")
+SWIFT_BIN="$("${SWIFT_BUILD[@]}" --show-bin-path)"
+rm -rf "$SWIFT_BIN"/*.bundle
+"${SWIFT_BUILD[@]}" --product AgenthailMac >/dev/null
+cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
+for bundle in "$SWIFT_BIN"/*.bundle; do
+	cp -R "$bundle" "$OUTPUT/Contents/Resources/"
+done
 "$ROOT/scripts/codesign-with-retry.sh" --force --deep --options runtime --sign "$IDENTITY" "$OUTPUT"
 codesign --verify --deep --strict --verbose=2 "$OUTPUT"
 echo "$OUTPUT"

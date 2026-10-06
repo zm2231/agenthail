@@ -1,12 +1,25 @@
 import AppKit
 import Combine
+import CoreSpotlight
 import Darwin
+import KeyboardShortcuts
 import ServiceManagement
 import SwiftUI
 import UserNotifications
 
 private let notificationCategory = "AGENTHAIL_COMPLETION"
+private let sessionNotificationCategory = "AGENTHAIL_SESSION"
 private let openDashboardAction = "OPEN_DASHBOARD"
+private let replyAction = "REPLY"
+
+private func registerNotificationCategories(_ center: UNUserNotificationCenter) {
+    let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
+    let reply = UNTextInputNotificationAction(identifier: replyAction, title: "Reply", textInputButtonTitle: "Send", textInputPlaceholder: "Message")
+    center.setNotificationCategories([
+        UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: []),
+        UNNotificationCategory(identifier: sessionNotificationCategory, actions: [reply, open], intentIdentifiers: []),
+    ])
+}
 
 private struct NotificationState: Codable {
     let available: Bool
@@ -17,7 +30,7 @@ private struct NotificationState: Codable {
     let error: String?
 }
 
-private enum NativeCommand {
+enum NativeCommand {
     static func run(_ arguments: [String]) -> Int32 {
         guard let command = arguments.first else { return 64 }
         switch command {
@@ -93,13 +106,17 @@ private enum NativeCommand {
             return 64
         }
         let center = UNUserNotificationCenter.current()
-        let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
-        center.setNotificationCategories([UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: [])])
+        registerNotificationCategories(center)
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = message
         content.sound = .default
         content.categoryIdentifier = notificationCategory
+        if let sessionID = values["session"], !sessionID.isEmpty {
+            content.userInfo = ["sessionId": sessionID]
+            content.threadIdentifier = sessionID
+            content.categoryIdentifier = sessionNotificationCategory
+        }
         let request = UNNotificationRequest(identifier: values["identifier"] ?? UUID().uuidString, content: content, trigger: nil)
         let semaphore = DispatchSemaphore(value: 0)
         var sendError: Error?
@@ -204,12 +221,69 @@ private enum NativeCommand {
 
 private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var duplicateTimer: Timer?
+    weak var model: AgenthailModel?
+
+    @MainActor
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType,
+              let sessionID = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return false }
+        NotificationRoute.shared.open(sessionID: sessionID)
+        return true
+    }
+
+    @MainActor
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard let model else { return nil }
+        let menu = NSMenu()
+        for section in SessionMenuSection.build(model) {
+            if menu.numberOfItems > 0 { menu.addItem(.separator()) }
+            let header = NSMenuItem(title: section.title, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for session in section.sessions {
+                let item = NSMenuItem(title: SessionMenuSection.label(session, in: model.knownSessions), action: #selector(openSession(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = session.id
+                menu.addItem(item)
+            }
+        }
+        return menu
+    }
+
+    @MainActor
+    @objc private func openSession(_ item: NSMenuItem) {
+        guard let sessionID = item.representedObject as? String else { return }
+        NotificationRoute.shared.open(sessionID: sessionID)
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleURLEvent(_:reply:)), forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    @MainActor
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              let url = URL(string: text),
+              let link = AgenthailLink(url: url) else { return }
+        NotificationRoute.shared.open(link)
+    }
+
+    @MainActor
+    @objc func sendToAgenthail(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        guard let text = pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            error.pointee = "There is no text to send." as NSString
+            return
+        }
+        NotificationRoute.shared.share(text)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.servicesProvider = self
+        NSUpdateDynamicServices()
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        let open = UNNotificationAction(identifier: openDashboardAction, title: "Open Agenthail")
-        center.setNotificationCategories([UNNotificationCategory(identifier: notificationCategory, actions: [open], intentIdentifiers: [])])
+        registerNotificationCategories(center)
+        KeyboardShortcuts.onKeyUp(for: .openPalette) { NotificationRoute.shared.showPalette() }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationLaunched(_:)), name: NSWorkspace.didLaunchApplicationNotification, object: nil)
         terminateDuplicateApplications()
         duplicateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -252,83 +326,110 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotifica
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        if response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction {
-            await MainActor.run {
-                let application = NSApplication.shared
-                application.activate(ignoringOtherApps: true)
-                if let window = application.windows.first(where: { $0.canBecomeMain }) {
-                    window.makeKeyAndOrderFront(nil)
-                    return
-                }
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = true
-                NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
-            }
+        let sessionID = response.notification.request.content.userInfo["sessionId"] as? String
+        if response.actionIdentifier == replyAction, let sessionID, let text = (response as? UNTextInputNotificationResponse)?.userText {
+            await MainActor.run { NotificationRoute.shared.reply(text, to: sessionID) }
+            return
         }
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openDashboardAction else { return }
+        await MainActor.run { NotificationRoute.shared.open(sessionID: sessionID) }
     }
 }
 
-enum AgenthailProcess {
-    static func run(_ arguments: [String]) {
-        let process = configuredProcess(arguments)
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
+@MainActor
+final class NotificationRoute: ObservableObject {
+    struct Request: Equatable {
+        let id = UUID()
+        var sessionID: String?
+        var newSession = false
+        var sharedText: String?
+        var reply: String?
+        var palette = false
     }
 
-    static func output(_ arguments: [String]) -> (Int32, String) {
-        let process = configuredProcess(arguments)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (process.terminationStatus, String(decoding: data, as: UTF8.self))
-        } catch {
-            return (1, error.localizedDescription)
+    static let shared = NotificationRoute()
+    @Published private(set) var latest: Request?
+    private var handledID: UUID?
+
+    func open(sessionID: String?) {
+        latest = Request(sessionID: sessionID)
+    }
+
+    func share(_ text: String) {
+        latest = Request(sessionID: nil, sharedText: text)
+    }
+
+    func showPalette() {
+        latest = Request(sessionID: nil, palette: true)
+    }
+
+    func reply(_ text: String, to sessionID: String) {
+        latest = Request(sessionID: sessionID, reply: text)
+    }
+
+    func open(_ link: AgenthailLink) {
+        switch link {
+        case .open: latest = Request(sessionID: nil)
+        case .newSession: latest = Request(sessionID: nil, newSession: true)
+        case .session(let reference): latest = Request(sessionID: reference)
         }
     }
 
-    private static func configuredProcess(_ arguments: [String]) -> Process {
-        let process = Process()
-        process.executableURL = executableURL()
-        process.arguments = arguments
-        var environment = ProcessInfo.processInfo.environment
-        let root = "/Library/Application Support/Agenthail"
-        if FileManager.default.fileExists(atPath: "\(root)/agenthail") {
-            environment["AGENTHAIL_SIDECAR"] = "\(root)/sidecar.py"
-            environment["AGENTHAIL_COOKIE_BRIDGE"] = "\(root)/cookie.mjs"
-            environment["AGENTHAIL_PYTHON"] = "\(root)/runtime/python/bin/python3"
-            environment["AGENTHAIL_MAC_APP"] = Bundle.main.executableURL?.path
-            environment["PYTHONPATH"] = "\(root)/pydeps" + environmentSuffix(environment["PYTHONPATH"])
-            environment["PATH"] = "\(root)/runtime/node/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin" + environmentSuffix(environment["PATH"])
-            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    func claim() -> Request? {
+        guard let latest, latest.id != handledID else { return nil }
+        handledID = latest.id
+        return latest
+    }
+}
+
+private struct MenuBarLabel: View {
+    @ObservedObject var model: AgenthailModel
+    @ObservedObject private var route = NotificationRoute.shared
+    @AppStorage(SpotlightIndex.preferenceKey) private var spotlightSessions = true
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Group {
+            if model.isConnected, let image = MenuBarArtwork.image {
+                Image(nsImage: image)
+                    .accessibilityLabel("Agenthail")
+            } else {
+                Image(systemName: "exclamationmark.triangle")
+                    .accessibilityLabel("Agenthail unavailable")
+            }
         }
-        process.environment = environment
-        return process
+        .onAppear(perform: handleRoute)
+        .onChange(of: route.latest) { handleRoute() }
+        .onChange(of: model.snapshot?.sessions, initial: true) { syncSpotlight() }
+        .onChange(of: spotlightSessions) { syncSpotlight() }
+        .onChange(of: SessionTree.needsYou(model.knownSessions, attentionSessionIDs: model.attentionSessionIDs).count, initial: true) { _, count in
+            NSApplication.shared.dockTile.badgeLabel = count > 0 ? String(count) : nil
+        }
     }
 
-    private static func environmentSuffix(_ value: String?) -> String {
-        guard let value, !value.isEmpty else { return "" }
-        return ":\(value)"
+    private func syncSpotlight() {
+        guard spotlightSessions else {
+            SpotlightIndex.shared.clear()
+            return
+        }
+        if let sessions = model.snapshot?.sessions { SpotlightIndex.shared.update(sessions) }
     }
 
-    private static func executableURL() -> URL {
-        let environment = ProcessInfo.processInfo.environment
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
-            environment["AGENTHAIL_CLI"],
-            Bundle.main.resourceURL?.appendingPathComponent("agenthail").path,
-            "/opt/homebrew/bin/agenthail",
-            "/usr/local/bin/agenthail",
-            "\(home)/.local/bin/agenthail"
-        ].compactMap { $0 }.filter { !$0.isEmpty }
-        if let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return URL(fileURLWithPath: path)
+    private func handleRoute() {
+        guard let request = route.claim() else { return }
+        if let text = request.reply, let sessionID = request.sessionID {
+            Task {
+                guard !(await model.reply(text, to: sessionID)) else { return }
+                NotificationRoute.shared.open(sessionID: sessionID)
+            }
+            return
         }
-        return URL(fileURLWithPath: "/usr/bin/false")
+        if let sessionID = request.sessionID { model.openSession(reference: sessionID) }
+        NSApplication.shared.activate()
+        openWindow(id: "main")
+        if request.newSession { model.newSessionVisible = true }
+        if request.palette { model.paletteVisible = true }
+        if let text = request.sharedText { model.receiveSharedText(text) }
     }
 }
 
@@ -350,27 +451,68 @@ private enum MenuBarArtwork {
     }()
 }
 
+private struct SessionMenuSection: Identifiable {
+    let title: String
+    let sessions: [SessionState]
+    var id: String { title }
+
+    @MainActor
+    static func build(_ model: AgenthailModel, limit: Int = 5) -> [SessionMenuSection] {
+        let attention = model.attentionSessionIDs
+        let tree = SessionTree.build(model.knownSessions, filter: .all, attentionSessionIDs: attention, now: Date())
+        let others = SessionTree.newestFirst(SessionFamilies.build(model.knownSessions).filter { !attention.contains($0.root.id) }, by: SessionTree.activity)
+        return [
+            SessionMenuSection(title: "Needs you", sessions: Array(tree.needsYou.prefix(limit))),
+            SessionMenuSection(title: "Working", sessions: Array(others.filter(\.isWorking).map(\.root).prefix(limit))),
+            SessionMenuSection(title: "Recent", sessions: Array(others.filter { !$0.isWorking }.map(\.root).prefix(limit)))
+        ].filter { !$0.sessions.isEmpty }
+    }
+
+    static func label(_ session: SessionState, in sessions: [SessionState]) -> String {
+        "\(SessionFamilies.title(session, in: sessions))  ·  \(session.surface.capitalized)\(session.isWorking ? "" : "  ·  " + relativeAge(session.lastActive))"
+    }
+}
+
 private struct AgenthailMenuContent: View {
     @ObservedObject var model: AgenthailModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Label(model.isConnected ? "Connected" : "Not connected", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-        Divider()
-        Text("Working: \(model.workingSessions.count.formatted())")
-        Text("Needs attention: \((model.snapshot?.attention.count ?? 0).formatted())")
-        Text("Queued: \((model.snapshot?.queue.count ?? 0).formatted())")
-        Divider()
-        Button("Open Agenthail") {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-            openWindow(id: "main")
+        Label(model.isConnected ? "Connected" : "Agenthail isn't running", systemImage: model.isConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        ForEach(SessionMenuSection.build(model)) { section in
+            Section(section.title) {
+                ForEach(section.sessions) { session in sessionItem(session) }
+            }
         }
-        .keyboardShortcut("o")
+        Divider()
+        Button("New Session…") {
+            open()
+            model.newSessionVisible = true
+        }
+        Button("Open Agenthail") { open() }
+            .keyboardShortcut("o")
+        SettingsLink { Text("Settings…") }
+            .keyboardShortcut(",")
+        Divider()
         Button("Restart Agenthail") { model.restartDaemon() }
         Button("Open Login Item Settings") { _ = NativeCommand.run(["service", "settings"]) }
         Divider()
         Button("Quit Agenthail") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    private func sessionItem(_ session: SessionState) -> some View {
+        Button {
+            model.mainPane.select(session.id)
+            open()
+        } label: {
+            Text(SessionMenuSection.label(session, in: model.knownSessions))
+        }
+    }
+
+    private func open() {
+        NSApplication.shared.activate()
+        openWindow(id: "main")
     }
 }
 
@@ -379,22 +521,32 @@ private struct AgenthailMenuBarApp: App {
     @StateObject private var model = AgenthailModel()
 
     var body: some Scene {
-        WindowGroup("Agenthail", id: "main") {
-            AgenthailRootView(model: model)
-                .frame(minWidth: 720, minHeight: 520)
+        Window("Agenthail", id: "main") {
+            DesktopWindow(model: model)
+                .frame(minWidth: 900, minHeight: 560)
         }
-        .defaultSize(width: 1180, height: 760)
+        .defaultSize(width: 1440, height: 900)
+        .windowStyle(.hiddenTitleBar)
+        .commands { SessionCommands(model: model) }
+
+        WindowGroup("Session", id: "session", for: String.self) { $sessionID in
+            if let sessionID {
+                SessionWindow(model: model, sessionID: sessionID)
+                    .frame(minWidth: 620, minHeight: 480)
+            }
+        }
+        .defaultSize(width: 900, height: 820)
+        .windowStyle(.hiddenTitleBar)
+
+        Settings {
+            DesktopSettings(model: model)
+        }
 
         MenuBarExtra {
             AgenthailMenuContent(model: model)
         } label: {
-            if model.isConnected, let image = MenuBarArtwork.image {
-                Image(nsImage: image)
-                    .accessibilityLabel("Agenthail")
-            } else {
-                Image(systemName: "exclamationmark.triangle")
-                    .accessibilityLabel("Agenthail unavailable")
-            }
+            MenuBarLabel(model: model)
+                .onAppear { appDelegate.model = model }
         }
         .menuBarExtraStyle(.menu)
     }

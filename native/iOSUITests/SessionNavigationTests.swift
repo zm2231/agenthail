@@ -27,6 +27,35 @@ final class SessionNavigationTests: XCTestCase {
     }
 
 
+    func testSharedConversationShowsBadgeNoteAndOpensOtherProcess() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-session", "--preview-app", "--preview-shared"]
+        app.launch()
+        let shared = app.buttons["session-demo"]
+        XCTAssertTrue(shared.waitForExistence(timeout: 10))
+        XCTAssertTrue(shared.label.contains("Open in 2 processes"), shared.label)
+        XCTAssertTrue(app.buttons["session-demo-resumed"].label.contains("Open in 2 processes"))
+        XCTAssertFalse(app.buttons["session-codex-demo"].label.contains("processes"))
+        attach(app, "shared-list")
+        shared.tap()
+        let note = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Also open in pid 41588 (started '")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        XCTAssertTrue(note.label.hasSuffix("Messages here go to this process."), note.label)
+        let open = app.buttons["open-shared-demo-resumed"]
+        XCTAssertEqual(open.label, "Open other process, pid 41588")
+        attach(app, "shared-header")
+        open.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Also open in pid 41017 (started '")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["open-shared-demo"].exists)
+    }
+
+    private func attach(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testSessionOpensAndReturnsToBrowser() {
         let app = XCUIApplication()
         app.launchArguments = ["--preview-session", "--preview-app"]

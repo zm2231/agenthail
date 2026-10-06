@@ -25,6 +25,7 @@ import (
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/voice"
 )
 
 //go:embed dashboard/index.html
@@ -60,6 +61,7 @@ type dashboardServer struct {
 	stateVersion  atomic.Uint64
 	cachedVersion uint64
 	state         dashboardState
+	voice         *voice.Service
 }
 
 func (d *dashboardServer) invalidate() {
@@ -101,6 +103,9 @@ type dashboardSession struct {
 	UnavailableReason string                     `json:"unavailableReason,omitempty"`
 	Runtime           *surface.Runtime           `json:"runtime,omitempty"`
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
+	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
+	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
+	SharedWith        []dashboardSharedSession   `json:"sharedWith,omitempty"`
 }
 
 type dashboardState struct {
@@ -229,7 +234,11 @@ func (d *dashboardServer) shutdown() error {
 	if d.cancel != nil {
 		d.cancel()
 	}
-	return d.server.Close()
+	err := d.server.Close()
+	if d.voice != nil {
+		d.voice.Close()
+	}
+	return err
 }
 
 func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
@@ -331,7 +340,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if !GetNotificationStatus().Enabled {
 			err = fmt.Errorf("desktop notifications are not enabled")
 		} else {
-			err = Notify("Agenthail", "Notifications are working")
+			err = Notify("Agenthail", "Notifications are working", "")
 		}
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)
@@ -829,6 +838,8 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			var saved dashboardSession
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
 				entry.Open = saved.Open
+				entry.Subagents = saved.Subagents
+				entry.SharedWith = saved.SharedWith
 			}
 		}
 		entry.QueueCount = counts[session.ID]
@@ -1568,7 +1579,12 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "name must be 1 to 80 characters without spaces, /, or #", http.StatusBadRequest)
 			return
 		}
-		if err := d.Registry.ReplaceAlias(alias, session.ID); err != nil {
+		if err := d.Registry.SetAlias(alias, session.ID); err != nil {
+			var taken registry.AliasTakenError
+			if errors.As(err, &taken) {
+				http.Error(w, fmt.Sprintf("@%s is already used by another session", alias), http.StatusConflict)
+				return
+			}
 			http.Error(w, fmt.Sprintf("name conversation: %s", err), http.StatusBadRequest)
 			return
 		}
@@ -1826,6 +1842,11 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	}
 	session, err := d.Registry.Session(sessionID)
 	if err != nil {
+		if aliased, aliasErr := d.Registry.LookupAlias(strings.TrimPrefix(sessionID, "@")); aliasErr == nil {
+			session, err = d.Registry.Session(aliased)
+		}
+	}
+	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -1887,6 +1908,13 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	response["journalSeq"] = sessionRead.JournalSeq
+	if session.Surface == surface.KindClaude {
+		if shared, err := d.savedSharedSessions(session.ID); err != nil {
+			d.log.Printf("session %s shared processes: %s", d.resolveDisplay(session.ID), err)
+		} else if len(shared) > 0 {
+			response["sharedWith"] = shared
+		}
+	}
 	if sessionReadErr != nil {
 		response["readError"] = "Session journal could not be read."
 	} else if sessionRead.UnavailableReason != "" {
@@ -1941,14 +1969,11 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 			return filtered, err
 		}
 		requests["claudeSubagents"] = func() (any, error) {
-			links, err := observer.ObserveClaudeSubagentLinks(ctx)
-			filtered := []surface.ClaudeSubagentLink{}
-			for _, link := range links {
-				if link.ParentSessionID == session.ID {
-					filtered = append(filtered, link)
-				}
+			links, err := observer.ObserveClaudeSubagents(ctx, session)
+			if links == nil {
+				links = []surface.ClaudeSubagentLink{}
 			}
-			return filtered, err
+			return links, err
 		}
 	}
 	response := map[string]any{"sessionId": session.ID}

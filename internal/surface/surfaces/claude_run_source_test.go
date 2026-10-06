@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -102,40 +101,5 @@ func TestObserveClaudeRunsRejectsMalformedProviderTimestamp(t *testing.T) {
 	}
 	if _, err := ObserveClaudeRuns(context.Background(), home); err == nil {
 		t.Fatal("expected malformed timestamp error")
-	}
-}
-
-func TestObserveClaudeSubagentLinksValidatesPathAndRecord(t *testing.T) {
-	home := t.TempDir()
-	parentID := "parent-session"
-	agentID := "a123"
-	path := filepath.Join(home, ".claude", "projects", "encoded-cwd", parentID, "subagents", "agent-"+agentID+".jsonl")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"type":"user","sessionId":"parent-session","agentId":"a123","message":{"content":"waiting for something"}}`+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ObserveClaudeSubagentLinks(context.Background(), home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []ClaudeSubagentLink{{ParentSessionID: parentID, AgentID: agentID, TranscriptPath: path}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("links=%+v want=%+v", got, want)
-	}
-}
-
-func TestObserveClaudeSubagentLinksRejectsMismatchedIdentity(t *testing.T) {
-	home := t.TempDir()
-	path := filepath.Join(home, ".claude", "projects", "encoded-cwd", "parent-session", "subagents", "agent-a123.jsonl")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"sessionId":"other-session","agentId":"a123"}`+"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ObserveClaudeSubagentLinks(context.Background(), home); err == nil {
-		t.Fatal("expected mismatched identity error")
 	}
 }

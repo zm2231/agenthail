@@ -232,7 +232,7 @@ func emitCodexTranscriptItem(session *surface.Session, uuid string, record map[s
 	if item.Kind == "done" {
 		operation = "phase"
 	}
-	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
+	onEvent(surface.StreamEvent{ID: key, ProviderKey: key, Version: uint64(len(item.Text)), Operation: operation, Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 }
 
 func codexRecordTurnID(record map[string]any) string {
@@ -448,7 +448,9 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		}
 		for i := range items {
 			if source == "claude" {
-				items[i].ID = stableTimelineItemID(offset, line, i)
+				if items[i].ID == "" {
+					items[i].ID = stableTimelineItemID(offset, line, i)
+				}
 			} else if source == "codex" {
 				items[i].ID = codexTranscriptItemKey(record, items[i], i)
 				if items[i].Kind == "event" {
@@ -526,11 +528,18 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 		pageStart = exchangeOffsets[len(exchangeOffsets)-limit]
 		result.NextBefore = pageStart
 	}
+	seen := map[string]bool{}
 	for i := len(groups) - 1; i >= 0; i-- {
 		if groupOffsets[i] < pageStart {
 			continue
 		}
-		result.Items = append(result.Items, groups[i]...)
+		for _, item := range groups[i] {
+			if seen[item.ID] {
+				continue
+			}
+			seen[item.ID] = true
+			result.Items = append(result.Items, item)
+		}
 	}
 	return result, nil
 }
@@ -766,10 +775,21 @@ func claudeTimelineItems(record map[string]any) []surface.TimelineItem {
 		}
 		return nil
 	}
+	if kind == "attachment" {
+		return claudeQueuedCommandItems(record)
+	}
 	if kind != "user" && kind != "assistant" {
 		return nil
 	}
 	message, _ := record["message"].(map[string]any)
+	if kind == "user" {
+		origin, _ := record["origin"].(map[string]any)
+		if text := claudeMessageText(message["content"]); text != "" && str(message, "tool_use_id") == "" {
+			if injected := claudePromptOrigin(origin, text); injected != claudeOriginHuman {
+				return []surface.TimelineItem{claudeInjectedItem(injected, origin, text)}
+			}
+		}
+	}
 	if text, ok := message["content"].(string); ok && text != "" {
 		if callID := str(message, "tool_use_id"); callID != "" {
 			return []surface.TimelineItem{{Kind: "toolResult", Title: "Tool result", Text: text, CallID: callID}}

@@ -28,6 +28,8 @@ type fixtureProvider struct {
 	pending      []Batch
 	polled       chan struct{}
 	interrupts   int
+	speaking     chan struct{}
+	speakingText string
 	toolCalls    []struct {
 		requestID string
 		success   bool
@@ -46,6 +48,7 @@ type targetFixture struct {
 	activeTurnID    string
 	capabilities    surface.Capabilities
 	watchDone       chan struct{}
+	streaming       chan struct{}
 }
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
@@ -85,6 +88,11 @@ func (f *targetFixture) Stream(ctx context.Context, _ *surface.Session, turnID s
 	}
 	if turnID != "target-turn" {
 		return errors.New("wrong turn")
+	}
+	if f.streaming != nil {
+		close(f.streaming)
+		<-ctx.Done()
+		return ctx.Err()
 	}
 	if f.stream != nil {
 		f.stream(callback)
@@ -166,7 +174,15 @@ func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID st
 	}{requestID, success, text})
 	return nil
 }
-func (p *fixtureProvider) Request(_ context.Context, _ *surface.Session, method string, params map[string]any) error {
+func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, method string, params map[string]any) error {
+	p.mu.Lock()
+	speaking, speakingText := p.speaking, p.speakingText
+	p.mu.Unlock()
+	if speaking != nil && method == "thread/realtime/appendText" && params["text"] == speakingText {
+		close(speaking)
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.requests = append(p.requests, method)
@@ -255,6 +271,7 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 	}
 	f.service = newService(f.path, f.provider, options.register, "/fixture/agenthail", resolver, delivery.Dispatcher{}, options.operatorSource, options.stream, manual)
 	t.Cleanup(func() { close(f.ticks) })
+	t.Cleanup(f.service.Close)
 	return f
 }
 
@@ -282,9 +299,9 @@ func (f *voiceFixture) tick() {
 	case <-time.After(time.Second):
 		f.t.Fatal("call observer did not poll")
 	}
-	// View takes the service lock, so the cycle that polled has completed.
+	// Taking the service lock waits for the cycle that polled to complete.
 	done := make(chan struct{})
-	go func() { f.service.View(""); close(done) }()
+	go func() { f.service.mu.Lock(); f.service.unlock(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -629,6 +646,121 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 	f.observe(spoken)
 	if !reflect.DeepEqual(target.sent, []string{"Inspect this session"}) {
 		t.Fatalf("spoken transcript was not delivered exactly once: %v", target.sent)
+	}
+}
+
+func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}, streaming: make(chan struct{})}
+	f := targetSelected(t, target)
+	f.observe(Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}})
+	select {
+	case <-target.streaming:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delegation never started watching its target")
+	}
+	closed := make(chan struct{})
+	go func() { f.service.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close returned before, or never after, stopping the delegation watch")
+	}
+}
+
+func TestCloseCancelsSpeechStillWaitingOnTheOperator(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
+	}
+	f := targetSelected(t, target)
+	speaking := make(chan struct{})
+	f.provider.mu.Lock()
+	f.provider.speaking, f.provider.speakingText = speaking, "The answer."
+	f.provider.mu.Unlock()
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this session"})
+	select {
+	case <-speaking:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delegated answer never reached the operator")
+	}
+	closed := make(chan struct{})
+	go func() { f.service.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close waited on speech the operator never accepted")
+	}
+}
+
+func TestSpeechWaitingOnTheOperatorLeavesViewAndActionsResponsive(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target.stream = func(callback func(surface.StreamEvent)) {
+		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
+	}
+	f := targetSelected(t, target)
+	f.service.mu.Lock()
+	f.service.speechTimeout = 300 * time.Millisecond
+	f.service.mu.Unlock()
+	speaking := make(chan struct{})
+	f.provider.mu.Lock()
+	f.provider.speaking, f.provider.speakingText = speaking, "The answer."
+	f.provider.mu.Unlock()
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this session"})
+	select {
+	case <-speaking:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the delegated answer never reached the operator")
+	}
+	viewed := make(chan State, 1)
+	go func() { viewed <- f.View() }()
+	select {
+	case v := <-viewed:
+		if v.Phase != "connected" || v.Target == nil || v.Target.ID != "target-a" {
+			t.Fatalf("view during speech=%+v", v)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("View waited on speech the operator had not accepted")
+	}
+	acted := make(chan error, 1)
+	go func() { _, err := f.Apply(Action{Action: "stop", AttemptID: "call-a"}); acted <- err }()
+	select {
+	case err := <-acted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a control action waited past the speech deadline")
+	}
+	if v := f.View(); !hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
+		t.Fatalf("expired speech was not recorded before the stop: %+v", v)
+	}
+}
+
+func TestCloseWaitsForAnActionInProgressAndRefusesLaterWork(t *testing.T) {
+	f := newFixture(t, fixtureOptions{})
+	f.service.mu.Lock()
+	closed := make(chan struct{})
+	go func() { f.service.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while an action held the service")
+	case <-time.After(100 * time.Millisecond):
+	}
+	f.service.mu.Unlock()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after the action finished")
+	}
+	if _, err := f.Apply(Action{Action: "prepare"}); err == nil {
+		t.Fatal("an action was accepted after Close")
+	}
+	f.service.mu.Lock()
+	f.service.observe()
+	running := f.service.running
+	f.service.mu.Unlock()
+	if running {
+		t.Fatal("event polling started after Close")
 	}
 }
 

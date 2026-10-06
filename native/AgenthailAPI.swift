@@ -7,6 +7,7 @@ enum AgenthailAPIError: LocalizedError {
     case request(Int, String)
     case historyGap(String)
     case streamGap
+    case streamUnsupported
     case streamClosed
 
     var errorDescription: String? {
@@ -17,6 +18,7 @@ enum AgenthailAPIError: LocalizedError {
         case .request(_, let message): return message
         case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
+        case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
     }
@@ -116,8 +118,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), idempotencyKey: String? = nil) async throws -> ActionReceipt {
-        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings)
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
@@ -140,18 +142,32 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
         if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
+        let payload: Data
         if surface == "codex" {
-            let body = SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher)
-            return try await requestEncoded("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
+            payload = try JSONEncoder().encode(SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher))
+        } else {
+            var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
+            if surface == "claude" { body.merge(claude.fields) { _, value in value } }
+            if let launcher { body["launcher"] = launcher }
+            payload = try JSONSerialization.data(withJSONObject: body)
         }
-        var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-        if surface == "claude" { body.merge(claude.fields) { _, value in value } }
-        if let launcher { body["launcher"] = launcher }
-        return try await request("/api/v1/actions", method: "POST", body: body, timeout: 65, idempotencyKey: idempotencyKey)
+        var request = authorizedRequest(path: "/api/v1/actions")
+        request.httpMethod = "POST"
+        request.timeoutInterval = 65
+        request.httpBody = payload
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: idempotencyKey)
+        let (data, response) = try await session.data(for: request)
+        if failureReceipts, let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode),
+           let receipt = try? JSONDecoder().decode(SessionCreationReceipt.self, from: data), receipt.error != nil {
+            return receipt
+        }
+        try validate(response: response, data: data)
+        return try JSONDecoder().decode(SessionCreationReceipt.self, from: data)
     }
 
     func searchSessions(query: String) async throws -> SessionSearchResponse {
@@ -169,6 +185,10 @@ final class AgenthailAPI: @unchecked Sendable {
 
     func settings() async throws -> DashboardSettingsState {
         try await get("/api/v1/settings")
+    }
+
+    func updateBusyDelivery(_ mode: String, codexRecentHours: Int) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": mode])
     }
 
     func updateSettings(action: String) async throws {
@@ -245,21 +265,8 @@ final class AgenthailAPI: @unchecked Sendable {
         let (bytes, response) = try await session.bytes(for: request)
         try validate(response: response, data: nil)
         await onConnected()
-        var dataLine = ""
-        for try await line in bytes.lines {
-            if Task.isCancelled { return }
-            if line.hasPrefix("data: ") {
-                dataLine = String(line.dropFirst(6))
-            } else if line.isEmpty, !dataLine.isEmpty {
-                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(AgenthailEvent.self, from: data) {
-                    await onEvent(event)
-                }
-                dataLine = ""
-            }
-        }
-        if !Task.isCancelled {
-            throw AgenthailAPIError.streamClosed
-        }
+        try await Self.readEvents(bytes, as: AgenthailEvent.self, onEvent: onEvent)
+        if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
     func streamSession(id: String, after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (SessionStreamEvent) async -> Void) async throws {
@@ -271,25 +278,11 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
         if let response = response as? HTTPURLResponse, response.statusCode == 409 {
-            throw AgenthailAPIError.streamGap
+            throw await Self.streamConflict(bytes)
         }
         try validate(response: response, data: nil)
         await onConnected()
-        var dataLine = ""
-        for try await line in bytes.lines {
-            if Task.isCancelled { return }
-            if line.hasPrefix("data: ") {
-                dataLine = String(line.dropFirst(6))
-            } else if line.isEmpty, !dataLine.isEmpty {
-                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(SessionStreamEvent.self, from: data) {
-                    await onEvent(event)
-                }
-                dataLine = ""
-            }
-        }
-        if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(SessionStreamEvent.self, from: data) {
-            await onEvent(event)
-        }
+        try await Self.readEvents(bytes, as: SessionStreamEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -312,25 +305,11 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
         let (bytes, response) = try await session.bytes(for: request)
         if let response = response as? HTTPURLResponse, response.statusCode == 409 {
-            throw AgenthailAPIError.streamGap
+            throw await Self.streamConflict(bytes)
         }
         try validate(response: response, data: nil)
         await onConnected()
-        var dataLine = ""
-        for try await line in bytes.lines {
-            if Task.isCancelled { return }
-            if line.hasPrefix("data: ") {
-                dataLine = String(line.dropFirst(6))
-            } else if line.isEmpty, !dataLine.isEmpty {
-                if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(CatalogStreamEvent.self, from: data) {
-                    await onEvent(event)
-                }
-                dataLine = ""
-            }
-        }
-        if let data = dataLine.data(using: .utf8), let event = try? JSONDecoder().decode(CatalogStreamEvent.self, from: data) {
-            await onEvent(event)
-        }
+        try await Self.readEvents(bytes, as: CatalogStreamEvent.self, onEvent: onEvent)
         if !Task.isCancelled { throw AgenthailAPIError.streamClosed }
     }
 
@@ -384,10 +363,58 @@ final class AgenthailAPI: @unchecked Sendable {
         request.setValue(key ?? UUID().uuidString, forHTTPHeaderField: "Idempotency-Key")
     }
 
+    // Lines are split here because AsyncBytes.lines drops the blank lines that end server-sent events.
+    private static func readEvents<Event: Decodable>(_ bytes: URLSession.AsyncBytes, as type: Event.Type, onEvent: (Event) async -> Void) async throws {
+        var parser = ServerSentEventParser()
+        var line: [UInt8] = []
+        for try await byte in bytes {
+            guard byte == UInt8(ascii: "\n") else {
+                line.append(byte)
+                continue
+            }
+            if Task.isCancelled { return }
+            if line.last == UInt8(ascii: "\r") { line.removeLast() }
+            if let data = parser.consume(String(decoding: line, as: UTF8.self)), let event = try? JSONDecoder().decode(type, from: Data(data.utf8)) {
+                await onEvent(event)
+            }
+            line.removeAll(keepingCapacity: true)
+        }
+    }
+
+    private static func streamConflict(_ bytes: URLSession.AsyncBytes) async -> AgenthailAPIError {
+        let task = bytes.task
+        let deadline = Task {
+            try? await Task.sleep(for: .seconds(2))
+            task.cancel()
+        }
+        defer { deadline.cancel() }
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= 16 * 1024 { break }
+            }
+        } catch {}
+        return streamConflict(data)
+    }
+
+    static func streamConflict(_ data: Data) -> AgenthailAPIError {
+        let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? [String: Any]
+        switch error?["code"] as? String {
+        case "stream_gap": return .streamGap
+        case "stream_unsupported": return .streamUnsupported
+        default: return .request(409, error?["message"] as? String ?? HTTPURLResponse.localizedString(forStatusCode: 409))
+        }
+    }
+
     private func validate(response: URLResponse, data: Data?) throws {
         guard let response = response as? HTTPURLResponse else { throw AgenthailAPIError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
             var message = HTTPURLResponse.localizedString(forStatusCode: response.statusCode)
+            if let data, let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !text.isEmpty, text.count <= 500, !text.hasPrefix("{"), !text.hasPrefix("<") {
+                message = text
+            }
             if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
@@ -402,19 +429,36 @@ final class AgenthailAPI: @unchecked Sendable {
 
 }
 
+struct ServerSentEventParser {
+    private var data: [String] = []
+
+    mutating func consume(_ line: String) -> String? {
+        if line.isEmpty {
+            defer { data.removeAll() }
+            return data.isEmpty ? nil : data.joined(separator: "\n")
+        }
+        guard line.hasPrefix("data:") else { return nil }
+        let value = line.dropFirst(5)
+        data.append(String(value.first == " " ? value.dropFirst() : value))
+        return nil
+    }
+}
+
 private struct InstructionRequest: Encodable {
     let action: String
     let sessionID: String
     let message: String
     let turnSettings: TurnSettings
+    var busyDelivery: String? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(action, forKey: .action)
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)

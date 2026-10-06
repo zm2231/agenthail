@@ -280,7 +280,7 @@ func TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers(t *testing.T) {
 		t.Fatalf("duplicate inbound msg_id queued %d times", count)
 	}
 
-	if err := f.reg.ReplaceAlias("renamed", "older"); err != nil {
+	if err := f.reg.SetAlias("renamed", "older"); err != nil {
 		t.Fatal(err)
 	}
 	waitUntil(t, "heartbeat to publish the rename", func() bool {

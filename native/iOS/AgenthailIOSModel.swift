@@ -565,7 +565,7 @@ final class AgenthailIOSModel: ObservableObject {
         if searchQuery == query { searching = false }
     }
 
-    func openNotification(_ sessionID: String) {
+    func openSession(_ sessionID: String) {
         requestedSessionID = sessionID
     }
 
@@ -813,7 +813,6 @@ final class AgenthailIOSModel: ObservableObject {
                     if case AgenthailAPIError.streamGap = error {
                         catalogStreamCursor = 0
                         _ = await refresh(fresh: true)
-                        continue
                     }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
@@ -913,10 +912,10 @@ final class AgenthailIOSModel: ObservableObject {
                     })
                 } catch {
                     if Task.isCancelled || selectedSessionID != id { return }
+                    if case AgenthailAPIError.streamUnsupported = error { return }
                     if case AgenthailAPIError.streamGap = error {
                         sessionStreamCursor = 0
                         await refreshSession(id)
-                        continue
                     }
                     let delay = backoff.nextDelay()
                     try? await Task.sleep(for: .seconds(delay))
@@ -942,7 +941,7 @@ final class AgenthailIOSModel: ObservableObject {
         }
         guard var timeline = detail.timeline else { return }
         guard !event.data.itemId.isEmpty else { return }
-        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment)
+        let item = TimelineItem(id: event.data.itemId, kind: event.data.kind, role: event.data.role, title: event.data.title ?? (event.data.kind == "attachment" ? "Image" : event.data.kind), text: event.data.body ?? (event.data.kind == "attachment" ? "Image attachment" : ""), timestamp: event.data.ts, callId: event.data.callId, status: event.data.status, truncated: event.data.truncated, truncationReason: event.data.truncationReason, bodyRef: event.data.bodyRef, attachment: event.data.attachment, sender: event.data.sender)
         if event.data.op == "remove" {
             timeline.items.removeAll { $0.id == event.data.itemId }
         } else if let index = timeline.items.firstIndex(where: { $0.id == event.data.itemId }) {

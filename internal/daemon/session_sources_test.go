@@ -1266,3 +1266,89 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
+	_, reg, _, from, _ := daemonFixture(t)
+	from.ID = "claude-injections"
+	from.Surface = surface.KindClaude
+	from.HasLocal = true
+	transcript := filepath.Join(t.TempDir(), "session.jsonl")
+	notification := `<task-notification>\n<task-id>task-9</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<status>completed</status>\n<summary>Synthetic job done</summary>\n</task-notification>`
+	seed := `{"type":"user","uuid":"u1","origin":{"kind":"human"},"message":{"content":"start"}}
+{"type":"attachment","uuid":"q1","attachment":{"type":"queued_command","prompt":"` + notification + `"}}
+{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"started"}]}}
+`
+	if err := os.WriteFile(transcript, []byte(seed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	from.Transcript = transcript
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	manager := newSessionSourceManager(reg)
+	subscription, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.WriteString(`{"type":"user","uuid":"u2","origin":{"kind":"task-notification"},"message":{"content":"` + notification + `"}}
+{"type":"user","uuid":"u3","origin":{"kind":"peer","name":"reviewer","msg_id":"msg-9","body":"Please rebase"},"message":{"content":"Another Claude session sent a message: <cross-session-message from=\"uds:/tmp/synthetic.sock\" from-name=\"reviewer\">Please rebase</cross-session-message>"}}
+`)
+	if closeErr := file.Close(); err != nil {
+		t.Fatal(err)
+	} else if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		window, readErr := reg.SessionJournalAfter(from.ID, 0, 100)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		notifications := map[string]int{}
+		peer := false
+		for _, entry := range window.Entries {
+			var payload sessionJournalPayload
+			if json.Unmarshal(entry.Payload, &payload) != nil {
+				continue
+			}
+			if payload.Origin == "task-notification" {
+				notifications[payload.ItemID]++
+				if payload.Kind != "event" || payload.Status != "completed" || payload.CallID != "toolu_synthetic" || payload.Body != "Synthetic job done" {
+					t.Fatalf("notification payload=%+v", payload)
+				}
+			}
+			if payload.Origin == "peer" && payload.Role == "peer" && payload.Sender == "reviewer" && payload.Body == "Please rebase" {
+				peer = true
+			}
+			if payload.Role == "user" && strings.Contains(payload.Body, "task-notification") {
+				t.Fatalf("notification journaled as user message: %+v", payload)
+			}
+		}
+		if len(notifications) > 1 {
+			t.Fatalf("notification copies became separate items: %v", notifications)
+		}
+		if len(notifications) == 1 && peer {
+			page, pageErr := (&Daemon{Registry: reg}).readJournalPage(from.ID, 0, 100)
+			if pageErr != nil {
+				t.Fatal(pageErr)
+			}
+			found := false
+			for _, item := range page.Items {
+				found = found || (item.Origin == "peer" && item.Role == "peer" && item.Sender == "reviewer")
+			}
+			if !found {
+				t.Fatalf("page items=%+v", page.Items)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("notifications=%v peer=%v window=%+v", notifications, peer, window)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

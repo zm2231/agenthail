@@ -368,7 +368,7 @@ func (a *App) cmdDaemon(args []string) error {
 			if !status.Enabled {
 				return fmt.Errorf("desktop notifications are not enabled (%s)", status.Authorization)
 			}
-			if err := daemon.Notify("Agenthail", "Native notifications are ready."); err != nil {
+			if err := daemon.Notify("Agenthail", "Native notifications are ready.", ""); err != nil {
 				return err
 			}
 			fmt.Println("test notification sent")

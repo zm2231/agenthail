@@ -88,15 +88,17 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	return peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
 }
 
+// ResolveCaller checks every live process, so a later process sharing a
+// session id still resolves to that session.
 func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surface.Session, bool, error) {
-	sessions, err := c.List(ctx)
+	processes, err := c.processes(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	valid := make(map[int]surface.Session, len(sessions))
-	for _, session := range sessions {
-		if session.Transport == "uds" {
-			valid[session.PID] = session
+	valid := make(map[int]surface.Session, len(processes))
+	for _, process := range processes {
+		if process.session.Transport == "uds" {
+			valid[process.session.PID] = process.session
 		}
 	}
 	for _, pid := range ancestorPIDs {
@@ -113,29 +115,41 @@ func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surfac
 	return nil, false, nil
 }
 
+// nativeCaller finds the sender's own messaging socket. The source carries
+// only a session id, so when several live processes share it the sender's
+// process is unknown and the reply is addressed to the session instead.
 func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session, string, bool, error) {
 	if id == "" {
 		return nil, "", false, nil
 	}
-	sessions, err := c.List(ctx)
+	processes, err := c.processes(ctx)
 	if err != nil {
 		return nil, "", false, err
 	}
-	for _, session := range sessions {
-		if session.ID != id || session.Transport != "uds" {
+	var sender *surface.Session
+	var record map[string]any
+	for _, process := range processes {
+		if process.session.ID != id || process.session.Transport != "uds" {
 			continue
 		}
-		record, present := c.peerRecord(session.PID)
-		if !present || str(record, "agenthail") == "peer-worker" {
+		candidate, present := c.peerRecord(process.session.PID)
+		if !present || str(candidate, "agenthail") == "peer-worker" {
 			continue
 		}
-		socket := c.peerSocket(ctx, record)
-		if socket == "" {
-			return nil, "", false, surface.DeliveryUnavailable(fmt.Errorf("Claude sender messaging socket is unavailable"))
+		if sender != nil {
+			return nil, "", false, nil
 		}
-		return &session, socket, true, nil
+		session := process.session
+		sender, record = &session, candidate
 	}
-	return nil, "", false, nil
+	if sender == nil {
+		return nil, "", false, nil
+	}
+	socket := c.peerSocket(ctx, record)
+	if socket == "" {
+		return nil, "", false, surface.DeliveryUnavailable(fmt.Errorf("Claude sender messaging socket is unavailable"))
+	}
+	return sender, socket, true, nil
 }
 
 func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
