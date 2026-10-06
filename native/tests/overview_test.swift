@@ -66,7 +66,9 @@ struct OverviewTest {
 
         expect(CodexRecentWindow.choices(including: 5) == [1, 3, 5, 8, 12, 24], "a preset keeps the preset list")
         expect(CodexRecentWindow.choices(including: 2) == [1, 2, 3, 5, 8, 12, 24], "a custom saved window stays selectable")
-        expect(CodexRecentWindow.choices(including: 30) == CodexRecentWindow.presets, "an out-of-range value is not offered")
+        expect(CodexRecentWindow.choices(including: 48) == [1, 3, 5, 8, 12, 24, 48], "a saved window above the presets stays selectable")
+        expect(CodexRecentWindow.choices(including: 168) == [1, 3, 5, 8, 12, 24, 168], "the daemon maximum stays selectable")
+        expect(CodexRecentWindow.choices(including: 169) == CodexRecentWindow.presets, "a value the daemon rejects is not offered")
         expect(CodexRecentWindow.label(1) == "1 hour" && CodexRecentWindow.label(12) == "12 hours", "window labels")
         print("overview tests passed")
     }

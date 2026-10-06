@@ -147,7 +147,7 @@ struct DeliveryOutcome: Identifiable, Equatable {
 }
 
 enum CodexRecentWindow {
-    static let range = 1...24
+    static let range = 1...168
     static let presets = [1, 3, 5, 8, 12, 24]
 
     static func choices(including current: Int) -> [Int] {
