@@ -12,6 +12,9 @@ struct SessionLaunchTest {
         let replayed = try decide(#"{"ok":true,"status":"submitted"}"#, launcher: nil)
         check(replayed == .starting, "a replayed in-flight create reads as still starting")
 
+        let pending = try decide(#"{"ok":true,"launcher":"tmux","location":{"session":"agents","pane":"%1"}}"#)
+        check(pending == .submitted("Submitted to tmux. It appears in the sidebar once it starts."), "a pending terminal launch reads as submitted, not as a replay")
+
         let fallback = try decide(#"{"ok":true,"status":"submitted","accepted":true}"#, launcher: nil)
         check(fallback == .submitted("Submitted to claude. It appears in the sidebar once it starts."), "an unnamed target falls back to the agent")
 

@@ -56,7 +56,7 @@ enum SessionLaunchDecision: Equatable {
             self = .open(id)
             return
         }
-        if receipt.accepted == nil {
+        if receipt.status == "submitted" && receipt.accepted == nil {
             self = .starting
             return
         }
