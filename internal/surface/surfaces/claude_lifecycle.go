@@ -167,8 +167,10 @@ const claudeResumeSettleTimeout = 10 * time.Second
 // claude --bg --resume prints its backgrounded line and exits 0 before the
 // session initializes, so only the job state shows whether it started. A
 // terminal state counts only once the job record was written by this resume,
-// not left over from the stop or failure being resumed.
+// not left over from the stop or failure being resumed. Claude records
+// updatedAt to the millisecond.
 func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
+	started = started.Truncate(time.Millisecond)
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)

@@ -113,3 +113,13 @@ func TestClaudeResumeAcceptsShellState(t *testing.T) {
 		t.Fatalf("result=%v err=%v", result, err)
 	}
 }
+
+func TestClaudeResumeCountsFailureInTheSameMillisecond(t *testing.T) {
+	home, c := fakeBackgroundClaude(t, "failed", "")
+	started := time.Date(2026, 1, 2, 3, 4, 5, 123_600_000, time.UTC)
+	writeJobRecord(t, home, "fixture failure", started.Truncate(time.Millisecond))
+	_, err := c.awaitResumed(context.Background(), "job12345", started)
+	if err == nil || !strings.Contains(err.Error(), "fixture failure") || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+}
