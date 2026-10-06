@@ -123,6 +123,8 @@ jobs:
           "$RUNNER_TEMP/composer-drop-test"
           swiftc -parse-as-library native/macOS/BoundedDock.swift native/tests/bounded_dock_test.swift -o "$RUNNER_TEMP/bounded-dock-test"
           "$RUNNER_TEMP/bounded-dock-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/TurnSettings.swift native/macOS/DesktopPalette.swift native/macOS/BoundedDock.swift native/macOS/SharedConversationBanner.swift native/tests/shared_conversation_banner_test.swift -o "$RUNNER_TEMP/shared-conversation-banner-test"
+          "$RUNNER_TEMP/shared-conversation-banner-test"
           swiftc -parse-as-library native/macOS/SessionHandle.swift native/tests/session_handle_test.swift -o "$RUNNER_TEMP/session-handle-test"
           "$RUNNER_TEMP/session-handle-test"
       - name: Mac app build
