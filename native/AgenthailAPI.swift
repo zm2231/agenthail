@@ -187,8 +187,8 @@ final class AgenthailAPI: @unchecked Sendable {
         try await get("/api/v1/settings")
     }
 
-    func updateBusyDelivery(_ mode: String, codexRecentHours: Int) async throws {
-        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": mode])
+    func updateDashboardConfig(busyDelivery: String, codexRecentHours: Int) async throws {
+        let _: EmptyResponse = try await request("/api/v1/settings", method: "POST", body: ["action": "dashboard-config", "codexRecentHours": codexRecentHours, "busyDelivery": busyDelivery])
     }
 
     func updateSettings(action: String) async throws {
@@ -243,7 +243,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
@@ -255,6 +255,7 @@ final class AgenthailAPI: @unchecked Sendable {
         if let fromID { body["fromId"] = fromID }
         if let toID { body["toId"] = toID }
         if let pattern { body["pattern"] = pattern }
+        if let once { body["once"] = once }
         if let relayID { body["relayId"] = relayID }
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
