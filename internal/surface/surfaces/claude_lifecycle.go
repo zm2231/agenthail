@@ -138,6 +138,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		if action == "resume" {
 			args = []string{"--bg", "--resume", record.SessionID}
 		}
+		started := time.Now()
 		output, err := c.backgroundCommand(ctx, record.Cwd, args...)
 		if err != nil {
 			if action != "logs" {
@@ -150,7 +151,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			if parseErr != nil || resumedID != record.ID {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume identity was not confirmed; inspect claude agents: %s", string(output)))
 			}
-			state, settleErr := c.awaitResumed(ctx, record.ID)
+			state, settleErr := c.awaitResumed(ctx, record.ID, started)
 			if settleErr != nil {
 				return nil, settleErr
 			}
@@ -164,8 +165,10 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 const claudeResumeSettleTimeout = 10 * time.Second
 
 // claude --bg --resume prints its backgrounded line and exits 0 before the
-// session initializes, so only the job state shows whether it started.
-func (c *Claude) awaitResumed(ctx context.Context, id string) (string, error) {
+// session initializes, so only the job state shows whether it started. A
+// terminal state counts only once the job record was written by this resume,
+// not left over from the stop or failure being resumed.
+func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -181,10 +184,16 @@ func (c *Claude) awaitResumed(ctx context.Context, id string) (string, error) {
 			}
 		}
 		switch state {
-		case "working", "blocked", "running", "idle", "waiting", "busy":
+		case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
 			return state, nil
 		case "failed", "crashed", "stopped", "done":
-			return "", fmt.Errorf("Claude background job %s is %s after resume: %s", id, state, c.backgroundDetail(id))
+			if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
+				detail := job.Detail
+				if strings.TrimSpace(detail) == "" {
+					detail = "no job detail recorded"
+				}
+				return "", fmt.Errorf("Claude background job %s is %s after resume: %s", id, state, detail)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -199,19 +208,20 @@ func (c *Claude) awaitResumed(ctx context.Context, id string) (string, error) {
 	}
 }
 
-// claude agents --json omits the failure detail that the job state records.
-func (c *Claude) backgroundDetail(id string) string {
+type claudeJob struct {
+	Detail    string    `json:"detail"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// claude agents --json omits the failure detail and update time that the job
+// record holds.
+func (c *Claude) backgroundJob(id string) (claudeJob, bool) {
+	var job claudeJob
 	raw, err := os.ReadFile(filepath.Join(c.home, ".claude", "jobs", id, "state.json"))
-	if err != nil {
-		return "no job detail recorded"
+	if err != nil || json.Unmarshal(raw, &job) != nil {
+		return job, false
 	}
-	var job struct {
-		Detail string `json:"detail"`
-	}
-	if json.Unmarshal(raw, &job) != nil || strings.TrimSpace(job.Detail) == "" {
-		return "no job detail recorded"
-	}
-	return job.Detail
+	return job, true
 }
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)

@@ -16,6 +16,7 @@ func TestClaudeModelsCoalescesAndCachesSuccessfulCatalog(t *testing.T) {
 	script := `#!/bin/sh
 IFS= read -r _
 printf x >> "$HOME/catalog-calls"
+env | grep '^CMUX_' >> "$HOME/catalog-cmux-env"
 sleep 0.05
 printf '%s\n' '{"type":"control_response","response":{"request_id":"agenthail-model-catalog","response":{"models":[{"value":"haiku","displayName":"Haiku"}]}}}'
 sleep 30
@@ -24,6 +25,7 @@ sleep 30
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	t.Setenv("CMUX_SURFACE_ID", "fixture-surface")
 	claude := NewClaude("Default", home)
 	var group sync.WaitGroup
 	errs := make(chan error, 2)
@@ -54,6 +56,9 @@ sleep 30
 	}
 	if strings.Count(string(calls), "x") != 1 {
 		t.Fatalf("catalog subprocesses=%d", strings.Count(string(calls), "x"))
+	}
+	if leaked, _ := os.ReadFile(filepath.Join(home, "catalog-cmux-env")); len(leaked) != 0 {
+		t.Fatalf("model catalog inherited terminal state %q", leaked)
 	}
 }
 
