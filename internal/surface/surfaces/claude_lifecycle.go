@@ -162,14 +162,13 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	return nil, fmt.Errorf("session is not a Claude background agent")
 }
 
-const claudeResumeSettleTimeout = 10 * time.Second
+var claudeResumeSettleTimeout = 10 * time.Second
 
 // claude --bg --resume prints its backgrounded line and exits 0 before the
 // session initializes, so only the job state shows whether it started. The job
 // record holds the state, its updatedAt and the failure detail in one write; a
 // state counts only once that record was written by this resume, not left over
-// from before it. Claude records updatedAt to the millisecond. The catalog
-// listing is read only when the job has no record.
+// from before it. Claude records updatedAt to the millisecond.
 func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
 	started = started.Truncate(time.Millisecond)
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
@@ -177,23 +176,9 @@ func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	state := ""
-	var listErr error
 	for {
-		job, ok := c.backgroundJob(id)
-		fresh := ok && !job.UpdatedAt.Before(started)
-		if ok {
+		if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
 			state = job.State
-		} else {
-			var records []claudeBackground
-			records, listErr = c.backgroundSessions(ctx)
-			for _, record := range records {
-				if record.ID == id && record.Kind == "background" {
-					state = record.State
-					fresh = true
-				}
-			}
-		}
-		if fresh {
 			switch state {
 			case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
 				return state, nil
@@ -209,9 +194,6 @@ func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time)
 		case <-ctx.Done():
 			return "", surface.DeliveryOutcomeUnknown(ctx.Err())
 		case <-deadline.C:
-			if listErr != nil {
-				return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s resume is unconfirmed: %w", id, listErr))
-			}
 			return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s did not reach a running state after resume (last state %q); inspect claude agents", id, state))
 		case <-ticker.C:
 		}

@@ -131,6 +131,18 @@ func TestClaudeResumeDecidesFromJobRecordWhenListingDisagrees(t *testing.T) {
 	}
 }
 
+func TestClaudeResumeIgnoresStaleListingWhileJobRecordIsUnreadable(t *testing.T) {
+	timeout := claudeResumeSettleTimeout
+	claudeResumeSettleTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { claudeResumeSettleTimeout = timeout })
+	home, c := fakeBackgroundClaude(t, "idle", `printf '{"state":"fai' > "$HOME/.claude/jobs/job12345/state.json"`)
+	writeJobRecord(t, home, "idle", "", time.Now().Add(-time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err == nil || !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
 func TestClaudeResumeAcceptsShellState(t *testing.T) {
 	_, c := fakeBackgroundClaude(t, "stopped", `setstate shell`)
 	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
