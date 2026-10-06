@@ -301,8 +301,8 @@ struct ForkSessionSheet: View {
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.red)
                     .textSelection(.enabled)
-            } else if controller.stillForking {
-                Text("Still forking. Press Fork again to check on it.")
+            } else if let notice = controller.notice {
+                Text(notice)
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }

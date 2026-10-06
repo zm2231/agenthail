@@ -154,7 +154,7 @@ final class BackgroundSessionController: ObservableObject {
 @MainActor
 final class ForkController: ObservableObject {
     @Published private(set) var forking = false
-    @Published private(set) var stillForking = false
+    @Published private(set) var notice: String?
     @Published private(set) var error: String?
     private var pendingKey: (cwd: String?, key: String)?
 
@@ -167,7 +167,7 @@ final class ForkController: ObservableObject {
         let key = pendingKey.flatMap { $0.cwd == cwd ? $0.key : nil } ?? UUID().uuidString
         pendingKey = nil
         forking = true
-        stillForking = false
+        notice = nil
         error = nil
         defer { forking = false }
         do {
@@ -176,18 +176,18 @@ final class ForkController: ObservableObject {
                 return session
             case .submitted:
                 pendingKey = (cwd, key)
-                stillForking = true
+                notice = "Still forking. Press Fork again to check on it."
                 return nil
             }
         } catch {
-            if Self.outcomeUnknown(error) { pendingKey = (cwd, key) }
+            if case AgenthailAPIError.outcomeUnknown = error {
+                pendingKey = (cwd, key)
+                notice = "Codex may still be creating this fork. It will appear in the sidebar when ready."
+                return nil
+            }
+            if error is URLError { pendingKey = (cwd, key) }
             self.error = error.localizedDescription
             return nil
         }
-    }
-
-    private static func outcomeUnknown(_ error: Error) -> Bool {
-        if case AgenthailAPIError.outcomeUnknown = error { return true }
-        return error is URLError
     }
 }

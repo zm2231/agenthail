@@ -221,21 +221,23 @@ struct SessionOperationsTest {
         let submitted = #"{"ok":true,"status":"submitted"}"#
 
         var controller = ForkController()
-        reset([(502, definite), (200, forked)])
+        reset([(502, definite), (200, forked), (200, forked)])
         let failed = await controller.fork(sessionID: "S", cwd: nil, api: api)
         check(failed == nil && controller.error == "thread not found", "a definite failure shows its error")
         let retried = await controller.fork(sessionID: "S", cwd: nil, api: api)
         check(retried?.id == "fork-1" && controller.error == nil, "a retry after a definite failure forks")
-        check(StubProtocol.keys.count == 2 && StubProtocol.keys[0] != nil && StubProtocol.keys[0] != StubProtocol.keys[1], "a retry after a definite failure sends a new key")
+        check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] != StubProtocol.keys[1], "a retry after a definite failure sends a new key")
+        _ = await controller.fork(sessionID: "S", cwd: nil, api: api)
+        check(StubProtocol.keys[2] != StubProtocol.keys[1], "a fork after a success sends a new key")
 
         controller = ForkController()
-        reset([(502, unknown), (200, forked), (200, forked)])
-        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
-        check(controller.error?.hasSuffix("The outcome is unknown; check the session before retrying.") == true, "an unknown outcome is called out")
+        reset([(502, unknown), (502, unknown)])
+        let uncertain = await controller.fork(sessionID: "S", cwd: "/work", api: api)
+        let pendingNote = "Codex may still be creating this fork. It will appear in the sidebar when ready."
+        check(uncertain == nil && controller.error == nil && controller.notice == pendingNote, "an unknown outcome says the fork may still appear")
         _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
         check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] == StubProtocol.keys[1], "a retry after an unknown outcome reuses the key")
-        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
-        check(StubProtocol.keys[2] != StubProtocol.keys[1], "a fork after a success sends a new key")
+        check(controller.error == nil && controller.notice == pendingNote, "a replayed unknown outcome keeps the note")
 
         controller = ForkController()
         reset([(502, unknown), (200, forked)])
@@ -246,9 +248,9 @@ struct SessionOperationsTest {
         controller = ForkController()
         reset([(202, submitted), (200, forked)])
         let pending = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(pending == nil && controller.stillForking && controller.error == nil, "a submitted reply shows the fork is still running")
+        check(pending == nil && controller.notice?.hasPrefix("Still forking") == true && controller.error == nil, "a submitted reply shows the fork is still running")
         let finished = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(finished?.id == "fork-1" && !controller.stillForking, "checking again opens the fork")
+        check(finished?.id == "fork-1" && controller.notice == nil, "checking again opens the fork")
         check(StubProtocol.keys[0] == StubProtocol.keys[1], "a submitted fork keeps its key")
     }
 
