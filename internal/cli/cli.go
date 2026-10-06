@@ -1009,6 +1009,26 @@ func relTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
+// registeredSessionUnavailable explains a registered session with no live
+// process: when its surface still knows the session as a stopped or failed
+// job, the caller needs that state and the resume command, not a match error.
+func (a *App) registeredSessionUnavailable(ctx context.Context, sid, target string, adapter surface.Surface, resolveErr error) error {
+	err := fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
+	lifecycle, ok := adapter.(surface.SessionLifecycle)
+	if !ok || !errors.Is(resolveErr, surface.ErrSessionNotFound) {
+		return err
+	}
+	registered, lookupErr := a.Registry.Session(sid)
+	if lookupErr != nil {
+		return err
+	}
+	status, statusErr := lifecycle.SessionAction(ctx, registered, "status")
+	if statusErr != nil {
+		return err
+	}
+	return fmt.Errorf("%s session %s is not running: background job %v is %v; resume it with: agenthail thread resume %s", adapter.Name(), sid, status["id"], status["state"], target)
+}
+
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
 	if kindText, selector, ok := strings.Cut(target, ":"); ok {
 		kind := surface.SurfaceKind(strings.ToLower(kindText))
@@ -1052,7 +1072,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				}
 				session, resolveErr := adapter.Resolve(ctx, sid)
 				if resolveErr != nil {
-					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
+					return nil, nil, a.registeredSessionUnavailable(ctx, sid, target, adapter, resolveErr)
 				}
 				if err := a.Registry.RegisterSession(*session); err != nil {
 					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)

@@ -31,8 +31,21 @@ func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...stri
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "HOME="+c.home)
+	cmd.Env = claudeCommandEnv(c.home)
 	return cmd.CombinedOutput()
+}
+
+// cmux's claude wrapper keys on CMUX_SURFACE_ID to inject a temporary
+// --settings file that background jobs persist and replay on resume, after
+// the file is gone. Without CMUX_ variables the wrapper passes through.
+func claudeCommandEnv(home string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CMUX_") {
+			env = append(env, entry)
+		}
+	}
+	return append(env, "HOME="+home)
 }
 func (c *Claude) backgroundSessions(ctx context.Context) ([]claudeBackground, error) {
 	data, err := c.backgroundCommand(ctx, "", "agents", "--json", "--all")
@@ -137,10 +150,68 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			if parseErr != nil || resumedID != record.ID {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume identity was not confirmed; inspect claude agents: %s", string(output)))
 			}
+			state, settleErr := c.awaitResumed(ctx, record.ID)
+			if settleErr != nil {
+				return nil, settleErr
+			}
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "state": state, "output": string(output)}, nil
 		}
 		return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "output": string(output)}, nil
 	}
 	return nil, fmt.Errorf("session is not a Claude background agent")
+}
+
+const claudeResumeSettleTimeout = 10 * time.Second
+
+// claude --bg --resume prints its backgrounded line and exits 0 before the
+// session initializes, so only the job state shows whether it started.
+func (c *Claude) awaitResumed(ctx context.Context, id string) (string, error) {
+	deadline := time.NewTimer(claudeResumeSettleTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	state := ""
+	var listErr error
+	for {
+		var records []claudeBackground
+		records, listErr = c.backgroundSessions(ctx)
+		for _, record := range records {
+			if record.ID == id && record.Kind == "background" {
+				state = record.State
+			}
+		}
+		switch state {
+		case "working", "blocked", "running", "idle", "waiting", "busy":
+			return state, nil
+		case "failed", "crashed", "stopped", "done":
+			return "", fmt.Errorf("Claude background job %s is %s after resume: %s", id, state, c.backgroundDetail(id))
+		}
+		select {
+		case <-ctx.Done():
+			return "", surface.DeliveryOutcomeUnknown(ctx.Err())
+		case <-deadline.C:
+			if listErr != nil {
+				return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s resume is unconfirmed: %w", id, listErr))
+			}
+			return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s did not reach a running state after resume (last state %q); inspect claude agents", id, state))
+		case <-ticker.C:
+		}
+	}
+}
+
+// claude agents --json omits the failure detail that the job state records.
+func (c *Claude) backgroundDetail(id string) string {
+	raw, err := os.ReadFile(filepath.Join(c.home, ".claude", "jobs", id, "state.json"))
+	if err != nil {
+		return "no job detail recorded"
+	}
+	var job struct {
+		Detail string `json:"detail"`
+	}
+	if json.Unmarshal(raw, &job) != nil || strings.TrimSpace(job.Detail) == "" {
+		return "no job detail recorded"
+	}
+	return job.Detail
 }
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)

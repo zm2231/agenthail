@@ -540,7 +540,7 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 		if process, found, err := c.processByPID(ctx, target); err != nil || found {
 			return process, err
 		}
-		return nil, fmt.Errorf("no session matched '%s'", target)
+		return nil, fmt.Errorf("%w '%s'", surface.ErrSessionNotFound, target)
 	}
 	if len(matches) > 1 {
 		var lines []string

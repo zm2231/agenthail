@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -134,7 +133,7 @@ func (c *Claude) loadModels(ctx context.Context) ([]surface.ModelOption, error) 
 		"--print", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--no-session-persistence", "--permission-prompts", "none")
 	cmd.Dir = c.home
-	cmd.Env = append(os.Environ(), "HOME="+c.home)
+	cmd.Env = claudeCommandEnv(c.home)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("start Claude model catalog: %w", err)
