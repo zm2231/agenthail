@@ -3,7 +3,7 @@ set -euo pipefail
 
 public_docs=(README.md SECURITY.md docs/native-apps.md)
 plain_docs=(README.md docs/native-apps.md)
-public_ui=(internal/daemon/dashboard/index.html internal/daemon/dashboard/app.js native/AgenthailApp.swift native/macOS/DesktopWindow.swift native/macOS/DesktopSettings.swift native/macOS/CommandPalette.swift native/macOS/NewSessionSheet.swift native/iOS/AgenthailIOSViews.swift native/AgenthailAPI.swift)
+public_ui=(internal/daemon/dashboard/index.html internal/daemon/dashboard/app.js native/AgenthailApp.swift native/macOS/DesktopWindow.swift native/macOS/SharedConversationBanner.swift native/macOS/DesktopSettings.swift native/macOS/CommandPalette.swift native/macOS/NewSessionSheet.swift native/iOS/AgenthailIOSViews.swift native/AgenthailAPI.swift)
 
 if grep -n '—' "${public_docs[@]}" "${public_ui[@]}"; then
   echo "Public copy contains an em dash." >&2

@@ -1209,18 +1209,22 @@ struct ComposerView: View {
                     .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(DesktopPalette.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
             } else {
-                ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
-                    DeliveryProblemBanner(problem: problem, model: model)
-                        .padding(.bottom, 8)
-                }
                 let queued = model.queuedItems(for: session.id)
-                if !queued.isEmpty {
-                    QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
-                        .padding(.horizontal, 10)
-                }
-                if !draft.attachments.isEmpty {
-                    AttachmentDock(attachments: $draft.attachments, roundedTop: queued.isEmpty)
-                        .padding(.horizontal, 10)
+                BoundedDock {
+                    VStack(spacing: 0) {
+                        ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
+                            DeliveryProblemBanner(problem: problem, model: model)
+                                .padding(.bottom, 8)
+                        }
+                        if !queued.isEmpty {
+                            QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
+                                .padding(.horizontal, 10)
+                        }
+                        if !draft.attachments.isEmpty {
+                            AttachmentDock(attachments: $draft.attachments, roundedTop: queued.isEmpty)
+                                .padding(.horizontal, 10)
+                        }
+                    }
                 }
                 VStack(spacing: 0) {
                     TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
@@ -1357,53 +1361,6 @@ struct ComposerView: View {
         guard hasText else { return }
         let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
         pane.submit(busyDelivery: explicit)
-    }
-}
-
-struct SharedConversationBanner: View {
-    let note: String
-    let peers: [SharedProcess]
-    var leadingInset: CGFloat = 22
-    let onOpen: (String) -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "square.on.square")
-                .foregroundStyle(DesktopPalette.accentText)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(note)
-                    .fixedSize(horizontal: false, vertical: true)
-                if peers.count > 1 {
-                    ForEach(peers) { peer in
-                        HStack(spacing: 10) {
-                            Text(SharedConversation.peerLabel(peer))
-                                .foregroundStyle(DesktopPalette.text2)
-                            openButton(peer)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if peers.count == 1 {
-                openButton(peers[0])
-            }
-        }
-        .font(.system(size: 12.5))
-        .padding(.leading, leadingInset)
-        .padding(.trailing, 14)
-        .padding(.vertical, 9)
-        .background(DesktopPalette.dock)
-        .overlay(alignment: .bottom) { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func openButton(_ peer: SharedProcess) -> some View {
-        Button("Open other") { onOpen(peer.id) }
-            .buttonStyle(.plain)
-            .foregroundStyle(DesktopPalette.accentText)
-            .accessibilityLabel(SharedConversation.openLabel(peer))
-            .help(SharedConversation.openLabel(peer))
     }
 }
 
