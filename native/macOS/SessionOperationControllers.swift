@@ -150,3 +150,44 @@ final class BackgroundSessionController: ObservableObject {
         }
     }
 }
+
+@MainActor
+final class ForkController: ObservableObject {
+    @Published private(set) var forking = false
+    @Published private(set) var stillForking = false
+    @Published private(set) var error: String?
+    private var pendingKey: (cwd: String?, key: String)?
+
+    func fork(sessionID: String, cwd: String?, api: AgenthailAPI?) async -> ForkedSession? {
+        guard !forking else { return nil }
+        guard let api else {
+            error = "Agenthail isn't connected."
+            return nil
+        }
+        let key = pendingKey.flatMap { $0.cwd == cwd ? $0.key : nil } ?? UUID().uuidString
+        pendingKey = nil
+        forking = true
+        stillForking = false
+        error = nil
+        defer { forking = false }
+        do {
+            switch try await api.forkSession(id: sessionID, cwd: cwd, idempotencyKey: key) {
+            case .forked(let session):
+                return session
+            case .submitted:
+                pendingKey = (cwd, key)
+                stillForking = true
+                return nil
+            }
+        } catch {
+            if Self.outcomeUnknown(error) { pendingKey = (cwd, key) }
+            self.error = error.localizedDescription
+            return nil
+        }
+    }
+
+    private static func outcomeUnknown(_ error: Error) -> Bool {
+        if case AgenthailAPIError.outcomeUnknown = error { return true }
+        return error is URLError
+    }
+}

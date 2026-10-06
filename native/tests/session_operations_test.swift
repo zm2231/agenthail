@@ -2,6 +2,7 @@ import Foundation
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var bodies: [[String: Any]] = []
+    nonisolated(unsafe) static var keys: [String?] = []
     nonisolated(unsafe) static var replies: [(Int, String)] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -19,6 +20,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             }
             stream.close()
         }
+        Self.keys.append(request.value(forHTTPHeaderField: "Idempotency-Key"))
         Self.bodies.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
         let (status, body) = Self.replies.isEmpty ? (200, "{}") : Self.replies.removeFirst()
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
@@ -40,6 +42,7 @@ struct SessionOperationsTest {
         await checkRequests()
         await checkNativeQueueController()
         await checkBackgroundController()
+        await checkForkController()
         print("session operations tests passed")
     }
 
@@ -104,6 +107,7 @@ struct SessionOperationsTest {
 
     static func reset(_ replies: [(Int, String)]) {
         StubProtocol.bodies = []
+        StubProtocol.keys = []
         StubProtocol.replies = replies
     }
 
@@ -111,7 +115,8 @@ struct SessionOperationsTest {
         let api = api()
         reset([(200, #"{"ok":true,"result":{"session":{"id":"fork-1","surface":"codex"}}}"#)])
         let fork = try? await api.forkSession(id: "S", cwd: "/work")
-        check(fork?.session.id == "fork-1", "fork returns the new session")
+        guard case .forked(let forked)? = fork else { return check(false, "fork returns the new session") }
+        check(forked.id == "fork-1", "fork returns the new session")
         check(StubProtocol.bodies.first?["action"] as? String == "session-fork" && StubProtocol.bodies.first?["sessionId"] as? String == "S", "fork names the action and source")
         check((StubProtocol.bodies.first?["fork"] as? [String: Any])?["cwd"] as? String == "/work", "fork sends the folder")
 
@@ -205,6 +210,46 @@ struct SessionOperationsTest {
         check(!controller.resumeUnchanged, "the no-op note clears on the next action")
         controller.reset(sessionID: "D")
         check(controller.status == nil && controller.logs == nil && !controller.resumeUnchanged, "switching sessions clears background state")
+    }
+
+    @MainActor
+    static func checkForkController() async {
+        let api = api()
+        let forked = #"{"ok":true,"result":{"session":{"id":"fork-1"}}}"#
+        let definite = #"{"ok":false,"unknown":false,"error":"thread not found"}"#
+        let unknown = #"{"ok":false,"unknown":true,"error":"timed out"}"#
+        let submitted = #"{"ok":true,"status":"submitted"}"#
+
+        var controller = ForkController()
+        reset([(502, definite), (200, forked)])
+        let failed = await controller.fork(sessionID: "S", cwd: nil, api: api)
+        check(failed == nil && controller.error == "thread not found", "a definite failure shows its error")
+        let retried = await controller.fork(sessionID: "S", cwd: nil, api: api)
+        check(retried?.id == "fork-1" && controller.error == nil, "a retry after a definite failure forks")
+        check(StubProtocol.keys.count == 2 && StubProtocol.keys[0] != nil && StubProtocol.keys[0] != StubProtocol.keys[1], "a retry after a definite failure sends a new key")
+
+        controller = ForkController()
+        reset([(502, unknown), (200, forked), (200, forked)])
+        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
+        check(controller.error?.hasSuffix("The outcome is unknown; check the session before retrying.") == true, "an unknown outcome is called out")
+        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
+        check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] == StubProtocol.keys[1], "a retry after an unknown outcome reuses the key")
+        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
+        check(StubProtocol.keys[2] != StubProtocol.keys[1], "a fork after a success sends a new key")
+
+        controller = ForkController()
+        reset([(502, unknown), (200, forked)])
+        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
+        _ = await controller.fork(sessionID: "S", cwd: "/other", api: api)
+        check(StubProtocol.keys[0] != StubProtocol.keys[1], "changing the folder sends a new key")
+
+        controller = ForkController()
+        reset([(202, submitted), (200, forked)])
+        let pending = await controller.fork(sessionID: "S", cwd: nil, api: api)
+        check(pending == nil && controller.stillForking && controller.error == nil, "a submitted reply shows the fork is still running")
+        let finished = await controller.fork(sessionID: "S", cwd: nil, api: api)
+        check(finished?.id == "fork-1" && !controller.stillForking, "checking again opens the fork")
+        check(StubProtocol.keys[0] == StubProtocol.keys[1], "a submitted fork keeps its key")
     }
 
     static func check(_ condition: Bool, _ message: String) {

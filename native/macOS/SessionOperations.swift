@@ -68,6 +68,16 @@ struct SessionForkResult: Decodable {
     let session: ForkedSession
 }
 
+enum SessionForkOutcome {
+    case forked(ForkedSession)
+    case submitted
+}
+
+private struct SessionForkResponse: Decodable {
+    let status: String?
+    let result: SessionForkResult?
+}
+
 struct SessionLifecycleResult: Decodable, Equatable {
     let id: String?
     let sessionId: String?
@@ -96,10 +106,12 @@ enum SessionOperationAvailability {
 }
 
 extension AgenthailAPI {
-    func forkSession(id: String, cwd: String?, idempotencyKey: String? = nil) async throws -> SessionForkResult {
+    func forkSession(id: String, cwd: String?, idempotencyKey: String? = nil) async throws -> SessionForkOutcome {
         let request = SessionOperationRequest(action: "session-fork", sessionId: id, fork: ForkCommand(cwd: cwd))
-        let response: SessionOperationResponse<SessionForkResult> = try await postAction(request, idempotencyKey: idempotencyKey)
-        return response.result
+        let response: SessionForkResponse = try await postAction(request, idempotencyKey: idempotencyKey)
+        if let result = response.result { return .forked(result.session) }
+        guard response.status == "submitted" else { throw AgenthailAPIError.invalidResponse }
+        return .submitted
     }
 
     func nativeQueue<Result: Decodable>(sessionID: String, _ command: NativeQueueCommand, idempotencyKey: String? = nil) async throws -> Result {

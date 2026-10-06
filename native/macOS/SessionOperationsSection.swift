@@ -281,9 +281,7 @@ struct ForkSessionSheet: View {
     let session: SessionState
     @Environment(\.dismiss) private var dismiss
     @State private var folder = ""
-    @State private var forking = false
-    @State private var error: String?
-    @State private var keys: [String: String] = [:]
+    @StateObject private var controller = ForkController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -298,19 +296,23 @@ struct ForkSessionSheet: View {
                     .textFieldStyle(.roundedBorder)
                 Button("Choose…", action: chooseFolder)
             }
-            if let error {
+            if let error = controller.error {
                 Text(error)
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.red)
                     .textSelection(.enabled)
+            } else if controller.stillForking {
+                Text("Still forking. Press Fork again to check on it.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DesktopPalette.text2)
             }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(forking ? "Forking…" : "Fork", action: fork)
+                Button(controller.forking ? "Forking…" : "Fork", action: fork)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(forking)
+                    .disabled(controller.forking)
             }
         }
         .padding(20)
@@ -327,16 +329,12 @@ struct ForkSessionSheet: View {
     }
 
     private func fork() {
-        forking = true
-        error = nil
         let trimmed = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         let cwd = trimmed.isEmpty ? nil : (trimmed as NSString).expandingTildeInPath
-        let key = keys[cwd ?? "", default: UUID().uuidString]
-        keys[cwd ?? ""] = key
         Task {
-            let failure = await pane.fork(session, cwd: cwd, idempotencyKey: key)
-            forking = false
-            if let failure { error = failure } else { dismiss() }
+            guard let forked = await controller.fork(sessionID: session.id, cwd: cwd, api: pane.model.api) else { return }
+            await pane.openFork(forked)
+            dismiss()
         }
     }
 }

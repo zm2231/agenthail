@@ -310,15 +310,8 @@ final class SessionPane: ObservableObject, Identifiable {
         return options.first { $0.id.caseInsensitiveCompare(query) == .orderedSame || $0.displayName.caseInsensitiveCompare(query) == .orderedSame }?.id ?? query
     }
 
-    func fork(_ session: SessionState, cwd: String?, idempotencyKey: String) async -> String? {
-        guard let api = model.api else { return "Agenthail isn't connected." }
-        do {
-            let result = try await api.forkSession(id: session.id, cwd: cwd, idempotencyKey: idempotencyKey)
-            await model.openCreatedSession(result.session.id, in: closed ? nil : self)
-            return nil
-        } catch {
-            return error.localizedDescription
-        }
+    func openFork(_ forked: ForkedSession) async {
+        await model.openCreatedSession(forked.id, in: closed ? nil : self)
     }
 
     static func stopAvailable(_ session: SessionState?, removed: Bool, draftEmpty: Bool) -> Bool {

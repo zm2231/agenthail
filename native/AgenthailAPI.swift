@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case outcomeUnknown(String)
     case historyGap(String)
     case streamGap
     case streamUnsupported
@@ -16,6 +17,7 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
@@ -425,7 +427,8 @@ final class AgenthailAPI: @unchecked Sendable {
                     message = detail
                 }
                 if let detail = object["error"] as? String, !detail.isEmpty {
-                    message = object["unknown"] as? Bool == true ? "\(detail) The outcome is unknown; check the session before retrying." : detail
+                    if object["unknown"] as? Bool == true { throw AgenthailAPIError.outcomeUnknown(detail) }
+                    message = detail
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
