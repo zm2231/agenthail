@@ -283,7 +283,7 @@ struct ForkSessionSheet: View {
     @State private var folder = ""
     @State private var forking = false
     @State private var error: String?
-    @State private var attempt: (cwd: String?, key: String)?
+    @State private var keys: [String: String] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -331,13 +331,8 @@ struct ForkSessionSheet: View {
         error = nil
         let trimmed = folder.trimmingCharacters(in: .whitespacesAndNewlines)
         let cwd = trimmed.isEmpty ? nil : (trimmed as NSString).expandingTildeInPath
-        let key: String
-        if let current = attempt, current.cwd == cwd {
-            key = current.key
-        } else {
-            key = UUID().uuidString
-            attempt = (cwd, key)
-        }
+        let key = keys[cwd ?? "", default: UUID().uuidString]
+        keys[cwd ?? ""] = key
         Task {
             let failure = await pane.fork(session, cwd: cwd, idempotencyKey: key)
             forking = false
