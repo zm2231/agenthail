@@ -45,6 +45,7 @@ final class AgenthailModel: ObservableObject {
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
 
     private(set) var api: AgenthailAPI?
+    private var creationKey = SessionLaunchKey()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
@@ -72,7 +73,6 @@ final class AgenthailModel: ObservableObject {
         let idempotencyKey: String
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
-    private var pendingCreation: (identity: [String], key: String)?
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -264,36 +264,49 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> SessionLaunchOutcome {
+    func creationModels(for agent: String) async throws -> [ModelOption] {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.creationModels(surface: agent)
+    }
+
+    func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
+        let outcome = await createSession(form)
+        creationKey.record(outcome)
+        return outcome
+    }
+
+    private func createSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
         guard let api else { return .failed("Agenthail isn't connected.") }
-        let identity = [agent, folder, message, launcher ?? ""]
-        if pendingCreation?.identity != identity {
-            pendingCreation = (identity, UUID().uuidString)
-        }
-        let idempotencyKey = pendingCreation?.key
         do {
-            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey, failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: launcher, agent: agent)
-            if decision.settlesRetry {
-                pendingCreation = nil
-                operationError = nil
-            }
+            let body = try form.creationBody()
+            let receipt = try await api.createSession(body: body, idempotencyKey: creationKey.key(for: body), failureReceipts: true)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
             switch decision {
             case .open(let id):
+                operationError = nil
                 await openCreatedSession(id)
                 return .opened
             case .submitted(let note):
+                operationError = nil
                 return .submitted(note)
+            case .starting:
+                return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
                 if let id { await openCreatedSession(id) }
-                return .failed("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
+                return .starting("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):
                 return .failed(message)
             }
-        } catch {
+        } catch AgenthailAPIError.request(_, let message) {
+            return .failed(message)
+        } catch AgenthailAPIError.unavailable(let message) {
+            return .failed(message)
+        } catch let error as CodexCreationSettingsError {
             return .failed(error.localizedDescription)
+        } catch {
+            return .uncertain(error.localizedDescription)
         }
     }
 
