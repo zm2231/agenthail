@@ -297,12 +297,12 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    private func openCreatedSession(_ id: String) async {
+    func openCreatedSession(_ id: String, in pane: SessionPane? = nil) async {
         await refresh(fresh: true)
         if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
-            pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
+            pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
         }
-        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { mainPane.select(session.id) }
+        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { (pane ?? mainPane).select(session.id) }
     }
 
     func attachmentData(sessionID: String, attachment: SessionAttachment) async throws -> Data {
