@@ -1010,8 +1010,8 @@ func relTime(t time.Time) string {
 }
 
 // registeredSessionUnavailable explains a registered session with no live
-// process: when its surface still knows the session as a stopped or failed
-// job, the caller needs that state and the resume command, not a match error.
+// process: when its surface still knows the session as a job, the caller needs
+// that state, and the resume command when the job has ended, not a match error.
 func (a *App) registeredSessionUnavailable(ctx context.Context, sid, target string, adapter surface.Surface, resolveErr error) error {
 	err := fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 	lifecycle, ok := adapter.(surface.SessionLifecycle)
@@ -1026,7 +1026,11 @@ func (a *App) registeredSessionUnavailable(ctx context.Context, sid, target stri
 	if statusErr != nil {
 		return err
 	}
-	return fmt.Errorf("%s session %s is not running: background job %v is %v; resume it with: agenthail thread resume %s", adapter.Name(), sid, status["id"], status["state"], target)
+	switch status["state"] {
+	case "failed", "crashed", "stopped", "done":
+		return fmt.Errorf("%s session %s is not running: background job %v is %v; resume it with: agenthail thread resume %s", adapter.Name(), sid, status["id"], status["state"], target)
+	}
+	return fmt.Errorf("%s session %s is not reachable yet: background job %v is %v", adapter.Name(), sid, status["id"], status["state"])
 }
 
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {

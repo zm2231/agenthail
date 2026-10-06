@@ -166,9 +166,8 @@ const claudeResumeSettleTimeout = 10 * time.Second
 
 // claude --bg --resume prints its backgrounded line and exits 0 before the
 // session initializes, so only the job state shows whether it started. A
-// terminal state counts only once the job record was written by this resume,
-// not left over from the stop or failure being resumed. Claude records
-// updatedAt to the millisecond.
+// state counts only once the job record was written by this resume, not left
+// over from before it. Claude records updatedAt to the millisecond.
 func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
 	started = started.Truncate(time.Millisecond)
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
@@ -185,11 +184,11 @@ func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time)
 				state = record.State
 			}
 		}
-		switch state {
-		case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
-			return state, nil
-		case "failed", "crashed", "stopped", "done":
-			if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
+		if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
+			switch state {
+			case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
+				return state, nil
+			case "failed", "crashed", "stopped", "done":
 				detail := job.Detail
 				if strings.TrimSpace(detail) == "" {
 					detail = "no job detail recorded"

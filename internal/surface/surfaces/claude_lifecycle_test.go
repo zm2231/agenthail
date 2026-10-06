@@ -17,6 +17,11 @@ func fakeBackgroundClaude(t *testing.T, initialState, onResume string) (string, 
 	home := t.TempDir()
 	script := `#!/bin/sh
 env >> "$HOME/env"
+setstate() {
+ printf '%s' "$1" > "$HOME/state"
+ mkdir -p "$HOME/.claude/jobs/job12345"
+ printf '{"detail":"%s","updatedAt":"2999-01-01T00:00:00Z"}' "$2" > "$HOME/.claude/jobs/job12345/state.json"
+}
 if [ "$1" = agents ]; then
  printf '[{"id":"job12345","sessionId":"fixture-session","kind":"background","name":"fixture","cwd":"%s","state":"%s"}]\n' "$HOME" "$(cat "$HOME/state")"
 elif [ "$1" = --bg ] && [ "$2" = --resume ]; then
@@ -90,7 +95,7 @@ func TestClaudeResumeReportsJobThatFailsToStart(t *testing.T) {
 }
 
 func TestClaudeResumeWaitsForRunningJob(t *testing.T) {
-	_, c := fakeBackgroundClaude(t, "stopped", `printf starting > "$HOME/state"; (sleep 0.3; printf working > "$HOME/state") >/dev/null 2>&1 &`)
+	_, c := fakeBackgroundClaude(t, "stopped", `setstate starting; (sleep 0.3; setstate working) >/dev/null 2>&1 &`)
 	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
 	if err != nil || result["state"] != "working" || result["id"] != "job12345" {
 		t.Fatalf("result=%v err=%v", result, err)
@@ -98,7 +103,7 @@ func TestClaudeResumeWaitsForRunningJob(t *testing.T) {
 }
 
 func TestClaudeResumeIgnoresTerminalStateLeftFromBeforeResume(t *testing.T) {
-	home, c := fakeBackgroundClaude(t, "stopped", `(sleep 0.3; printf working > "$HOME/state") >/dev/null 2>&1 &`)
+	home, c := fakeBackgroundClaude(t, "stopped", `(sleep 0.3; setstate working) >/dev/null 2>&1 &`)
 	writeJobRecord(t, home, "stopped", time.Now().Add(-time.Hour))
 	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
 	if err != nil || result["state"] != "working" {
@@ -106,8 +111,18 @@ func TestClaudeResumeIgnoresTerminalStateLeftFromBeforeResume(t *testing.T) {
 	}
 }
 
+func TestClaudeResumeIgnoresLiveStateLeftFromBeforeResume(t *testing.T) {
+	detail := "exit 1 before init: Error: Settings file not found: /fixture/settings.json"
+	home, c := fakeBackgroundClaude(t, "idle", `(sleep 0.3; setstate failed '`+detail+`') >/dev/null 2>&1 &`)
+	writeJobRecord(t, home, "", time.Now().Add(-time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err == nil || !strings.Contains(err.Error(), "is failed after resume") || !strings.Contains(err.Error(), detail) {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
 func TestClaudeResumeAcceptsShellState(t *testing.T) {
-	_, c := fakeBackgroundClaude(t, "stopped", `printf shell > "$HOME/state"`)
+	_, c := fakeBackgroundClaude(t, "stopped", `setstate shell`)
 	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
 	if err != nil || result["state"] != "shell" {
 		t.Fatalf("result=%v err=%v", result, err)
