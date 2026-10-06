@@ -21,7 +21,7 @@ elif [ "$1" = --bg ]; then
  if [ "$2" = --resume ]; then
   printf working > "$HOME/state"
   mkdir -p "$HOME/.claude/jobs/ab12cd34"
-  printf '{"updatedAt":"2999-01-01T00:00:00Z"}' > "$HOME/.claude/jobs/ab12cd34/state.json"
+  printf '{"state":"working","updatedAt":"2999-01-01T00:00:00Z"}' > "$HOME/.claude/jobs/ab12cd34/state.json"
  fi
  printf '\033[32mbackgrounded · ab12cd34\033[0m\n'
 else

@@ -165,9 +165,11 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 const claudeResumeSettleTimeout = 10 * time.Second
 
 // claude --bg --resume prints its backgrounded line and exits 0 before the
-// session initializes, so only the job state shows whether it started. A
-// state counts only once the job record was written by this resume, not left
-// over from before it. Claude records updatedAt to the millisecond.
+// session initializes, so only the job state shows whether it started. The job
+// record holds the state, its updatedAt and the failure detail in one write; a
+// state counts only once that record was written by this resume, not left over
+// from before it. Claude records updatedAt to the millisecond. The catalog
+// listing is read only when the job has no record.
 func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
 	started = started.Truncate(time.Millisecond)
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
@@ -177,14 +179,21 @@ func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time)
 	state := ""
 	var listErr error
 	for {
-		var records []claudeBackground
-		records, listErr = c.backgroundSessions(ctx)
-		for _, record := range records {
-			if record.ID == id && record.Kind == "background" {
-				state = record.State
+		job, ok := c.backgroundJob(id)
+		fresh := ok && !job.UpdatedAt.Before(started)
+		if ok {
+			state = job.State
+		} else {
+			var records []claudeBackground
+			records, listErr = c.backgroundSessions(ctx)
+			for _, record := range records {
+				if record.ID == id && record.Kind == "background" {
+					state = record.State
+					fresh = true
+				}
 			}
 		}
-		if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
+		if fresh {
 			switch state {
 			case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
 				return state, nil
@@ -210,6 +219,7 @@ func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time)
 }
 
 type claudeJob struct {
+	State     string    `json:"state"`
 	Detail    string    `json:"detail"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
