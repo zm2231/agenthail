@@ -150,7 +150,7 @@ agenthail thread create codex "Implement the verified fix" --alias builder --jso
 agenthail thread create claude "Investigate the build failure" --alias investigator --json
 ```
 
-The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
+The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI, web dashboard and Mac app; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
 Notion threads can start the same way:
 

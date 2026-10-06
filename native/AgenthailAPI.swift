@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case outcomeUnknown(String)
     case historyGap(String)
     case streamGap
     case streamUnsupported
@@ -16,6 +17,7 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
@@ -260,6 +262,10 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
 
+    func postAction<Body: Encodable, Response: Decodable>(_ body: Body, idempotencyKey: String? = nil) async throws -> Response {
+        try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
+    }
+
     func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
         var request = authorizedRequest(path: "/api/v1/events")
         request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
@@ -420,6 +426,10 @@ final class AgenthailAPI: @unchecked Sendable {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }
+                if let detail = object["error"] as? String, !detail.isEmpty {
+                    if object["unknown"] as? Bool == true { throw AgenthailAPIError.outcomeUnknown(detail) }
+                    message = detail
+                }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
                 }
@@ -452,7 +462,7 @@ private struct InstructionRequest: Encodable {
     let turnSettings: TurnSettings
     var busyDelivery: String? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case serviceTier; case outputSchema; case busyDelivery }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -463,6 +473,8 @@ private struct InstructionRequest: Encodable {
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
+            try container.encodeIfPresent(turnSettings.serviceTier, forKey: .serviceTier)
+            try container.encodeIfPresent(turnSettings.outputSchema, forKey: .outputSchema)
         }
     }
 }

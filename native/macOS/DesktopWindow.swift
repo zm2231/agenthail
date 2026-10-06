@@ -557,6 +557,7 @@ struct ConversationPane: View {
             }
             .background(DesktopPalette.window)
             .environmentObject(pane)
+            .sheet(item: $pane.forkingSession) { ForkSessionSheet(pane: pane, session: $0) }
         } else {
             ContentUnavailableView {
                 if model.isConnected {
@@ -1228,6 +1229,13 @@ struct ComposerView: View {
                         }
                     }
                 }
+                if !slashSuggestions.isEmpty {
+                    SlashCommandMenu(suggestions: slashSuggestions, roundedTop: queued.isEmpty) { choice in
+                        draft.text = choice
+                        focused = true
+                    }
+                    .padding(.horizontal, 10)
+                }
                 VStack(spacing: 0) {
                     TextField("Message \(session.title)", text: $draft.text, axis: .vertical)
                         .textFieldStyle(.plain)
@@ -1253,11 +1261,16 @@ struct ComposerView: View {
                             TurnSettingsMenu(model: model, sessionID: session.id, detail: pane.detail)
                         }
                         Spacer()
-                        if session.isWorking && hasText {
+                        if session.isWorking && hasText && !draftIsCommand {
                             Text(hint)
                                 .font(.system(size: 11))
                                 .foregroundStyle(DesktopPalette.text2)
                                 .padding(.trailing, 4)
+                        }
+                        if showsSteerNow {
+                            Button("Steer now") { pane.submit(busyDelivery: FollowUpAction.steer.rawValue) }
+                                .controlSize(.small)
+                                .help(shortcuts.help("Change the turn in progress", .sendAlternate))
                         }
                         Button(action: primaryAction) {
                             Image(systemName: primarySymbol)
@@ -1311,6 +1324,24 @@ struct ComposerView: View {
     }
 
     private var primaryIsStop: Bool { SessionPane.stopAvailable(session, removed: false, draftEmpty: draft.isEmpty) }
+    private var draftIsCommand: Bool {
+        draft.attachments.isEmpty && (SlashInput(draft.text, available: SlashCommand.allCases) != .message || !slashSuggestions.isEmpty)
+    }
+    private var showsSteerNow: Bool { session.isWorking && canSteer && hasText && !draftIsCommand && resolvedAction(alternate: false) == .queue }
+    private var slashSuggestions: [SlashCommandMenu.Suggestion] {
+        guard draft.attachments.isEmpty else { return [] }
+        if let query = SlashCommand.modelQuery(for: draft.text), session.capabilities.model {
+            let options = pane.detail?.models ?? []
+            if options.contains(where: { $0.id == query }) { return [] }
+            return options
+                .filter { query.isEmpty || $0.id.localizedCaseInsensitiveContains(query) || $0.displayName.localizedCaseInsensitiveContains(query) }
+                .map { SlashCommandMenu.Suggestion(id: "model:" + $0.id, title: $0.displayName, detail: $0.id == pane.detail?.model ? "Current" : ($0.description ?? $0.id), insertion: "/model " + $0.id) }
+        }
+        let available = SlashCommand.available(capabilities: session.capabilities, working: session.isWorking)
+        return SlashCommand.suggestions(for: draft.text, available: available).map {
+            SlashCommandMenu.Suggestion(id: $0.token, title: $0.token, detail: $0.summary, insertion: $0.token + ($0.needsArgument ? " " : ""))
+        }
+    }
 
     private func chooseAttachments() {
         let panel = NSOpenPanel()
@@ -1361,6 +1392,10 @@ struct ComposerView: View {
 
     private func submit(alternate: Bool) {
         guard hasText else { return }
+        if let first = slashSuggestions.first, String(draft.text.drop { $0.isWhitespace }) != first.insertion {
+            draft.text = first.insertion
+            return
+        }
         let explicit = session.isWorking && alternate && canSteer ? resolvedAction(alternate: true).rawValue : nil
         pane.submit(busyDelivery: explicit)
     }
@@ -1669,6 +1704,7 @@ struct DetailsTab: View {
                     .help("Ask the agent to compact its context")
             }
             GoalSection(model: model, pane: pane, session: session)
+            SessionOperationsSection(model: model, pane: pane, session: session)
             SubagentsSection(model: model, pane: pane, session: session)
             ClaudeObservationsSection(detail: pane.detail)
         }

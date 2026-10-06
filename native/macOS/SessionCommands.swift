@@ -32,6 +32,8 @@ struct SessionCommands: Commands {
             }
             .keyboardShortcut(shortcuts.keyboardShortcut(.openInNewWindow))
             .disabled(session == nil)
+            Button("Fork…") { pane?.forkingSession = session }
+                .disabled(session.map(SessionOperationAvailability.fork) != true || pane?.removedSession != nil)
             Divider()
             Button("Stop") {
                 if let pane, pane.canStop { pane.interrupt() }
