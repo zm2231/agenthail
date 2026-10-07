@@ -18,6 +18,9 @@ func (s *Service) sendInstruction(ctx context.Context, target *Target, text, mes
 	if target == nil || target.Session == nil || target.Adapter == nil {
 		return errors.New("target unavailable")
 	}
+	if selected := s.state.State.Target; selected != nil && target.Session.ID != selected.ID {
+		return errors.New("transfer or return to the orchestrator before instructing another worker")
+	}
 	if strings.TrimSpace(text) == "" || len(text) > 16<<10 || messageID == "" || len(messageID) > 128 {
 		return errors.New("a bounded instruction and message ID are required")
 	}

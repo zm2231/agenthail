@@ -122,6 +122,34 @@ func TestVoiceBoundReadAndListToolsReturnJournalData(t *testing.T) {
 	}
 }
 
+func TestVoiceSendToolRespectsSelectedWorkerBoundary(t *testing.T) {
+	for _, bound := range []bool{true, false} {
+		t.Run(map[bool]string{true: "selected", false: "orchestrator"}[bound], func(t *testing.T) {
+			selected := &targetFixture{session: surface.Session{ID: "selected", Surface: surface.KindCodex, Transport: "desktop"}}
+			other := &targetFixture{session: surface.Session{ID: "other", Surface: surface.KindCodex, Transport: "desktop"}}
+			f := boundFixture(t, selected, newJournalFixture())
+			if !bound {
+				f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "return", "threadId": "operator", "namespace": "agenthail", "tool": "voice_return_to_orchestrator"}})
+			}
+			f.service.mu.Lock()
+			f.service.target = func(context.Context, string) (*Target, error) {
+				return &Target{Session: &other.session, Adapter: other}, nil
+			}
+			f.service.unlock()
+			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "other-instruction", "threadId": "operator", "namespace": "agenthail", "tool": "session_send", "arguments": map[string]any{"targetId": "other", "text": "Do the authorized work"}}})
+			f.provider.mu.Lock()
+			response := f.provider.toolCalls[len(f.provider.toolCalls)-1]
+			f.provider.mu.Unlock()
+			if bound && (response.success || len(other.sent) != 0) {
+				t.Fatal("selected call wrote to a different worker")
+			}
+			if !bound && (!response.success || len(other.sent) != 1) {
+				t.Fatal("orchestrator could not send an intentional instruction")
+			}
+		})
+	}
+}
+
 func TestVoiceProgressThenFinalDoesNotRepeatSpokenPrefix(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Name: "Worker", Transport: "desktop"}}
 	stream := newJournalFixture()

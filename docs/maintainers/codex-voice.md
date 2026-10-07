@@ -83,6 +83,8 @@ typed discussion remain conversational. The backing operator uses `session_send`
 only for complete user-authorized work, corrections or constraints. Progress
 questions are answered from supplied context or the bounded `session_read` tool,
 not automatically injected into the worker.
+While bound, only the selected worker may receive instructions. Transfer or return
+to the orchestrator before instructing another worker.
 
 The persistent audio operator retains the packaged Operations skill for ordinary
 voice lifecycle support, but it is not the coding provider for a selected target.
