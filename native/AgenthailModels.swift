@@ -11,44 +11,6 @@ struct ClaudeCreationSettings {
     }
 }
 
-struct CodexCreationSettings: Equatable {
-    static let schemaLimit = 64 << 10
-
-    var approvalPolicy = ""
-    var serviceTier = ""
-    var outputSchema = ""
-
-    var isEmpty: Bool { fieldsWithoutSchema.isEmpty && outputSchema.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    var schemaProblem: String? {
-        let text = outputSchema.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        guard text.utf8.count <= Self.schemaLimit,
-              (try? JSONSerialization.jsonObject(with: Data(text.utf8))) is [String: Any]
-        else { return "Output schema must be a JSON object, at most 64 KiB." }
-        return nil
-    }
-
-    func fields() throws -> [String: Any] {
-        var fields: [String: Any] = fieldsWithoutSchema
-        let text = outputSchema.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-            if let problem = schemaProblem { throw CodexCreationSettingsError(message: problem) }
-            fields["outputSchema"] = try JSONSerialization.jsonObject(with: Data(text.utf8))
-        }
-        return fields
-    }
-
-    private var fieldsWithoutSchema: [String: String] {
-        ["approvalPolicy": approvalPolicy, "serviceTier": serviceTier].filter { !$0.value.isEmpty }
-    }
-}
-
-struct CodexCreationSettingsError: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
-}
-
 struct SessionCreationOptions: Decodable {
     struct Surface: Decodable, Identifiable { let id: String; let workspace: Bool }
     let surfaces: [Surface]

@@ -142,25 +142,23 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    static func creationBody(surface: String, message: String, cwd: String, model: String, alias: String = "", turnSettings: TurnSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) throws -> Data {
-        if launcher != nil && (!turnSettings.isEmpty || !codex.isEmpty || !claude.fields.isEmpty) {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) throws -> Data {
+        if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-        if !alias.isEmpty { body["alias"] = alias }
         if let launcher { body["launcher"] = launcher }
         if surface == "codex" {
             if let effort = turnSettings.effort { body["effort"] = effort }
             if let mode = turnSettings.mode { body["mode"] = mode.rawValue }
-            body.merge(try codex.fields()) { _, value in value }
         } else if surface == "claude" {
             body.merge(claude.fields) { _, value in value }
         }
         return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, alias: String = "", turnSettings: TurnSettings = .init(), codex: CodexCreationSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
-        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, alias: alias, turnSettings: turnSettings, codex: codex, claude: claude, launcher: launcher), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
     }
 
     func createSession(body: Data, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {

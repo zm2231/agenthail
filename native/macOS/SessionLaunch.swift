@@ -39,7 +39,7 @@ enum SessionLaunchDecision: Equatable {
     case halted(String)
     case failed(String)
 
-    init(_ receipt: SessionCreationReceipt, launcher: String?, agent: String) {
+    init(_ receipt: SessionCreationReceipt, agent: String) {
         if receipt.unknown == true {
             self = .unconfirmed(receipt.id)
             return
@@ -60,53 +60,28 @@ enum SessionLaunchDecision: Equatable {
             self = .starting
             return
         }
-        let target = receipt.launcher ?? launcher ?? agent
+        let target = receipt.launcher ?? agent
         let note = "Submitted to \(target). It appears in the sidebar once it starts."
         self = .submitted([note, receipt.warning].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"))
     }
 }
 
 struct SessionLaunchForm: Equatable {
-    static let codexEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
-    static let claudeEfforts = ["low", "medium", "high", "xhigh", "max"]
-
     var agent = "claude"
-    var launcher: String?
-    var alias = ""
     var folder = ""
     var model = ""
-    var message = ""
     var effort = ""
-    var mode: TurnSettings.Mode?
-    var codex = CodexCreationSettings()
-    var claudeAgent = ""
-    var worktree = ""
-    var permissionMode = ""
+    var message = ""
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
-    var hasOptions: Bool { (agent == "codex" || agent == "claude") && launcher == nil }
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
-    var handle: String { SessionHandle.normalized(alias) }
-
-    var problem: String? {
-        if !handle.isEmpty, let problem = SessionHandle.problem(with: alias) { return problem }
-        if agent == "codex" && launcher == nil { return codex.schemaProblem }
-        return nil
-    }
-
-    var isComplete: Bool { problem == nil && !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) }
+    var isComplete: Bool { !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) }
 
     mutating func switchAgent(to next: String) {
         guard next != agent else { return }
-        self = SessionLaunchForm(agent: next, alias: alias, folder: folder, message: message)
-    }
-
-    mutating func selectLauncher(_ next: String?) {
-        launcher = next
-        guard next != nil else { return }
-        clearOptions()
+        self = SessionLaunchForm(agent: next, folder: folder, message: message)
     }
 
     mutating func selectModel(_ next: String) {
@@ -115,39 +90,18 @@ struct SessionLaunchForm: Equatable {
         effort = ""
     }
 
-    mutating func clearOptions() {
-        effort = ""
-        mode = nil
-        codex = .init()
-        claudeAgent = ""
-        worktree = ""
-        permissionMode = ""
-    }
-
-    var turnSettings: TurnSettings {
-        guard agent == "codex", launcher == nil else { return .init() }
-        return TurnSettings(effort: effort.isEmpty ? nil : effort, mode: mode)
-    }
-
-    var codexSettings: CodexCreationSettings {
-        agent == "codex" && launcher == nil ? codex : .init()
-    }
-
-    var claudeSettings: ClaudeCreationSettings {
-        guard agent == "claude", launcher == nil else { return .init() }
-        return ClaudeCreationSettings(worktree: worktree.trimmingCharacters(in: .whitespacesAndNewlines), agent: claudeAgent.trimmingCharacters(in: .whitespacesAndNewlines), effort: effort, permissionMode: permissionMode)
-    }
-
     var cwd: String { usesFolder ? folder : "" }
-    var modelID: String { listsModels ? model.trimmingCharacters(in: .whitespacesAndNewlines) : "" }
+    var modelID: String { listsModels ? model : "" }
 
     func creationBody() throws -> Data {
-        try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, alias: handle, turnSettings: turnSettings, codex: codexSettings, claude: claudeSettings, launcher: launcher)
+        let effort = listsModels ? effort : ""
+        let turnSettings = agent == "codex" && !effort.isEmpty ? TurnSettings(effort: effort) : TurnSettings()
+        let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort) : ClaudeCreationSettings()
+        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude)
     }
 
     func efforts(models: [ModelOption]) -> [String] {
-        let accepted = agent == "codex" ? Self.codexEfforts : agent == "claude" ? Self.claudeEfforts : []
         let selected = models.first { $0.id == model } ?? (model.isEmpty ? models.first { $0.default == true } : nil)
-        return (selected?.supportedReasoningEfforts ?? accepted).filter(accepted.contains)
+        return selected?.supportedReasoningEfforts ?? []
     }
 }

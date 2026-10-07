@@ -26,7 +26,6 @@ struct SessionLaunchRetryTest {
         check(Set(ScriptedProtocol.keys).count == 3, "changing the request mints a new key, and changing it back does too")
 
         var spelled = a
-        spelled.alias = ""
         spelled.message = "  Synthetic task A\n"
         model = makeModel([.lost, .lost])
         _ = await model.launchSession(a)

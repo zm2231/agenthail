@@ -280,7 +280,7 @@ final class AgenthailModel: ObservableObject {
         do {
             let body = try form.creationBody()
             let receipt = try await api.createSession(body: body, idempotencyKey: creationKey.key(for: body), failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
+            let decision = SessionLaunchDecision(receipt, agent: form.agent)
             switch decision {
             case .open(let id):
                 operationError = nil
@@ -303,8 +303,6 @@ final class AgenthailModel: ObservableObject {
             return .failed(message)
         } catch AgenthailAPIError.unavailable(let message) {
             return .failed(message)
-        } catch let error as CodexCreationSettingsError {
-            return .failed(error.localizedDescription)
         } catch {
             return .uncertain(error.localizedDescription)
         }

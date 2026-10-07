@@ -16,17 +16,8 @@ struct SessionLaunchFormTest {
         check(!form.isComplete, "a blank message can't start")
         form.message = "Summarize the sample"
         check(form.isComplete, "a message and folder can start")
-        form.alias = "@two words"
-        check(form.problem == "Names can't contain spaces, /, or #.", "an invalid name is reported")
-        check(!form.isComplete, "an invalid name blocks starting")
-        form.alias = "@sample-task"
-        check(form.problem == nil && form.handle == "sample-task", "a valid name drops its @")
-        form.codex.outputSchema = "[1, 2]"
-        check(form.problem == "Output schema must be a JSON object, at most 64 KiB.", "a non-object schema is reported")
-        form.codex.outputSchema = #"{"type":"object"}"#
-        check(form.problem == nil, "an object schema is accepted")
-        form.codex.outputSchema = "{" + String(repeating: " ", count: CodexCreationSettings.schemaLimit) + "}"
-        check(form.problem != nil, "an oversized schema is reported")
+        form.folder = ""
+        check(!form.isComplete, "a folder is required")
 
         let notion = SessionLaunchForm(agent: "notion", message: "Draft the outline")
         check(notion.isComplete, "Notion needs no folder")
@@ -34,37 +25,26 @@ struct SessionLaunchFormTest {
     }
 
     private static func checkSwitching() {
-        var form = SessionLaunchForm(agent: "claude", alias: "keep", folder: "/work/sample", model: "sample-model", message: "Keep me", effort: "high", claudeAgent: "reviewer", worktree: "tree", permissionMode: "plan")
+        var form = SessionLaunchForm(agent: "claude", folder: "/work/sample", model: "sample-model", effort: "high", message: "Keep me")
         form.switchAgent(to: "codex")
-        check(form.alias == "keep" && form.folder == "/work/sample" && form.message == "Keep me", "switching agents keeps name, folder and message")
-        check(form.model.isEmpty && form.effort.isEmpty && form.claudeAgent.isEmpty && form.permissionMode.isEmpty && form.worktree.isEmpty, "switching agents clears agent-specific settings")
+        check(form.folder == "/work/sample" && form.message == "Keep me", "switching agents keeps folder and message")
+        check(form.model.isEmpty && form.effort.isEmpty, "switching agents clears model and effort")
 
         form.effort = "high"
-        form.mode = .plan
-        form.codex.serviceTier = "fast"
         form.selectModel("other-model")
-        check(form.effort.isEmpty && form.mode == .plan, "changing the model clears effort only")
-        form.effort = "low"
-        form.selectLauncher("tmux")
-        check(form.launcher == "tmux" && !form.hasOptions, "a terminal launcher has no options")
-        check(form.turnSettings.isEmpty && form.codexSettings.isEmpty && form.effort.isEmpty && form.mode == nil, "choosing a terminal launcher clears options")
-        form.selectLauncher(nil)
-        check(form.hasOptions, "the default launcher has options")
+        check(form.model == "other-model" && form.effort.isEmpty, "changing the model clears effort")
     }
 
     private static func checkEfforts() {
-        let codex = SessionLaunchForm(agent: "codex", model: "")
         let catalog = [
-            ModelOption(id: "fast-model", displayName: "Fast", description: nil, default: true, allowsCustom: nil, supportedReasoningEfforts: ["low", "medium", "extreme"], defaultReasoningEffort: "low"),
+            ModelOption(id: "fast-model", displayName: "Fast", description: nil, default: true, allowsCustom: nil, supportedReasoningEfforts: ["low", "medium"], defaultReasoningEffort: "low"),
+            ModelOption(id: "deep-model", displayName: "Deep", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: ["high", "max"], defaultReasoningEffort: "high"),
             ModelOption(id: "plain-model", displayName: "Plain", description: nil, default: nil, allowsCustom: nil, supportedReasoningEfforts: nil, defaultReasoningEffort: nil),
         ]
-        check(codex.efforts(models: catalog) == ["low", "medium"], "the default model's efforts are offered, limited to values the daemon accepts")
-        var plain = codex
-        plain.model = "plain-model"
-        check(plain.efforts(models: catalog) == SessionLaunchForm.codexEfforts, "a model without listed efforts offers every accepted effort")
-        check(SessionLaunchForm(agent: "claude").efforts(models: []) == SessionLaunchForm.claudeEfforts, "Claude without a catalog offers every effort it accepts")
-        check(SessionLaunchForm(agent: "claude", model: "fast-model").efforts(models: catalog) == ["low", "medium"], "Claude follows the selected model's efforts")
-        check(SessionLaunchForm(agent: "notion").efforts(models: []).isEmpty, "Notion has no effort")
+        check(SessionLaunchForm(agent: "codex").efforts(models: catalog) == ["low", "medium"], "the runtime default offers the default model's efforts")
+        check(SessionLaunchForm(agent: "claude", model: "deep-model").efforts(models: catalog) == ["high", "max"], "a chosen model offers its own efforts")
+        check(SessionLaunchForm(agent: "codex", model: "plain-model").efforts(models: catalog).isEmpty, "a model without listed efforts offers none")
+        check(SessionLaunchForm(agent: "claude").efforts(models: []).isEmpty, "no catalog offers no effort")
     }
 
     private static func checkOptions() throws {
@@ -77,42 +57,27 @@ struct SessionLaunchFormTest {
     private static func checkPayloads() async throws {
         let api = AgenthailAPI(baseURL: URL(string: "http://agenthail.test")!, token: "synthetic", session: CaptureProtocol.session)
 
-        var codex = SessionLaunchForm(agent: "codex", alias: "@sample-task", folder: "/work/sample", model: "sample-model", message: "  Summarize  ", effort: "high", mode: .plan)
-        codex.codex = CodexCreationSettings(approvalPolicy: "never", serviceTier: "flex", outputSchema: #"{"type":"object"}"#)
-        let codexBody = try await send(codex, api)
-        check(codexBody["action"] as? String == "session-create" && codexBody["surface"] as? String == "codex", "Codex uses session-create")
-        check(codexBody["alias"] as? String == "sample-task" && codexBody["message"] as? String == "Summarize", "name and trimmed message are sent")
-        check(codexBody["model"] as? String == "sample-model" && codexBody["cwd"] as? String == "/work/sample", "model and folder are sent")
-        check(codexBody["effort"] as? String == "high" && codexBody["mode"] as? String == "plan", "effort and mode are sent")
-        check(codexBody["approvalPolicy"] as? String == "never" && codexBody["serviceTier"] as? String == "flex", "approvals and service tier are sent")
-        check((codexBody["outputSchema"] as? [String: Any])?["type"] as? String == "object", "the output schema is sent as JSON, not text")
-        check(codexBody["launcher"] == nil && codexBody["permissionMode"] == nil, "no launcher or Claude field leaks")
+        let codex = try await send(SessionLaunchForm(agent: "codex", folder: "/work/sample", model: "sample-model", effort: "high", message: "  Summarize  "), api)
+        check(codex["action"] as? String == "session-create" && codex["surface"] as? String == "codex", "Codex uses session-create")
+        check(codex["message"] as? String == "Summarize" && codex["cwd"] as? String == "/work/sample", "trimmed message and folder are sent")
+        check(codex["model"] as? String == "sample-model" && codex["effort"] as? String == "high", "model and effort are sent")
+        check(Set(codex.keys) == ["action", "surface", "message", "cwd", "model", "effort"], "Codex sends only the sheet's fields")
 
-        let claude = SessionLaunchForm(agent: "claude", folder: "/work/sample", message: "Review", effort: "max", claudeAgent: "reviewer", worktree: "review-tree", permissionMode: "acceptEdits")
-        let claudeBody = try await send(claude, api)
-        check(claudeBody["agent"] as? String == "reviewer" && claudeBody["worktree"] as? String == "review-tree", "named agent and worktree are sent")
-        check(claudeBody["permissionMode"] as? String == "acceptEdits" && claudeBody["effort"] as? String == "max", "permission mode and effort are sent")
-        check(claudeBody["alias"] == nil && claudeBody["name"] == nil && claudeBody["mode"] == nil && claudeBody["approvalPolicy"] == nil, "no empty name or Codex field is sent")
+        let claude = try await send(SessionLaunchForm(agent: "claude", folder: "/work/sample", effort: "max", message: "Review"), api)
+        check(claude["model"] as? String == "" && claude["effort"] as? String == "max", "the runtime default model sends an empty model with the chosen effort")
+        check(Set(claude.keys) == ["action", "surface", "message", "cwd", "model", "effort"], "Claude sends only the sheet's fields")
 
-        let notionBody = try await send(SessionLaunchForm(agent: "notion", alias: "notes", folder: "/work/sample", model: "ignored", message: "Outline"), api)
-        check(notionBody["action"] as? String == "notion-create" && notionBody["alias"] as? String == "notes", "Notion uses notion-create with its name")
-        check(notionBody["cwd"] as? String == "" && notionBody["model"] as? String == "", "Notion sends no folder or model")
+        let plain = try await send(SessionLaunchForm(agent: "claude", folder: "/work/sample", message: "Review"), api)
+        check(Set(plain.keys) == ["action", "surface", "message", "cwd", "model"], "no effort is sent when none is chosen")
 
-        var terminal = SessionLaunchForm(agent: "codex", alias: "term", folder: "/work/sample", model: "sample-model", message: "Run")
-        terminal.selectLauncher("tmux")
-        let terminalBody = try await send(terminal, api)
-        check(terminalBody["launcher"] as? String == "tmux" && terminalBody["alias"] as? String == "term" && terminalBody["model"] as? String == "sample-model", "terminal launches keep name and model")
-        check(Set(terminalBody.keys) == ["action", "surface", "message", "cwd", "model", "alias", "launcher"], "terminal launches send no advanced option")
-
-        do {
-            _ = try await api.createSession(surface: "codex", message: "Run", cwd: "/work/sample", model: "", codex: CodexCreationSettings(serviceTier: "fast"), launcher: "tmux")
-            check(false, "the API refuses advanced options for a terminal launch")
-        } catch {}
+        let notion = try await send(SessionLaunchForm(agent: "notion", folder: "/work/sample", model: "ignored", effort: "high", message: "Outline"), api)
+        check(notion["action"] as? String == "notion-create", "Notion uses notion-create")
+        check(notion["cwd"] as? String == "" && notion["model"] as? String == "" && notion["effort"] == nil, "Notion sends no folder, model or effort")
     }
 
     private static func send(_ form: SessionLaunchForm, _ api: AgenthailAPI) async throws -> [String: Any] {
         CaptureProtocol.body = nil
-        _ = try await api.createSession(surface: form.agent, message: form.trimmedMessage, cwd: form.cwd, model: form.modelID, alias: form.handle, turnSettings: form.turnSettings, codex: form.codexSettings, claude: form.claudeSettings, launcher: form.launcher)
+        _ = try await api.createSession(body: form.creationBody())
         guard let data = CaptureProtocol.body, let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             check(false, "the request body is JSON")
             return [:]
