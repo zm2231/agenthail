@@ -35,9 +35,10 @@ distinction between automated checks, real Codex evaluation, and phone testing.
    delivery evidence, and the actual reply.
 
 Only audio and WebRTC negotiation go to Codex's realtime service. The phone sends
-control requests to the paired Mac over HTTPS. The audio page contains no paired
-token or Codex credentials; its native container supplies the authenticated page
-request. Codex's existing authenticated client creates the realtime call.
+control requests to the paired Mac over HTTPS. The native WebRTC peer never
+receives the paired token or Codex credentials. Codex's existing authenticated
+client creates the realtime call. CallKit owns audio activation; media begins
+only after its activation callback. The app owns one call independently of sheets.
 The entry is a compact control above the tab bar; Sessions, Inbox, and Settings
 remain available while it is present.
 
@@ -102,14 +103,15 @@ existing transport; the voice layer does not emulate them.
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
 | Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. |
 | Mute | Stops sending microphone content without stopping the call or agent work. |
-| Hang up / leave app | Stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. It does not interrupt an agent turn. Calls do not continue in the background. |
+| Hang up / leave app | Hang up stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. Closing the sheet, switching apps or locking the phone does not hang up. Force-quit/OS termination cannot preserve a call. It does not interrupt an agent turn. |
 | Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting that exact turn's interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |
 | Approvals | Existing native approval policy remains in effect. The phone can display recorded activity but does not implement approval/question replies. A blocked native approval needs attention on the Mac. |
 | Multiple phones | One paired token owns an active call. Other devices see occupancy and cannot take over or read its negotiation SDP. |
 | Reconnect | No automatic redial or inference replay. Hang up an uncertain call, then call again. A missing phone heartbeat requests audio stop after about 40 seconds; worker turns remain. |
 
-This is a foreground call, not CallKit, a background telephone service, or a
-remote desktop. Existing Codex and correlated-transcript Claude sessions may be
+The iOS call uses native WebRTC, CallKit and a voice audio session. It is not an
+incoming-call service or remote desktop; it does not use PushKit. Existing Codex
+and correlated-transcript Claude sessions may be
 targets; they are not alternative voice providers. Voice availability and model
 usage remain subject to the signed-in Codex account.
 
@@ -162,10 +164,9 @@ If the host ends the current attempt while the phone is still connecting, the
 phone displays that failure instead of silently returning to Ready to talk.
 An iOS microphone interruption includes the system reason code when available;
 an interruption-ended notification alone does not hang up an active call.
-The phone does not activate a separate native audio session around WebKit's
-microphone capture: WebKit owns the call's audio session, and an ended capture
-track is reported as a call error. This avoids the two local audio sessions
-interrupting each other during capture startup. Terminal-state polling cleans
+The iPhone uses one native media peer and CallKit-managed audio activation, not
+WebKit capture. Audio and the system call UUID are tied to the host's attempt ID.
+Terminal-state polling cleans
 up local audio once per call, not on every refresh. Voice details shows the call
 ID and last host-close reason/event number for a completed call. These messages
 identify the teardown path, not the cause of an earlier host-side `closed` event.
@@ -206,15 +207,16 @@ Read these units in order:
 4. `internal/daemon/voice.go` and `voice_peer.js`: control-scoped Bearer-only API
    and audio-only WebRTC program. A dashboard cookie cannot substitute for a
    valid control token.
-5. `native/iOS/VoiceAPI.swift`, `VoiceAudioBridge.swift`, `VoiceOperator.swift`:
-   paired HTTPS requests, origin-restricted WebKit audio, call/conversation UI,
-   cancellation guards, and normal timeline integration.
+5. `native/iOS/VoiceAPI.swift`, `VoiceAudioBridge.swift`, `VoiceCallCoordinator.swift`,
+   `VoiceOperator.swift`: paired HTTPS requests, native media and CallKit,
+   app-lifetime ownership, call/conversation UI and cancellation guards.
 
-The reusable sheet is `AgenthailVoiceOperatorSheet(openSession:)`; its callback
+The reusable sheet is `AgenthailVoiceOperatorSheet(model:openSession:)`; its callback
 opens the same normal session ID, not a voice-specific replacement session.
 The standalone app entry is a separate integration unit, allowing the main
 Sessions UI to put that entry in its own toolbar. The consuming iOS target must
-include the microphone purpose string from `native/project.yml`; regenerate the
+include the microphone purpose string and background audio modes from
+`native/project.yml`; regenerate the
 Xcode project with XcodeGen after changing that source.
 
 ## Verification
@@ -269,25 +271,34 @@ writes a private `pairing.json`; open its `pairingURL` on the test Simulator and
 confirm the normal pairing UI. Pairing links expire after 15 minutes; the host
 has a 45-minute evaluation window.
 
-Build the Debug iOS app normally. Place two user-speech WAV recordings in its
-data container at `Documents/VoiceEvaluation/request-1.wav` and `request-2.wav`.
-Launch the app with `--voice-evaluation`. The screen explicitly says **Simulated
-microphone · Real Codex**. This mode is compiled only for Debug Simulator builds:
+The old WebKit Simulator recording hook is not part of the native app. Its
+historical receipt establishes the Codex/provider path, not this native peer.
+Use a paired physical iPhone and a matching signed build for native acceptance:
 
-- It refuses native microphone permission and refuses to call if the recording
-  hook is missing. The WebKit media-device object is retained for the lifetime
-  of the fixture, so its capture override survives between initialization and use.
-- **Call Codex Voice** sends the first recording after the real data channel opens.
-  Wait for the spoken discovery result; **Speak next request** sends the second.
-- A continuous silent source keeps outgoing audio alive between requests.
-  **Hang up** saves the actual mixed user/Codex dialogue to the same directory;
-  `diagnostics.jsonl` includes input/output media counters and audio energy.
+1. Start a cold orchestrator call; record tap-to-audio time. Hang up, then call
+   again on the same operator and record the warm time. Native connection logs
+   contain durations, not SDP, bearer tokens or audio.
+2. Ask for live session discovery, then bounded read-only work in a test-owned
+   Codex session. Verify that the actual target performs it and both its interim
+   update and final answer are spoken. Inspect the target's transcript and tools;
+   a registered tool or a spoken claim alone is not evidence of execution.
+3. Ask for a transfer to that exact session, then return to the orchestrator.
+   Verify the committed route shown on the phone and the matching host target.
+   Also call the target directly from its session menu without creating a worker.
+4. Close the call sheet, switch apps, and lock the phone for at least two minutes.
+   Speak and listen while locked, then reopen the sheet: same call ID, same route,
+   no duplicate call. Confirm the host's heartbeat remains fresh without timeline
+   reads. Test system Mute and End alongside in-app controls.
+5. Change Wi-Fi/cellular network, connect/disconnect headphones, and take a system
+   interruption. Verify recovery or a visible terminal cause, never an automatic
+   redial or replay of spoken work. Repeat hangup during preparation/negotiation.
+6. Force-quit the app, lose the Mac connection, and restart only the isolated test
+   host. Verify audio stops, stale state cannot claim a connected call, and the
+   missing heartbeat closes host audio without stopping coding work.
 
-Give the existing worker bounded, meaningful work, then independently inspect its
-actual command output and completion. Check the spoken summary against those
-results, not a predetermined phrase. Compare worktree state before and after a
-read-only request. The host test's successful exit only means the host closed;
-it is **not** the conversation's acceptance verdict.
+The host test's successful exit only means the host closed; it is **not** the
+conversation's acceptance verdict. Simulator tests cannot establish physical
+background execution, Bluetooth routing, microphone capture or lock-screen audio.
 
 After confirmed native hangup, preserve the recording and receipts, create the
 isolated directory's `finished` marker, close its app connection, and remove only
@@ -362,4 +373,4 @@ voice-agent frameworks.
 | `conversation/session.ts`: validated delegation lifecycle | Agenthail uses the existing authenticated audio session but does not enable its legacy operator handoff route. |
 | `register.ts`: `pi.sendUserMessage`, with steer when busy | Agenthail resolves and messages the explicitly selected existing session through its authenticated transport. |
 | `controller.ts`: `finishAgentMessage` → `agentResult`; `handoff.ts`: target-scoped speakable result return | The reference informed Agenthail's receipt-plus-turn-ID requirement; Agenthail appends only that correlated target stream to its audio plane. |
-| LAN controller retains the host audio call across device moves | Not implemented here: the phone owns its foreground media peer. Backgrounding ends audio; the operator and work persist. Reopening explicitly starts a new call on the same operator. |
+| LAN controller retains the host audio call across device moves | No cross-device takeover. The phone owns an app-lifetime native peer with background audio; reopening its sheet shows the existing call. A new call uses the same persistent operator only after the previous call ends. |

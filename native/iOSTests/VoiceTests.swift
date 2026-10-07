@@ -4,6 +4,56 @@ import XCTest
 
 final class VoiceTests: XCTestCase {
     @MainActor
+    func testDismissingAndReopeningScreenPreservesCallAndCoordinatorIdentity() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        let coordinator = VoiceCallCoordinator(makeModel: { model })
+        coordinator.open(targetID: "target-a")
+        model.screenAppeared()
+        await model.call()
+        model.screenDisappeared()
+        XCTAssertTrue(model.dialing)
+        XCTAssertEqual(audio.ends, 0)
+        coordinator.open(targetID: "other-session")
+        XCTAssertTrue(coordinator.model === model)
+        XCTAssertEqual(model.targetID, "target-a")
+        XCTAssertEqual(audio.starts, 1)
+        coordinator.disconnect()
+        XCTAssertNil(coordinator.model)
+        XCTAssertEqual(audio.ends, 1)
+    }
+
+    @MainActor
+    func testHeartbeatUsesAcceptedAttemptAndStopsOnHangup() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "heartbeat" }) { await Task.yield() }
+        let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
+        let heartbeat = try XCTUnwrap(api.actions.first { $0.action == "heartbeat" })
+        XCTAssertEqual(heartbeat.attemptId, start.attemptId)
+        model.hangup()
+        let count = api.actions.filter { $0.action == "heartbeat" }.count
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(api.actions.filter { $0.action == "heartbeat" }.count, count)
+        XCTAssertEqual(audio.ends, 1)
+        model.close()
+    }
+
+    @MainActor
+    func testSystemMuteAndEndUpdateTheSameCallModel() async {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("mute", "true")
+        XCTAssertTrue(model.muted)
+        audio.onMessage?("ended", "")
+        XCTAssertFalse(model.dialing)
+        XCTAssertEqual(audio.ends, 1)
+    }
+
+    @MainActor
     func testPreOfferAudioFailurePreservesCauseAndDoesNotStopUnknownHostCall() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true

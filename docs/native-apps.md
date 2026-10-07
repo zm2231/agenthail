@@ -73,8 +73,13 @@ dictation. Your Codex account must support native Voice and your paired phone mu
 have control permission.
 
 Live conversation and expandable agent activity remain visible. **Open full
-timeline** opens the same ordinary session. **Hang up** ends audio, not agent work;
-leaving the app also ends the call. Call again to resume the same orchestrator.
+timeline** opens the same ordinary session. **Hang up** ends local audio immediately,
+then asks the Mac to close the call; it does not end agent work. The iOS app uses
+native WebRTC and CallKit. Closing the call screen or locking the phone does not
+hang up. Reopen the call from Sessions to see the same call and committed target.
+System call controls can mute or end it. Force-quitting the app ends audio; there
+is no automatic redial or replay of microphone requests. Call again to resume the
+same orchestrator after the previous host call has closed.
 Native approvals may still need attention on your Mac.
 
 See [Voice setup, capabilities, and verification](maintainers/codex-voice.md).
