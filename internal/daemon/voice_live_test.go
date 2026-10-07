@@ -10,13 +10,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 	"github.com/zm2231/agenthail/internal/voice"
@@ -45,7 +45,42 @@ func TestLiveCodexVoice(t *testing.T) {
 	if commandPath == "" || !filepath.IsAbs(commandPath) {
 		t.Fatal("AGENTHAIL_VOICE_SMOKE_CLI must name the matching built CLI by absolute path")
 	}
-	s := voice.New(statePath, &surfaces.CodexVoice{Codex: codex}, nil, commandPath)
+	stateData, err := os.ReadFile(statePath)
+	if err != nil || len(stateData) > 2<<20 {
+		t.Fatal("provide a bounded existing test-owned operator state")
+	}
+	var saved struct {
+		State voice.State `json:"state"`
+	}
+	if json.Unmarshal(stateData, &saved) != nil || saved.State.Session == nil || saved.State.Phase != "ended" {
+		t.Fatal("the test-owned operator must have confirmed ended audio")
+	}
+	directory := t.TempDir()
+	isolatedState := filepath.Join(directory, "operator.json")
+	if err := os.WriteFile(isolatedState, stateData, 0600); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry.Open(filepath.Join(directory, "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	d := New(reg, []surface.Surface{codex})
+	defer d.sources.shutdown()
+	resolveContext, resolveCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	workerSession, err := codex.Resolve(resolveContext, workerID)
+	resolveCancel()
+	if err != nil || workerSession == nil || workerSession.ID != workerID {
+		t.Fatalf("resolve exact existing worker: %v", err)
+	}
+	for _, session := range []*surface.Session{saved.State.Session, workerSession} {
+		if err := reg.RegisterSession(*session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := voice.NewWithTargetsAndOperatorSourceAndStream(isolatedState, &surfaces.CodexVoice{Codex: codex}, reg.RegisterSession, commandPath, d.resolveVoiceTarget, d.dispatcher(), func(session *surface.Session, active bool) {
+		d.setSessionSourceHold(session, active, "voice")
+	}, daemonVoiceStreamProvider{daemon: d})
 	defer s.Close()
 	if s.View("").Session == nil {
 		t.Fatal("provide an existing test-owned operator state; this evaluation must not create tasks")
@@ -60,8 +95,9 @@ func TestLiveCodexVoice(t *testing.T) {
 	for _, item := range baseline.Items {
 		priorItems[item.ID] = true
 	}
-	workerSession := &surface.Session{ID: workerID, Surface: surface.KindCodex}
-	workerBaseline, err := codex.ReadSession(context.Background(), workerSession, surface.SessionReadRequest{})
+	workerContext, workerCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	workerBaseline, err := codex.ReadSession(workerContext, workerSession, surface.SessionReadRequest{})
+	workerCancel()
 	if err != nil || workerBaseline.UnavailableReason != "" {
 		t.Fatalf("existing worker activity unavailable: %v", err)
 	}
@@ -79,7 +115,7 @@ func TestLiveCodexVoice(t *testing.T) {
 		}
 		http.SetCookie(w, &http.Cookie{Name: "probe", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><h1>Live Codex Voice evaluation</h1><p>Existing test-owned operator. Synthesized fixture audio, no microphone recording. Starts real Codex inference. List existing tasks, then select and message the existing test task. No creation.</p><button id=start>Speak listing request</button><button id=followup>Speak followup request</button><button id=stop>Hang up</button><pre id=status></pre><audio autoplay></audio><script>`+liveVoiceHarness+voicePeerScript+`</script>`)
+		fmt.Fprint(w, `<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><h1>Live Codex Voice evaluation</h1><p>Existing test-owned operator. Synthesized fixture audio, no microphone recording. Starts real Codex inference. List and read the existing test worker, transfer to it, explicitly instruct it, then return to the orchestrator. No worker creation.</p><button id=start>Speak listing request</button><button id=followup>Speak followup request</button><button id=stop>Hang up</button><pre id=status></pre><audio autoplay></audio><script>`+liveVoiceHarness+voicePeerScript+`</script>`)
 	})
 	authorized := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -164,39 +200,30 @@ func TestLiveCodexVoice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var listEvidence, sendEvidence, workerEvidence bool
+	toolEvidence := map[string]bool{}
+	for _, event := range v.Events {
+		if event.Method == "item/tool/call" && event.Params["namespace"] == "agenthail" && event.Params["threadId"] == v.Session.ID {
+			tool, _ := event.Params["tool"].(string)
+			toolEvidence[tool] = true
+		}
+	}
 	var operatorItems []surface.TimelineItem
 	for _, item := range timeline.Items {
 		if priorItems[item.ID] {
 			continue
 		}
 		operatorItems = append(operatorItems, item)
-		if item.Kind == "toolCall" && strings.Contains(item.Text, "agenthail") {
-			if strings.Contains(item.Text, "thread create") {
-				t.Fatal("evaluation created a task")
-			}
-			listEvidence = listEvidence || strings.Contains(item.Text, " list")
-			sendEvidence = sendEvidence || strings.Contains(item.Text, " send")
-		}
-		if item.Kind == "toolResult" && strings.Contains(item.Text, workerID) {
-			workerEvidence = true
+		if item.Kind == "toolCall" && strings.Contains(item.Text, "agenthail") && strings.Contains(item.Text, "thread create") {
+			t.Fatal("evaluation created a worker")
 		}
 	}
-	if !listEvidence || !sendEvidence || !workerEvidence || workerID == v.Session.ID {
-		t.Fatalf("handoff evidence incomplete: list=%v send=%v worker=%v", listEvidence, sendEvidence, workerEvidence)
+	for _, tool := range []string{"session_list", "session_read", "session_send", "voice_transfer", "voice_return_to_orchestrator"} {
+		if !toolEvidence[tool] {
+			t.Fatalf("missing bound tool request: %s; observed=%v", tool, toolEvidence)
+		}
 	}
-	output, err := exec.CommandContext(ctx, commandPath, "last", workerID, "3", "--full", "--json").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reply struct {
-		Session   string `json:"session"`
-		Exchanges []struct {
-			Assistant string `json:"assistant"`
-		} `json:"exchanges"`
-	}
-	if json.Unmarshal(output, &reply) != nil || reply.Session != workerID {
-		t.Fatal("worker reply identity missing")
+	if workerID == v.Session.ID || v.Target != nil {
+		t.Fatal("evaluation must use a distinct worker and return to the orchestrator")
 	}
 	workerTimeline, err := codex.ReadSession(ctx, workerSession, surface.SessionReadRequest{})
 	if err != nil {
@@ -215,7 +242,7 @@ func TestLiveCodexVoice(t *testing.T) {
 	if !workerTool || !workerAnswer {
 		t.Fatal("the existing worker must perform real tool work and return an answer")
 	}
-	data, err := json.MarshalIndent(map[string]any{"operatorId": v.Session.ID, "workerId": workerID, "attemptId": v.AttemptID, "voiceEvents": v.Events, "operatorActivity": operatorItems, "workerActivity": workerItems, "workerReply": json.RawMessage(output), "semanticReview": "required: compare requested work, actual commands and results, and spoken summary", "physicalIOS": "not tested"}, "", "  ")
+	data, err := json.MarshalIndent(map[string]any{"operatorId": v.Session.ID, "workerId": workerID, "attemptId": v.AttemptID, "voiceEvents": v.Events, "boundToolRequests": toolEvidence, "operatorActivity": operatorItems, "workerActivity": workerItems, "semanticReview": "required: verify successful tool results, unchanged worker during discussion, intentional busy steering, independent worker updates, no repeated speech, and spoken summary", "physicalIOS": "not tested"}, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

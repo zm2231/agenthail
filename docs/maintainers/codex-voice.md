@@ -348,31 +348,37 @@ program receives a known WAV file instead of recording the tester's microphone:
 AGENTHAIL_LIVE_VOICE=1 \
 AGENTHAIL_VOICE_SMOKE_CLI=/absolute/path/to/matching/agenthail \
 AGENTHAIL_VOICE_SMOKE_AUDIO=/absolute/path/to/list-existing-tasks.wav \
-AGENTHAIL_VOICE_SMOKE_FOLLOWUP_AUDIO=/absolute/path/to/select-and-message.wav \
+AGENTHAIL_VOICE_SMOKE_FOLLOWUP_AUDIO=/absolute/path/to/transfer-instruct-and-return.wav \
 AGENTHAIL_VOICE_SMOKE_WORKER=existing-test-owned-worker-uuid \
 AGENTHAIL_VOICE_SMOKE_STATE=/absolute/path/to/test-only/operator.json \
 go test -tags voice_live ./internal/daemon -run '^TestLiveCodexVoice$' \
   -v -count=1 -timeout=9m
 ```
 
-The state file must already identify a test-owned operator. The evaluation refuses
-to create an operator and rejects task-creation tool calls. Open its printed
+The state file must identify a test-owned operator with confirmed ended audio.
+The evaluation copies that state into an isolated registry and uses the daemon's
+target resolver, delivery dispatcher and shared session journal. Preparation may
+renew an outdated tool catalog with a continuity-carrying operator thread; the
+old thread is retained. No worker is created. Open its printed
 loopback URL and choose **Speak listing request**. The first recording must ask
 for live existing tasks without messaging or creating any. Wait for the spoken
-listing before choosing **Speak followup request**. That recording should identify
-the preselected existing test task and give it real bounded work. For example:
-“Ask that agent to inspect this worktree, run the focused voice tests without
-editing files, and report what passed and what still needs phone testing.”
+listing before choosing **Speak followup request**. That recording should ask to
+read and transfer to the preselected existing worker, give it real bounded work,
+and return to the orchestrator. For example: “Read this worker's recent activity,
+transfer to it, and ask it to run the focused voice tests without editing files.
+When it answers, summarize what passed and return to the orchestrator.”
 Never target arbitrary existing work. After the completed reply is spoken, call
 `window.finishProbe('existing-test-owned-worker-uuid')` in the test page console.
-The harness captures listing/send evidence, the existing worker's new tool
-activity and answer, voice events, and an independent read of the worker's reply.
+The harness captures bound list/read/send/transfer/return requests, the existing
+worker's new tool activity and answer, voice events, and the final selected route.
 It requires received audio energy and speech after an operator final answer, then
 requests hangup. It does not use a fixed response phrase as semantic acceptance.
 
-Review the captured JSON against the actual scenario: Was the requested target
-selected? Did it receive the intended work? Did it run the reported commands?
-Did the spoken summary accurately report their results and remaining limits?
+Review the captured JSON against the actual scenario: Did the bound tools succeed,
+and was the requested target selected? Did discussion leave worker input unchanged?
+Did an intentional instruction steer a busy worker? Were later independent worker
+updates interpreted without repeating speech? Did the spoken summary accurately
+report actual commands, results and remaining limits?
 Passing capture checks alone does not answer those questions. Preserve the state
 path to exercise reconnect to the same operator. The synthesized microphone must
 continue sending silence after each recording, as a live microphone would; an
