@@ -945,6 +945,9 @@ func TestPrepareStreamDropsSeedBufferAndKeepsFastPostCursorEvent(t *testing.T) {
 	if subscription.Cursor != 1 {
 		t.Fatalf("cursor=%d, want seed watermark 1", subscription.Cursor)
 	}
+	if len(subscription.Initial) != 1 || subscription.Initial[0].Seq != subscription.Cursor {
+		t.Fatalf("initial snapshot=%+v cursor=%d", subscription.Initial, subscription.Cursor)
+	}
 	adapter.events <- surface.StreamEvent{ID: "reply", ProviderKey: "reply", Version: 1, Operation: "upsert", Kind: "text", Role: "assistant", TurnID: "turn-fast", Text: "fast reply"}
 	select {
 	case event := <-subscription.Events:

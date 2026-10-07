@@ -7,6 +7,9 @@ final class VoiceCallDiagnostics {
         let startedAt: Date
         var milestones: [String: Double]
         var terminalCause: String?
+        var failureStage: String?
+        var failureCode: Int?
+        var failureDomain: String?
     }
     private(set) var attempts: [Attempt] = []
     private var clocks: [String: ContinuousClock.Instant] = [:]
@@ -43,6 +46,16 @@ final class VoiceCallDiagnostics {
         guard let index = attempts.firstIndex(where: { $0.id == id }), attempts[index].terminalCause == nil else { return }
         attempts[index].terminalCause = cause
         mark("local_ended", id: id)
+    }
+
+    func failure(_ error: Error, stage: String, id: String) {
+        guard let index = attempts.firstIndex(where: { $0.id == id }), attempts[index].failureStage == nil else { return }
+        let error = error as NSError
+        attempts[index].failureStage = stage
+        attempts[index].failureCode = error.code
+        let allowed = [NSURLErrorDomain, NSCocoaErrorDomain, "com.apple.CallKit.error.requesttransaction", "com.apple.CallKit.error.incomingcall"]
+        attempts[index].failureDomain = allowed.contains(error.domain) ? error.domain : "application"
+        mark("\(stage)_failed", id: id)
     }
 
     private func save() {

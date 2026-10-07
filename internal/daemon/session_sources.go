@@ -936,10 +936,19 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 		subscription.Cancel()
 		return sessionstream.Subscription{}, fmt.Errorf("seed session source: %w", err)
 	}
-	window, err := m.registry.SessionJournalAfter(session.ID, 0, 1)
+	page, err := m.registry.ReadSessionJournalPage(session.ID, 0, 40)
 	if err != nil {
 		subscription.Cancel()
 		return sessionstream.Subscription{}, fmt.Errorf("capture session journal cursor: %w", err)
+	}
+	initial := make([]sessionstream.Event, 0, len(page.Entries))
+	for _, entry := range page.Entries {
+		event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
+		if decodeErr != nil {
+			subscription.Cancel()
+			return sessionstream.Subscription{}, decodeErr
+		}
+		initial = append(initial, event)
 	}
 	events := make(chan sessionstream.Event, 64)
 	go func() {
@@ -952,7 +961,7 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 				if !ok {
 					return
 				}
-				if entry.Seq <= window.LatestSeq {
+				if entry.Seq <= page.LatestSeq {
 					continue
 				}
 				event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
@@ -971,5 +980,5 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 			}
 		}
 	}()
-	return sessionstream.Subscription{Cursor: window.LatestSeq, Events: events, Cancel: subscription.Cancel}, nil
+	return sessionstream.Subscription{Cursor: page.LatestSeq, Initial: initial, Events: events, Cancel: subscription.Cancel}, nil
 }

@@ -28,9 +28,10 @@ type Event struct {
 }
 
 type Subscription struct {
-	Cursor uint64
-	Events <-chan Event
-	Cancel func()
+	Cursor  uint64
+	Initial []Event
+	Events  <-chan Event
+	Cancel  func()
 }
 
 func DecodePayload(seq uint64, payload []byte) (Event, error) {

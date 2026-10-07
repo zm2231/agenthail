@@ -3,6 +3,21 @@ import XCTest
 
 @MainActor
 final class VoiceCallDiagnosticsTests: XCTestCase {
+    func testFailureStoresStageAndCodeWithoutPrivateErrorText() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("attempts.json")
+        let log = VoiceCallDiagnostics(file: file)
+        log.begin(id: "failure")
+        let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: [NSLocalizedDescriptionKey: "private transcript and token"])
+        log.failure(error, stage: "native_audio_start", id: "failure")
+        log.end("native_audio_start_failed", id: "failure")
+        let reloaded = VoiceCallDiagnostics(file: file)
+        XCTAssertEqual(reloaded.attempts.last?.failureStage, "native_audio_start")
+        XCTAssertEqual(reloaded.attempts.last?.failureCode, NSURLErrorTimedOut)
+        XCTAssertEqual(reloaded.attempts.last?.failureDomain, NSURLErrorDomain)
+        XCTAssertFalse(String(decoding: try Data(contentsOf: file), as: UTF8.self).contains("private transcript"))
+    }
     func testFirstTerminalCauseSurvivesCleanupAndRecordReload() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

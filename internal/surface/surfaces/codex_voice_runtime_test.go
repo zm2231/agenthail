@@ -40,7 +40,13 @@ assert.equal(result.events[3].params.requestId,'request-1');
 vm.runInContext(programs.response,context).then(value=>{
   assert.equal(value,'ok');
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0])),{type:'mcp-response',hostId:'local',message:{id:'request-1',result:{success:true,contentItems:[{type:'inputText',text:'Transferred'}]}}});
+  emit({type:'mcp-request',hostId:'local',request:{id:42,method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer',arguments:{targetId:'target'}}}});
+  return awaitResponse();
 }).catch(error=>{throw error});
+async function awaitResponse(){
+  await context.__agenthailCodexDesktopRendererV2.respondDynamicToolCall('42',true,'Transferred');
+  assert.equal(sent[1].message.id,42);
+}
 assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,6);
 for(let i=0;i<1001;i++)emit({type:'mcp-notification',hostId:'local',method:'turn/progress',params:{threadId:'operator'}});
 assert.equal(JSON.parse(vm.runInContext(programs.all,context)).events.length,1000);

@@ -1,12 +1,42 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func TestVoiceHostToolsReadCatalogAndSharedJournal(t *testing.T) {
+	d, reg, base, from, _ := daemonFixture(t)
+	from.Name, from.Transcript = "Selected worker", "/private/test/transcript"
+	if err := reg.RegisterSession(from); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &sourceCountingSurface{
+		daemonSurface: base,
+		started:       make(chan struct{}, 1),
+		events:        make(chan surface.StreamEvent, 1),
+		items:         []surface.TimelineItem{{ID: "answer", Kind: "text", Role: "assistant", Text: "Current worker result"}},
+	}
+	adapter.caps.Stream = true
+	d.Surfaces = []surface.Surface{adapter}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	provider := daemonVoiceStreamProvider{daemon: d}
+	rows, err := provider.ListVoiceSessions(ctx, "SELECTED")
+	if err != nil || len(rows) != 1 || rows[0].ID != from.ID || rows[0].Transcript != "" {
+		t.Fatalf("catalog=%+v err=%v", rows, err)
+	}
+	items, err := provider.ReadVoiceSession(ctx, &from)
+	if err != nil || len(items) != 1 || items[0].ItemID != "answer" || items[0].Body != "Current worker result" {
+		t.Fatalf("journal=%+v err=%v", items, err)
+	}
+}
 
 func TestVoiceEndpointsRequirePairedControlAndNativeBearer(t *testing.T) {
 	d, _, _, _, _ := daemonFixture(t)

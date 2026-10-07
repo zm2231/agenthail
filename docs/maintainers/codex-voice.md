@@ -49,27 +49,27 @@ select one existing Agenthail Codex or Claude session as its coding target. The
 selected target remains the coding model and keeps its ordinary session history;
 selecting or reconnecting a call never creates a worker. The host resolves the
 exact registered identity again before dispatch, checks writability and capability,
-then records the delivery evidence and target turn ID before accepting speakable
-updates.
+then sends only explicit instructions. A busy target must support steering;
+unsupported steering fails without putting the instruction in a queue.
 
-Only a target with a correlatable turn stream can receive realtime delegation.
-Claude's native UDS peer transport is deliberately blocked for this path because
-socket acceptance alone cannot be joined to a later transcript turn. Busy, held,
-read-only, unavailable, and unknown outcomes remain visible in the call state and
-are not represented as a spoken reply. Audio/provider identity is therefore not
-a claim that Claude supplies native audio.
+The voice operator continuously observes the selected session's shared journal,
+including work already running before the call. Claude UDS sessions can be
+observed and messaged without claiming a socket receipt identifies a later
+transcript turn. Updates are attributed to the selected session, not invented as
+replies to a particular request. A held message is not proof of worker execution.
+Audio/provider identity is not a claim that Claude supplies native audio.
 
 ## Conversation and work flow
 
 ```text
 iPhone microphone ⇄ Codex realtime voice
-                         │ completed user transcript
+                         │ explicit Agenthail tool instruction only
                          ▼
-             exact existing Codex or Claude target
-                         │ delivery evidence + target turn ID
+             exact existing Codex or Claude worker
+                         │ continuous shared journal context
                          ▼
-             correlated target stream updates
-                         │ appendText to existing audio plane
+              conversational voice intermediary
+                         │ interprets useful new updates
                          ▼
                    spoken response
 
@@ -78,18 +78,23 @@ iPhone conversation ◄─ live voice events + normal recorded session timeline
 ```
 
 The host resolves the entered target through Agenthail's live discovery and
-ambiguity checks; no local parser turns a guessed name into a command. On each
-completed user transcript, it delivers the exact text to that selected target.
-It only forwards text that arrives from the receipt's exact target turn, so a
-newer unrelated reply cannot become audible voice output.
+ambiguity checks; no local parser turns a guessed name into a command. Speech and
+typed discussion remain conversational. The backing operator uses `session_send`
+only for complete user-authorized work, corrections or constraints. Progress
+questions are answered from supplied context or the bounded `session_read` tool,
+not automatically injected into the worker.
 
 The persistent audio operator retains the packaged Operations skill for ordinary
 voice lifecycle support, but it is not the coding provider for a selected target.
-The host appends correlated target stream text to that existing realtime session;
-it remains Codex's native voice, not a separate TTS service.
+The host appends bounded, labeled transcript data to that existing realtime
+session. Historical context is silent; useful new updates are interpreted, not
+recited. Stable item versions and incremental text prevent replaying a full
+message after its progress was already supplied. Transfer replaces the journal
+binding; return and hangup cancel it. A generation guard rejects stale context
+even when the same session is selected again. Native audio stays connected.
 
-Agenthail's delivery semantics still apply. Accepted, queued, delivered, completed,
-failed, and unknown are different outcomes. Other agents' output is data, not
+Agenthail's Sent and Submitted receipts are not completion evidence. Voice worker
+instructions are never implicitly queued. Other agents' output is data, not
 permission to expand the user's request. Unsupported controls fail through the
 existing transport; the voice layer does not emulate them.
 
@@ -97,11 +102,11 @@ existing transport; the voice layer does not emulate them.
 
 | Surface | Behavior |
 | --- | --- |
-| Conversation | Native Codex realtime audio transcribes speech. Each completed user transcript is delivered to the selected existing session, and only its correlated stream is appended back to audio. No dictation-only replacement. |
+| Conversation | Native Codex realtime audio remains a conversational intermediary. Completed utterances are not automatically sent to a worker. The selected session's journal supplies continuous context. |
 | Agent operations | The complete packaged `agenthail-operations` skill is embedded in the host binary and passed as literal developer instructions when creating the operator. Availability still depends on configured runtimes and their capabilities. |
-| Identity | One saved operator per Agenthail registry at a time. Calling again reuses its thread, work, and history; it creates a new audio connection, not a new operator. The explicit **New conversation** action deliberately creates a distinct new operator thread and makes it the saved operator; the previous operator stays discoverable in the normal Sessions timeline. It is refused while a call is active or while a creation outcome is still unknown. |
+| Identity | One saved operator per Agenthail registry at a time. Calls reuse it unless the tool catalog needs renewal. Idle renewal creates a thread carrying bounded recent conversation and the selected target; the old thread remains discoverable. **New conversation** deliberately starts without that continuity. Neither operation runs during an active call or unresolved creation. |
 | Phone visibility | Live transcript deltas and completed utterances; expandable normal agent tool activity; full session timeline; connection, occupancy, truncation, and error states. Native recorded voice segments also appear in the normal timeline. |
-| Text during a call | **Type** sends the request to the selected session through the same correlation path. Message IDs prevent automatic replay after an uncertain response. |
+| Text during a call | **Type** sends discussion to the voice intermediary. Worker instructions require the bound `session_send` tool. Message IDs prevent replay of an instruction after an uncertain response. |
 | Mute | Stops sending microphone content without stopping the call or agent work. |
 | Hang up / leave app | Hang up stops local microphone, playback, and peer immediately, then requests native realtime stop. The phone shows local audio as ended while it waits for the native close receipt; an unconfirmed request stays visible and can be retried. Closing the sheet, switching apps or locking the phone does not hang up. Force-quit/OS termination cannot preserve a call. It does not interrupt an agent turn. |
 | Interrupt | **Interrupt orchestrator turn** only stops the operator. **Stop selected session** asks for confirmation, then checks the selected session's exact identity, writability, interrupt capability, and confirmed active turn before requesting that exact turn's interruption. It keeps audio connected and does not parse an ambiguous spoken "stop" as a worker cancellation. |
@@ -111,7 +116,7 @@ existing transport; the voice layer does not emulate them.
 
 The iOS call uses native WebRTC, CallKit and a voice audio session. It is not an
 incoming-call service or remote desktop; it does not use PushKit. Existing Codex
-and correlated-transcript Claude sessions may be
+and Claude sessions with an available journal may be
 targets; they are not alternative voice providers. Voice availability and model
 usage remain subject to the signed-in Codex account.
 
@@ -133,8 +138,9 @@ The peer submits the offer after `setLocalDescription`; ICE gathering may contin
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
 The native start request uses realtime `v3`, audio output, and startup context.
-It does not enable the legacy Codex response-handoff route: the realtime session
-is the audio plane, while the selected session remains the only coding target. A
+The authenticated Desktop backing task owns the Agenthail tool catalog; no private
+handoff-mode override or separate MCP registry is supplied. The selected worker
+remains the coding target, and the voice intermediary decides when to instruct it. A
 matching native `started` notification binds the call;
 its SDP answer permits negotiation. Only the phone's connected peer/data-channel
 acknowledgment advances it to `connected`.
@@ -174,7 +180,8 @@ Capture those details before attributing an instant disconnect.
 
 The phone keeps the last 20 attempt summaries in its private Application Support
 `voice-attempts.json`. Voice details exposes the latest attempt's monotonic
-milestones and first terminal cause. Cleanup cannot replace that cause. Records
+milestones and first terminal cause, plus the first failed setup stage and a
+sanitized error domain/code when available. Cleanup cannot replace that cause. Records
 contain no speech, SDP, bearer token or session text. An unfinished record loaded
 after app relaunch is classified `process_terminated_or_unknown`, not connected.
 These records diagnose lifecycle behavior; physical-device audio, lock-screen
@@ -195,11 +202,17 @@ restart cannot restore a physical media connection; an active saved call becomes
 unknown and requires hangup. Corrupt state blocks creation rather than discarding
 identity. Do not delete it as a generic retry strategy.
 
-The skill is pinned to the binary that created the operator. Updating a binary
-does not rewrite developer instructions of an already-running Codex thread. The
-details sheet shows the digest so this is inspectable. Reprovisioning a different
-operator or recovering an ambiguous creation is a manual operator decision, not an
-automatic migration.
+The tool catalog is supplied at operator creation, not realtime start. The bound
+tools are `session_list`, `session_read`, `session_send`, `session_interrupt`,
+`voice_transfer`, and `voice_return_to_orchestrator`. Normal configured MCPs
+remain part of the backing Codex task; these Agenthail-owned dynamic tools are
+not a second MCP registry or a voice-only MCP filter.
+
+On prepare, an idle operator whose instruction digest differs is replaced with
+a catalog-current thread carrying bounded recent conversation context. The old
+thread remains discoverable and is never deleted. Renewal is refused during a
+live call, if continuity cannot be read, or after an ambiguous creation. The
+details sheet shows the digest. No call, worker or approval policy is restarted.
 
 Recent voice events are limited to 100 records and 16 KiB per record. Normal
 session activity uses the existing bounded, paginated timeline. Large or missing
@@ -299,6 +312,10 @@ Use a paired physical iPhone and a matching signed build for native acceptance:
 3. Ask for a transfer to that exact session, then return to the orchestrator.
    Verify the committed route shown on the phone and the matching host target.
    Also call the target directly from its session menu without creating a worker.
+   While selected, ask a conversational follow-up: the worker must receive no
+   automatic input. Correct a busy capable worker and verify steer, not queue.
+   Observe a turn already running before transfer and a later independent turn;
+   both must reach voice. Return and reselect, checking for stale or repeated updates.
 4. Close the call sheet, switch apps, and lock the phone for at least two minutes.
    Speak and listen while locked, then reopen the sheet: same call ID, same route,
    no duplicate call. Confirm the host's heartbeat remains fresh without timeline
@@ -375,7 +392,7 @@ Relevant contracts are `thread/start`, `thread/realtime/start`, `appendText`,
 `stop`, and their asynchronous notifications. Schema availability is not evidence
 that a particular account can connect; use a real call to verify it.
 
-[pi-gippity-control](https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/4593f066d447925eae8e3106435f117236690f9e/packages/pi-gippity-control)
+[pi-gippity-control](https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/7121d6f8faa7963052f1a06404137e20ef4778f1/packages/pi-gippity-control)
 was inspected as a concrete reference for realtime conversation plus tool-capable
 agent delegation and cancellation. Its direct call/auth transport was not copied:
 Agenthail uses the app-server that already owns its Codex Desktop thread. This
@@ -384,7 +401,8 @@ voice-agent frameworks.
 
 | Reference mechanism | Agenthail adaptation |
 | --- | --- |
-| `conversation/session.ts`: validated delegation lifecycle | Agenthail uses the existing authenticated audio session but does not enable its legacy operator handoff route. |
-| `register.ts`: `pi.sendUserMessage`, with steer when busy | Agenthail resolves and messages the explicitly selected existing session through its authenticated transport. |
-| `controller.ts`: `finishAgentMessage` → `agentResult`; `handoff.ts`: target-scoped speakable result return | The reference informed Agenthail's receipt-plus-turn-ID requirement; Agenthail appends only that correlated target stream to its audio plane. |
+| `conversation/session.ts` and `session-messages.ts`: deliberate delegation separate from conversation | Agenthail keeps discussion with the intermediary and submits work only through an explicit instruction tool. |
+| `register.ts`: `pi.sendUserMessage`, with steer when busy | Agenthail resolves the exact target, steers a busy capable session, and refuses unsupported busy delivery without queueing. |
+| `context.ts` and `controller-sessions.ts`: current session context | A selected-session journal snapshot and continuous sequenced tail keep the intermediary aware of existing and subsequent work, including Claude UDS sessions. |
+| `handoff.ts`: coalesced progress and final result deduplication | Agenthail coalesces assistant updates, forwards final suffixes, and cancels obsolete bindings on transfer, return, and hangup. Transcript data is labeled untrusted. |
 | LAN controller retains the host audio call across device moves | No cross-device takeover. The phone owns an app-lifetime native peer with background audio; reopening its sheet shows the existing call. A new call uses the same persistent operator only after the previous call ends. |

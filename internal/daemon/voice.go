@@ -48,6 +48,43 @@ type daemonVoiceStreamProvider struct {
 	daemon *Daemon
 }
 
+func (p daemonVoiceStreamProvider) ListVoiceSessions(ctx context.Context, query string) ([]surface.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	rows, err := p.daemon.Registry.ListSessions(200)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]surface.Session, 0, 50)
+	query = strings.ToLower(strings.TrimSpace(query))
+	for _, row := range rows {
+		if row.Surface != surface.KindCodex && row.Surface != surface.KindClaude {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(row.Name+" "+row.ID+" "+row.Cwd), query) {
+			continue
+		}
+		row.Transcript = ""
+		result = append(result, row)
+		if len(result) == 50 {
+			break
+		}
+	}
+	return result, nil
+}
+
+func (p daemonVoiceStreamProvider) ReadVoiceSession(ctx context.Context, session *surface.Session) ([]sessionstream.Event, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	subscription, err := p.PrepareSessionStream(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	defer subscription.Cancel()
+	return subscription.Initial, nil
+}
+
 func (p daemonVoiceStreamProvider) PrepareSessionStream(ctx context.Context, session *surface.Session) (sessionstream.Subscription, error) {
 	if p.daemon == nil || session == nil {
 		return sessionstream.Subscription{}, fmt.Errorf("voice session source is unavailable")

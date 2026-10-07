@@ -25,6 +25,7 @@ type fixtureProvider struct {
 	params       []map[string]any
 	err          error
 	createErr    error
+	toolErr      error
 	pending      []Batch
 	polled       chan struct{}
 	interrupts   int
@@ -40,6 +41,7 @@ type fixtureProvider struct {
 type targetFixture struct {
 	session         surface.Session
 	sent            []string
+	steered         []string
 	stream          func(func(surface.StreamEvent))
 	turnID          string
 	observation     *surface.TurnObservation
@@ -126,11 +128,12 @@ func (f *targetFixture) InterruptTurn(_ context.Context, _ *surface.Session, tur
 	f.interruptTurnID = turnID
 	return nil
 }
-func (f *targetFixture) Steer(context.Context, *surface.Session, string) error {
-	return surface.ErrUnsupported
+func (f *targetFixture) Steer(_ context.Context, _ *surface.Session, text string) error {
+	f.steered = append(f.steered, text)
+	return nil
 }
 func (f *targetFixture) Capabilities() surface.Capabilities {
-	if f.capabilities.Interrupt {
+	if f.capabilities.Send || f.capabilities.Interrupt || f.capabilities.Steer {
 		return f.capabilities
 	}
 	return surface.Capabilities{Send: true, Stream: true}
@@ -172,13 +175,14 @@ func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID st
 		success   bool
 		text      string
 	}{requestID, success, text})
-	return nil
+	return p.toolErr
 }
 func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, method string, params map[string]any) error {
 	p.mu.Lock()
 	speaking, speakingText := p.speaking, p.speakingText
 	p.mu.Unlock()
-	if speaking != nil && method == "thread/realtime/appendText" && params["text"] == speakingText {
+	text, _ := params["text"].(string)
+	if speaking != nil && method == "thread/realtime/appendText" && strings.Contains(text, speakingText) {
 		close(speaking)
 		<-ctx.Done()
 		return ctx.Err()
@@ -605,188 +609,14 @@ func TestTextUnknownReceiptPreventsDuplicate(t *testing.T) {
 	}
 }
 
-func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}}
-	spoken := make(chan struct{})
-	target.stream = func(callback func(surface.StreamEvent)) {
-		callback(surface.StreamEvent{Kind: "text", Text: "The correlated answer."})
-		callback(surface.StreamEvent{ID: "partial-upsert", Operation: "upsert", Kind: "text", Text: "The partial answer."})
-		callback(surface.StreamEvent{ID: "final-item", Operation: "upsert", Final: true, Kind: "text", Text: "The authoritative answer."})
-		callback(surface.StreamEvent{ID: "final-item", Operation: "upsert", Final: true, Kind: "text", Text: "The authoritative answer."})
-		close(spoken)
-	}
-	f := targetSelected(t, target)
-	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the current failure"})
-	select {
-	case <-spoken:
-	case <-time.After(time.Second):
-		t.Fatal("correlated target stream did not reach the audio handoff")
-	}
-	if !reflect.DeepEqual(target.sent, []string{"Inspect the current failure"}) {
-		t.Fatalf("wrong target dispatch: %v", target.sent)
-	}
-	want := []string{"The correlated answer.", "The partial answer.", "The authoritative answer."}
-	if got := f.provider.spoken(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("spoken=%q want=%q", got, want)
-	}
-	v := f.View()
-	if v.Target == nil || v.Target.ID != "target-a" || v.CodingProvider != "claude" || v.AudioProvider != "openai-realtime-via-codex" {
-		t.Fatalf("capability contract missing from state: %+v", v)
-	}
-}
-
-func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}, watchDone: make(chan struct{})}
-	target.stream = func(callback func(surface.StreamEvent)) {
-		callback(surface.StreamEvent{ID: "codex:target-turn:done", Operation: "phase", TurnID: "target-turn", Kind: "done"})
-	}
-	f := targetSelected(t, target)
-	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the tool only"})
-	select {
-	case <-target.watchDone:
-	case <-time.After(time.Second):
-		t.Fatal("tool-only delegation did not finish")
-	}
-	if v := f.View(); hasEvent(v, "voice/delegation/failed") {
-		t.Fatalf("completed tool-only turn surfaced a delegation failure: %+v", v.Events)
-	}
-	if spoken := f.provider.spoken(); len(spoken) != 0 {
-		t.Fatalf("empty turn handed text to realtime audio: %q", spoken)
-	}
-}
-
-func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}}
-	target.stream = func(callback func(surface.StreamEvent)) {
-		callback(surface.StreamEvent{ID: "user", Role: "user", Kind: "message", Text: "do not speak"})
-		callback(surface.StreamEvent{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x"})
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "append", Version: 4, Kind: "text", Text: "part"})
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Operation: "upsert", Version: 13, Final: true, Kind: "message", Text: "part complete"})
-		callback(surface.StreamEvent{ID: "second", Role: "assistant", Final: true, Kind: "message", Text: "second answer"})
-		callback(surface.StreamEvent{Kind: "done"})
-	}
-	f := targetSelected(t, target)
-	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "three spoken items", func() bool { return len(f.provider.spoken()) >= 3 })
-	if spoken := f.provider.spoken(); !reflect.DeepEqual(spoken, []string{"part", " complete", "second answer"}) {
-		t.Fatalf("spoken=%q", spoken)
-	}
-}
-
-func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}}
-	target.stream = func(callback func(surface.StreamEvent)) {
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "partial"})
-		callback(surface.StreamEvent{Kind: "done", Status: "cancelled"})
-	}
-	f := targetSelected(t, target)
-	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Run the task"})
-	waitFor(t, "delegation failure", func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
-}
-
-func TestDelegationBlocksUncorrelatedClaudePeer(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, Name: "Peer", Transport: "uds"}}
-	f := targetSelected(t, target)
-	if _, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Do work"}); err == nil || len(target.sent) != 0 {
-		t.Fatalf("uncorrelated peer was dispatched: err=%v sends=%v", err, target.sent)
-	}
-}
-
-func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
+func TestSpokenTranscriptDoesNotAutomaticallyDelegate(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
 	f := targetSelected(t, target)
 	spoken := Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}}
 	f.observe(spoken)
 	f.observe(spoken)
-	if !reflect.DeepEqual(target.sent, []string{"Inspect this session"}) {
-		t.Fatalf("spoken transcript was not delivered exactly once: %v", target.sent)
-	}
-}
-
-func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}, streaming: make(chan struct{})}
-	f := targetSelected(t, target)
-	f.observe(Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}})
-	select {
-	case <-target.streaming:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the delegation never started watching its target")
-	}
-	closed := make(chan struct{})
-	go func() { f.service.Close(); close(closed) }()
-	select {
-	case <-closed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Close returned before, or never after, stopping the delegation watch")
-	}
-}
-
-func TestCloseCancelsSpeechStillWaitingOnTheOperator(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
-	target.stream = func(callback func(surface.StreamEvent)) {
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
-	}
-	f := targetSelected(t, target)
-	speaking := make(chan struct{})
-	f.provider.mu.Lock()
-	f.provider.speaking, f.provider.speakingText = speaking, "The answer."
-	f.provider.mu.Unlock()
-	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this session"})
-	select {
-	case <-speaking:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the delegated answer never reached the operator")
-	}
-	closed := make(chan struct{})
-	go func() { f.service.Close(); close(closed) }()
-	select {
-	case <-closed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Close waited on speech the operator never accepted")
-	}
-}
-
-func TestSpeechWaitingOnTheOperatorLeavesViewAndActionsResponsive(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
-	target.stream = func(callback func(surface.StreamEvent)) {
-		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
-	}
-	f := targetSelected(t, target)
-	f.service.mu.Lock()
-	f.service.speechTimeout = 300 * time.Millisecond
-	f.service.mu.Unlock()
-	speaking := make(chan struct{})
-	f.provider.mu.Lock()
-	f.provider.speaking, f.provider.speakingText = speaking, "The answer."
-	f.provider.mu.Unlock()
-	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect this session"})
-	select {
-	case <-speaking:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the delegated answer never reached the operator")
-	}
-	viewed := make(chan State, 1)
-	go func() { viewed <- f.View() }()
-	select {
-	case v := <-viewed:
-		if v.Phase != "connected" || v.Target == nil || v.Target.ID != "target-a" {
-			t.Fatalf("view during speech=%+v", v)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("View waited on speech the operator had not accepted")
-	}
-	acted := make(chan error, 1)
-	go func() { _, err := f.Apply(Action{Action: "stop", AttemptID: "call-a"}); acted <- err }()
-	select {
-	case err := <-acted:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("a control action waited past the speech deadline")
-	}
-	if v := f.View(); !hasEvent(v, "voice/delegation/final-failed") || v.Phase == "connected" {
-		t.Fatalf("expired speech was not recorded before the stop: %+v", v)
+	if len(target.sent) != 0 {
+		t.Fatalf("speech was forwarded without an explicit tool instruction: %v", target.sent)
 	}
 }
 
@@ -820,7 +650,7 @@ func TestCloseWaitsForAnActionInProgressAndRefusesLaterWork(t *testing.T) {
 
 func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}}
-	f := newFixture(t, fixtureOptions{target: target})
+	f := newFixture(t, fixtureOptions{target: target, stream: newJournalFixture()})
 	p := f.provider
 	connectFixture(t, f)
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "tool-a", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "target-a"}}})
@@ -910,18 +740,6 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 	sessionBound, _ := boundInitial[0]["text"].(string)
 	if len(initial) != 1 || len(boundInitial) != 1 || initial[0]["role"] != "developer" || boundInitial[0]["role"] != "developer" || orchestrator == "" || sessionBound == "" || orchestrator == sessionBound {
 		t.Fatalf("session-bound calls need their own developer instructions: orchestrator=%v bound=%v", initial, boundInitial)
-	}
-}
-
-func TestDelegationHoldsWhenTargetDoesNotProvideAnAuthoritativeTurnID(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
-	f := targetSelected(t, target)
-	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the target"})
-	if v := f.View(); !hasEventWith(v, "voice/delegation/held", "turnId", "target-a") || hasEvent(v, "voice/delegation/dispatched") {
-		t.Fatalf("uncorrelated receipt was not held: %+v", v.Events)
-	}
-	if spoken := f.provider.spoken(); len(spoken) != 0 {
-		t.Fatalf("held delegation spoke: %q", spoken)
 	}
 }
 

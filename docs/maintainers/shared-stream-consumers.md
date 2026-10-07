@@ -3,7 +3,7 @@
 ## Contract
 
 The daemon's `SessionSource` is the only live provider reader for a session.
-Voice delegation and CLI consumers must subscribe to that source before sending
+CLI correlated-reply consumers must subscribe to that source before sending
 or otherwise starting work. The subscription returns the journal sequence that
 was current when the subscription became ready. The consumer then dispatches,
 replays entries after that cursor, and keeps the subscription open until the
@@ -51,11 +51,16 @@ daemon path is returned to the caller; it must not silently fall back to a
 second provider reader. With no daemon, the existing bounded provider path is
 retained for offline use.
 
-Voice delegation uses the same source subscription; it reads the target's
-provider stream directly only when no daemon session stream is available, with
-the same terminal and per-item deduplication rules. The voice operator remains
-a separate Codex realtime audio plane; only target-session journal entries matching the delivery
-turn are appended to it. Cancellation releases the source subscription and
+Voice uses the same source, but follows a selected session continuously rather
+than treating each utterance as a correlated request. The prepared subscription
+includes a bounded `Initial` journal page and its `Cursor` from the same read
+transaction. Subsequent events begin strictly after that cursor. This supplies
+pre-existing worker context without opening a second provider reader.
+Voice carries selected-session attribution, lifecycle state and visible message
+updates; hidden reasoning and raw tool bodies are not spoken. Text updates are
+coalesced briefly and deduplicated per item. The source remains held until
+transfer, return, hangup or shutdown, including across worker turn completion.
+Cancellation releases the source subscription and
 does not interrupt the target unless the existing explicit stop path requests
 that action.
 
@@ -68,6 +73,6 @@ on every dispatch failure, queued/submitted result without an authoritative
 turn, timeout, and normal terminal completion. The source manager may become
 cold only after all subscribers and holders are released.
 
-Tests must cover the pre-dispatch fast-reply race, exact-turn filtering,
+Tests must cover the pre-dispatch fast-reply race, exact-turn filtering for CLI,
 replay/deduplication, terminal and source-error mapping, active-daemon zero
 provider reads, and offline bounded behavior.

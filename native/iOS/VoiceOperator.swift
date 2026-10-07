@@ -230,19 +230,25 @@ final class VoiceOperatorModel: ObservableObject {
         appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
         audioSuspended = false; held = false; mediaReconnecting = false
         defer { working = false }
+        var stage = "target_select"
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
             guard !closed, generation == current else { return }
             state = selected
+            stage = "operator_prepare"
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
+            stage = "native_audio_start"
             audio.configureCall(id: callID, name: committedRoute)
             try await audio.start()
         } catch {
             guard !closed, generation == current else { return }
             if !(error is CancellationError) { self.error = error.localizedDescription }
-            if let attemptID { diagnostics.end("host_start_rejected", id: attemptID) }
+            if let attemptID {
+                diagnostics.failure(error, stage: stage, id: attemptID)
+                diagnostics.end("\(stage)_failed", id: attemptID)
+            }
             dialing = false; attemptID = nil; audio.end()
         }
     }
@@ -276,6 +282,7 @@ final class VoiceOperatorModel: ObservableObject {
                 } catch {
                     guard !closed, generation == current else { return }
                     self.error = self.error ?? error.localizedDescription
+                    diagnostics.failure(error, stage: "host_start", id: id)
                     hangup(cause: "host_start_rejected")
                 }
             }
@@ -741,6 +748,10 @@ struct AgenthailVoiceOperatorSheet: View {
                     Section("Call lifecycle") {
                         LabeledContent("Attempt") { Text(attempt.id).font(.caption.monospaced()).textSelection(.enabled) }
                         if let cause = attempt.terminalCause { LabeledContent("Ended because", value: cause) }
+                        if let stage = attempt.failureStage {
+                            LabeledContent("Failure stage", value: stage)
+                            LabeledContent("Error code", value: "\(attempt.failureDomain ?? "application") · \(attempt.failureCode ?? 0)")
+                        }
                         ForEach(attempt.milestones.keys.sorted(), id: \.self) { milestone in
                             LabeledContent(milestone, value: String(format: "%.3f s", attempt.milestones[milestone] ?? 0))
                         }

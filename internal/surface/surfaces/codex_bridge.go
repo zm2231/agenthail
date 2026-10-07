@@ -14,12 +14,14 @@ const codexHookJS = `
 (() => {
   if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
   const current = globalThis.__agenthailCodexDesktopRendererV2;
-  if (current && typeof current.request === 'function') return 'already';
+  if (current && current.abi === 3 && typeof current.request === 'function') return 'already';
   const bridge = {
+    abi: 3,
     events: [],
     sequence: 0,
     next: 0,
     pending: new Map(),
+    toolRequests: new Map(),
   };
   window.addEventListener('message', event => {
     const data = event.data;
@@ -40,11 +42,18 @@ const codexHookJS = `
     }
     if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
       const params = data.request.params || {};
+      bridge.toolRequests.set(String(data.request.id), data.request.id);
+      if (bridge.toolRequests.size > 256) bridge.toolRequests.delete(bridge.toolRequests.keys().next().value);
       bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
   });
-  bridge.respondDynamicToolCall = (requestId, success, text) => Promise.resolve(globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', message:{id:requestId, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}}));
+  bridge.respondDynamicToolCall = async (requestId, success, text) => {
+    if (!bridge.toolRequests.has(String(requestId))) throw Error('Dynamic tool request is no longer available');
+    const id = bridge.toolRequests.get(String(requestId));
+    await globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', message:{id, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}});
+    bridge.toolRequests.delete(String(requestId));
+  };
   bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
     const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
     const timer = setTimeout(() => {
