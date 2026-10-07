@@ -900,6 +900,79 @@ func TestDisconnectedPhoneWatchdogRequestsAudioStopWithoutDeadlock(t *testing.T)
 	}
 }
 
+func TestNativeHeartbeatValidatesOwnerAndAttemptBeforeRenewing(t *testing.T) {
+	tests := []struct {
+		name  string
+		owner string
+		try   Action
+	}{
+		{name: "foreign owner", owner: "other-phone", try: Action{Action: "heartbeat", AttemptID: "call-a"}},
+		{name: "stale attempt", owner: "phone", try: Action{Action: "heartbeat", AttemptID: "old-call"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, p := fixture(t)
+			connectFixture(t, f)
+			apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
+			f.advance(39 * time.Second)
+			if _, err := f.service.Apply(context.Background(), tt.owner, tt.try); err == nil {
+				t.Fatal("invalid heartbeat was accepted")
+			}
+			f.advance(2 * time.Second)
+			f.tick()
+			requests, _, _ := p.snapshot()
+			if !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) {
+				t.Fatalf("invalid heartbeat renewed liveness: %v", requests)
+			}
+		})
+	}
+}
+
+func TestNativeHeartbeatSustainsCallWithoutProviderIOAndViewDoesNotRenew(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
+	seenAt := f.service.lastSeen.Load()
+	if got := f.View(); got.Phase != "connected" || f.service.lastSeen.Load() != seenAt {
+		t.Fatalf("native view renewed liveness or changed state: %+v", got)
+	}
+	f.advance(39 * time.Second)
+	f.tick()
+	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start"}) {
+		t.Fatalf("healthy heartbeat did not sustain call: %v", requests)
+	}
+	apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
+	f.advance(39 * time.Second)
+	f.tick()
+	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start"}) {
+		t.Fatalf("second heartbeat did not sustain call: %v", requests)
+	}
+	if _, err := f.service.Apply(context.Background(), "phone", Action{Action: "heartbeat", AttemptID: "call-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.service.state.NativeHeartbeatEnrolled != true {
+		t.Fatal("native heartbeat enrollment was not retained")
+	}
+}
+
+func TestNativeHeartbeatExpiryPreservesTerminalReason(t *testing.T) {
+	f, p := fixture(t)
+	connectFixture(t, f)
+	apply(t, f, Action{Action: "heartbeat", AttemptID: "call-a"})
+	f.advance(41 * time.Second)
+	f.tick()
+	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) {
+		t.Fatalf("expiry did not request audio stop: %v", requests)
+	}
+	if got := f.View(); got.Phase != "stopping" || got.TerminalReason != "phone_disconnected" {
+		t.Fatalf("expiry reason was not exposed: %+v", got)
+	}
+	f.observe(Event{Method: "thread/realtime/closed", Params: map[string]any{}})
+	if got := f.View(); got.Phase != "ended" || got.TerminalReason != "phone_disconnected" {
+		t.Fatalf("terminal reason was not preserved: %+v", got)
+	}
+}
+
 func TestSDPRequiresMatchingStartAndEventLossPreventsReattachment(t *testing.T) {
 	f, _ := fixture(t)
 	startFixture(t, f)

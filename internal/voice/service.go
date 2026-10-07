@@ -101,6 +101,7 @@ type State struct {
 	Target         *surface.Session `json:"target,omitempty"`
 	AudioProvider  string           `json:"audioProvider,omitempty"`
 	CodingProvider string           `json:"codingProvider,omitempty"`
+	TerminalReason string           `json:"terminalReason,omitempty"`
 }
 
 type Action struct {
@@ -113,9 +114,10 @@ type Action struct {
 }
 
 type diskState struct {
-	State    State    `json:"state"`
-	Owner    string   `json:"owner"`
-	Messages []string `json:"messages"`
+	State                   State    `json:"state"`
+	Owner                   string   `json:"owner"`
+	Messages                []string `json:"messages"`
+	NativeHeartbeatEnrolled bool     `json:"nativeHeartbeatEnrolled,omitempty"`
 }
 
 type Service struct {
@@ -148,9 +150,10 @@ type Service struct {
 // snapshot is the state as of the last release of s.mu. View reads it without
 // the lock, because actions and the event poll hold s.mu across provider I/O.
 type snapshot struct {
-	state  State
-	owner  string
-	active bool
+	state                   State
+	owner                   string
+	active                  bool
+	nativeHeartbeatEnrolled bool
 }
 
 func (p *snapshot) view(owner string) State {
@@ -242,7 +245,9 @@ func (s *Service) syncOperatorSourceActive() {
 func (s *Service) View(owner string) State {
 	current := s.published.Load()
 	if current.owner == owner {
-		s.seen()
+		if !current.nativeHeartbeatEnrolled {
+			s.seen()
+		}
 		if current.active && s.mu.TryLock() {
 			if s.active() && s.cursor.Source != "" && s.provider != nil && s.loadErr == nil {
 				s.observe()
@@ -273,7 +278,7 @@ func (s *Service) capture() *snapshot {
 	data, _ := json.Marshal(v)
 	var copy State
 	_ = json.Unmarshal(data, &copy)
-	return &snapshot{state: copy, owner: s.state.Owner, active: s.active()}
+	return &snapshot{state: copy, owner: s.state.Owner, active: s.active(), nativeHeartbeatEnrolled: s.state.NativeHeartbeatEnrolled}
 }
 
 // unlock publishes the state for View and releases s.mu.
@@ -332,7 +337,9 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 	if s.active() && s.state.Owner != owner {
 		return s.view(owner), errors.New("another device owns this call")
 	}
-	s.seen()
+	if a.Action != "heartbeat" {
+		s.seen()
+	}
 	err := s.apply(ctx, owner, a)
 	return s.view(owner), err
 }
@@ -395,7 +402,8 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		s.boundAttempt, s.eventGap = "", false
 		s.state.Owner = owner
 		s.state.Messages = nil
-		v.AttemptID, v.Phase, v.SDP, v.Message = a.AttemptID, "starting", "", ""
+		v.AttemptID, v.Phase, v.SDP, v.Message, v.TerminalReason = a.AttemptID, "starting", "", "", ""
+		s.state.NativeHeartbeatEnrolled = false
 		v.AudioProvider = "openai-realtime-via-codex"
 		if err := s.save(); err != nil {
 			s.loadErr = err
@@ -417,12 +425,21 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 			return errors.New("no matching negotiated call")
 		}
 		v.Phase = "connected"
+	case "heartbeat":
+		if !s.active() || a.AttemptID == "" || a.AttemptID != v.AttemptID {
+			return errors.New("heartbeat requires the current active voice call")
+		}
+		s.state.NativeHeartbeatEnrolled = true
+		s.seen()
 	case "stop":
 		if a.AttemptID != v.AttemptID || v.Session == nil {
 			return errors.New("call identity does not match")
 		}
 		if !s.active() {
 			return nil
+		}
+		if v.TerminalReason == "" {
+			v.TerminalReason = "local_hangup"
 		}
 		if s.cursor.Source == "" {
 			cursor, err := s.provider.Cursor(ctx)
@@ -966,9 +983,11 @@ func (s *Service) observe() {
 			}
 			if s.clock.now().Sub(time.Unix(0, s.lastSeen.Load())) > 40*time.Second {
 				ctx, cancel := context.WithTimeout(s.background, 10*time.Second)
+				s.state.State.TerminalReason = "phone_disconnected"
 				_ = s.apply(ctx, s.state.Owner, Action{Action: "stop", AttemptID: s.state.State.AttemptID})
 				cancel()
 				s.state.State.Message = "Phone disconnected; audio hangup requested. Agent work remains in the operator thread."
+				_ = s.save()
 				s.running = false
 				s.unlock()
 				return
