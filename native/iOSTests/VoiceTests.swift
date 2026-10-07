@@ -299,30 +299,32 @@ final class VoiceTests: XCTestCase {
     }
 
     @MainActor
-    func testOnlyBegunAudioInterruptionEndsActiveCallWithVisibleReason() async {
+    func testSystemAudioSuspensionDoesNotHangUpCall() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
-        model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
-                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue]))
+        audio.onMessage?("suspended", "true")
         XCTAssertTrue(model.dialing)
+        XCTAssertTrue(model.audioSuspended)
         XCTAssertEqual(audio.ends, 0)
-        model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
-                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue]))
-        XCTAssertFalse(model.dialing)
-        XCTAssertEqual(audio.ends, 1)
-        XCTAssertEqual(model.error, "iOS interrupted the microphone. The call was ended; call again after the interruption clears.")
+        audio.onMessage?("suspended", "false")
+        XCTAssertFalse(model.audioSuspended)
+        XCTAssertTrue(model.hasLocalCall)
+        XCTAssertNil(model.error)
     }
 
     @MainActor
-    func testAudioInterruptionIncludesSystemReasonWhenProvided() async {
+    func testSystemHoldDoesNotHangUpCall() async {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         let model = VoiceOperatorModel(api: api, audio: audio); model.targetID = "target-a"; model.ready = true
         await model.call()
-        model.audioInterrupted(Notification(name: AVAudioSession.interruptionNotification,
-                                            userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue,
-                                                       AVAudioSessionInterruptionReasonKey: AVAudioSession.InterruptionReason.default.rawValue]))
-        XCTAssertEqual(model.error, "iOS interrupted the microphone (iOS reason code \(AVAudioSession.InterruptionReason.default.rawValue)). The call was ended; call again after the interruption clears.")
+        audio.onMessage?("held", "true")
+        XCTAssertTrue(model.held)
+        XCTAssertTrue(model.hasLocalCall)
+        XCTAssertEqual(audio.ends, 0)
+        audio.onMessage?("held", "false")
+        XCTAssertFalse(model.held)
+        XCTAssertNil(model.error)
     }
 
     @MainActor
@@ -400,6 +402,25 @@ final class VoiceTests: XCTestCase {
         XCTAssertEqual(state.attemptId, "call-a")
         XCTAssertEqual(state.events.last?.sequence, 91)
         XCTAssertEqual(state.events.last?.params.reason, "requested")
+    }
+
+    @MainActor
+    func testStopAcceptanceDoesNotRecordHostClosureUntilMatchingTerminalState() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "heartbeat" }) { await Task.yield() }
+        let id = try XCTUnwrap(model.diagnostics.attempts.last?.id)
+        model.hangup()
+        for _ in 0..<1000 where model.diagnostics.attempts.last?.milestones["host_stop_accepted"] == nil { await Task.yield() }
+        XCTAssertNotNil(model.diagnostics.attempts.last?.milestones["host_stop_accepted"])
+        XCTAssertNil(model.diagnostics.attempts.last?.milestones["host_closed"])
+        XCTAssertEqual(model.diagnostics.attempts.last?.terminalCause, "user_hangup")
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"\#(id)","events":[],"occupied":false,"truncated":false}"#.utf8))
+        await model.refresh()
+        XCTAssertNotNil(model.diagnostics.attempts.last?.milestones["host_closed"])
+        XCTAssertEqual(model.diagnostics.attempts.last?.terminalCause, "user_hangup")
     }
 }
 

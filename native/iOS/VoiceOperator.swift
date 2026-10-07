@@ -14,12 +14,16 @@ final class VoiceOperatorModel: ObservableObject {
     @Published var connectionError: String?
     @Published var muted = false
     @Published var audioConnected = false
+    @Published var audioSuspended = false
+    @Published var held = false
+    @Published var mediaReconnecting = false
     @Published private(set) var hostHangupPending = false
     @Published private(set) var hostHangupUnconfirmed = false
     @Published var text = ""
     @Published var targetID = ""
     let isPreview: Bool
     let audio: any VoiceAudioClient
+    let diagnostics: VoiceCallDiagnostics
     private var api: (any VoiceServiceClient)?
     private var timelineAPI: AgenthailAPI?
     private var polling: Task<Void, Never>?
@@ -51,6 +55,7 @@ final class VoiceOperatorModel: ObservableObject {
         isPreview = preview
         self.targetID = targetID
         self.audio = audio ?? VoiceAudioBridge()
+        diagnostics = VoiceCallDiagnostics(file: api == nil && !preview ? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("voice-attempts.json") : nil)
 #if DEBUG
         if preview {
             state = try? JSONDecoder().decode(VoiceState.self, from: Data(Self.previewState.utf8))
@@ -109,7 +114,7 @@ final class VoiceOperatorModel: ObservableObject {
             if next.phase == "unknown", hasLocalCall, next.attemptId == attemptID {
                 state = next
                 error = error ?? next.message ?? "The host can no longer confirm this call. Audio has stopped."
-                hangup()
+                hangup(cause: "host_closed")
                 return
             }
             let terminal = next.phase == "ended" || next.phase == "blocked"
@@ -128,17 +133,24 @@ final class VoiceOperatorModel: ObservableObject {
             connectionError = nil
             if terminal {
                 let hadLocalCall = dialing || audioConnected || attemptID != nil
+                if let id = attemptID ?? hostHangupAttemptID, id == next.attemptId {
+                    diagnostics.mark(next.phase == "ended" ? "host_closed" : "host_blocked", id: id)
+                    diagnostics.end(next.phase == "ended" ? "host_closed" : "host_blocked", id: id)
+                }
                 audioConnected = false; dialing = false; attemptID = nil
+                audioSuspended = false; held = false; mediaReconnecting = false
                 if hadLocalCall { audio.end() }
                 heartbeat?.cancel(); heartbeat = nil
                 mediaRecovery?.cancel(); mediaRecovery = nil
                 hostHangupPending = false
                 hostHangupUnconfirmed = false
                 hostHangupAttemptID = nil
+                if visibleScreens == 0 { polling?.cancel(); polling = nil }
             }
             if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
                 appliedSDP = sdp
                 try await audio.answer(sdp)
+                if current == generation, let attemptID { diagnostics.mark("sdp_applied", id: attemptID) }
             }
             refreshActivity(sessionID: next.session?.id, generation: current)
         } catch {
@@ -191,14 +203,14 @@ final class VoiceOperatorModel: ObservableObject {
                     lastSuccess = .now
                     if ["ended", "blocked", "unknown"].contains(next.phase) {
                         self.error = self.error ?? next.message ?? "The host ended this call."
-                        self.hangup()
+                        self.hangup(cause: "host_closed")
                         return
                     }
                 } catch {
                     guard !Task.isCancelled, current == self.generation else { return }
                     if lastSuccess.duration(to: .now) >= .seconds(30) {
                         self.error = self.error ?? "The Mac connection was lost. Audio has stopped; call again when it reconnects."
-                        self.hangup()
+                        self.hangup(cause: "heartbeat_expired")
                         return
                     }
                 }
@@ -212,6 +224,11 @@ final class VoiceOperatorModel: ObservableObject {
         working = true; dialing = true; error = nil; generation += 1
         callStartedAt = .now
         let current = generation
+        let callID = UUID()
+        attemptID = callID.uuidString
+        diagnostics.begin(id: callID.uuidString)
+        appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
+        audioSuspended = false; held = false; mediaReconnecting = false
         defer { working = false }
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -220,14 +237,12 @@ final class VoiceOperatorModel: ObservableObject {
             let next = try await api.action(VoiceAction(action: "prepare"))
             guard !closed, generation == current else { return }
             state = next
-            let callID = UUID()
-            attemptID = callID.uuidString
-            appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
             audio.configureCall(id: callID, name: committedRoute)
             try await audio.start()
         } catch {
             guard !closed, generation == current else { return }
             if !(error is CancellationError) { self.error = error.localizedDescription }
+            if let attemptID { diagnostics.end("host_start_rejected", id: attemptID) }
             dialing = false; attemptID = nil; audio.end()
         }
     }
@@ -235,6 +250,11 @@ final class VoiceOperatorModel: ObservableObject {
     private func receive(_ type: String, _ value: String) {
         guard !closed else { return }
         switch type {
+        case "permission", "peer", "activation":
+            if let attemptID {
+                diagnostics.mark(type == "permission" ? "microphone_\(value)" : type, id: attemptID)
+                if type == "permission", value == "denied" { diagnostics.end("microphone_denied", id: attemptID) }
+            }
         case "loading": ready = false
         case "ready": ready = true
         case "unavailable": ready = false; error = value; hangup()
@@ -242,23 +262,27 @@ final class VoiceOperatorModel: ObservableObject {
             guard let api, let id = attemptID else { return }
             let current = generation
             startSubmitted = true
+            diagnostics.mark("offer_submitted", id: id)
             Task {
                 guard !closed, generation == current else { return }
                 do {
-                    let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value))
+                    let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value, heartbeatMode: "explicit"))
                     if closed || generation != current {
                         _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
                     }
                     state = next
+                    diagnostics.mark("host_start_accepted", id: id)
                     startHeartbeat(attempt: id, generation: current)
                 } catch {
                     guard !closed, generation == current else { return }
                     self.error = self.error ?? error.localizedDescription
-                    hangup()
+                    hangup(cause: "host_start_rejected")
                 }
             }
         case "connection":
             audioConnected = value == "connected"
+            if value == "connected", let attemptID { diagnostics.mark("peer_connected", id: attemptID) }
+            mediaReconnecting = value == "disconnected"
             if value == "connected" { mediaRecovery?.cancel(); mediaRecovery = nil }
             if value == "disconnected", mediaRecovery == nil {
                 let current = generation
@@ -266,15 +290,20 @@ final class VoiceOperatorModel: ObservableObject {
                     do { try await Task.sleep(for: .seconds(10)) } catch { return }
                     guard let self, current == self.generation, !self.audioConnected else { return }
                     self.error = self.error ?? "Audio could not reconnect. Call again to resume this session."
-                    self.hangup()
+                    self.hangup(cause: "peer_failed")
                 }
             }
-            if ["failed", "closed"].contains(value) { error = error ?? "Audio disconnected. Call again to resume this session."; hangup() }
+            if ["failed", "closed"].contains(value) { error = error ?? "Audio disconnected. Call again to resume this session."; hangup(cause: "peer_failed") }
             reportConnected()
-        case "channel": channelOpen = value == "open"; reportConnected()
+        case "channel":
+            channelOpen = value == "open"
+            if channelOpen, let attemptID { diagnostics.mark("data_channel_open", id: attemptID) }
+            reportConnected()
         case "mute": muted = value == "true"
-        case "ended": hangup()
-        case "error": error = error ?? value; hangup()
+        case "suspended": audioSuspended = value == "true"
+        case "held": held = value == "true"
+        case "ended": hangup(cause: value == "system_reset" ? "system_reset" : "user_hangup")
+        case "error": error = error ?? value; hangup(cause: "data_channel_failed")
         default: break
         }
     }
@@ -291,30 +320,25 @@ final class VoiceOperatorModel: ObservableObject {
         Task {
             do {
                 let next = try await api.action(VoiceAction(action: "connected", attemptId: id))
-                if !closed, current == generation { state = next }
+                if !closed, current == generation {
+                    state = next
+                    diagnostics.mark("host_connected", id: id)
+                }
             }
-            catch { if !closed, current == generation { self.error = error.localizedDescription; hangup() } }
+            catch { if !closed, current == generation { self.error = error.localizedDescription; hangup(cause: "host_start_rejected") } }
         }
     }
 
     func toggleMute() { muted.toggle(); audio.mute(muted) }
 
-    func audioInterrupted(_ notification: Notification) {
-        guard let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              AVAudioSession.InterruptionType(rawValue: rawValue) == .began,
-              dialing || audioConnected else { return }
-        let reason = (notification.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt)
-            .map { " (iOS reason code \($0))" } ?? ""
-        error = "iOS interrupted the microphone\(reason). The call was ended; call again after the interruption clears."
-        hangup()
-    }
-
-    func hangup() {
+    func hangup(cause: String = "user_hangup") {
+        if let attemptID { diagnostics.end(cause, id: attemptID) }
         generation += 1
         heartbeat?.cancel(); heartbeat = nil
         mediaRecovery?.cancel(); mediaRecovery = nil
         let current = generation
         dialing = false; audioConnected = false; channelOpen = false
+        audioSuspended = false; held = false; mediaReconnecting = false
         audio.end()
         let localAttempt = attemptID
         let id = localAttempt ?? hostHangupAttemptID ?? state?.attemptId
@@ -328,6 +352,7 @@ final class VoiceOperatorModel: ObservableObject {
         Task {
             do {
                 let next = try await api.action(VoiceAction(action: "stop", attemptId: id))
+                diagnostics.mark("host_stop_accepted", id: id)
                 if !closed, current == generation { state = next }
             }
             catch {
@@ -597,7 +622,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 Label("Audio ended locally. Confirming host hangup…", systemImage: "hourglass")
                     .font(.subheadline).foregroundStyle(.secondary)
             } else if model.hostHangupUnconfirmed {
-                callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
+                callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true) { model.hangup() }
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(.secondary) }
             } else if model.state?.hasCall == true || model.audioConnected || model.dialing {
                 if model.audioConnected && model.state?.occupied != true {
@@ -632,7 +657,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 HStack(alignment: .top, spacing: 32) {
                     callControl("Type", icon: "keyboard", disabled: !model.audioConnected) { showKeyboard.toggle() }
                     callControl(model.muted ? "Unmute" : "Mute", icon: model.muted ? "mic.slash.fill" : "mic.fill", disabled: !model.audioConnected, action: model.toggleMute)
-                    callControl("Hang up", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true, action: model.hangup)
+                    callControl("Hang up", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true) { model.hangup() }
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(.secondary) }
             } else {
@@ -659,6 +684,9 @@ struct AgenthailVoiceOperatorSheet: View {
         if model.hostHangupPending { return "Audio off locally; confirming host hangup…" }
         if model.hostHangupUnconfirmed { return "Audio off locally; host hangup unconfirmed" }
         if model.connectionError != nil { return "Reconnecting to your Mac" }
+        if model.held { return "Call on hold" }
+        if model.audioSuspended { return "Audio paused by iOS" }
+        if model.mediaReconnecting { return "Reconnecting audio…" }
         if model.audioConnected { return model.muted ? "Microphone muted" : "Connected" }
         if model.dialing { return "Connecting audio…" }
         switch model.state?.phase {
@@ -678,6 +706,10 @@ struct AgenthailVoiceOperatorSheet: View {
             List {
                 Section("Connection") {
                     LabeledContent("Provider", value: "Codex Voice")
+                    if let licenseURL = Bundle.main.url(forResource: "WebRTC-LICENSE", withExtension: "txt"),
+                       let license = try? String(contentsOf: licenseURL, encoding: .utf8) {
+                        DisclosureGroup("WebRTC license") { Text(license).font(.caption).textSelection(.enabled) }
+                    }
                     if let target = model.state?.target {
                         LabeledContent("Coding target", value: target.name)
                         LabeledContent("Coding provider", value: model.state?.codingProvider ?? target.surface)
@@ -703,6 +735,18 @@ struct AgenthailVoiceOperatorSheet: View {
                         LabeledContent("Skill", value: "Agenthail operations")
                         Text(model.state?.skillDigest ?? "").font(.caption.monospaced()).textSelection(.enabled)
                         Button("Open full timeline") { showDetails = false; openSession(session.id) }
+                    }
+                }
+                if let attempt = model.diagnostics.attempts.last {
+                    Section("Call lifecycle") {
+                        LabeledContent("Attempt") { Text(attempt.id).font(.caption.monospaced()).textSelection(.enabled) }
+                        if let cause = attempt.terminalCause { LabeledContent("Ended because", value: cause) }
+                        ForEach(attempt.milestones.keys.sorted(), id: \.self) { milestone in
+                            LabeledContent(milestone, value: String(format: "%.3f s", attempt.milestones[milestone] ?? 0))
+                        }
+                        if let failure = model.diagnostics.persistenceError {
+                            Text("Call diagnostics could not be saved: \(failure)").foregroundStyle(.red)
+                        }
                     }
                 }
                 if model.detail?.session.status == "busy" {

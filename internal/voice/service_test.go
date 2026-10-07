@@ -522,6 +522,60 @@ func TestDeviceLeaseRejectsTakeoverAndHidesSDP(t *testing.T) {
 	}
 }
 
+func TestNativeCallHeartbeatSurvivesWithoutViewsAndRejectsWrongIdentity(t *testing.T) {
+	f, p := fixture(t)
+	apply(t, f, Action{Action: "prepare"})
+	apply(t, f, Action{Action: "start", AttemptID: "native-a", SDP: "v=0 offer", HeartbeatMode: "explicit"})
+	f.observe(Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "native-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
+	apply(t, f, Action{Action: "connected", AttemptID: "native-a"})
+	for range 12 {
+		f.advance(10 * time.Second)
+		apply(t, f, Action{Action: "heartbeat", AttemptID: "native-a"})
+		f.tick()
+	}
+	if got := f.service.published.Load().state.Phase; got != "connected" {
+		t.Fatalf("healthy native call ended: %s", got)
+	}
+	last := f.service.lastSeen.Load()
+	f.advance(30 * time.Second)
+	for _, tc := range []struct{ name, owner, attempt string }{
+		{"other owner", "other-phone", "native-a"}, {"old attempt", "phone", "old"}, {"missing attempt", "phone", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := f.service.Apply(context.Background(), tc.owner, Action{Action: "heartbeat", AttemptID: tc.attempt}); err == nil {
+				t.Fatal("invalid heartbeat accepted")
+			}
+			if f.service.lastSeen.Load() != last {
+				t.Fatal("invalid identity extended the lease")
+			}
+		})
+	}
+	f.View()
+	if f.service.lastSeen.Load() != last {
+		t.Fatal("transcript viewing extended native media lease")
+	}
+	f.advance(11 * time.Second)
+	f.tick()
+	requests, interrupts, _ := p.snapshot()
+	if requests[len(requests)-1] != "thread/realtime/stop" || interrupts != 0 {
+		t.Fatalf("expiry affected coding work or did not stop audio: %v / %d", requests, interrupts)
+	}
+}
+
+func TestNativeHeartbeatCannotReviveRetainedCallAfterRestart(t *testing.T) {
+	f, _ := fixture(t)
+	apply(t, f, Action{Action: "prepare"})
+	apply(t, f, Action{Action: "start", AttemptID: "native-a", SDP: "v=0 offer", HeartbeatMode: "explicit"})
+	copy := New(f.path, f.provider, nil, "/fixture/agenthail")
+	defer copy.Close()
+	if got := copy.View("phone"); got.Phase != "unknown" {
+		t.Fatalf("restart restored media without evidence: %s", got.Phase)
+	}
+	if _, err := copy.Apply(context.Background(), "phone", Action{Action: "heartbeat", AttemptID: "native-a"}); err == nil {
+		t.Fatal("heartbeat reattached a dead native peer")
+	}
+}
+
 func TestOperatorSourceLifecycleTracksOnlyActiveTransitions(t *testing.T) {
 	var calls []string
 	f := newFixture(t, fixtureOptions{operatorSource: func(session *surface.Session, active bool) {

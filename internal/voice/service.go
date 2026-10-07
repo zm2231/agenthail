@@ -104,18 +104,20 @@ type State struct {
 }
 
 type Action struct {
-	Action    string `json:"action"`
-	AttemptID string `json:"attemptId"`
-	SDP       string `json:"sdp"`
-	Text      string `json:"text"`
-	MessageID string `json:"messageId"`
-	TargetID  string `json:"targetId"`
+	Action        string `json:"action"`
+	AttemptID     string `json:"attemptId"`
+	SDP           string `json:"sdp"`
+	Text          string `json:"text"`
+	MessageID     string `json:"messageId"`
+	TargetID      string `json:"targetId"`
+	HeartbeatMode string `json:"heartbeatMode,omitempty"`
 }
 
 type diskState struct {
-	State    State    `json:"state"`
-	Owner    string   `json:"owner"`
-	Messages []string `json:"messages"`
+	State             State    `json:"state"`
+	Owner             string   `json:"owner"`
+	Messages          []string `json:"messages"`
+	ExplicitHeartbeat bool     `json:"explicitHeartbeat,omitempty"`
 }
 
 type Service struct {
@@ -148,9 +150,10 @@ type Service struct {
 // snapshot is the state as of the last release of s.mu. View reads it without
 // the lock, because actions and the event poll hold s.mu across provider I/O.
 type snapshot struct {
-	state  State
-	owner  string
-	active bool
+	state             State
+	owner             string
+	active            bool
+	explicitHeartbeat bool
 }
 
 func (p *snapshot) view(owner string) State {
@@ -242,7 +245,9 @@ func (s *Service) syncOperatorSourceActive() {
 func (s *Service) View(owner string) State {
 	current := s.published.Load()
 	if current.owner == owner {
-		s.seen()
+		if !current.explicitHeartbeat {
+			s.seen()
+		}
 		if current.active && s.mu.TryLock() {
 			if s.active() && s.cursor.Source != "" && s.provider != nil && s.loadErr == nil {
 				s.observe()
@@ -273,7 +278,7 @@ func (s *Service) capture() *snapshot {
 	data, _ := json.Marshal(v)
 	var copy State
 	_ = json.Unmarshal(data, &copy)
-	return &snapshot{state: copy, owner: s.state.Owner, active: s.active()}
+	return &snapshot{state: copy, owner: s.state.Owner, active: s.active(), explicitHeartbeat: s.state.ExplicitHeartbeat}
 }
 
 // unlock publishes the state for View and releases s.mu.
@@ -332,8 +337,10 @@ func (s *Service) Apply(ctx context.Context, owner string, a Action) (State, err
 	if s.active() && s.state.Owner != owner {
 		return s.view(owner), errors.New("another device owns this call")
 	}
-	s.seen()
 	err := s.apply(ctx, owner, a)
+	if err == nil && (!s.state.ExplicitHeartbeat || a.Action == "heartbeat") {
+		s.seen()
+	}
 	return s.view(owner), err
 }
 
@@ -341,6 +348,11 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 	defer s.syncOperatorSourceActive()
 	v := &s.state.State
 	switch a.Action {
+	case "heartbeat":
+		if a.AttemptID == "" || a.AttemptID != v.AttemptID || s.state.Owner != owner || (v.Phase != "starting" && v.Phase != "negotiating" && v.Phase != "connected") {
+			return errors.New("heartbeat requires the current live call and its owner")
+		}
+		return nil
 	case "prepare":
 		if v.Phase == "creating" {
 			return errors.New("operator creation outcome is unknown; inspect Codex before creating another operator")
@@ -381,6 +393,9 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		if a.AttemptID == "" || len(a.AttemptID) > 128 || !strings.HasPrefix(a.SDP, "v=0") || len(a.SDP) > 96<<10 {
 			return errors.New("a unique attemptId and audio SDP offer are required")
 		}
+		if a.HeartbeatMode != "" && a.HeartbeatMode != "explicit" {
+			return errors.New("unsupported heartbeat mode")
+		}
 		if a.AttemptID == v.AttemptID {
 			return nil
 		}
@@ -394,6 +409,8 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		s.cursor = cursor
 		s.boundAttempt, s.eventGap = "", false
 		s.state.Owner = owner
+		s.state.ExplicitHeartbeat = a.HeartbeatMode == "explicit"
+		s.seen()
 		s.state.Messages = nil
 		v.AttemptID, v.Phase, v.SDP, v.Message = a.AttemptID, "starting", "", ""
 		v.AudioProvider = "openai-realtime-via-codex"

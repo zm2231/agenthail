@@ -162,8 +162,8 @@ matching native `closed` receipt, and makes an unconfirmed host request visible
 with a retry control.
 If the host ends the current attempt while the phone is still connecting, the
 phone displays that failure instead of silently returning to Ready to talk.
-An iOS microphone interruption includes the system reason code when available;
-an interruption-ended notification alone does not hang up an active call.
+CallKit audio deactivation pauses media without ending the call; activation
+restores the native audio session. System hold preserves the user's mute choice.
 The iPhone uses one native media peer and CallKit-managed audio activation, not
 WebKit capture. Audio and the system call UUID are tied to the host's attempt ID.
 Terminal-state polling cleans
@@ -171,6 +171,20 @@ up local audio once per call, not on every refresh. Voice details shows the call
 ID and last host-close reason/event number for a completed call. These messages
 identify the teardown path, not the cause of an earlier host-side `closed` event.
 Capture those details before attributing an instant disconnect.
+
+The phone keeps the last 20 attempt summaries in its private Application Support
+`voice-attempts.json`. Voice details exposes the latest attempt's monotonic
+milestones and first terminal cause. Cleanup cannot replace that cause. Records
+contain no speech, SDP, bearer token or session text. An unfinished record loaded
+after app relaunch is classified `process_terminated_or_unknown`, not connected.
+These records diagnose lifecycle behavior; physical-device audio, lock-screen
+and Bluetooth acceptance still require the matrix below.
+
+Native starts send `heartbeatMode: "explicit"`. The owning phone renews the exact
+attempt every ten seconds independently of transcript rendering; state reads
+cannot renew this mode. The host rejects stale IDs and non-owning devices, and
+expires an unrenewed call after forty seconds. Local media stops after thirty
+seconds without a successful renewal; there is no automatic redial.
 
 State lives beside `registry.db` at `voice/operator.json`, with a private operator
 workspace at `voice/operator/`. The state file is atomically replaced with mode
