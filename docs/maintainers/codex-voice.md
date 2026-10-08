@@ -7,6 +7,11 @@ agents, create a new agent, or ask it to send work and read back the result.
 There is no on-device speech recognition, command grammar, separate TTS service,
 or separate OpenAI API key.
 
+Catalog, target-resolution, and journal reads release the call-state lock and
+have an eight-second ceiling. At most four unfinished reads are retained; a
+cancelled or changed call cannot commit a stale read result. Tool-result delivery
+also releases the lock, so it does not prevent heartbeat or local hangup requests.
+
 This feature requires matching Agenthail host and iOS builds containing the
 voice module. An older installed daemon or TestFlight build does not acquire it
 merely by checking out this branch. See [verification](#verification) for the
@@ -189,6 +194,12 @@ after app relaunch is classified `process_terminated_or_unknown`, not connected.
 These records diagnose lifecycle behavior; physical-device audio, lock-screen
 and Bluetooth acceptance still require the matrix below.
 
+The phone stops voice-status polling after confirmed hangup and restarts it when
+calling or reopening the screen. Local audio ends before host confirmation. The
+jump-to-latest control retains its layout space while hidden, so scroll geometry
+does not resize the footer. Button availability changes are recorded as bounded
+reason codes in the attempt milestones and the `voice-call` log category.
+
 Native starts send `heartbeatMode: "explicit"`. The owning phone renews the exact
 attempt every ten seconds independently of transcript rendering; state reads
 cannot renew this mode. The host rejects stale IDs and non-owning devices, and
@@ -227,7 +238,11 @@ truncate them through a second speech-submission path.
 Read these units in order:
 
 1. `internal/surface/surfaces/codex_bridge.go`: actual Desktop renderer message
-   contract. Notifications are flat `method`/`params`; responses contain `message`.
+   contract. Notifications are flat `method`/`params`. App-server responses arriving
+   at the renderer contain `message`; dynamic-tool responses sent to the host
+   contain `response` and `threadId`, preserving the original numeric or string
+   request ID. A bridge upgrade retains unresolved request identity. Duplicate
+   tool requests reuse their committed result rather than repeating an action.
 2. `internal/voice/service.go`: persistent identity, lease, call state, duplicate
    protection, and native request parameters. `skills/operations.go` embeds the
    distributed Operations skill.

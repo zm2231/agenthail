@@ -14,15 +14,22 @@ const codexHookJS = `
 (() => {
   if (!globalThis.electronBridge || typeof globalThis.electronBridge.sendMessageFromView !== 'function') return 'no-renderer-bridge';
   const current = globalThis.__agenthailCodexDesktopRendererV2;
-  if (current && current.abi === 3 && typeof current.request === 'function') return 'already';
+  if (current && current.abi === 4 && typeof current.request === 'function') return 'already';
   const bridge = {
-    abi: 3,
-    events: [],
-    sequence: 0,
-    next: 0,
-    pending: new Map(),
+    abi: 4,
+    events: current && Array.isArray(current.events) ? current.events.slice() : [],
+    sequence: current && Number.isSafeInteger(current.sequence) ? current.sequence : 0,
+    next: current && Number.isSafeInteger(current.next) ? current.next : 0,
+    pending: current && current.pending instanceof Map ? current.pending : new Map(),
     toolRequests: new Map(),
+    toolResponses: new Map(),
   };
+  if (current && current.toolRequests instanceof Map) {
+    for (const [key, value] of current.toolRequests) {
+      const event = [...bridge.events].reverse().find(e => e.method === 'item/tool/call' && e.params && String(e.params.requestId) === key);
+      bridge.toolRequests.set(key, value && typeof value === 'object' ? value : {id:value, threadId:event && event.params.threadId});
+    }
+  }
   window.addEventListener('message', event => {
     const data = event.data;
     if (!data || data.hostId !== 'local') return;
@@ -42,17 +49,24 @@ const codexHookJS = `
     }
     if (data.type === 'mcp-request' && data.request && data.request.method === 'item/tool/call' && data.request.id != null) {
       const params = data.request.params || {};
-      bridge.toolRequests.set(String(data.request.id), data.request.id);
+      const key = String(data.request.id);
+      if (bridge.toolRequests.has(key) || bridge.toolResponses.has(key)) return;
+      bridge.toolRequests.set(key, {id:data.request.id, threadId:params.threadId});
       if (bridge.toolRequests.size > 256) bridge.toolRequests.delete(bridge.toolRequests.keys().next().value);
       bridge.events.push({sequence: ++bridge.sequence, method: 'item/tool/call', params: {...params, requestId: String(data.request.id)}});
       if (bridge.events.length > 1000) bridge.events.splice(0, bridge.events.length - 1000);
     }
   });
-  bridge.respondDynamicToolCall = async (requestId, success, text) => {
-    if (!bridge.toolRequests.has(String(requestId))) throw Error('Dynamic tool request is no longer available');
-    const id = bridge.toolRequests.get(String(requestId));
-    await globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', message:{id, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}});
-    bridge.toolRequests.delete(String(requestId));
+  bridge.respondDynamicToolCall = async (requestId, threadId, success, text) => {
+    const key = String(requestId);
+    if (bridge.toolResponses.has(key)) return;
+    if (!bridge.toolRequests.has(key)) throw Error('Dynamic tool request is no longer available');
+    const request = bridge.toolRequests.get(key);
+    if (typeof threadId !== 'string' || !threadId || (request.threadId && request.threadId !== threadId)) throw Error('Dynamic tool response thread does not match its request');
+    await globalThis.electronBridge.sendMessageFromView({type:'mcp-response', hostId:'local', threadId, response:{id:request.id, result:{success:Boolean(success), contentItems:[{type:'inputText', text:String(text || '')}]}}});
+    bridge.toolRequests.delete(key);
+    bridge.toolResponses.set(key, true);
+    if (bridge.toolResponses.size > 256) bridge.toolResponses.delete(bridge.toolResponses.keys().next().value);
   };
   bridge.request = (method, params, timeoutMs) => new Promise(resolve => {
     const id = 'agenthail-' + Date.now() + '-' + (++bridge.next);
@@ -74,8 +88,8 @@ func codexRPCJSONJS(method, paramsJSON string, timeout time.Duration) string {
 		strconvQuote(method), paramsJSON, timeout.Milliseconds())
 }
 
-func codexDynamicToolResponseJS(requestID string, success bool, text string) string {
-	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.respondDynamicToolCall!=='function')return'bridge_unavailable';await b.respondDynamicToolCall(%s,%t,%s);return'ok'}catch(e){return String(e&&e.message||e)}})()`, strconvQuote(requestID), success, strconvQuote(text))
+func codexDynamicToolResponseJS(requestID, threadID string, success bool, text string) string {
+	return fmt.Sprintf(`(async()=>{try{const b=globalThis.__agenthailCodexDesktopRendererV2;if(!b||typeof b.respondDynamicToolCall!=='function')return'bridge_unavailable';await b.respondDynamicToolCall(%s,%s,%t,%s);return'ok'}catch(e){return String(e&&e.message||e)}})()`, strconvQuote(requestID), strconvQuote(threadID), success, strconvQuote(text))
 }
 
 func codexPayloadInitJS(id string) string {

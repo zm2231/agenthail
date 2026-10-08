@@ -44,7 +44,20 @@ final class VoiceOperatorModel: ObservableObject {
     private var closed = false
     var hasLocalCall: Bool { dialing || audioConnected || attemptID != nil }
     var committedRoute: String { state?.target?.name ?? "Agenthail orchestrator" }
-    var canCall: Bool { ready && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed && !closed && state?.hasCall != true && state?.phase != "blocked" && connectionError == nil }
+    var callUnavailableReason: String? {
+        if closed { return "closed" }
+        if !ready { return "audio_not_ready" }
+        if working { return "action_in_progress" }
+        if dialing { return "dialing" }
+        if audioConnected { return "audio_connected" }
+        if hostHangupPending { return "hangup_pending" }
+        if hostHangupUnconfirmed { return "hangup_unconfirmed" }
+        if state?.hasCall == true { return "host_call_active" }
+        if state?.phase == "blocked" { return "host_blocked" }
+        if connectionError != nil { return "host_unavailable" }
+        return nil
+    }
+    var canCall: Bool { callUnavailableReason == nil }
     var canStartNewConversation: Bool {
         state != nil && !working && !dialing && !audioConnected && !hostHangupPending && !hostHangupUnconfirmed
             && !closed && state?.hasCall != true && state?.occupied != true
@@ -145,7 +158,7 @@ final class VoiceOperatorModel: ObservableObject {
                 hostHangupPending = false
                 hostHangupUnconfirmed = false
                 hostHangupAttemptID = nil
-                if visibleScreens == 0 { polling?.cancel(); polling = nil }
+                if next.phase == "ended" || visibleScreens == 0 { polling?.cancel(); polling = nil }
             }
             if let sdp = next.sdp, sdp != appliedSDP, next.attemptId == attemptID {
                 appliedSDP = sdp
@@ -229,7 +242,8 @@ final class VoiceOperatorModel: ObservableObject {
         diagnostics.begin(id: callID.uuidString)
         appliedSDP = nil; channelOpen = false; connectedReported = false; startSubmitted = false; muted = false
         audioSuspended = false; held = false; mediaReconnecting = false
-        defer { working = false }
+        defer { if generation == current { working = false } }
+        open()
         var stage = "target_select"
         do {
             let selected = try await api.action(VoiceAction(action: "select", targetId: targetID.trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -341,6 +355,8 @@ final class VoiceOperatorModel: ObservableObject {
     func hangup(cause: String = "user_hangup") {
         if let attemptID { diagnostics.end(cause, id: attemptID) }
         generation += 1
+        working = false
+        activityRefresh?.cancel(); activityRefresh = nil
         heartbeat?.cancel(); heartbeat = nil
         mediaRecovery?.cancel(); mediaRecovery = nil
         let current = generation
@@ -371,6 +387,14 @@ final class VoiceOperatorModel: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    func recordCallAvailability() {
+        let reason = callUnavailableReason ?? "available"
+        logger.info("Voice call button state: \(reason, privacy: .public)")
+        if let id = diagnostics.attempts.last?.id {
+            diagnostics.mark("call_button_\(reason)", id: id)
         }
     }
 
@@ -452,6 +476,11 @@ final class VoiceOperatorModel: ObservableObject {
     }
 }
 
+private struct VoiceScrollSize: Equatable {
+    let viewport: CGFloat
+    let content: CGFloat
+}
+
 struct AgenthailVoiceOperatorSheet: View {
     @ObservedObject private var model: VoiceOperatorModel
     @Environment(\.dismiss) private var dismiss
@@ -465,6 +494,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
     let openSession: (String) -> Void
 
     init(model: VoiceOperatorModel, openSession: @escaping (String) -> Void) {
@@ -474,7 +504,7 @@ struct AgenthailVoiceOperatorSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
+            VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                     if model.isPreview { Text("Sample conversation").font(.caption).foregroundStyle(.secondary) }
@@ -531,8 +561,13 @@ struct AgenthailVoiceOperatorSheet: View {
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
                 }
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .defaultScrollAnchor(.top, for: .alignment)
+                .scrollPosition($scrollPosition)
+                .onScrollGeometryChange(for: VoiceScrollSize.self) { geometry in
+                    VoiceScrollSize(viewport: geometry.containerSize.height, content: geometry.contentSize.height)
+                } action: { _, _ in
+                    if followingLatest { scrollPosition.scrollTo(edge: .bottom) }
+                }
                 .onScrollPhaseChange { _, phase in
                     if phase == .interacting {
                         userScrolling = true
@@ -548,30 +583,29 @@ struct AgenthailVoiceOperatorSheet: View {
                     atLatest = value
                 }
                 .onChange(of: latestContentMarker) { _, _ in
-                    if followingLatest { proxy.scrollTo("voice-bottom", anchor: .bottom) }
+                    if followingLatest { scrollPosition.scrollTo(edge: .bottom) }
                 }
                 .onChange(of: model.state?.session?.id) { _, _ in
                     followingLatest = true
                     atLatest = true
-                    proxy.scrollTo("voice-bottom", anchor: .bottom)
+                    scrollPosition.scrollTo(edge: .bottom)
                 }
-                .safeAreaInset(edge: .bottom) {
-                    VStack(spacing: 0) {
-                        if !atLatest {
-                            Button {
-                                followingLatest = true
-                                proxy.scrollTo("voice-bottom", anchor: .bottom)
-                            } label: {
-                                Image(systemName: "arrow.down")
-                                    .font(.body.weight(.semibold))
-                                    .frame(width: 44, height: 44)
-                                    .background(.regularMaterial, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Jump to latest voice activity")
-                        }
-                        controls
+                VStack(spacing: 0) {
+                    Button {
+                        followingLatest = true
+                        scrollPosition.scrollTo(edge: .bottom)
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .background(.regularMaterial, in: Circle())
                     }
+                    .buttonStyle(.plain)
+                    .opacity(atLatest ? 0 : 1)
+                    .allowsHitTesting(!atLatest)
+                    .accessibilityHidden(atLatest)
+                    .accessibilityLabel("Jump to latest voice activity")
+                    controls
                 }
             }
             .navigationTitle(model.state?.target == nil ? "Talk to orchestrator" : "Session voice")
@@ -587,6 +621,7 @@ struct AgenthailVoiceOperatorSheet: View {
             }
             .sheet(isPresented: $showDetails) { connectionDetails }
             .onAppear { model.screenAppeared() }
+            .onChange(of: model.callUnavailableReason) { _, _ in model.recordCallAvailability() }
             .onDisappear { model.screenDisappeared() }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
                 Button("Interrupt orchestrator", role: .destructive) { Task { await model.interrupt() } }
@@ -609,9 +644,9 @@ struct AgenthailVoiceOperatorSheet: View {
     }
 
     private var latestContentMarker: String {
-        let event = model.state?.events.last?.sequence ?? 0
-        let item = model.detail?.timeline?.items.last?.id ?? ""
-        return "\(event):\(item)"
+        let transcript = model.state?.transcripts.last
+        let item = model.detail?.timeline?.items.last
+        return "\(transcript?.id ?? ""):\(transcript?.text ?? ""):\(item?.id ?? ""):\(item?.text ?? "")"
     }
 
     private var controls: some View {

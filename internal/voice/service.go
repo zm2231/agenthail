@@ -75,7 +75,7 @@ type Provider interface {
 // persistent Codex operator. It is intentionally separate from Provider so
 // other voice transports remain usable without exposing a tool callback.
 type DynamicToolResponder interface {
-	RespondDynamicToolCall(context.Context, string, bool, string) error
+	RespondDynamicToolCall(context.Context, string, string, bool, string) error
 }
 
 // Target is the selected coding session behind a voice call. The audio plane
@@ -153,6 +153,14 @@ type Service struct {
 	speechTimeout           time.Duration
 	targetGeneration        uint64
 	targetCancel            context.CancelFunc
+	toolResults             map[string]toolResult
+	toolResultOrder         []string
+	readSlots               chan struct{}
+}
+
+type toolResult struct {
+	success bool
+	text    string
 }
 
 // snapshot is the state as of the last release of s.mu. View reads it without
@@ -560,7 +568,8 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 	if s.target == nil {
 		return errors.New("session-bound voice targets are unavailable on this host")
 	}
-	target, err := s.target(ctx, requested)
+	resolve := s.target
+	target, err := voiceRead(s, ctx, func(ctx context.Context) (*Target, error) { return resolve(ctx, requested) })
 	if err != nil {
 		return err
 	}
@@ -570,14 +579,19 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 	if target.Session.Surface != surface.KindCodex && target.Session.Surface != surface.KindClaude {
 		return errors.New("voice targets must be existing Codex or Claude sessions")
 	}
-	if err := surface.EnsureWritableSession(ctx, target.Adapter, target.Session); err != nil {
+	if _, err := voiceRead(s, ctx, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, surface.EnsureWritableSession(ctx, target.Adapter, target.Session)
+	}); err != nil {
 		return err
 	}
 	previous := *v
+	generation := s.targetGeneration
 	v.Target = target.Session
 	if transfer {
 		if err := s.bindTarget(ctx); err != nil {
-			*v = previous
+			if v.AttemptID == previous.AttemptID && v.Phase == previous.Phase && generation == s.targetGeneration && v.Target == target.Session {
+				v.Target, v.CodingProvider, v.AudioProvider, v.Message = previous.Target, previous.CodingProvider, previous.AudioProvider, previous.Message
+			}
 			return fmt.Errorf("bind selected session: %w", err)
 		}
 	}
@@ -596,7 +610,8 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	if a.AttemptID != v.AttemptID || v.Phase != "connected" || v.Target == nil || s.target == nil {
 		return errors.New("select a connected target call before sending an instruction")
 	}
-	target, err := s.target(ctx, v.Target.ID)
+	resolve, targetID := s.target, v.Target.ID
+	target, err := voiceRead(s, ctx, func(ctx context.Context) (*Target, error) { return resolve(ctx, targetID) })
 	if err != nil {
 		return err
 	}
@@ -608,14 +623,17 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	if a.AttemptID != v.AttemptID || v.Phase != "connected" || v.Target == nil || s.target == nil {
 		return errors.New("select a connected target call before interrupting it")
 	}
-	target, err := s.target(ctx, v.Target.ID)
+	resolve, targetID := s.target, v.Target.ID
+	target, err := voiceRead(s, ctx, func(ctx context.Context) (*Target, error) { return resolve(ctx, targetID) })
 	if err != nil {
 		return err
 	}
 	if target == nil || target.Session == nil || target.Adapter == nil || target.Session.ID != v.Target.ID {
 		return errors.New("selected target is no longer available")
 	}
-	if err := surface.EnsureWritableSession(ctx, target.Adapter, target.Session); err != nil {
+	if _, err := voiceRead(s, ctx, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, surface.EnsureWritableSession(ctx, target.Adapter, target.Session)
+	}); err != nil {
 		return err
 	}
 	capabilities := surface.EffectiveCapabilities(target.Session, target.Adapter.Capabilities())
@@ -625,7 +643,9 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	if !capabilities.Interrupt {
 		return errors.New("selected target does not support interruption")
 	}
-	observation, err := target.Adapter.Observe(ctx, target.Session)
+	observation, err := voiceRead(s, ctx, func(ctx context.Context) (*surface.TurnObservation, error) {
+		return target.Adapter.Observe(ctx, target.Session)
+	})
 	if err != nil {
 		return fmt.Errorf("confirm selected target turn: %w", err)
 	}
@@ -636,7 +656,9 @@ func (s *Service) interruptTarget(ctx context.Context, a Action) error {
 	if !ok {
 		return errors.New("selected target cannot confirm turn-specific interruption")
 	}
-	if err := interrupter.InterruptTurn(ctx, target.Session, observation.ActiveTurnID); err != nil {
+	if _, err := voiceCall(s, ctx, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, interrupter.InterruptTurn(ctx, target.Session, observation.ActiveTurnID)
+	}); err != nil {
 		return err
 	}
 	v.Message = "Interrupt requested for " + target.Session.Name + " turn " + observation.ActiveTurnID + "."
@@ -856,13 +878,36 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	if requestID == "" || threadID != s.state.State.Session.ID || namespace != "agenthail" {
 		return
 	}
+	key := threadID + ":" + requestID
 	respond := func(success bool, text string) {
-		if err := responder.RespondDynamicToolCall(ctx, requestID, success, text); err != nil {
-			s.state.State.Message = "Voice tool response could not be returned to Codex."
+		if s.toolResults == nil {
+			s.toolResults = make(map[string]toolResult)
+		}
+		if _, exists := s.toolResults[key]; !exists {
+			s.toolResults[key] = toolResult{success: success, text: text}
+			s.toolResultOrder = append(s.toolResultOrder, key)
+			if len(s.toolResultOrder) > 256 {
+				delete(s.toolResults, s.toolResultOrder[0])
+				s.toolResultOrder = s.toolResultOrder[1:]
+			}
+		}
+		attempt := s.state.State.AttemptID
+		s.mu.Unlock()
+		err := responder.RespondDynamicToolCall(ctx, requestID, threadID, success, text)
+		s.mu.Lock()
+		if s.state.State.Session == nil || s.state.State.Session.ID != threadID || s.state.State.AttemptID != attempt {
+			return
+		}
+		if err != nil {
+			s.state.State.Message = "Voice tool response could not be returned to Codex (" + tool + "). Check the committed call destination before repeating an action."
 			if saveErr := s.save(); saveErr != nil {
 				s.loadErr = saveErr
 			}
 		}
+	}
+	if result, exists := s.toolResults[key]; exists {
+		respond(result.success, result.text)
+		return
 	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
 	targetID, _ := arguments["targetId"].(string)
@@ -887,7 +932,7 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 			break
 		}
 		query, _ := arguments["query"].(string)
-		rows, listErr := ops.ListVoiceSessions(ctx, query)
+		rows, listErr := voiceRead(s, ctx, func(ctx context.Context) ([]surface.Session, error) { return ops.ListVoiceSessions(ctx, query) })
 		if listErr != nil {
 			err = listErr
 			break
@@ -901,7 +946,8 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 			err = errors.New("session send requires a connected call")
 			break
 		}
-		target, resolveErr := s.target(ctx, targetID)
+		resolve := s.target
+		target, resolveErr := voiceRead(s, ctx, func(ctx context.Context) (*Target, error) { return resolve(ctx, targetID) })
 		if resolveErr != nil {
 			err = resolveErr
 			break

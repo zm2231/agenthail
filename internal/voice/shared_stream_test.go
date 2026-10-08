@@ -40,6 +40,259 @@ func (f *journalStreamFixture) ReadVoiceSession(context.Context, *surface.Sessio
 	return f.initial, nil
 }
 
+type blockedVoiceCatalog struct {
+	*journalStreamFixture
+	entered chan struct{}
+	release chan struct{}
+}
+
+type blockedVoiceAdapter struct {
+	*targetFixture
+	block func()
+}
+
+func (f *blockedVoiceAdapter) Observe(ctx context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	f.block()
+	return f.targetFixture.Observe(ctx, session)
+}
+
+type blockedVoiceStream struct {
+	*journalStreamFixture
+	block func()
+}
+
+func (f *blockedVoiceStream) PrepareSessionStream(ctx context.Context, session *surface.Session) (sessionstream.Subscription, error) {
+	f.block()
+	return f.journalStreamFixture.PrepareSessionStream(ctx, session)
+}
+
+func TestVoiceBlockedOperationsKeepLifecycleResponsive(t *testing.T) {
+	for _, variant := range []struct{ tool, stage string }{
+		{"voice_transfer", "resolve"}, {"session_send", "resolve"}, {"session_interrupt", "resolve"},
+		{"voice_transfer", "prepare"}, {"session_send", "observe"}, {"session_interrupt", "observe"},
+	} {
+		t.Run(variant.tool+"/"+variant.stage, func(t *testing.T) {
+			target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop"}, observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn"}, capabilities: surface.Capabilities{Interrupt: true, Steer: true}}
+			f := boundFixture(t, target, newJournalFixture())
+			attempt := f.View().AttemptID
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			block := func() { close(entered); <-release }
+			f.service.mu.Lock()
+			f.service.target = func(context.Context, string) (*Target, error) {
+				if variant.stage == "resolve" {
+					block()
+				}
+				if variant.stage == "observe" {
+					return &Target{Session: &target.session, Adapter: &blockedVoiceAdapter{target, block}}, nil
+				}
+				return &Target{Session: &target.session, Adapter: target}, nil
+			}
+			if variant.stage == "prepare" {
+				f.service.stream = &blockedVoiceStream{newJournalFixture(), block}
+			}
+			f.service.unlock()
+			f.provider.mu.Lock()
+			f.provider.pending = append(f.provider.pending, Batch{Events: []Event{{Method: "item/tool/call", Params: map[string]any{"requestId": "blocked", "threadId": "operator", "namespace": "agenthail", "tool": variant.tool, "arguments": map[string]any{"targetId": "worker", "text": "Authorized instruction"}}}}})
+			f.provider.mu.Unlock()
+			done := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			go func() { f.service.mu.Lock(); err := f.service.poll(ctx); f.service.unlock(); done <- err }()
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("operation did not block")
+			}
+			responsive := make(chan error, 1)
+			go func() {
+				_, err := f.Apply(Action{Action: "heartbeat", AttemptID: attempt})
+				if err == nil {
+					_, err = f.Apply(Action{Action: "stop", AttemptID: attempt})
+				}
+				responsive <- err
+			}()
+			select {
+			case err := <-responsive:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("operation retained the lifecycle lock")
+			}
+			unblock()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("stale operation did not finish")
+			}
+			if len(target.sent) != 0 || len(target.steered) != 0 || target.interrupts != 0 || f.View().Phase == "connected" {
+				t.Fatal("stale operation changed or resurrected the call")
+			}
+			f.provider.mu.Lock()
+			defer f.provider.mu.Unlock()
+			if len(f.provider.toolCalls) != 1 || f.provider.toolCalls[0].success {
+				t.Fatal("stale tool result reported success")
+			}
+		})
+	}
+}
+
+func (f *blockedVoiceCatalog) ListVoiceSessions(context.Context, string) ([]surface.Session, error) {
+	close(f.entered)
+	<-f.release
+	return nil, nil
+}
+
+func TestVoiceBlockedCatalogDoesNotBlockHeartbeatOrHangup(t *testing.T) {
+	stream := &blockedVoiceCatalog{journalStreamFixture: newJournalFixture(), entered: make(chan struct{}), release: make(chan struct{})}
+	f := newFixture(t, fixtureOptions{stream: stream})
+	connectFixture(t, f)
+	attempt := f.View().AttemptID
+	f.provider.mu.Lock()
+	f.provider.pending = append(f.provider.pending, Batch{Events: []Event{{Method: "item/tool/call", Params: map[string]any{"requestId": "blocked", "threadId": "operator", "namespace": "agenthail", "tool": "session_list"}}}})
+	f.provider.mu.Unlock()
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	go func() {
+		f.service.mu.Lock()
+		err := f.service.poll(ctx)
+		f.service.unlock()
+		done <- err
+	}()
+	select {
+	case <-stream.entered:
+	case <-time.After(time.Second):
+		t.Fatal("tool did not enter catalog read")
+	}
+	defer close(stream.release)
+	responsive := make(chan error, 1)
+	go func() {
+		_, err := f.Apply(Action{Action: "heartbeat", AttemptID: attempt})
+		if err == nil {
+			_, err = f.Apply(Action{Action: "stop", AttemptID: attempt})
+		}
+		responsive <- err
+	}()
+	select {
+	case err := <-responsive:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("blocked catalog retained the call lifecycle lock")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tool did not return at its deadline")
+	}
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if len(f.provider.toolCalls) != 1 || f.provider.toolCalls[0].success {
+		t.Fatal("blocked read did not return a failed tool result")
+	}
+}
+
+func TestVoiceStaleContextCannotChangeHangupMessage(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop"}}
+	f := boundFixture(t, target, newJournalFixture())
+	f.service.mu.Lock()
+	generation, attempt := f.service.targetGeneration, f.service.state.State.AttemptID
+	f.service.speechTimeout = 200 * time.Millisecond
+	f.service.unlock()
+	entered := make(chan struct{})
+	f.provider.mu.Lock()
+	f.provider.speaking, f.provider.speakingText = entered, "stale-context-sentinel"
+	f.provider.mu.Unlock()
+	done := make(chan bool, 1)
+	go func() {
+		done <- f.service.appendTargetContext(context.Background(), generation, attempt, &target.session, map[string]any{"text": "stale-context-sentinel"})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("context request did not block")
+	}
+	stopped := apply(t, f, Action{Action: "stop", AttemptID: attempt})
+	select {
+	case accepted := <-done:
+		if accepted {
+			t.Fatal("stale context was accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("context did not finish")
+	}
+	if f.View().Message != stopped.Message {
+		t.Fatal("stale context changed hangup message")
+	}
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved diskState
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.State.Message != stopped.Message {
+		t.Fatal("stale context persisted a new message")
+	}
+}
+
+func TestVoiceStaleTransferCannotRestoreRouteAfterReturn(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop"}}
+	f := boundFixture(t, target, newJournalFixture())
+	attempt := f.View().AttemptID
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	stream := newJournalFixture()
+	f.service.mu.Lock()
+	f.service.stream = &blockedVoiceStream{stream, func() { close(entered); <-release }}
+	f.service.unlock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Apply(Action{Action: "transfer", AttemptID: attempt, TargetID: "worker"})
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("transfer did not block")
+	}
+	returned := apply(t, f, Action{Action: "transfer", AttemptID: attempt})
+	if returned.Target != nil {
+		t.Fatal("return did not clear target")
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stale transfer succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transfer did not finish")
+	}
+	if f.View().Target != nil || f.View().Message != returned.Message {
+		t.Fatal("stale transfer restored a previous route")
+	}
+	select {
+	case <-stream.cancelled:
+	default:
+		t.Fatal("stale subscription was not cancelled")
+	}
+}
+
 func TestVoiceCatalogRenewalRetainsHistoryAndSelectedTarget(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude, Name: "Claude", Transport: "uds"}}
 	stream := newJournalFixture()
@@ -87,6 +340,35 @@ func TestVoiceToolResponseFailureIsVisibleAndPersisted(t *testing.T) {
 				t.Fatalf("tool failure not persisted: %v", err)
 			}
 		})
+	}
+}
+
+func TestVoiceRepeatedToolRequestDoesNotRepeatCommittedTransfer(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Name: "Worker", Transport: "desktop"}}
+	f := newFixture(t, fixtureOptions{target: target, stream: newJournalFixture()})
+	connectFixture(t, f)
+	request := Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "worker"}}}
+	f.provider.toolErr = errors.New("response transport unavailable")
+	f.observe(request)
+	if got := f.View().Target; got == nil || got.ID != "worker" {
+		t.Fatal("transfer did not commit before response failure")
+	}
+	f.service.mu.Lock()
+	generation := f.service.targetGeneration
+	f.service.mu.Unlock()
+	f.provider.mu.Lock()
+	f.provider.toolErr = nil
+	f.provider.mu.Unlock()
+	f.observe(request)
+	f.service.mu.Lock()
+	defer f.service.mu.Unlock()
+	if f.service.targetGeneration != generation {
+		t.Fatal("duplicate tool request changed the target binding")
+	}
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if len(f.provider.toolCalls) != 2 || f.provider.toolCalls[0].text != f.provider.toolCalls[1].text {
+		t.Fatal("duplicate tool request did not reuse its committed result")
 	}
 }
 

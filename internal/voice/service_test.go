@@ -167,7 +167,10 @@ func (p *fixtureProvider) Poll(_ context.Context, after Cursor, _ string) (Batch
 	return b, nil
 }
 
-func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID string, success bool, text string) error {
+func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID, threadID string, success bool, text string) error {
+	if threadID != "operator" {
+		return errors.New("unexpected tool response thread")
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.toolCalls = append(p.toolCalls, struct {
@@ -315,10 +318,26 @@ func (f *voiceFixture) tick() {
 
 func (f *voiceFixture) observe(events ...Event) {
 	f.t.Helper()
+	expected := len(f.View().Events)
+	for _, event := range events {
+		if event.Method != "thread/realtime/sdp" && event.Method != "thread/realtime/outputAudio/delta" {
+			expected++
+		}
+	}
+	if expected > 100 {
+		expected = 100
+	}
 	f.provider.mu.Lock()
 	f.provider.pending = append(f.provider.pending, Batch{Cursor: Cursor{Source: "fixture", Position: 20}, Events: events})
 	f.provider.mu.Unlock()
 	f.tick()
+	deadline := time.Now().Add(time.Second)
+	for len(f.View().Events) < expected {
+		if time.Now().After(deadline) {
+			f.t.Fatal("observer did not finish the event batch")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func (f *voiceFixture) loseEvents(events ...Event) {
