@@ -82,8 +82,8 @@ func (s *Service) clearTargetBinding() {
 	}
 }
 
-func (s *Service) bindTarget(ctx context.Context) error {
-	if s.state.State.Target == nil {
+func (s *Service) bindTarget(ctx context.Context, target *surface.Session) error {
+	if target == nil {
 		s.clearTargetBinding()
 		return nil
 	}
@@ -92,7 +92,7 @@ func (s *Service) bindTarget(ctx context.Context) error {
 	}
 	streamCtx, cancel := context.WithCancel(s.background)
 	stop := context.AfterFunc(ctx, cancel)
-	stream, target := s.stream, s.state.State.Target
+	stream := s.stream
 	subscription, err := voiceCall(s, ctx, func(context.Context) (sessionstream.Subscription, error) {
 		return stream.PrepareSessionStream(streamCtx, target)
 	})
@@ -114,6 +114,12 @@ func (s *Service) bindTarget(ctx context.Context) error {
 		}
 		return errors.New("selected-session journal returned no live subscription")
 	}
+	if !s.appendTargetContextLocked(ctx, s.targetGeneration, s.state.State.AttemptID, target, map[string]any{"type": "binding", "recent": bindingContext(subscription.Initial)}) {
+		cancel()
+		subscription.Cancel()
+		return errors.New("selected-session context was not accepted by realtime")
+	}
+	s.state.State.Target = target
 	s.clearTargetBinding()
 	s.targetCancel = cancel
 	generation, attemptID, selected := s.targetGeneration, s.state.State.AttemptID, *s.state.State.Target
@@ -176,21 +182,9 @@ func (s *Service) watchTargetContext(ctx context.Context, generation uint64, att
 	bodies := map[string]string{}
 	emitted := map[string]string{}
 	pending := map[string]sessionstream.Event{}
-	initial := make([]map[string]any, 0, len(subscription.Initial))
 	for _, event := range recentContext(subscription.Initial) {
 		versions[event.ItemID], bodies[event.ItemID] = event.Version, event.Body
 		emitted[event.ItemID] = event.Body
-		initial = append(initial, contextItem(event))
-	}
-	for len(initial) > 0 {
-		data, _ := json.Marshal(initial)
-		if len(data) <= 32<<10 {
-			break
-		}
-		initial = initial[1:]
-	}
-	if !s.appendTargetContext(ctx, generation, attemptID, target, map[string]any{"type": "binding", "recent": initial}) {
-		return
 	}
 	forward := func(event sessionstream.Event) bool {
 		item := contextItem(event)
@@ -285,8 +279,30 @@ func (s *Service) watchTargetContext(ctx context.Context, generation uint64, att
 func (s *Service) appendTargetContext(ctx context.Context, generation uint64, attemptID string, target *surface.Session, data map[string]any) bool {
 	s.mu.Lock()
 	defer s.unlock()
+	return s.appendTargetContextLocked(ctx, generation, attemptID, target, data)
+}
+
+func bindingContext(events []sessionstream.Event) []map[string]any {
+	initial := make([]map[string]any, 0, len(events))
+	for _, event := range recentContext(events) {
+		initial = append(initial, contextItem(event))
+	}
+	for len(initial) > 0 {
+		data, _ := json.Marshal(initial)
+		if len(data) <= 32<<10 {
+			break
+		}
+		initial = initial[1:]
+	}
+	return initial
+}
+
+func (s *Service) appendTargetContextLocked(ctx context.Context, generation uint64, attemptID string, target *surface.Session, data map[string]any) bool {
 	v := &s.state.State
-	if ctx.Err() != nil || generation != s.targetGeneration || attemptID != v.AttemptID || v.Phase != "connected" || v.Target == nil || v.Target.ID != target.ID {
+	if ctx.Err() != nil || generation != s.targetGeneration || attemptID != v.AttemptID || v.Phase != "connected" {
+		return false
+	}
+	if data["type"] != "binding" && (v.Target == nil || v.Target.ID != target.ID) {
 		return false
 	}
 	data["sessionId"], data["sessionName"] = target.ID, target.Name

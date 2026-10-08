@@ -483,7 +483,7 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 			return errors.New("no matching negotiated call")
 		}
 		v.Phase = "connected"
-		if err := s.bindTarget(ctx); err != nil {
+		if err := s.bindTarget(ctx, v.Target); err != nil {
 			v.Message = "Voice is connected, but selected-session context is unavailable: " + err.Error()
 		}
 	case "stop":
@@ -584,16 +584,12 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 	}); err != nil {
 		return err
 	}
-	previous := *v
-	generation := s.targetGeneration
-	v.Target = target.Session
 	if transfer {
-		if err := s.bindTarget(ctx); err != nil {
-			if v.AttemptID == previous.AttemptID && v.Phase == previous.Phase && generation == s.targetGeneration && v.Target == target.Session {
-				v.Target, v.CodingProvider, v.AudioProvider, v.Message = previous.Target, previous.CodingProvider, previous.AudioProvider, previous.Message
-			}
+		if err := s.bindTarget(ctx, target.Session); err != nil {
 			return fmt.Errorf("bind selected session: %w", err)
 		}
+	} else {
+		v.Target = target.Session
 	}
 	v.CodingProvider = string(target.Adapter.Name())
 	v.AudioProvider = "openai-realtime-via-codex"

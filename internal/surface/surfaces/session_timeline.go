@@ -40,9 +40,13 @@ func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, requ
 // ReadSession uses the local transcript for Desktop content and the managed app-server for
 // managed exchanges; timeline items always come from the local transcript.
 func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
-	page, err := readTranscriptPage(ctx, codexTranscriptPath(session), "codex", request.Before, request.Limit)
+	path := codexTranscriptPath(session)
+	page, err := readTranscriptPage(ctx, path, "codex", request.Before, request.Limit)
 	if err != nil {
 		return nil, err
+	}
+	if page.TranscriptIdentity != "" {
+		session.Transcript = path
 	}
 	local := surface.BoundSessionRead(session, page)
 	if request.Before > 0 {
@@ -132,6 +136,13 @@ func transcriptFileIdentity(info os.FileInfo) string {
 
 func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, uuid string, onEvent func(surface.StreamEvent), timeout time.Duration) error {
 	path := codexTranscriptPath(session)
+	if session.Transcript != "" && path != session.Transcript && codexRolloutNamesSession(path, session.ID) {
+		session.Transcript = path
+		session.TranscriptIdentity = ""
+		session.TranscriptOffset = 0
+		session.CodexPendingEventUser = false
+		session.CodexPendingEventTurn, session.CodexCurrentTurnID = "", ""
+	}
 	if path == "" {
 		return fmt.Errorf("Codex local transcript is unavailable")
 	}
@@ -154,6 +165,20 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	deadline := time.Now().Add(timeout)
 	currentTurnID := session.CodexCurrentTurnID
 	for time.Now().Before(deadline) {
+		if nextPath := codexTranscriptPath(session); nextPath != path && codexRolloutNamesSession(nextPath, session.ID) {
+			nextInfo, statErr := os.Stat(nextPath)
+			if statErr != nil {
+				return fmt.Errorf("Codex continuation is unavailable: %w", surface.ErrTranscriptUnavailable)
+			}
+			path, fileInfo = nextPath, nextInfo
+			offset = 0
+			session.TranscriptOffset = 0
+			currentTurnID = ""
+			session.Transcript = path
+			session.TranscriptIdentity = transcriptFileIdentity(nextInfo)
+			session.CodexPendingEventUser = false
+			session.CodexPendingEventTurn = ""
+		}
 		currentInfo, statErr := os.Stat(path)
 		if statErr != nil || currentInfo == nil || !os.SameFile(fileInfo, currentInfo) || currentInfo.Size() < offset {
 			return fmt.Errorf("Codex transcript changed during stream: %w", surface.ErrTranscriptUnavailable)

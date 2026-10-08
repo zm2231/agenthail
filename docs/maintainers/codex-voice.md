@@ -64,6 +64,36 @@ transcript turn. Updates are attributed to the selected session, not invented as
 replies to a particular request. A held message is not proof of worker execution.
 Audio/provider identity is not a claim that Claude supplies native audio.
 
+The bound `session_list` tool reads the current catalog used by the CLI, not
+historical registry rows. Transfer success requires a live journal subscription
+and acceptance of its initial context by realtime. It does not certify that a
+subsequent worker update has been spoken. Changing workers cancels the previous
+worker subscription, while keeping the connected conversational intermediary.
+
+Codex transcript continuations are resolved through its read-only thread index.
+A different rollout is accepted only when its metadata names the exact thread;
+subagent family IDs do not authorize a switch. The journal records the validated
+path and file identity before publishing continuation events. Replacement of a
+file at the same path remains an error rather than a continuation.
+
+### Realtime context handover boundary
+
+The installed experimental protocol supports starting a thread sideband with an
+`existingCall` transport and a client-negotiated call ID. That is not a context
+reset or a verified hot-switch operation. The realtime methods expose start,
+appendAudio, appendText, appendSpeech, stop and listVoices, not a reset method.
+Startup history settings do not remove the history of an existing voice call.
+The Agenthail attempt ID is not a client-negotiated call ID.
+The installed Codex rejects a prompt on an `existingCall` start, and the upstream
+attachment path deliberately skips session configuration. Reattaching a sideband
+therefore cannot be used as a context-reset contract.
+
+Before implementing backing-thread replacement while preserving media, use a
+disposable client-owned call: attach thread A, detach its sideband, attach B with
+the same call ID, and verify media continuity, routing, removal of A's authority
+and context, and return to A. A successful start receipt alone is insufficient.
+The production transfer does not attempt this unverified operation.
+
 ## Conversation and work flow
 
 ```text

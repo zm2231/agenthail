@@ -297,7 +297,22 @@ func (s *sessionSource) run() {
 		current.CodexPendingEventUser = s.session.CodexPendingEventUser
 		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
-		streamErr := s.adapter.Stream(s.ctx, &current, "", s.append, 30*time.Minute)
+		var continuationErr error
+		streamErr := s.adapter.Stream(s.ctx, &current, "", func(event surface.StreamEvent) {
+			if continuationErr == nil {
+				continuationErr = s.advanceTranscript(current)
+			}
+			if continuationErr == nil {
+				s.append(event)
+			}
+		}, 30*time.Minute)
+		if continuationErr == nil {
+			continuationErr = s.advanceTranscript(current)
+		}
+		if continuationErr != nil {
+			s.appendSourceError(continuationErr)
+			return
+		}
 		if current.Transcript == s.session.Transcript && current.TranscriptIdentity != "" && (current.TranscriptIdentity == s.session.TranscriptIdentity || !s.session.TranscriptOffsetSet) && current.TranscriptOffsetSet && current.TranscriptOffset >= s.session.TranscriptOffset {
 			s.session.TranscriptOffset = current.TranscriptOffset
 			s.session.TranscriptOffsetSet = true
@@ -333,6 +348,23 @@ func (s *sessionSource) closeSubscribers() {
 		delete(s.subscribers, id)
 		close(subscriber)
 	}
+}
+
+func (s *sessionSource) advanceTranscript(current surface.Session) error {
+	validator, ok := s.adapter.(interface {
+		ValidateTranscriptContinuation(surface.Session, surface.Session) bool
+	})
+	if !ok || !validator.ValidateTranscriptContinuation(s.session, current) {
+		return nil
+	}
+	if err := s.manager.registry.AdvanceSessionTranscript(s.session.ID, s.session.Transcript, current.Transcript, current.TranscriptIdentity); err != nil {
+		return err
+	}
+	s.session.Transcript = current.Transcript
+	s.session.TranscriptIdentity = current.TranscriptIdentity
+	s.session.TranscriptOffset = 0
+	s.session.TranscriptOffsetSet = false
+	return nil
 }
 
 func (s *sessionSource) remove() {
@@ -456,6 +488,7 @@ func (s *sessionSource) loadSeed() error {
 		return s.catchUpLocalTranscript(ctx, trustedIdentity)
 	}
 	s.providerMu.Lock()
+	previous := s.session
 	read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Limit: 40})
 	s.providerMu.Unlock()
 	if err != nil || read == nil {
@@ -465,7 +498,9 @@ func (s *sessionSource) loadSeed() error {
 		return err
 	}
 	if trustedIdentity != "" && read.TranscriptIdentity != trustedIdentity {
-		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
+		if err := s.acceptTranscriptRead(previous, read.TranscriptIdentity, trustedIdentity); err != nil {
+			return err
+		}
 	}
 	if read.TranscriptOffsetSet {
 		s.session.TranscriptOffset = read.TranscriptOffset
@@ -562,6 +597,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	transcriptIdentity := trustedIdentity
 	for {
 		s.providerMu.Lock()
+		previous := s.session
 		read, err := surface.ReadSession(ctx, s.adapter, &s.session, surface.SessionReadRequest{Before: before, Limit: 40})
 		s.providerMu.Unlock()
 		if err != nil || read == nil {
@@ -576,11 +612,18 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 		if transcriptIdentity == "" {
 			transcriptIdentity = read.TranscriptIdentity
 		} else if read.TranscriptIdentity != transcriptIdentity {
-			phase := "during catch-up"
 			if len(pages) == 0 {
-				phase = "before catch-up"
+				if err := s.acceptTranscriptRead(previous, read.TranscriptIdentity, transcriptIdentity); err != nil {
+					return err
+				}
+				transcriptIdentity = read.TranscriptIdentity
+			} else {
+				phase := "during catch-up"
+				if len(pages) == 0 {
+					phase = "before catch-up"
+				}
+				return fmt.Errorf("Codex local transcript was replaced %s: %w", phase, surface.ErrTranscriptUnavailable)
 			}
-			return fmt.Errorf("Codex local transcript was replaced %s: %w", phase, surface.ErrTranscriptUnavailable)
 		}
 		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
 			s.session.TranscriptOffset = read.TranscriptOffset
@@ -602,6 +645,26 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	if err := s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, transcriptIdentity); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (s *sessionSource) acceptTranscriptRead(previous surface.Session, identity, trustedIdentity string) error {
+	previous.TranscriptIdentity = trustedIdentity
+	current := s.session
+	current.TranscriptIdentity = identity
+	validator, ok := s.adapter.(interface {
+		ValidateTranscriptContinuation(surface.Session, surface.Session) bool
+	})
+	if !ok || !validator.ValidateTranscriptContinuation(previous, current) {
+		s.session.Transcript = previous.Transcript
+		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
+	}
+	if err := s.manager.registry.AdvanceSessionTranscript(s.session.ID, previous.Transcript, current.Transcript, identity); err != nil {
+		s.session.Transcript = previous.Transcript
+		return err
+	}
+	s.session.TranscriptOffsetSet = false
+	s.session.TranscriptIdentity = identity
 	return nil
 }
 

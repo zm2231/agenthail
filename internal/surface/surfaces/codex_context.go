@@ -130,6 +130,9 @@ func (c *Codex) ContextUsage(ctx context.Context, sess *surface.Session) (*surfa
 }
 
 func codexTranscriptPath(sess *surface.Session) string {
+	if path := indexedCodexRollout(codexHome(), sess.ID); path != "" {
+		return path
+	}
 	if sess.Transcript != "" {
 		return sess.Transcript
 	}

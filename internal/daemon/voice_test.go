@@ -17,6 +17,8 @@ func TestVoiceHostToolsReadCatalogAndSharedJournal(t *testing.T) {
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
+	base.sessions[from.ID] = from
+	d.discoverCatalog(context.Background())
 	adapter := &sourceCountingSurface{
 		daemonSurface: base,
 		started:       make(chan struct{}, 1),
@@ -35,6 +37,24 @@ func TestVoiceHostToolsReadCatalogAndSharedJournal(t *testing.T) {
 	items, err := provider.ReadVoiceSession(ctx, &from)
 	if err != nil || len(items) != 1 || items[0].ItemID != "answer" || items[0].Body != "Current worker result" {
 		t.Fatalf("journal=%+v err=%v", items, err)
+	}
+}
+
+func TestVoiceSessionListExcludesRemovedBusyHistory(t *testing.T) {
+	d, reg, adapter, from, _ := daemonFixture(t)
+	from.Status = surface.StatusBusy
+	adapter.sessions[from.ID] = from
+	d.discoverCatalog(context.Background())
+	delete(adapter.sessions, from.ID)
+	d.discoverCatalog(context.Background())
+	d.discoverCatalog(context.Background())
+	stored, err := reg.Session(from.ID)
+	if err != nil || stored.Status != surface.StatusBusy {
+		t.Fatalf("historical fixture=%+v err=%v", stored, err)
+	}
+	rows, err := (daemonVoiceStreamProvider{daemon: d}).ListVoiceSessions(context.Background(), from.ID)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("removed historical session returned: %+v err=%v", rows, err)
 	}
 }
 

@@ -52,13 +52,14 @@ func (p daemonVoiceStreamProvider) ListVoiceSessions(ctx context.Context, query 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	rows, err := p.daemon.Registry.ListSessions(200)
+	snapshot, err := p.daemon.Registry.CatalogSnapshot()
 	if err != nil {
 		return nil, err
 	}
 	result := make([]surface.Session, 0, 50)
 	query = strings.ToLower(strings.TrimSpace(query))
-	for _, row := range rows {
+	for _, state := range snapshot.Sessions {
+		row := state.Session
 		if row.Surface != surface.KindCodex && row.Surface != surface.KindClaude {
 			continue
 		}

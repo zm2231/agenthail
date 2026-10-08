@@ -61,6 +61,61 @@ type blockedVoiceStream struct {
 	block func()
 }
 
+type rejectedVoiceStream struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *rejectedVoiceStream) PrepareSessionStream(ctx context.Context, _ *surface.Session) (sessionstream.Subscription, error) {
+	close(f.entered)
+	select {
+	case <-f.release:
+		return sessionstream.Subscription{}, errors.New("candidate feed unavailable")
+	case <-ctx.Done():
+		return sessionstream.Subscription{}, ctx.Err()
+	}
+}
+
+func TestVoiceFailedTransferPreservesPreviousWorkerFeed(t *testing.T) {
+	previous := &targetFixture{session: surface.Session{ID: "previous", Surface: surface.KindClaude, Transport: "uds"}}
+	stream := newJournalFixture()
+	f := boundFixture(t, previous, stream)
+	candidate := &targetFixture{session: surface.Session{ID: "candidate", Surface: surface.KindCodex, Transport: "desktop"}}
+	blocked := &rejectedVoiceStream{entered: make(chan struct{}), release: make(chan struct{})}
+	defer close(blocked.release)
+	f.service.mu.Lock()
+	f.service.stream = blocked
+	f.service.target = func(context.Context, string) (*Target, error) {
+		return &Target{Session: &candidate.session, Adapter: candidate}, nil
+	}
+	f.service.unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		f.service.mu.Lock()
+		err := f.service.selectTarget(ctx, candidate.session.ID, true)
+		f.service.unlock()
+		done <- err
+	}()
+	select {
+	case <-blocked.entered:
+	case <-ctx.Done():
+		t.Fatal("candidate subscription was not attempted")
+	}
+	stream.events <- sessionstream.Event{Seq: 13, ItemID: "old-update", Version: 1, Kind: "message", Role: "assistant", Body: "Previous worker still running", Final: true}
+	waitFor(t, "previous feed during transfer", func() bool { return len(contextMessages(f.provider)) == 2 })
+	if target := f.View().Target; target == nil || target.ID != previous.session.ID {
+		t.Fatal("candidate became selected before attachment")
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("rejected transfer succeeded")
+	}
+	stream.events <- sessionstream.Event{Seq: 14, ItemID: "after-failure", Version: 1, Kind: "message", Role: "assistant", Body: "Previous worker after rejection", Final: true}
+	waitFor(t, "previous feed after rejected transfer", func() bool { return len(contextMessages(f.provider)) == 3 })
+}
+
 func (f *blockedVoiceStream) PrepareSessionStream(ctx context.Context, session *surface.Session) (sessionstream.Subscription, error) {
 	f.block()
 	return f.journalStreamFixture.PrepareSessionStream(ctx, session)
@@ -369,6 +424,28 @@ func TestVoiceRepeatedToolRequestDoesNotRepeatCommittedTransfer(t *testing.T) {
 	defer f.provider.mu.Unlock()
 	if len(f.provider.toolCalls) != 2 || f.provider.toolCalls[0].text != f.provider.toolCalls[1].text {
 		t.Fatal("duplicate tool request did not reuse its committed result")
+	}
+}
+
+func TestVoiceTransferDoesNotSucceedWithoutRealtimeBinding(t *testing.T) {
+	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude, Name: "Worker", Transport: "uds"}}
+	stream := newJournalFixture()
+	f := newFixture(t, fixtureOptions{target: target, stream: stream})
+	connectFixture(t, f)
+	f.provider.failRequests(errors.New("realtime attachment rejected"))
+	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "worker"}}})
+	if target := f.View().Target; target != nil {
+		t.Fatalf("failed attachment retained target: %+v", target)
+	}
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if len(f.provider.toolCalls) != 1 || f.provider.toolCalls[0].success {
+		t.Fatal("transfer reported success before realtime accepted target context")
+	}
+	select {
+	case <-stream.cancelled:
+	default:
+		t.Fatal("failed attachment leaked its subscription")
 	}
 }
 

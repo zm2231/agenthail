@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,110 @@ type sourceCountingSurface struct {
 	events    chan surface.StreamEvent
 	items     []surface.TimelineItem
 	streamErr error
+}
+
+func TestCodexContinuationReachesJournalAndSurvivesSourceRestart(t *testing.T) {
+	for _, restartBeforeRollover := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart-before-rollover=%v", restartBeforeRollover), func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("CODEX_HOME", home)
+			oldPath, newPath := filepath.Join(home, "old.jsonl"), filepath.Join(home, "continuation.jsonl")
+			meta := "{\"type\":\"session_meta\",\"payload\":{\"id\":\"worker\"}}\n"
+			for _, path := range []string{oldPath, newPath} {
+				if err := os.WriteFile(path, []byte(meta), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			index, err := sql.Open("sqlite", filepath.Join(home, "state_5.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer index.Close()
+			if _, err := index.Exec("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT); INSERT INTO threads VALUES('worker',?)", oldPath); err != nil {
+				t.Fatal(err)
+			}
+			reg, err := registry.Open(filepath.Join(home, "registry.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reg.Close()
+			session := surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop", Transcript: oldPath, HasLocal: true}
+			if err := reg.RegisterSession(session); err != nil {
+				t.Fatal(err)
+			}
+			manager := newSessionSourceManager(reg)
+			defer manager.shutdown()
+			adapter := providers.NewCodex("http://127.0.0.1:1")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			first, err := manager.prepareStream(ctx, &session, adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if restartBeforeRollover {
+				first.Cancel()
+				waitForSessionSourceGone(t, manager)
+			}
+			file, err := os.OpenFile(newPath, os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = file.WriteString(`{"type":"response_item","payload":{"type":"message","id":"continuation-answer","role":"assistant","content":[{"type":"output_text","text":"New live result"}]}}` + "\n")
+			file.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := index.Exec("UPDATE threads SET rollout_path=? WHERE id='worker'", newPath); err != nil {
+				t.Fatal(err)
+			}
+			if restartBeforeRollover {
+				first, err = manager.prepareStream(ctx, &session, adapter)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for {
+				page, err := reg.ReadSessionJournalPage("worker", 0, 40)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, event := range page.Entries {
+					if strings.Contains(string(event.Payload), "New live result") {
+						found = true
+					}
+				}
+				if found {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("continuation did not reach shared journal")
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
+			first.Cancel()
+			waitForSessionSourceGone(t, manager)
+			stored, err := reg.Session("worker")
+			if err != nil || stored.Transcript != newPath {
+				t.Fatalf("path=%+v err=%v", stored, err)
+			}
+			beforeRestart, err := reg.ReadSessionJournalPage("worker", 0, 40)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := manager.prepareStream(ctx, stored, adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second.Cancel()
+			waitForSessionSourceGone(t, manager)
+			afterRestart, err := reg.ReadSessionJournalPage("worker", 0, 40)
+			if err != nil || afterRestart.LatestSeq != beforeRestart.LatestSeq {
+				t.Fatalf("continuation replayed on restart: before=%d after=%d err=%v", beforeRestart.LatestSeq, afterRestart.LatestSeq, err)
+			}
+		})
+	}
 }
 
 func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *testing.T) {
