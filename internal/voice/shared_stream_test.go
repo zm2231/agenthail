@@ -523,6 +523,33 @@ func TestVoiceProgressThenFinalDoesNotRepeatSpokenPrefix(t *testing.T) {
 	}
 }
 
+func TestVoiceWorkerContextChannels(t *testing.T) {
+	for _, test := range []struct {
+		name, kind, role, operation, text, method string
+	}{
+		{"assistant", "message", "assistant", "", "Useful update", "thread/realtime/appendSpeech"},
+		{"tool", "tool_output", "assistant", "", "Tool output", "thread/realtime/appendText"},
+		{"user", "message", "user", "", "User input", "thread/realtime/appendText"},
+		{"removed", "message", "assistant", "remove", "Removed update", "thread/realtime/appendText"},
+		{"empty_delta", "message", "assistant", "", "", "thread/realtime/appendText"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude, Transport: "uds"}}
+			f := boundFixture(t, target, newJournalFixture())
+			f.service.mu.Lock()
+			generation, attempt := f.service.targetGeneration, f.service.state.State.AttemptID
+			f.service.unlock()
+			if !f.service.appendTargetContext(context.Background(), generation, attempt, &target.session, map[string]any{"type": "update", "item": map[string]any{"kind": test.kind, "role": test.role, "operation": test.operation, "text": test.text}}) {
+				t.Fatal("context rejected")
+			}
+			requests, _, _ := f.provider.snapshot()
+			if requests[len(requests)-1] != test.method {
+				t.Fatalf("channel=%s, want %s", requests[len(requests)-1], test.method)
+			}
+		})
+	}
+}
+
 func TestVoiceBindingHistoryUsesLatestLiveItemVersions(t *testing.T) {
 	stream := newJournalFixture()
 	stream.initial = []sessionstream.Event{
