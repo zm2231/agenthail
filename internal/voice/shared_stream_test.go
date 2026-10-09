@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,32 @@ import (
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func TestSessionReadKeepsNewestItemsWithinEncodedVoiceBudget(t *testing.T) {
+	stream := newJournalFixture()
+	for i := 0; i < 40; i++ {
+		stream.initial = append(stream.initial, sessionstream.Event{ItemID: strconv.Itoa(i), Kind: "message", Role: "assistant", Body: strings.Repeat("\x01界", 4000)})
+	}
+	stream.initial[39].Body = "Actual latest answer"
+	f := newFixture(t, fixtureOptions{target: &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude}}, stream: stream})
+	f.service.mu.Lock()
+	defer f.service.unlock()
+	output, err := f.service.readSessionTool(context.Background(), "worker")
+	if err != nil || len(output) > 64<<10 {
+		t.Fatalf("bytes=%d error=%v", len(output), err)
+	}
+	var result struct {
+		Items     []map[string]any `json:"items"`
+		Truncated bool             `json:"truncated"`
+		Omitted   int              `json:"omittedItems"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Truncated || result.Omitted == 0 || len(result.Items) == 0 || result.Items[len(result.Items)-1]["text"] != "Actual latest answer" {
+		t.Fatalf("result=%+v", result)
+	}
+}
 
 type journalStreamFixture struct {
 	events      chan sessionstream.Event

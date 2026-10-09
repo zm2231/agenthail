@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -155,7 +154,9 @@ func contextItem(event sessionstream.Event) map[string]any {
 		item["bodyRef"] = event.BodyRef
 	}
 	if event.Operation != "remove" && event.Kind != "reasoning" && event.Kind != "tool_call" && event.Kind != "tool_output" {
-		item["text"] = voiceContextText(event.Body, 4000)
+		text := voiceContextText(event.Body, 4000)
+		item["text"] = text
+		item["truncated"] = event.Truncated || text != event.Body
 	}
 	return item
 }
@@ -361,12 +362,19 @@ func (s *Service) readSessionTool(ctx context.Context, requested string) (string
 	for _, event := range recentContext(events) {
 		items = append(items, contextItem(event))
 	}
-	data, err := json.Marshal(map[string]any{"sessionId": target.Session.ID, "source": "journal", "items": items})
-	if err != nil {
-		return "", err
+	omitted := 0
+	for {
+		data, err := json.Marshal(map[string]any{"sessionId": target.Session.ID, "source": "journal", "items": items, "truncated": omitted > 0, "omittedItems": omitted})
+		if err != nil {
+			return "", err
+		}
+		if len(data) <= 64<<10 {
+			return string(data), nil
+		}
+		if len(items) <= 1 {
+			return "", errors.New("session item metadata exceeds the voice read budget")
+		}
+		items = items[1:]
+		omitted++
 	}
-	if len(data) > 64<<10 {
-		return "", fmt.Errorf("session context exceeds the voice read budget")
-	}
-	return string(data), nil
 }

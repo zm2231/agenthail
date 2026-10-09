@@ -25,6 +25,10 @@ const timelineItemLimit = 200
 // Tests shorten it so stream windows do not dominate the suite.
 var transcriptPollInterval = 300 * time.Millisecond
 
+func (c *Claude) RequiresLocalTranscript(session *surface.Session) bool {
+	return session != nil && (session.HasLocal || session.Transcript != "")
+}
+
 func (c *Claude) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	path := session.Transcript
 	if path == "" {

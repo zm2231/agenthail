@@ -19,6 +19,37 @@ type coldPageSurface struct {
 	started   chan struct{}
 }
 
+func TestRecentPageRestartsStoppedSourceBeforeReturningJournal(t *testing.T) {
+	for _, consumer := range []string{"page", "voice"} {
+		t.Run(consumer, func(t *testing.T) {
+			d, _, base, session, _ := daemonFixture(t)
+			adapter := &sourceCountingSurface{daemonSurface: base, started: make(chan struct{}, 2), events: make(chan surface.StreamEvent), items: []surface.TimelineItem{{ID: "old", Kind: "message", Role: "assistant", Text: "Old persisted answer"}}}
+			adapter.caps.Stream = true
+			d.Surfaces = []surface.Surface{adapter}
+			defer func() { d.sources.shutdown() }()
+			if err := d.sources.seed(context.Background(), &session, adapter); err != nil {
+				t.Fatal(err)
+			}
+			d.sources.shutdown()
+			d.sources = newSessionSourceManager(d.Registry)
+			adapter.items = []surface.TimelineItem{{ID: "old", Kind: "message", Role: "assistant", Text: "Old persisted answer"}, {ID: "new", Kind: "message", Role: "assistant", Text: "Actual latest answer"}}
+			if consumer == "voice" {
+				events, err := (daemonVoiceStreamProvider{daemon: d}).ReadVoiceSession(context.Background(), &session)
+				if err != nil || len(events) == 0 || events[len(events)-1].Body != "Actual latest answer" {
+					t.Fatalf("events=%+v error=%v", events, err)
+				}
+				return
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/session?id="+session.ID+"&timeline=1&limit=5", nil)
+			response := httptest.NewRecorder()
+			d.dashboardSessionHandler(response, request)
+			if response.Code != http.StatusOK || !contains(response.Body.String(), "Actual latest answer") {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func (s *coldPageSurface) ReadSession(context.Context, *surface.Session, surface.SessionReadRequest) (*surface.SessionReadResult, error) {
 	s.readCalls.Add(1)
 	return &surface.SessionReadResult{Items: []surface.TimelineItem{{ID: "seeded-item", Kind: "text", Role: "assistant", BodyRef: "seed-ref", Text: "seeded from provider"}}}, nil

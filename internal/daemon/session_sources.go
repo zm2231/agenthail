@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -471,16 +470,15 @@ func (s *sessionSource) seedJournal() error {
 
 func (s *sessionSource) loadSeed() error {
 	seedStatus, seedSeq, trustedIdentity, statusErr := s.manager.registry.SessionJournalSeedCheckpoint(s.session.ID)
+	if statusErr != nil {
+		return statusErr
+	}
 	localTranscript := false
 	if provider, ok := s.adapter.(surface.LocalTranscriptProvider); ok {
 		localTranscript = provider.RequiresLocalTranscript(&s.session)
 	}
-	streamable := surface.EffectiveCapabilities(&s.session, s.adapter.Capabilities()).Stream
-	if statusErr == nil && seedStatus == registry.SessionJournalSeeded && !localTranscript && streamable {
-		return s.resumeClaudeTranscript(trustedIdentity)
-	}
-	if localTranscript && trustedIdentity == "" && seedSeq > 0 {
-		return fmt.Errorf("Codex local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
+	if localTranscript && trustedIdentity == "" && seedSeq > 0 && s.session.Surface != surface.KindClaude {
+		return fmt.Errorf("local transcript identity checkpoint is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, sessionJournalSeedTimeout)
 	defer cancel()
@@ -510,60 +508,16 @@ func (s *sessionSource) loadSeed() error {
 		s.session.CodexCurrentTurnID = read.CodexCurrentTurnID
 		s.session.TranscriptIdentity = read.TranscriptIdentity
 	} else if localTranscript {
-		return fmt.Errorf("Codex local transcript is unavailable")
+		return fmt.Errorf("local transcript is unavailable")
 	}
 	if localTranscript && read.TranscriptIdentity == "" {
-		return fmt.Errorf("Codex local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
+		return fmt.Errorf("local transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
 	if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {
 		return err
 	}
 	s.appendSeedItems(read.Items)
 	return s.manager.registry.MarkSessionJournalSeedWithIdentity(s.session.ID, true, read.TranscriptIdentity)
-}
-
-// resumeClaudeTranscript starts a fresh Claude source at the newest transcript record already in
-// the journal, so turns written while no source was running are delivered instead of skipped.
-// Replaying that one record is idempotent because its provider key is stable.
-func (s *sessionSource) resumeClaudeTranscript(trustedIdentity string) error {
-	if s.session.Surface != surface.KindClaude || trustedIdentity == "" || s.session.TranscriptOffsetSet {
-		return nil
-	}
-	resume := int64(-1)
-	before := uint64(0)
-	for {
-		page, err := s.manager.registry.ReadSessionJournalPage(s.session.ID, before, 200)
-		if err != nil {
-			var gap *registry.SessionJournalHistoryGapError
-			if errors.As(err, &gap) {
-				break
-			}
-			return err
-		}
-		for _, entry := range page.Entries {
-			key, ok := strings.CutPrefix(entry.ProviderKey, "timeline:")
-			if !ok {
-				continue
-			}
-			offset, _, ok := strings.Cut(key, "-")
-			if !ok {
-				continue
-			}
-			if value, err := strconv.ParseInt(offset, 10, 64); err == nil && value > resume {
-				resume = value
-			}
-		}
-		if page.NextBefore == 0 {
-			break
-		}
-		before = page.NextBefore
-	}
-	if resume >= 0 {
-		s.session.TranscriptOffset = resume
-		s.session.TranscriptOffsetSet = true
-		s.session.TranscriptIdentity = trustedIdentity
-	}
-	return nil
 }
 
 func (s *sessionSource) setSeedErr(err error) {
@@ -607,7 +561,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			return err
 		}
 		if !read.TranscriptOffsetSet {
-			return fmt.Errorf("Codex local transcript is unavailable")
+			return fmt.Errorf("local transcript is unavailable")
 		}
 		if transcriptIdentity == "" {
 			transcriptIdentity = read.TranscriptIdentity
@@ -622,7 +576,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 				if len(pages) == 0 {
 					phase = "before catch-up"
 				}
-				return fmt.Errorf("Codex local transcript was replaced %s: %w", phase, surface.ErrTranscriptUnavailable)
+				return fmt.Errorf("local transcript was replaced %s: %w", phase, surface.ErrTranscriptUnavailable)
 			}
 		}
 		if read.TranscriptOffsetSet && !s.session.TranscriptOffsetSet {
@@ -657,7 +611,7 @@ func (s *sessionSource) acceptTranscriptRead(previous surface.Session, identity,
 	})
 	if !ok || !validator.ValidateTranscriptContinuation(previous, current) {
 		s.session.Transcript = previous.Transcript
-		return fmt.Errorf("Codex local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
+		return fmt.Errorf("local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
 	}
 	if err := s.manager.registry.AdvanceSessionTranscript(s.session.ID, previous.Transcript, current.Transcript, identity); err != nil {
 		s.session.Transcript = previous.Transcript

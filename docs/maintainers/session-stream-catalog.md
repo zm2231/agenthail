@@ -146,6 +146,19 @@ source cannot prove identity or correlate an effect. The source is held while
 any viewer subscribes, a relay/route watches the session, a managed turn is
 active, delivery reconciliation is pending, or a voice call is active.
 It may become cold only when all holders are gone; a cold read reacquires it.
+Recent page reads for streaming sessions wait for that shared source to catch
+up before returning the journal. Reopened Claude and Codex local sources read
+bounded transcript pages back to an existing journal identity, append missed
+items in chronological order, then tail from the captured complete-record
+offset. Existing active sources are reused; older cursors do not trigger a
+fresh latest-page read. A catch-up timeout is exposed as a read error rather
+than silently claiming that a cached page is current.
+
+The bound voice `session_read` returns the newest journal context within a
+64 KiB encoded JSON budget. It drops older context first, reports `truncated`
+and `omittedItems`, and marks individually shortened item text as truncated.
+JSON escaping counts toward the budget. Reasoning and full tool output stay
+outside the speakable context projection.
 
 The journal has count and byte retention limits. A slow subscriber is closed
 and resumes using its last received session sequence. Restart preserves the

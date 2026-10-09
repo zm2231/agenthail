@@ -1884,7 +1884,7 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	if sessionReadErr == nil && sessionRead.JournalSeq > 0 && !effective.Stream && timelineBefore == 0 {
 		d.sources.refresh(session, adapter)
 	}
-	if sessionReadErr == nil && sessionRead.JournalSeq == 0 && timelineBefore == 0 {
+	if timelineBefore == 0 && (effective.Stream || sessionRead.JournalSeq == 0) {
 		seedCtx, cancel := context.WithTimeout(r.Context(), min(operationTimeout, 2*time.Second))
 		seedErr := d.sources.seed(seedCtx, session, adapter)
 		cancel()

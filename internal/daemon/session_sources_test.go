@@ -1312,6 +1312,14 @@ func TestHeldSourceRestartsAfterUpstreamEnds(t *testing.T) {
 }
 
 func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
+	for _, missingIdentity := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing-identity-%t", missingIdentity), func(t *testing.T) {
+			testClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t, missingIdentity)
+		})
+	}
+}
+
+func testClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T, missingIdentity bool) {
 	_, reg, _, from, _ := daemonFixture(t)
 	transcript := t.TempDir() + "/session.jsonl"
 	if err := os.WriteFile(transcript, []byte(`{"type":"user","uuid":"u1","message":{"content":"seed"}}
@@ -1332,6 +1340,21 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 	}
 	first.Cancel()
 	waitForSessionSourceGone(t, firstManager)
+	if missingIdentity {
+		db, err := sql.Open("sqlite", reg.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.Exec("UPDATE session_journal_state SET seed_identity='' WHERE session_id=?", from.ID)
+		db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
+		if err != nil || identity != "" {
+			t.Fatalf("expected identity-less checkpoint, identity=%q err=%v", identity, err)
+		}
+	}
 	file, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -1344,7 +1367,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 	}
 	file.Close()
 	manager := newSessionSourceManager(reg)
-	second, err := manager.subscribe(&from, providers.NewClaude("Default", t.TempDir()))
+	second, err := manager.prepareStream(context.Background(), &from, providers.NewClaude("Default", t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1352,6 +1375,13 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 		second.Cancel()
 		waitForSessionSourceGone(t, manager)
 	}()
+	if len(second.Initial) == 0 || second.Initial[len(second.Initial)-1].Body != "unviewed answer" {
+		t.Fatalf("reopened initial page omitted latest answer: %+v", second.Initial)
+	}
+	_, _, identity, err := reg.SessionJournalSeedCheckpoint(from.ID)
+	if err != nil || identity == "" {
+		t.Fatalf("catch-up did not persist transcript identity: identity=%q err=%v", identity, err)
+	}
 	bodies := map[string]int{}
 	deadline := time.Now().Add(3 * time.Second)
 	for bodies["unviewed answer"] == 0 && time.Now().Before(deadline) {
