@@ -47,6 +47,13 @@ only after its activation callback. The app owns one call independently of sheet
 The entry is a compact control above the tab bar; Sessions, Inbox, and Settings
 remain available while it is present.
 
+The call button keeps a solid appearance through host refreshes. It remains
+disabled while hangup is awaiting confirmation; local audio has already stopped.
+Agent activity uses the same chronological message and tool rows as session
+transcripts. Expanding activity pauses following the latest update so inspecting
+recorded work does not move the viewport. Resizing the call controls alone does
+not scroll the conversation.
+
 ## Session-bound voice targets
 
 The current call has one audio provider, `openai-realtime-via-codex`, and can

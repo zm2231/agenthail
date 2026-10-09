@@ -72,6 +72,7 @@ final class VoiceOperatorModel: ObservableObject {
 #if DEBUG
         if preview {
             state = try? JSONDecoder().decode(VoiceState.self, from: Data(Self.previewState.utf8))
+            detail = try? JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.previewDetailJSON.utf8))
             ready = true
             return
         }
@@ -103,6 +104,11 @@ final class VoiceOperatorModel: ObservableObject {
         }
         let value: [String: Any] = ["protocol": 1, "phase": "ready", "events": events, "truncated": false, "occupied": false]
         return String(data: try! JSONSerialization.data(withJSONObject: value), encoding: .utf8)!
+    }
+
+    func refreshPreview() {
+        guard isPreview else { return }
+        state = try? JSONDecoder().decode(VoiceState.self, from: Data(Self.previewState.utf8))
     }
 #endif
 
@@ -201,6 +207,13 @@ final class VoiceOperatorModel: ObservableObject {
                 self.activityError = "Activity reconnecting: \(error.localizedDescription)"
             }
         }
+    }
+
+    func activityAttachment(_ item: TimelineItem) async -> Data? {
+        guard let timelineAPI, let id = detail?.session.id, let attachment = item.attachment else { return nil }
+        let data = try? await timelineAPI.sessionAttachment(sessionID: id, id: attachment.id)
+        guard !Task.isCancelled, !closed, detail?.session.id == id else { return nil }
+        return data
     }
 
     private func startHeartbeat(attempt: String, generation current: Int) {
@@ -491,6 +504,7 @@ struct AgenthailVoiceOperatorSheet: View {
     @State private var showKeyboard = false
     @State private var showDetails = false
     @State private var showTransfer = false
+    @State private var showActivity = false
     @State private var followingLatest = true
     @State private var atLatest = true
     @State private var userScrolling = false
@@ -525,10 +539,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
                     if let state = model.state, !state.transcripts.isEmpty {
                         ForEach(state.transcripts) { item in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(item.role == "user" ? "You" : (model.state?.target == nil ? "Orchestrator" : "Selected session")).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                                Text(item.text).font(.body).lineSpacing(4).textSelection(.enabled)
-                            }
+                            IOSMessage(label: item.role == "user" ? "You" : "Assistant", text: item.text, color: .secondary)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 20) {
@@ -543,30 +554,36 @@ struct AgenthailVoiceOperatorSheet: View {
                     if model.state?.truncated == true { Text("Showing recent voice activity. Recorded agent work remains in the full timeline.").font(.caption).foregroundStyle(.secondary) }
                     if let activityError = model.activityError { Text(activityError).font(.caption).foregroundStyle(.orange) }
                     if let detail = model.detail {
-                        DisclosureGroup {
-                            VStack(alignment: .leading, spacing: 12) {
+                        DisclosureGroup(isExpanded: $showActivity) {
+                            VStack(alignment: .leading, spacing: 24) {
                                 if detail.readOnly { Text(detail.readOnlyReason).foregroundStyle(.orange) }
                                 if let timeline = detail.timeline {
                                     if let unavailable = timeline.unavailableReason { Text(unavailable).foregroundStyle(.secondary) }
-                                    ForEach(TimelineGroup.newestFirst(timeline.items)) { CompactActivityGroup(group: $0) }
+                                    ForEach(TimelineGroup.make(timeline.items)) { group in
+                                        CompactActivityGroup(group: group, attachmentLoader: { item in await model.activityAttachment(item) }) { followingLatest = false }
+                                    }
                                     if timeline.truncated { Text("Earlier activity is in the full timeline.").font(.caption) }
                                 }
                                 Button("Open full timeline") { openSession(detail.session.id) }
                             }.padding(.top, 12)
-                        } label: {
+                    } label: {
                             Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                         }
+                        .accessibilityIdentifier("voice-activity")
                     }
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
                 }
                 .defaultScrollAnchor(.top, for: .alignment)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
                 .scrollPosition($scrollPosition)
                 .onScrollGeometryChange(for: VoiceScrollSize.self) { geometry in
                     VoiceScrollSize(viewport: geometry.containerSize.height, content: geometry.contentSize.height)
-                } action: { _, _ in
-                    if followingLatest { scrollPosition.scrollTo(edge: .bottom) }
+                } action: { old, next in
+                    if followingLatest, !showActivity, old.content != next.content {
+                        scrollPosition.scrollTo(edge: .bottom)
+                    }
                 }
                 .onScrollPhaseChange { _, phase in
                     if phase == .interacting {
@@ -583,7 +600,10 @@ struct AgenthailVoiceOperatorSheet: View {
                     atLatest = value
                 }
                 .onChange(of: latestContentMarker) { _, _ in
-                    if followingLatest { scrollPosition.scrollTo(edge: .bottom) }
+                    if followingLatest, !showActivity { scrollPosition.scrollTo(edge: .bottom) }
+                }
+                .onChange(of: showActivity) { _, expanded in
+                    if expanded { followingLatest = false }
                 }
                 .onChange(of: model.state?.session?.id) { _, _ in
                     followingLatest = true
@@ -594,7 +614,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     Button {
                         followingLatest = true
                         scrollPosition.scrollTo(edge: .bottom)
-                    } label: {
+                        } label: {
                         Image(systemName: "arrow.down")
                             .font(.body.weight(.semibold))
                             .frame(width: 44, height: 44)
@@ -621,6 +641,15 @@ struct AgenthailVoiceOperatorSheet: View {
             }
             .sheet(isPresented: $showDetails) { connectionDetails }
             .onAppear { model.screenAppeared() }
+#if DEBUG
+            .task {
+                guard model.isPreview, ProcessInfo.processInfo.arguments.contains("--preview-voice-refresh") else { return }
+                for _ in 0..<40 {
+                    do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+                    model.refreshPreview()
+                }
+            }
+#endif
             .onChange(of: model.callUnavailableReason) { _, _ in model.recordCallAvailability() }
             .onDisappear { model.screenDisappeared() }
             .confirmationDialog("Interrupt the orchestrator's current turn? This does not stop delegated agents.", isPresented: $confirmInterrupt) {
@@ -661,8 +690,7 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
             }
             if model.hostHangupPending {
-                Label("Audio ended locally. Confirming host hangup…", systemImage: "hourglass")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                callEntry
             } else if model.hostHangupUnconfirmed {
                 callControl("Try hangup again", icon: "phone.down.fill", destructive: true, disabled: model.state?.occupied == true) { model.hangup() }
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio is off locally. The host did not confirm hangup.").font(.caption).foregroundStyle(.secondary) }
@@ -703,12 +731,26 @@ struct AgenthailVoiceOperatorSheet: View {
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Text("Audio ends. Your agents keep working.").font(.caption).foregroundStyle(.secondary) }
             } else {
-                Button { Task { await model.call() } } label: {
-                    Label(dynamicTypeSize.isAccessibilitySize ? "Call" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Talk to orchestrator" : "Call session"), systemImage: "phone.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                }.buttonStyle(.borderedProminent).accessibilityLabel("Start voice call").disabled(!model.canCall)
-                if !dynamicTypeSize.isAccessibilitySize { Text(model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "The orchestrator can inspect, plan, and coordinate across Agenthail." : "Your conversation and agent work stay in the selected session.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                callEntry
             }
         }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: .infinity).background(.bar)
+    }
+
+    private var callEntry: some View {
+        VStack(spacing: 16) {
+            Button { Task { await model.call() } } label: {
+                Label(dynamicTypeSize.isAccessibilitySize ? "Call" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Talk to orchestrator" : "Call session"), systemImage: "phone.fill")
+                    .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(VoiceCallButtonStyle())
+            .accessibilityLabel("Start voice call")
+            .disabled(!model.canCall)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Text(model.hostHangupPending ? "Audio ended locally. Confirming host hangup…" : (model.targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "The orchestrator can inspect, plan, and coordinate across Agenthail." : "Your conversation and agent work stay in the selected session."))
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .frame(minHeight: 32)
+            }
+        }
     }
 
     private func callControl(_ title: String, icon: String, destructive: Bool = false, disabled: Bool, action: @escaping () -> Void) -> some View {
@@ -805,6 +847,17 @@ struct AgenthailVoiceOperatorSheet: View {
             }.navigationTitle("Voice details").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showDetails = false } } }
         }
+    }
+}
+
+private struct VoiceCallButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .background(isEnabled ? SessionStyle.accent : Color.secondary, in: Capsule())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
     }
 }
 

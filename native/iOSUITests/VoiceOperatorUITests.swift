@@ -4,7 +4,7 @@ import XCTest
 final class VoiceOperatorUITests: XCTestCase {
     func testPreviewStartsAtNewestTranscriptAndExplainsNewConversation() {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-voice"]
+        app.launchArguments = ["--preview-voice", "--preview-voice-refresh"]
         app.launch()
 
         let newest = app.staticTexts["Newest voice update"]
@@ -19,7 +19,7 @@ final class VoiceOperatorUITests: XCTestCase {
 
     func testFollowingLatestDoesNotMoveTheTranscriptViewport() {
         let app = XCUIApplication()
-        app.launchArguments = ["--preview-voice"]
+        app.launchArguments = ["--preview-voice", "--preview-voice-refresh"]
         app.launch()
         let newest = app.staticTexts["Newest voice update"]
         XCTAssertTrue(newest.waitForExistence(timeout: 10))
@@ -42,6 +42,29 @@ final class VoiceOperatorUITests: XCTestCase {
             XCTAssertEqual(newest.frame.minY, position, accuracy: 3)
             XCTAssertTrue(call.isEnabled)
             XCTAssertFalse(jump.isHittable)
+        }
+    }
+
+    func testVoiceActivityUsesSessionTranscriptRowsAndStopsFollowing() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-voice", "--preview-voice-refresh"]
+        app.launch()
+        let activity = app.buttons["voice-activity"]
+        XCTAssertTrue(activity.waitForExistence(timeout: 10))
+        activity.tap()
+        let commandGroup = app.buttons["activity-3"]
+        for _ in 0..<4 where !commandGroup.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(commandGroup.isHittable)
+        commandGroup.tap()
+        let command = app.staticTexts["Run command"]
+        XCTAssertTrue(command.waitForExistence(timeout: 5))
+        let call = app.buttons["Start voice call"]
+        XCTAssertTrue(call.isEnabled)
+        let position = command.frame.minY
+        for _ in 0..<4 {
+            Thread.sleep(forTimeInterval: 0.3)
+            XCTAssertEqual(command.frame.minY, position, accuracy: 3)
+            XCTAssertTrue(call.isEnabled)
         }
     }
 }
