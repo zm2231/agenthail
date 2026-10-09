@@ -509,7 +509,7 @@ func TestVoiceSendToolRespectsSelectedWorkerBoundary(t *testing.T) {
 	}
 }
 
-func TestVoiceProgressThenFinalDoesNotRepeatSpokenPrefix(t *testing.T) {
+func TestVoiceProgressThenFinalDoesNotRepeatContextPrefix(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Name: "Worker", Transport: "desktop"}}
 	stream := newJournalFixture()
 	f := boundFixture(t, target, stream)
@@ -527,7 +527,7 @@ func TestVoiceWorkerContextChannels(t *testing.T) {
 	for _, test := range []struct {
 		name, kind, role, operation, text, method string
 	}{
-		{"assistant", "message", "assistant", "", "Useful update", "thread/realtime/appendSpeech"},
+		{"assistant", "message", "assistant", "", "Useful update", "thread/realtime/appendText"},
 		{"tool", "tool_output", "assistant", "", "Tool output", "thread/realtime/appendText"},
 		{"user", "message", "user", "", "User input", "thread/realtime/appendText"},
 		{"removed", "message", "assistant", "remove", "Removed update", "thread/realtime/appendText"},
@@ -545,6 +545,43 @@ func TestVoiceWorkerContextChannels(t *testing.T) {
 			requests, _, _ := f.provider.snapshot()
 			if requests[len(requests)-1] != test.method {
 				t.Fatalf("channel=%s, want %s", requests[len(requests)-1], test.method)
+			}
+			f.provider.mu.Lock()
+			params := f.provider.params[len(f.provider.params)-1]
+			f.provider.mu.Unlock()
+			if params["role"] != "developer" || !strings.Contains(params["text"].(string), "not a request to speak") {
+				t.Fatalf("worker update is not background context: %v", params)
+			}
+		})
+	}
+}
+
+func TestVoiceAutomaticWorkerUpdatesRemainContextDuringOperatorResponse(t *testing.T) {
+	for _, kind := range []surface.SurfaceKind{surface.KindCodex, surface.KindClaude} {
+		t.Run(string(kind), func(t *testing.T) {
+			target := &targetFixture{session: surface.Session{ID: "worker", Surface: kind, Name: "Worker", Transport: "desktop"}}
+			stream := newJournalFixture()
+			f := boundFixture(t, target, stream)
+			f.observe(Event{Method: "thread/realtime/item/started", Params: map[string]any{"item": map[string]any{"id": "operator-answer", "role": "assistant"}}})
+			stream.events <- sessionstream.Event{Seq: 13, ItemID: "progress", Version: 1, Kind: "message", Role: "assistant", Body: "Still checking"}
+			waitFor(t, "timer-flushed worker context", func() bool { return len(contextMessages(f.provider)) == 2 })
+			stream.events <- sessionstream.Event{Seq: 14, ItemID: "final", Version: 1, Kind: "message", Role: "assistant", Body: "Finished checking", Final: true}
+			waitFor(t, "final worker context", func() bool { return len(contextMessages(f.provider)) == 3 })
+			contexts := contextMessages(f.provider)
+			for index, expected := range []string{"Still checking", "Finished checking"} {
+				item := contexts[index+1]["item"].(map[string]any)
+				if contexts[index+1]["sessionId"] != "worker" || item["text"] != expected {
+					t.Fatalf("worker context lost: %v", contexts[index+1])
+				}
+			}
+			requests, _, _ := f.provider.snapshot()
+			for _, method := range requests {
+				if method != "thread/realtime/start" && method != "thread/realtime/appendText" {
+					t.Fatalf("automatic update requested audio or call control: %s", method)
+				}
+			}
+			if len(target.sent) != 0 || len(target.steered) != 0 {
+				t.Fatal("worker observation dispatched an instruction")
 			}
 		})
 	}

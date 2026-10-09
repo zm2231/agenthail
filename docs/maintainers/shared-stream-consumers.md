@@ -57,8 +57,10 @@ includes a bounded `Initial` journal page and its `Cursor` from the same read
 transaction. Subsequent events begin strictly after that cursor. This supplies
 pre-existing worker context without opening a second provider reader.
 Voice carries selected-session attribution, lifecycle state and visible message
-updates; hidden reasoning and raw tool bodies are not spoken. Text updates are
-coalesced briefly and deduplicated per item. The source remains held until
+updates as context-only `appendText` messages, never automatic `appendSpeech`
+requests. The intermediary decides whether and when to summarize useful updates;
+hidden reasoning and raw tool bodies are not spoken. Text updates are coalesced
+briefly and deduplicated per item. The source remains held until
 transfer, return, hangup or shutdown, including across worker turn completion.
 Cancellation releases the source subscription and
 does not interrupt the target unless the existing explicit stop path requests

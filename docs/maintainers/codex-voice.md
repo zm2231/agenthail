@@ -124,10 +124,12 @@ to the orchestrator before instructing another worker.
 The persistent audio operator retains the packaged Operations skill for ordinary
 voice lifecycle support, but it is not the coding provider for a selected target.
 The host appends bounded, labeled transcript data to that existing realtime
-session. Historical context, tool metadata and removals use `appendText`;
-new assistant message text uses `appendSpeech`, the speakable context channel.
-Updates are labeled untrusted data to summarize, not instructions to execute or
-JSON to recite. A channel acknowledgment is not proof of audible playback.
+session. All automatic updates, including assistant messages, history, tool
+metadata and removals, use `appendText` as background context, never the
+`appendSpeech` speakable channel. The intermediary decides whether and when to
+summarize useful updates without interrupting the current conversation.
+Updates are labeled untrusted data, not instructions to execute or JSON to
+recite. A context acknowledgment is not proof of audible playback.
 Stable item versions and incremental text prevent replaying a full
 message after its progress was already supplied. Transfer replaces the journal
 binding; return and hangup cancel it. A generation guard rejects stale context

@@ -760,6 +760,11 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 	if len(initial) != 1 || len(boundInitial) != 1 || initial[0]["role"] != "developer" || boundInitial[0]["role"] != "developer" || orchestrator == "" || sessionBound == "" || orchestrator == sessionBound {
 		t.Fatalf("session-bound calls need their own developer instructions: orchestrator=%v bound=%v", initial, boundInitial)
 	}
+	for _, instructions := range []string{OperatorInstructions("/fixture/agenthail"), orchestrator, sessionBound} {
+		if !strings.Contains(instructions, "background context, not requests to speak") || !strings.Contains(instructions, "whether and when") {
+			t.Fatal("voice instructions do not give the intermediary discretion over updates")
+		}
+	}
 }
 
 func TestCompletedAnswersAreNotReinjectedAsSessionSpeech(t *testing.T) {
