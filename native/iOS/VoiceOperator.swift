@@ -566,11 +566,11 @@ struct AgenthailVoiceOperatorSheet: View {
                                 }
                                 Button("Open full timeline") { openSession(detail.session.id) }
                             }.padding(.top, 12)
-                    } label: {
+                        } label: {
                             Label(detail.session.status == "busy" ? "Orchestrator is working" : "Agent activity", systemImage: "terminal")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                                .accessibilityIdentifier("voice-activity")
                         }
-                        .accessibilityIdentifier("voice-activity")
                     }
                     Color.clear.frame(height: 1).id("voice-bottom")
                 }.frame(maxWidth: 640).padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: .infinity)
@@ -614,7 +614,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     Button {
                         followingLatest = true
                         scrollPosition.scrollTo(edge: .bottom)
-                        } label: {
+                    } label: {
                         Image(systemName: "arrow.down")
                             .font(.body.weight(.semibold))
                             .frame(width: 44, height: 44)
