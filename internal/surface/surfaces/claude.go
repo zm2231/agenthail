@@ -403,10 +403,11 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 			continue
 		}
 		sess := surface.Session{
-			ID:      bridge,
-			Surface: surface.KindClaude,
-			Cwd:     str(m, "cwd"),
-			Status:  surface.SessionStatus(str(m, "status")),
+			ID:              bridge,
+			Surface:         surface.KindClaude,
+			Cwd:             str(m, "cwd"),
+			Status:          surface.SessionStatus(str(m, "status")),
+			BridgeSessionID: str(m, "bridgeSessionId"),
 		}
 		if pid, ok := m["pid"].(float64); ok {
 			sess.PID = int(pid)
@@ -639,6 +640,32 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
 	return c.postMessage(ctx, sess, message)
+}
+
+// SendHumanTurn submits a message through Claude's authenticated web bridge as
+// a user event. It is intentionally separate from Send so agent-to-agent
+// delivery continues to use the native peer transport by default.
+func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if sess == nil {
+		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
+	}
+	bridgeSessionID := sess.BridgeSessionID
+	if bridgeSessionID == "" && sess.Transport != "uds" {
+		bridgeSessionID = sess.ID
+	}
+	if bridgeSessionID == "" {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
+	}
+	bridgeSession := *sess
+	bridgeSession.ID = bridgeSessionID
+	observation, err := c.Observe(ctx, &bridgeSession)
+	if err != nil {
+		return nil, err
+	}
+	if observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
+		return &surface.SendResult{UUID: bridgeSessionID, Accepted: false}, nil
+	}
+	return c.postMessage(ctx, &bridgeSession, message)
 }
 
 func claudeProcessAlive(pid int) bool {

@@ -36,6 +36,7 @@ type Session struct {
 	HasLocal              bool            `json:"hasLocal"`
 	Source                string          `json:"source,omitempty"`
 	Transport             string          `json:"transport,omitempty"`
+	BridgeSessionID       string          `json:"-"`
 	ConfiguredModel       string          `json:"configuredModel,omitempty"`
 	LastActive            time.Time       `json:"lastActive"`
 	StartedAt             time.Time       `json:"startedAt,omitzero"`
