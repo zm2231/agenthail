@@ -10,11 +10,13 @@ protocol VoiceAudioClient: AnyObject {
     func end()
     func answer(_ sdp: String) async throws
     func mute(_ muted: Bool)
+    func appendContext(_ text: String) throws
     func close()
 }
 
 extension VoiceAudioClient {
     func configureCall(id: UUID, name: String) {}
+    func appendContext(_ text: String) throws { throw AgenthailAPIError.unavailable("Voice context transport is unavailable.") }
 }
 
 @MainActor
@@ -23,8 +25,13 @@ protocol VoicePeerClient: AnyObject {
     func start() async throws -> String
     func answer(_ sdp: String) async throws
     func mute(_ muted: Bool)
+    func appendContext(_ text: String) throws
     func audioSession(_ session: AVAudioSession, active: Bool)
     func end()
+}
+
+extension VoicePeerClient {
+    func appendContext(_ text: String) throws { throw AgenthailAPIError.unavailable("Voice context transport is unavailable.") }
 }
 
 @MainActor
@@ -119,6 +126,11 @@ final class VoiceAudioBridge: VoiceAudioClient {
     }
 
     func mute(_ muted: Bool) { self.muted = muted; peer?.mute(muted || held); system.mute(muted) }
+
+    func appendContext(_ text: String) throws {
+        guard let peer else { throw AgenthailAPIError.unavailable("No active native voice connection.") }
+        try peer.appendContext(text)
+    }
 
     func end() {
         generation += 1

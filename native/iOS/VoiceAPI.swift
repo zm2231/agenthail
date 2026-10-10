@@ -15,9 +15,32 @@ struct VoiceState: Decodable {
     let target: RawSession?
     let audioProvider: String?
     let codingProvider: String?
+    let inputMuted: Bool?
+    let inputRevision: UInt64?
+    let contextFrames: [VoiceContextFrame]?
+    let bindingGeneration: UInt64?
 
     var hasCall: Bool { ["starting", "negotiating", "connected", "stopping", "unknown"].contains(phase) }
     var transcripts: [VoiceTranscript] {
+        if events.contains(where: { $0.params.item?.type == "transcriptSegment" && $0.params.item?.realtimeSessionId == attemptId }) {
+            var result: [VoiceTranscript] = []
+            var indices: [String: Int] = [:]
+            for event in events {
+                if let item = event.params.item, item.type == "transcriptSegment",
+                   item.realtimeSessionId == attemptId, ["user", "assistant"].contains(item.role ?? ""),
+                   ["thread/realtime/item/started", "thread/realtime/item/completed"].contains(event.method) {
+                    if let index = indices[item.id] { result[index].text = item.text ?? ""; result[index].inputMuted = result[index].inputMuted || event.params.inputMuted == true }
+                    else {
+                        indices[item.id] = result.count
+                        result.append(VoiceTranscript(id: item.id, role: item.role!, text: item.text ?? "", inputMuted: event.params.inputMuted == true))
+                    }
+                } else if event.method == "thread/realtime/item/transcript/delta",
+                          let id = event.params.itemId, let index = indices[id], let delta = event.params.delta {
+                    result[index].text += delta
+                }
+            }
+            return result.filter { !$0.text.isEmpty }
+        }
         var result: [VoiceTranscript] = []
         var pending: [String: Int] = [:]
         for event in events {
@@ -26,20 +49,26 @@ struct VoiceState: Decodable {
             switch event.method {
             case "thread/realtime/transcript/delta":
                 guard let delta = event.params.delta else { continue }
-                if let index = pending[role] { result[index].text += delta }
+                if let index = pending[role] { result[index].text += delta; result[index].inputMuted = result[index].inputMuted || event.params.inputMuted == true }
                 else {
                     pending[role] = result.count
-                    result.append(VoiceTranscript(id: String(event.sequence), role: role, text: delta))
+                    result.append(VoiceTranscript(id: String(event.sequence), role: role, text: delta, inputMuted: event.params.inputMuted == true))
                 }
             case "thread/realtime/transcript/done":
                 guard let text = event.params.text else { continue }
-                if let index = pending.removeValue(forKey: role) { result[index].text = text }
-                else { result.append(VoiceTranscript(id: String(event.sequence), role: role, text: text)) }
+                if let index = pending.removeValue(forKey: role) { result[index].text = text; result[index].inputMuted = result[index].inputMuted || event.params.inputMuted == true }
+                else { result.append(VoiceTranscript(id: String(event.sequence), role: role, text: text, inputMuted: event.params.inputMuted == true)) }
             default: break
             }
         }
         return result
     }
+}
+
+struct VoiceContextFrame: Decodable {
+    let id: UInt64
+    let generation: UInt64
+    let text: String
 }
 
 struct VoiceEvent: Decodable {
@@ -51,6 +80,28 @@ struct VoiceEvent: Decodable {
         let role: String?
         let text: String?
         let reason: String?
+        let itemId: String?
+        let item: Item?
+        let inputMuted: Bool?
+        private enum CodingKeys: String, CodingKey { case delta, role, text, reason, itemId, item, inputMuted }
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            delta = try values.decodeIfPresent(String.self, forKey: .delta)
+            role = try values.decodeIfPresent(String.self, forKey: .role)
+            text = try values.decodeIfPresent(String.self, forKey: .text)
+            reason = try values.decodeIfPresent(String.self, forKey: .reason)
+            itemId = try values.decodeIfPresent(String.self, forKey: .itemId)
+            inputMuted = try values.decodeIfPresent(Bool.self, forKey: .inputMuted)
+            // itemAdded also carries arbitrary JSON, not a canonical transcript item.
+            item = try? values.decode(Item.self, forKey: .item)
+        }
+    }
+    struct Item: Decodable {
+        let id: String
+        let realtimeSessionId: String
+        let type: String
+        let role: String?
+        let text: String?
     }
 }
 
@@ -58,6 +109,8 @@ struct VoiceTranscript: Identifiable {
     let id: String
     let role: String
     var text: String
+    var inputMuted = false
+    var label: String { role == "user" ? (inputMuted ? "Provider transcript · mic muted" : "You") : "Assistant" }
 }
 
 struct VoiceAction: Encodable {
@@ -68,6 +121,10 @@ struct VoiceAction: Encodable {
     var messageId: String? = nil
     var targetId: String? = nil
     var heartbeatMode: String? = nil
+    var muted: Bool? = nil
+    var inputRevision: UInt64? = nil
+    var contextAck: UInt64? = nil
+    var contextTransport: String? = nil
 }
 
 @MainActor

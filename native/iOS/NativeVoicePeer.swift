@@ -87,7 +87,34 @@ final class NativeVoicePeer: VoicePeerClient {
         guard current == generation else { throw CancellationError() }
     }
 
-    func mute(_ muted: Bool) { self.muted = muted; microphone?.isEnabled = !muted }
+    func mute(_ muted: Bool) {
+        self.muted = muted
+        microphone?.isEnabled = !muted
+        onMessage?("input-muted", muted ? "true" : "false")
+    }
+
+    func appendContext(_ text: String) throws {
+        guard let channel, channel.readyState == .open else {
+            throw AgenthailAPIError.unavailable("Voice data channel is not open.")
+        }
+        for data in try Self.contextFrames(text) {
+            guard channel.sendData(RTCDataBuffer(data: data, isBinary: false)) else {
+                throw AgenthailAPIError.unavailable("Voice data channel rejected context.")
+            }
+        }
+    }
+
+    static func contextFrames(_ text: String) throws -> [Data] {
+        guard text.utf8.count <= 48 * 1024 else { throw AgenthailAPIError.unavailable("Voice context exceeds the frame budget.") }
+        var chunks: [String] = []; var chunk = ""
+        for scalar in text.unicodeScalars {
+            let value = String(scalar)
+            if chunk.utf8.count + value.utf8.count > 500 { chunks.append(chunk); chunk = "" }
+            chunk += value
+        }
+        if !chunk.isEmpty { chunks.append(chunk) }
+        return try chunks.map { try JSONSerialization.data(withJSONObject: ["type": "session.context.append", "channel": "commentary", "content": [["type": "input_text", "text": $0]]]) }
+    }
 
     func end() {
         generation += 1
@@ -135,5 +162,13 @@ private final class NativeChannelDelegate: NSObject, RTCDataChannelDelegate, @un
         if dataChannel.readyState == .open { events("channel", "open") }
         if dataChannel.readyState == .closed { events("error", "The voice data channel closed.") }
     }
-    func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {}
+    func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+        guard !buffer.isBinary, buffer.data.count <= 64 * 1024,
+              let value = try? JSONSerialization.jsonObject(with: buffer.data) as? [String: Any],
+              let type = value["type"] as? String else { return }
+        // Keep only event identity, never captured audio or transcript contents.
+        if ["input_transcript.added", "output_transcript.added", "turn.done", "delegation.created"].contains(type) {
+            events("realtime-event", type)
+        }
+    }
 }

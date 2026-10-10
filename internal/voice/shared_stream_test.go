@@ -131,7 +131,7 @@ func TestVoiceFailedTransferPreservesPreviousWorkerFeed(t *testing.T) {
 		t.Fatal("candidate subscription was not attempted")
 	}
 	stream.events <- sessionstream.Event{Seq: 13, ItemID: "old-update", Version: 1, Kind: "message", Role: "assistant", Body: "Previous worker still running", Final: true}
-	waitFor(t, "previous feed during transfer", func() bool { return len(contextMessages(f.provider)) == 2 })
+	waitFor(t, "previous feed during transfer", func() bool { return len(contextMessages(f.service)) == 2 })
 	if target := f.View().Target; target == nil || target.ID != previous.session.ID {
 		t.Fatal("candidate became selected before attachment")
 	}
@@ -140,7 +140,7 @@ func TestVoiceFailedTransferPreservesPreviousWorkerFeed(t *testing.T) {
 		t.Fatal("rejected transfer succeeded")
 	}
 	stream.events <- sessionstream.Event{Seq: 14, ItemID: "after-failure", Version: 1, Kind: "message", Role: "assistant", Body: "Previous worker after rejection", Final: true}
-	waitFor(t, "previous feed after rejected transfer", func() bool { return len(contextMessages(f.provider)) == 3 })
+	waitFor(t, "previous feed after rejected transfer", func() bool { return len(contextMessages(f.service)) == 3 })
 }
 
 func (f *blockedVoiceStream) PrepareSessionStream(ctx context.Context, session *surface.Session) (sessionstream.Subscription, error) {
@@ -290,29 +290,10 @@ func TestVoiceStaleContextCannotChangeHangupMessage(t *testing.T) {
 	f := boundFixture(t, target, newJournalFixture())
 	f.service.mu.Lock()
 	generation, attempt := f.service.targetGeneration, f.service.state.State.AttemptID
-	f.service.speechTimeout = 200 * time.Millisecond
 	f.service.unlock()
-	entered := make(chan struct{})
-	f.provider.mu.Lock()
-	f.provider.speaking, f.provider.speakingText = entered, "stale-context-sentinel"
-	f.provider.mu.Unlock()
-	done := make(chan bool, 1)
-	go func() {
-		done <- f.service.appendTargetContext(context.Background(), generation, attempt, &target.session, map[string]any{"text": "stale-context-sentinel"})
-	}()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("context request did not block")
-	}
 	stopped := apply(t, f, Action{Action: "stop", AttemptID: attempt})
-	select {
-	case accepted := <-done:
-		if accepted {
-			t.Fatal("stale context was accepted")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("context did not finish")
+	if f.service.appendTargetContext(context.Background(), generation, attempt, &target.session, map[string]any{"item": map[string]any{"itemId": "stale", "text": "stale-context-sentinel"}}) {
+		t.Fatal("stale context was accepted")
 	}
 	if f.View().Message != stopped.Message {
 		t.Fatal("stale context changed hangup message")
@@ -454,12 +435,20 @@ func TestVoiceRepeatedToolRequestDoesNotRepeatCommittedTransfer(t *testing.T) {
 	}
 }
 
-func TestVoiceTransferDoesNotSucceedWithoutRealtimeBinding(t *testing.T) {
+type unavailableJournalFixture struct{}
+
+func (unavailableJournalFixture) PrepareSessionStream(context.Context, *surface.Session) (sessionstream.Subscription, error) {
+	return sessionstream.Subscription{}, errors.New("journal attachment rejected")
+}
+
+func TestVoiceTransferDoesNotSucceedWithoutJournalBinding(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude, Name: "Worker", Transport: "uds"}}
 	stream := newJournalFixture()
 	f := newFixture(t, fixtureOptions{target: target, stream: stream})
 	connectFixture(t, f)
-	f.provider.failRequests(errors.New("realtime attachment rejected"))
+	f.service.mu.Lock()
+	f.service.stream = unavailableJournalFixture{}
+	f.service.unlock()
 	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "worker"}}})
 	if target := f.View().Target; target != nil {
 		t.Fatalf("failed attachment retained target: %+v", target)
@@ -467,12 +456,7 @@ func TestVoiceTransferDoesNotSucceedWithoutRealtimeBinding(t *testing.T) {
 	f.provider.mu.Lock()
 	defer f.provider.mu.Unlock()
 	if len(f.provider.toolCalls) != 1 || f.provider.toolCalls[0].success {
-		t.Fatal("transfer reported success before realtime accepted target context")
-	}
-	select {
-	case <-stream.cancelled:
-	default:
-		t.Fatal("failed attachment leaked its subscription")
+		t.Fatal("transfer reported success without a worker journal subscription")
 	}
 }
 
@@ -481,10 +465,10 @@ func TestVoiceAssistantRemovalIsForwardedWithoutReplayingText(t *testing.T) {
 	stream := newJournalFixture()
 	f := boundFixture(t, target, stream)
 	stream.events <- sessionstream.Event{Seq: 13, ItemID: "answer", Version: 1, Kind: "message", Role: "assistant", Body: "Obsolete response", Final: true}
-	waitFor(t, "assistant response", func() bool { return len(contextMessages(f.provider)) == 2 })
+	waitFor(t, "assistant response", func() bool { return len(contextMessages(f.service)) == 2 })
 	stream.events <- sessionstream.Event{Seq: 14, ItemID: "answer", Version: 2, Operation: "remove", Kind: "message", Role: "assistant", Body: "Obsolete response", Final: true}
-	waitFor(t, "assistant removal", func() bool { return len(contextMessages(f.provider)) == 3 })
-	item := contextMessages(f.provider)[2]["item"].(map[string]any)
+	waitFor(t, "assistant removal", func() bool { return len(contextMessages(f.service)) == 3 })
+	item := contextMessages(f.service)[2]["item"].(map[string]any)
 	if item["operation"] != "remove" || item["text"] != nil {
 		t.Fatalf("removal replayed text: %v", item)
 	}
@@ -541,10 +525,10 @@ func TestVoiceProgressThenFinalDoesNotRepeatContextPrefix(t *testing.T) {
 	stream := newJournalFixture()
 	f := boundFixture(t, target, stream)
 	stream.events <- sessionstream.Event{Seq: 13, ItemID: "answer", Version: 1, Kind: "message", Role: "assistant", Body: "First sentence. Second sentence. More"}
-	waitFor(t, "progress context", func() bool { return len(contextMessages(f.provider)) == 2 })
+	waitFor(t, "progress context", func() bool { return len(contextMessages(f.service)) == 2 })
 	stream.events <- sessionstream.Event{Seq: 14, ItemID: "answer", Version: 2, Kind: "message", Role: "assistant", Body: "First sentence. Second sentence. More done", Final: true}
-	waitFor(t, "final context", func() bool { return len(contextMessages(f.provider)) == 3 })
-	item := contextMessages(f.provider)[2]["item"].(map[string]any)
+	waitFor(t, "final context", func() bool { return len(contextMessages(f.service)) == 3 })
+	item := contextMessages(f.service)[2]["item"].(map[string]any)
 	if item["text"] != " done" || item["textMode"] != "delta" {
 		t.Fatalf("final replay=%v", item)
 	}
@@ -569,15 +553,9 @@ func TestVoiceWorkerContextChannels(t *testing.T) {
 			if !f.service.appendTargetContext(context.Background(), generation, attempt, &target.session, map[string]any{"type": "update", "item": map[string]any{"kind": test.kind, "role": test.role, "operation": test.operation, "text": test.text}}) {
 				t.Fatal("context rejected")
 			}
-			requests, _, _ := f.provider.snapshot()
-			if requests[len(requests)-1] != test.method {
-				t.Fatalf("channel=%s, want %s", requests[len(requests)-1], test.method)
-			}
-			f.provider.mu.Lock()
-			params := f.provider.params[len(f.provider.params)-1]
-			f.provider.mu.Unlock()
-			if params["role"] != "developer" || !strings.Contains(params["text"].(string), "not a request to speak") {
-				t.Fatalf("worker update is not background context: %v", params)
+			frames := f.View().ContextFrames
+			if len(frames) == 0 || !strings.Contains(frames[0].Text, "not a request to speak") {
+				t.Fatalf("worker context did not use the native commentary transport: %v", frames)
 			}
 		})
 	}
@@ -589,12 +567,19 @@ func TestVoiceAutomaticWorkerUpdatesRemainContextDuringOperatorResponse(t *testi
 			target := &targetFixture{session: surface.Session{ID: "worker", Surface: kind, Name: "Worker", Transport: "desktop"}}
 			stream := newJournalFixture()
 			f := boundFixture(t, target, stream)
-			f.observe(Event{Method: "thread/realtime/item/started", Params: map[string]any{"item": map[string]any{"id": "operator-answer", "role": "assistant"}}})
+			f.observe(Event{Method: "thread/realtime/item/started", Params: map[string]any{"item": map[string]any{"id": "operator-answer", "type": "transcriptSegment", "role": "assistant"}}})
 			stream.events <- sessionstream.Event{Seq: 13, ItemID: "progress", Version: 1, Kind: "message", Role: "assistant", Body: "Still checking"}
-			waitFor(t, "timer-flushed worker context", func() bool { return len(contextMessages(f.provider)) == 2 })
 			stream.events <- sessionstream.Event{Seq: 14, ItemID: "final", Version: 1, Kind: "message", Role: "assistant", Body: "Finished checking", Final: true}
-			waitFor(t, "final worker context", func() bool { return len(contextMessages(f.provider)) == 3 })
-			contexts := contextMessages(f.provider)
+			time.Sleep(60 * time.Millisecond)
+			if len(contextMessages(f.service)) != 1 {
+				t.Fatal("worker context entered an active response")
+			}
+			f.observe(Event{Method: "thread/realtime/item/completed", Params: map[string]any{"item": map[string]any{"id": "operator-answer", "type": "transcriptSegment", "role": "assistant"}}})
+			f.service.mu.Lock()
+			f.service.conversation.lastActivity = time.Time{}
+			f.service.unlock()
+			waitFor(t, "final worker context", func() bool { return len(contextMessages(f.service)) == 3 })
+			contexts := contextMessages(f.service)
 			for index, expected := range []string{"Still checking", "Finished checking"} {
 				item := contexts[index+1]["item"].(map[string]any)
 				if contexts[index+1]["sessionId"] != "worker" || item["text"] != expected {
@@ -624,16 +609,16 @@ func TestVoiceBindingHistoryUsesLatestLiveItemVersions(t *testing.T) {
 		{Seq: 5, ItemID: "hidden", Kind: "reasoning", Role: "assistant", Body: "Private"},
 	}
 	f := boundFixture(t, &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop"}}, stream)
-	recent := contextMessages(f.provider)[0]["recent"].([]any)
+	recent := contextMessages(f.service)[0]["recent"].([]any)
 	if len(recent) != 1 || recent[0].(map[string]any)["text"] != "Complete" {
 		t.Fatalf("binding history=%v", recent)
 	}
 }
 
-func contextMessages(provider *fixtureProvider) []map[string]any {
+func contextMessages(service *Service) []map[string]any {
 	var result []map[string]any
-	for _, text := range provider.spoken() {
-		_, body, ok := strings.Cut(text, "\n")
+	for _, frame := range service.View("phone").ContextFrames {
+		_, body, ok := strings.Cut(frame.Text, "\n")
 		if !ok {
 			continue
 		}
@@ -650,7 +635,7 @@ func boundFixture(t *testing.T, target *targetFixture, stream *journalStreamFixt
 	apply(t, f, Action{Action: "prepare"})
 	apply(t, f, Action{Action: "select", TargetID: target.session.ID})
 	connectFixture(t, f)
-	waitFor(t, "initial worker context", func() bool { return len(contextMessages(f.provider)) == 1 })
+	waitFor(t, "initial worker context", func() bool { return len(contextMessages(f.service)) == 1 })
 	return f
 }
 
@@ -663,12 +648,12 @@ func TestVoiceContinuouslyObservesClaudePeerWithoutSending(t *testing.T) {
 	stream.events <- sessionstream.Event{Seq: 14, ItemID: "answer", Version: 1, Kind: "message", Role: "assistant", TurnID: "already-running", Body: "First update", Final: true}
 	stream.events <- sessionstream.Event{Seq: 15, ItemID: "reasoning", Version: 1, Kind: "reasoning", Role: "assistant", Body: "private reasoning"}
 	stream.events <- sessionstream.Event{Seq: 16, ItemID: "second", Version: 1, Kind: "message", Role: "assistant", TurnID: "next-turn", Body: "Second update", Final: true}
-	waitFor(t, "both independent worker messages", func() bool { return len(contextMessages(f.provider)) == 3 })
+	waitFor(t, "both independent worker messages", func() bool { return len(contextMessages(f.service)) == 3 })
 	if len(target.sent) != 0 {
 		t.Fatal("observation sent worker input")
 	}
-	context := f.provider.spoken()
-	if strings.Contains(strings.Join(context, "\n"), "private reasoning") {
+	context, _ := json.Marshal(contextMessages(f.service))
+	if strings.Contains(string(context), "private reasoning") {
 		t.Fatal("hidden reasoning leaked")
 	}
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "request-1", Text: "Make the change"})
@@ -725,24 +710,18 @@ func TestVoiceReturnCancelsFeedAndRejectsOldGeneration(t *testing.T) {
 	if f.service.appendTargetContext(context.Background(), generation, "call-a", &target.session, map[string]any{"type": "stale"}) {
 		t.Fatal("old target context accepted")
 	}
-	if len(contextMessages(f.provider)) != 1 {
+	if len(contextMessages(f.service)) != 0 {
 		t.Fatal("old target spoken after return")
 	}
 }
 
-func TestVoiceCloseCancelsBlockedContextRequest(t *testing.T) {
+func TestVoiceCloseDoesNotWaitForPhoneContextAcknowledgment(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Name: "Worker", Transport: "desktop"}}
 	f := newFixture(t, fixtureOptions{target: target, stream: newJournalFixture()})
 	apply(t, f, Action{Action: "prepare"})
 	apply(t, f, Action{Action: "select", TargetID: "worker"})
-	speaking := make(chan struct{})
-	f.provider.speaking, f.provider.speakingText = speaking, "Selected-session context"
 	connectFixture(t, f)
-	select {
-	case <-speaking:
-	case <-time.After(time.Second):
-		t.Fatal("context request never started")
-	}
+	waitFor(t, "queued context", func() bool { return len(f.View().ContextFrames) == 1 })
 	closed := make(chan struct{})
 	go func() { f.service.Close(); close(closed) }()
 	select {

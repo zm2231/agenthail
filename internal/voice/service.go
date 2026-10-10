@@ -95,30 +95,44 @@ type SessionStreamProvider interface {
 }
 
 type State struct {
-	Protocol       int              `json:"protocol"`
-	Session        *surface.Session `json:"session,omitempty"`
-	Phase          string           `json:"phase"`
-	AttemptID      string           `json:"attemptId,omitempty"`
-	SkillDigest    string           `json:"skillDigest,omitempty"`
-	Message        string           `json:"message,omitempty"`
-	SDP            string           `json:"sdp,omitempty"`
-	Events         []Event          `json:"events"`
-	Truncated      bool             `json:"truncated"`
-	Occupied       bool             `json:"occupied"`
-	TextReceipt    string           `json:"textReceipt,omitempty"`
-	Target         *surface.Session `json:"target,omitempty"`
-	AudioProvider  string           `json:"audioProvider,omitempty"`
-	CodingProvider string           `json:"codingProvider,omitempty"`
+	Protocol          int              `json:"protocol"`
+	Session           *surface.Session `json:"session,omitempty"`
+	Phase             string           `json:"phase"`
+	AttemptID         string           `json:"attemptId,omitempty"`
+	SkillDigest       string           `json:"skillDigest,omitempty"`
+	Message           string           `json:"message,omitempty"`
+	SDP               string           `json:"sdp,omitempty"`
+	Events            []Event          `json:"events"`
+	Truncated         bool             `json:"truncated"`
+	Occupied          bool             `json:"occupied"`
+	TextReceipt       string           `json:"textReceipt,omitempty"`
+	Target            *surface.Session `json:"target,omitempty"`
+	AudioProvider     string           `json:"audioProvider,omitempty"`
+	CodingProvider    string           `json:"codingProvider,omitempty"`
+	InputMuted        bool             `json:"inputMuted"`
+	InputRevision     uint64           `json:"inputRevision"`
+	ContextFrames     []ContextFrame   `json:"contextFrames,omitempty"`
+	BindingGeneration uint64           `json:"bindingGeneration"`
+}
+
+type ContextFrame struct {
+	ID         uint64 `json:"id"`
+	Generation uint64 `json:"generation"`
+	Text       string `json:"text"`
 }
 
 type Action struct {
-	Action        string `json:"action"`
-	AttemptID     string `json:"attemptId"`
-	SDP           string `json:"sdp"`
-	Text          string `json:"text"`
-	MessageID     string `json:"messageId"`
-	TargetID      string `json:"targetId"`
-	HeartbeatMode string `json:"heartbeatMode,omitempty"`
+	Action           string `json:"action"`
+	AttemptID        string `json:"attemptId"`
+	SDP              string `json:"sdp"`
+	Text             string `json:"text"`
+	MessageID        string `json:"messageId"`
+	TargetID         string `json:"targetId"`
+	HeartbeatMode    string `json:"heartbeatMode,omitempty"`
+	Muted            *bool  `json:"muted,omitempty"`
+	InputRevision    uint64 `json:"inputRevision,omitempty"`
+	ContextAck       uint64 `json:"contextAck,omitempty"`
+	ContextTransport string `json:"contextTransport,omitempty"`
 }
 
 type diskState struct {
@@ -158,6 +172,7 @@ type Service struct {
 	toolResults             map[string]toolResult
 	toolResultOrder         []string
 	readSlots               chan struct{}
+	conversation            conversation
 }
 
 type toolResult struct {
@@ -179,6 +194,7 @@ func (p *snapshot) view(owner string) State {
 	v.Occupied = p.active && p.owner != owner
 	if v.Occupied {
 		v.SDP = ""
+		v.ContextFrames = nil
 	}
 	return v
 }
@@ -284,6 +300,7 @@ func (s *Service) view(owner string) State {
 // capture copies the state for readers outside s.mu. The caller holds s.mu.
 func (s *Service) capture() *snapshot {
 	v := s.state.State
+	v.BindingGeneration = s.targetGeneration
 	if s.loadErr != nil {
 		v.Phase = "blocked"
 		v.Message = "Voice state could not be read: " + s.loadErr.Error()
@@ -315,6 +332,7 @@ func (s *Service) save() error {
 	}
 	copy := s.state
 	copy.State.SDP = ""
+	copy.State.ContextFrames = nil
 	data, err := json.Marshal(copy)
 	if err != nil {
 		return err
@@ -366,6 +384,29 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 	defer s.syncOperatorSourceActive()
 	v := &s.state.State
 	switch a.Action {
+	case "input-state":
+		if a.AttemptID != v.AttemptID || !s.active() || a.Muted == nil || a.InputRevision == 0 {
+			return errors.New("input state requires the current call, mute state and revision")
+		}
+		if a.InputRevision <= v.InputRevision {
+			return nil
+		}
+		v.InputMuted, v.InputRevision = *a.Muted, a.InputRevision
+	case "context-ack":
+		if a.AttemptID != v.AttemptID || !s.active() || a.ContextAck == 0 {
+			return errors.New("context acknowledgment requires the current call and frame ID")
+		}
+		if a.ContextAck > s.conversation.contextSequence {
+			return errors.New("context acknowledgment exceeds the produced sequence")
+		}
+		remaining := make([]ContextFrame, 0, len(v.ContextFrames))
+		for _, frame := range v.ContextFrames {
+			if frame.ID > a.ContextAck {
+				remaining = append(remaining, frame)
+			}
+		}
+		v.ContextFrames = remaining
+		return nil
 	case "heartbeat":
 		if a.AttemptID == "" || a.AttemptID != v.AttemptID || s.state.Owner != owner || (v.Phase != "starting" && v.Phase != "negotiating" && v.Phase != "connected") {
 			return errors.New("heartbeat requires the current live call and its owner")
@@ -438,6 +479,9 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 	case "target-interrupt":
 		return s.interruptTarget(ctx, a)
 	case "start":
+		if a.ContextTransport != "native-commentary" {
+			return errors.New("update the phone app: voice requires the native commentary transport")
+		}
 		if v.Session == nil {
 			return errors.New("prepare the operator first")
 		}
@@ -464,6 +508,10 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		s.seen()
 		s.state.Messages = nil
 		v.AttemptID, v.Phase, v.SDP, v.Message = a.AttemptID, "starting", "", ""
+		v.InputMuted, v.InputRevision = false, 0
+		v.ContextFrames = nil
+		v.Events = []Event{}
+		s.conversation.reset()
 		v.AudioProvider = "openai-realtime-via-codex"
 		if err := s.save(); err != nil {
 			s.loadErr = err
@@ -748,6 +796,9 @@ func StartParams(threadID, attemptID, sdp string, sessionBound bool) map[string]
 		"transport": map[string]any{"type": "webrtc", "sdp": sdp},
 		"version":   "v3", "outputModality": "audio", "includeStartupContext": true,
 		"flushTranscriptTailOnSessionEnd": true,
+		"clientManagedHandoffs":           true,
+		"backendReasoningStatus":          false,
+		"delegationAckFiller":             false,
 		"initialItems":                    []map[string]any{{"role": "developer", "text": instructions}},
 	}
 }
@@ -819,6 +870,22 @@ func (s *Service) poll(ctx context.Context) error {
 	}
 	s.cursor = b.Cursor
 	for _, e := range b.Events {
+		if item, ok := e.Params["item"].(map[string]any); ok {
+			if attempt, _ := item["realtimeSessionId"].(string); attempt != "" && attempt != v.AttemptID {
+				continue
+			}
+		}
+		s.conversation.observe(e, s.clock.now())
+		item, _ := e.Params["item"].(map[string]any)
+		if e.Params["role"] == "user" || (item["type"] == "transcriptSegment" && item["role"] == "user") {
+			params := make(map[string]any, len(e.Params)+1)
+			for key, value := range e.Params {
+				params[key] = value
+			}
+			params["inputMuted"] = v.InputMuted
+			e.Params = params
+		}
+		s.conversation.backend(e, s.targetGeneration)
 		if e.Method == "item/tool/call" {
 			s.handleDynamicToolCall(ctx, e)
 		}
@@ -853,6 +920,11 @@ func (s *Service) poll(ctx context.Context) error {
 		if len(v.Events) > 100 {
 			v.Events = v.Events[len(v.Events)-100:]
 			v.Truncated = true
+		}
+	}
+	if v.Phase == "connected" {
+		if !s.flushTargetContextLocked(ctx, s.targetGeneration, v.AttemptID, v.Target) {
+			return errors.New("worker context could not reach realtime")
 		}
 	}
 	if len(b.Events) > 0 || b.Lost {
@@ -907,8 +979,15 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 		respond(result.success, result.text)
 		return
 	}
+	if s.state.State.InputMuted && (tool == "session_send" || tool == "session_interrupt" || tool == "voice_transfer" || tool == "voice_return_to_orchestrator") {
+		respond(false, "Microphone input is muted. No voice-requested action was taken; use the call controls or unmute to request it.")
+		return
+	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
 	targetID, _ := arguments["targetId"].(string)
+	turnID, _ := e.Params["turnId"].(string)
+	ownedGeneration, ownsTurn := s.conversation.ownedTurns[turnID]
+	ownsTurn = ownsTurn && ownedGeneration == s.targetGeneration
 	var err error
 	switch tool {
 	case "voice_transfer":
@@ -967,6 +1046,10 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	if err != nil {
 		respond(false, err.Error())
 		return
+	}
+	if ownsTurn && (tool == "voice_transfer" || tool == "voice_return_to_orchestrator") {
+		s.conversation.turns[turnID] = s.targetGeneration
+		s.conversation.ownedTurns[turnID] = s.targetGeneration
 	}
 	message := "Voice is now with the Agenthail orchestrator."
 	if target := s.state.State.Target; target != nil {

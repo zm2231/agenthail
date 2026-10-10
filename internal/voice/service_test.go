@@ -283,6 +283,9 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 }
 
 func (f *voiceFixture) Apply(a Action) (State, error) {
+	if a.Action == "start" && a.ContextTransport == "" {
+		a.ContextTransport = "native-commentary"
+	}
 	return f.service.Apply(context.Background(), "phone", a)
 }
 
@@ -740,6 +743,9 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 	p := StartParams("operator", "call", "offer", false)
 	if p["version"] != "v3" || p["outputModality"] != "audio" {
 		t.Fatalf("params=%v", p)
+	}
+	if p["clientManagedHandoffs"] != true || p["backendReasoningStatus"] != false || p["delegationAckFiller"] != false {
+		t.Fatalf("unowned automatic output remains enabled: %v", p)
 	}
 	if _, ok := p["codexResponseHandoffMode"]; ok {
 		t.Fatal("legacy realtime handoff remains enabled")

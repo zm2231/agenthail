@@ -4,6 +4,28 @@ import XCTest
 
 final class VoiceTests: XCTestCase {
     @MainActor
+    func testContextFramesSendOnceAndAcknowledgeWithoutReplaying() async throws {
+        let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
+        let model = VoiceOperatorModel(api: api, audio: audio); model.ready = true
+        await model.call()
+        audio.onMessage?("offer", "v=0 fixture")
+        for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
+        let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
+        XCTAssertEqual(start.contextTransport, "native-commentary")
+        let id = try XCTUnwrap(start.attemptId)
+        audio.onMessage?("connection", "connected")
+        audio.onMessage?("channel", "open")
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"\#(id)","bindingGeneration":2,"events":[],"occupied":false,"truncated":false,"contextFrames":[{"id":1,"generation":2,"text":"Quiet context"}]}"#.utf8))
+        await model.refresh()
+        await model.refresh()
+        XCTAssertEqual(audio.contexts, ["Quiet context"])
+        XCTAssertEqual(api.actions.filter { $0.action == "context-ack" }.last?.contextAck, 1)
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"\#(id)","bindingGeneration":1,"events":[],"occupied":false,"truncated":false,"contextFrames":[{"id":2,"generation":1,"text":"Retired worker"}]}"#.utf8))
+        await model.refresh()
+        XCTAssertEqual(audio.contexts, ["Quiet context"])
+        model.close()
+    }
+    @MainActor
     func testConfirmedHangupStopsIdlePollingAndCallingRestartsIt() async throws {
         let api = VoiceFixtureAPI(); let audio = VoiceFixtureAudio()
         api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"ended","attemptId":"old","events":[],"occupied":false,"truncated":false}"#.utf8))
@@ -502,6 +524,7 @@ private final class VoiceFixtureAudio: VoiceAudioClient {
     var ends = 0
     var holdStart = false
     var pending: CheckedContinuation<Void, Never>?
+    var contexts: [String] = []
     func load(_ request: URLRequest) {}
     func start() async throws {
         starts += 1
@@ -511,6 +534,7 @@ private final class VoiceFixtureAudio: VoiceAudioClient {
     func end() { ends += 1 }
     func answer(_ sdp: String) async throws {}
     func mute(_ muted: Bool) {}
+    func appendContext(_ text: String) throws { contexts.append(text) }
     func close() {}
 }
 

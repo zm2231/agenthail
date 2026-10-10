@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/zm2231/agenthail/internal/voice"
 )
 
 func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
@@ -27,8 +28,16 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	frames := make(chan json.RawMessage, 16)
+	notifications := make(chan map[string]any, 128)
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !websocket.IsWebSocketUpgrade(r) {
+			w.Header().Set("Content-Type", "application/sdp")
+			w.Header().Set("Location", "/v1/realtime/calls/rtc_synthetic_context_probe")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, "v=0\r\ns=synthetic\r\n")
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -45,10 +54,16 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 			case <-ctx.Done():
 				return
 			}
+			var frame map[string]any
+			_ = json.Unmarshal(data, &frame)
+			if frame["channel"] == "speakable" {
+				_ = conn.WriteJSON(map[string]any{"type": "output_transcript.added", "item": map[string]any{"id": "voice-output", "text": "Synthetic spoken response"}})
+				_ = conn.WriteJSON(map[string]any{"type": "turn.done", "turn": map[string]any{"id": "voice-turn", "role": "assistant", "transcript": "Synthetic spoken response"}})
+			}
 		}
 	}))
 	defer server.Close()
-	cmd := exec.CommandContext(ctx, binary, "app-server", "--stdio", "-c", fmt.Sprintf("experimental_realtime_ws_base_url=%q", server.URL))
+	cmd := exec.CommandContext(ctx, binary, "app-server", "--stdio", "-c", fmt.Sprintf("experimental_realtime_ws_base_url=%q", server.URL), "-c", fmt.Sprintf("experimental_realtime_webrtc_call_base_url=%q", server.URL))
 	cmd.Env = append(os.Environ(), "CODEX_HOME="+t.TempDir(), "OPENAI_API_KEY=agenthail-synthetic-protocol-test")
 	cmd.Stderr = io.Discard
 	stdin, err := cmd.StdinPipe()
@@ -71,6 +86,12 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 		for scanner.Scan() {
 			var value map[string]any
 			if json.Unmarshal(scanner.Bytes(), &value) == nil {
+				if value["method"] != nil {
+					select {
+					case notifications <- value:
+					default:
+					}
+				}
 				select {
 				case responses <- value:
 				case <-ctx.Done():
@@ -115,7 +136,7 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 	if id == "" {
 		t.Fatal("no disposable thread ID")
 	}
-	request("thread/realtime/start", map[string]any{"threadId": id, "outputModality": "audio", "version": "v3", "includeStartupContext": false, "transport": map[string]any{"type": "existingCall", "callId": "rtc_synthetic_context_probe"}})
+	request("thread/realtime/start", voice.StartParams(id, "synthetic-call", "v=0 synthetic offer", false))
 	for _, method := range []string{"thread/realtime/appendText", "thread/realtime/appendSpeech"} {
 		params := map[string]any{"threadId": id, "text": "Synthetic selected-worker update"}
 		if method == "thread/realtime/appendText" {
@@ -138,8 +159,32 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 			if method == "thread/realtime/appendText" && value["channel"] == "speakable" {
 				t.Fatalf("quiet context became speakable: %s", frame)
 			}
+			if method == "thread/realtime/appendText" {
+				t.Log("appendText omits commentary; it must not transport quiet worker updates")
+			}
 		case <-ctx.Done():
 			t.Fatalf("%s produced no context frame", method)
+		}
+	}
+	started, completed := false, false
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for !started || !completed {
+		select {
+		case notification := <-notifications:
+			params, _ := notification["params"].(map[string]any)
+			if params["role"] != "assistant" {
+				continue
+			}
+			t.Logf("installed transcript lifecycle: %v", notification)
+			if notification["method"] == "thread/realtime/transcript/delta" {
+				started = true
+			}
+			if notification["method"] == "thread/realtime/transcript/done" {
+				completed = true
+			}
+		case <-timer.C:
+			t.Fatalf("installed speech lifecycle incomplete: started=%v completed=%v", started, completed)
 		}
 	}
 	request("thread/realtime/stop", map[string]any{"threadId": id})

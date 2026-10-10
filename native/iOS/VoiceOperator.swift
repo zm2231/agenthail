@@ -30,6 +30,10 @@ final class VoiceOperatorModel: ObservableObject {
     private var heartbeat: Task<Void, Never>?
     private var activityRefresh: Task<Void, Never>?
     private var mediaRecovery: Task<Void, Never>?
+    private var contextDispatching = false
+    private var contextSent: UInt64 = 0
+    private var contextAttempt: String?
+    private var contextBindingGeneration: UInt64 = 0
     private var visibleScreens = 0
     private var lastActivityRefresh = Date.distantPast
     private var callStartedAt: ContinuousClock.Instant?
@@ -38,6 +42,7 @@ final class VoiceOperatorModel: ObservableObject {
     private var attemptID: String?
     private var appliedSDP: String?
     private var channelOpen = false
+    private var inputRevision: UInt64 = 0
     private var connectedReported = false
     private var startSubmitted = false
     private var hostHangupAttemptID: String?
@@ -171,10 +176,39 @@ final class VoiceOperatorModel: ObservableObject {
                 try await audio.answer(sdp)
                 if current == generation, let attemptID { diagnostics.mark("sdp_applied", id: attemptID) }
             }
+            if audioConnected, channelOpen, next.attemptId == attemptID {
+                await dispatchContext(next, generation: current)
+            }
             refreshActivity(sessionID: next.session?.id, generation: current)
         } catch {
             guard !closed, current == generation else { return }
             connectionError = "Reconnecting: \(error.localizedDescription)"
+        }
+    }
+
+    private func dispatchContext(_ next: VoiceState, generation current: Int) async {
+        guard !contextDispatching, let api, let id = attemptID, next.attemptId == id else { return }
+        contextDispatching = true
+        defer { contextDispatching = false }
+        if contextAttempt != id { contextAttempt = id; contextSent = 0; contextBindingGeneration = 0 }
+        contextBindingGeneration = max(contextBindingGeneration, max(next.bindingGeneration ?? 0, state?.bindingGeneration ?? 0))
+        do {
+            for frame in (next.contextFrames ?? []).sorted(by: { $0.id < $1.id }) where frame.id > contextSent {
+                guard !closed, generation == current, attemptID == id else { return }
+                contextBindingGeneration = max(contextBindingGeneration, state?.bindingGeneration ?? 0)
+                guard frame.generation == contextBindingGeneration else { contextSent = frame.id; continue }
+                try audio.appendContext(frame.text)
+                contextSent = frame.id
+                diagnostics.event("context_commentary_sent", id: id)
+            }
+            if contextSent > 0, !(next.contextFrames ?? []).isEmpty {
+                _ = try await api.action(VoiceAction(action: "context-ack", attemptId: id, contextAck: contextSent))
+            }
+        } catch {
+            guard !closed, generation == current, attemptID == id else { return }
+            diagnostics.failure(error, stage: "context_dispatch", id: id)
+            self.error = "Voice context could not reach the call. Audio stopped to avoid replaying an uncertain update."
+            hangup(cause: "context_dispatch_failed")
         }
     }
 
@@ -299,12 +333,13 @@ final class VoiceOperatorModel: ObservableObject {
             Task {
                 guard !closed, generation == current else { return }
                 do {
-                    let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value, heartbeatMode: "explicit"))
+                    let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value, heartbeatMode: "explicit", contextTransport: "native-commentary"))
                     if closed || generation != current {
                         _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
                     }
                     state = next
                     diagnostics.mark("host_start_accepted", id: id)
+                    audio.mute(muted)
                     startHeartbeat(attempt: id, generation: current)
                 } catch {
                     guard !closed, generation == current else { return }
@@ -334,6 +369,26 @@ final class VoiceOperatorModel: ObservableObject {
             if channelOpen, let attemptID { diagnostics.mark("data_channel_open", id: attemptID) }
             reportConnected()
         case "mute": muted = value == "true"
+        case "input-muted":
+            guard let api, let id = attemptID, startSubmitted else { return }
+            inputRevision += 1
+            let revision = inputRevision
+            let current = generation
+            diagnostics.event("input_muted_\(value)", id: id)
+            Task {
+                do {
+                    let next = try await api.action(VoiceAction(action: "input-state", attemptId: id, muted: value == "true", inputRevision: revision))
+                    guard !closed, current == generation else { return }
+                    if (next.inputRevision ?? 0) >= revision { state = next }
+                } catch {
+                    guard !closed, current == generation else { return }
+                    diagnostics.failure(error, stage: "input_state", id: id)
+                    self.error = "Local microphone state could not be confirmed by the host. End the call before issuing more voice instructions."
+                    hangup(cause: "input_state_failed")
+                }
+            }
+        case "realtime-event":
+            if let attemptID { diagnostics.event("\(value)_\(muted || held ? "muted" : "unmuted")", id: attemptID) }
         case "suspended": audioSuspended = value == "true"
         case "held": held = value == "true"
         case "ended": hangup(cause: value == "system_reset" ? "system_reset" : "user_hangup")
@@ -539,7 +594,7 @@ struct AgenthailVoiceOperatorSheet: View {
                     if model.state?.occupied == true { Text("Another paired device owns this call. You can inspect the operator timeline.") }
                     if let state = model.state, !state.transcripts.isEmpty {
                         ForEach(state.transcripts) { item in
-                            IOSMessage(label: item.role == "user" ? "You" : "Assistant", text: item.text, color: .secondary)
+                            IOSMessage(label: item.label, text: item.text, color: .secondary)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 20) {

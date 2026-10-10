@@ -10,6 +10,7 @@ final class VoiceCallDiagnostics {
         var failureStage: String?
         var failureCode: Int?
         var failureDomain: String?
+        var events: [String]? = nil
     }
     private(set) var attempts: [Attempt] = []
     private var clocks: [String: ContinuousClock.Instant] = [:]
@@ -39,6 +40,16 @@ final class VoiceCallDiagnostics {
         guard let index = attempts.firstIndex(where: { $0.id == id }), attempts[index].milestones[name] == nil, let started = clocks[id] else { return }
         let elapsed = started.duration(to: .now).components
         attempts[index].milestones[name] = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        save()
+    }
+
+    func event(_ name: String, id: String) {
+        guard let index = attempts.firstIndex(where: { $0.id == id }), let started = clocks[id] else { return }
+        let elapsed = started.duration(to: .now).components
+        let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        var events = attempts[index].events ?? []
+        events.append(String(format: "%.3f %@", seconds, name))
+        attempts[index].events = Array(events.suffix(128))
         save()
     }
 
