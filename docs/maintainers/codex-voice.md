@@ -188,7 +188,8 @@ not deleted; it remains discoverable in the normal Sessions timeline.
 The peer submits the offer after `setLocalDescription`; ICE gathering may continue
 while signaling proceeds. A network that does not report `complete` gathering is
 not treated as a failed call before the host receives the offer.
-The native start request uses realtime `v3`, audio output, and startup context.
+The native start request uses realtime `v3`, audio output, and the embedded
+realtime system prompt. Inherited workspace startup context is disabled.
 The authenticated Desktop backing task owns the Agenthail tool catalog; no private
 handoff-mode override or separate MCP registry is supplied. The selected worker
 remains the coding target, and the voice intermediary decides when to instruct it. A
