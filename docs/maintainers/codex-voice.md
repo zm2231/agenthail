@@ -131,10 +131,12 @@ to the orchestrator before instructing another worker.
 The persistent audio operator retains the packaged Operations skill for ordinary
 voice lifecycle support, but it is not the coding provider for a selected target.
 The host appends bounded, labeled transcript data to that existing realtime
-session. All automatic updates, including assistant messages, history, tool
-metadata and removals, use `appendText` as background context, never the
-`appendSpeech` speakable channel. The intermediary decides whether and when to
-summarize useful updates without interrupting the current conversation.
+session. Automatic updates use native data-channel `session.context.append`
+frames with the `commentary` channel. Reasoning, tool contents and worker user
+messages are excluded. The intermediary decides whether and when to summarize
+useful updates without interrupting the current conversation. Codex returns
+backing-operator progress and final answers through its native handoff to the
+original delegation ID; Agenthail does not mirror them through `appendSpeech`.
 Updates are labeled untrusted data, not instructions to execute or JSON to
 recite. A context acknowledgment is not proof of audible playback.
 Stable item versions and incremental text prevent replaying a full
