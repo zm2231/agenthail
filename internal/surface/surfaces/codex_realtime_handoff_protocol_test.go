@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +31,7 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	frames := make(chan json.RawMessage, 128)
+	callSessions := make(chan map[string]any, 1)
 	connections := make(chan *websocket.Conn, 1)
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +72,26 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			}
 			return
+		}
+		_, mediaParams, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil {
+			t.Errorf("call content type: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		reader := multipart.NewReader(r.Body, mediaParams["boundary"])
+		for {
+			part, err := reader.NextPart()
+			if err != nil {
+				break
+			}
+			if part.FormName() == "session" {
+				var session map[string]any
+				if err := json.NewDecoder(part).Decode(&session); err != nil {
+					t.Errorf("call session: %v", err)
+				}
+				callSessions <- session
+			}
 		}
 		w.Header().Set("Content-Type", "application/sdp")
 		w.Header().Set("Location", "/v1/realtime/calls/rtc_synthetic_handoff")
@@ -140,11 +163,38 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 	id, _ := thread["id"].(string)
 	params := voice.StartParams(id, "synthetic-handoff", "v=0 synthetic", false)
 	request("thread/realtime/start", params)
+	select {
+	case session := <-callSessions:
+		if session["instructions"] != params["prompt"] {
+			t.Fatal("Codex did not use Agenthail's effective realtime system prompt")
+		}
+		instructions, _ := session["instructions"].(string)
+		if strings.Contains(instructions, "<startup_context>") || strings.Contains(instructions, "[BACKEND]") {
+			t.Fatal("built-in instructions or workspace startup context leaked into voice")
+		}
+		t.Log("outbound session.instructions exactly matches Agenthail prompt; no built-in or workspace prompt appended")
+	case <-ctx.Done():
+		t.Fatal("realtime call setup was not captured")
+	}
 	var conn *websocket.Conn
 	select {
 	case conn = <-connections:
 	case <-ctx.Done():
 		t.Fatal("realtime sideband did not connect")
+	}
+	counts := map[string]int{}
+	observe := func(frame json.RawMessage) map[string]any {
+		var value map[string]any
+		_ = json.Unmarshal(frame, &value)
+		if value["type"] == "delegation.context.append" {
+			id, _ := value["delegation_item_id"].(string)
+			content, _ := json.Marshal(value["content"])
+			counts[id+":"+string(content)]++
+		}
+		if value["type"] == "session.context.append" && (strings.Contains(string(frame), "Synthetic handoff result") || strings.Contains(string(frame), "Checking synthetic work")) {
+			t.Fatal("request response also entered session-wide context")
+		}
+		return value
 	}
 	for _, delegationID := range []string{"first", "follow-up", "repeated-question"} {
 		if err := conn.WriteJSON(map[string]any{"type": "delegation.created", "item": map[string]any{"id": delegationID, "type": "delegation", "target": "client", "content": []any{map[string]any{"type": "input_text", "text": "Say Synthetic handoff result"}}}}); err != nil {
@@ -155,8 +205,7 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 			select {
 			case frame := <-frames:
 				t.Logf("automatic handoff frame: %s", frame)
-				var value map[string]any
-				_ = json.Unmarshal(frame, &value)
+				value := observe(frame)
 				progressReceived = progressReceived || (value["type"] == "delegation.context.append" && value["delegation_item_id"] == delegationID && strings.Contains(string(frame), "Checking synthetic work"))
 				matched = value["type"] == "delegation.context.append" && value["delegation_item_id"] == delegationID && strings.Contains(string(frame), "Synthetic handoff result")
 			case <-ctx.Done():
@@ -180,4 +229,15 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 		}
 	}
 	request("thread/realtime/stop", map[string]any{"threadId": id})
+	for len(frames) > 0 {
+		observe(<-frames)
+	}
+	if len(counts) != 6 {
+		t.Fatalf("request results were missing or misattributed: %v", counts)
+	}
+	for identity, count := range counts {
+		if count != 1 {
+			t.Fatalf("duplicate request response %s: %d", identity, count)
+		}
+	}
 }

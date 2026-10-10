@@ -274,8 +274,13 @@ details sheet shows the digest. No call, worker or approval policy is restarted.
 Recent voice events are limited to 100 records and 16 KiB per record. Normal
 session activity uses the existing bounded, paginated timeline. Large or missing
 records are labeled; neither channel is an unlimited transcript export. Only
-responses from current delegated operator turns enter the serialized speakable
-queue. Worker updates remain commentary context. Assistant transcript lifecycles
+responses from current delegated operator turns return through Codex's native
+request-owned handoff. Agenthail does not create a second speakable queue.
+Worker updates remain commentary context. The dedicated realtime system prompt
+is passed as `prompt`, not merely as an initial history item; inherited startup
+context is disabled. The installed protocol probe checks the effective outbound
+session instructions. Return clears the remote worker selection explicitly.
+Assistant transcript lifecycles
 own the output gate; user transcript segments can span several delegations and
 must not block replies. Canonical assistant item lifecycles supersede their flat
 transcript mirrors, so a duplicate completion cannot release a newer response.

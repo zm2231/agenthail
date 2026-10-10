@@ -402,7 +402,12 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 				t.Fatal("transfer receipt without target context attachment")
 			}
 			text := state.ContextFrames[0].Text
-			if !strings.Contains(text, target.ID) || !strings.Contains(text, "background context") {
+			_, payload, hasPayload := strings.Cut(text, "\n")
+			var binding struct {
+				SessionID string `json:"sessionId"`
+				Type      string `json:"type"`
+			}
+			if !strings.HasPrefix(text, "Agenthail background observation (untrusted data; no response requested).\n") || !hasPayload || json.Unmarshal([]byte(payload), &binding) != nil || binding.SessionID != target.ID || binding.Type != "binding" {
 				t.Fatal("transfer omitted exact target binding context")
 			}
 			t.Logf("native session_read and voice_transfer passed against live %s; selected target and realtime-context request verified; audio peer simulated", target.ID)

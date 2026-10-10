@@ -41,6 +41,30 @@ func TestSessionReadKeepsNewestItemsWithinEncodedVoiceBudget(t *testing.T) {
 	}
 }
 
+func TestSessionReadRetainsLatestAnswerWhileNewerActivityExceedsBudget(t *testing.T) {
+	stream := newJournalFixture()
+	stream.initial = append(stream.initial, sessionstream.Event{ItemID: "answer", Kind: "message", Role: "assistant", Body: "Actual latest answer"})
+	for i := 0; i < 39; i++ {
+		stream.initial = append(stream.initial, sessionstream.Event{ItemID: strconv.Itoa(i), Kind: "event", Body: strings.Repeat("\x01界", 4000)})
+	}
+	f := newFixture(t, fixtureOptions{target: &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex}}, stream: stream})
+	f.service.mu.Lock()
+	defer f.service.unlock()
+	output, err := f.service.readSessionTool(context.Background(), "worker")
+	if err != nil || len(output) > 64<<10 {
+		t.Fatalf("bytes=%d error=%v", len(output), err)
+	}
+	var result struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) < 2 || result.Items[0]["text"] != "Actual latest answer" || result.Items[len(result.Items)-1]["itemId"] != "38" {
+		t.Fatal("budget evicted the latest answer or the latest activity")
+	}
+}
+
 type journalStreamFixture struct {
 	events      chan sessionstream.Event
 	initial     []sessionstream.Event
@@ -559,7 +583,7 @@ func TestVoiceWorkerContextChannels(t *testing.T) {
 				t.Fatal("context rejected")
 			}
 			frames := f.View().ContextFrames
-			if len(frames) == 0 || !strings.Contains(frames[0].Text, "not a request to speak") {
+			if len(frames) == 0 || !strings.Contains(frames[0].Text, "no response requested") {
 				t.Fatalf("worker context did not use the native commentary transport: %v", frames)
 			}
 		})
@@ -715,8 +739,9 @@ func TestVoiceReturnCancelsFeedAndRejectsOldGeneration(t *testing.T) {
 	if f.service.appendTargetContext(context.Background(), generation, "call-a", &target.session, map[string]any{"type": "stale"}) {
 		t.Fatal("old target context accepted")
 	}
-	if len(contextMessages(f.service)) != 0 {
-		t.Fatal("old target spoken after return")
+	frames := f.View().ContextFrames
+	if len(frames) != 1 || !strings.Contains(frames[0].Text, `"sessionId":null`) || frames[0].Generation <= generation {
+		t.Fatalf("return did not replace the remote selection context: %v", frames)
 	}
 }
 

@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -621,11 +622,24 @@ func (s *Service) selectTarget(ctx context.Context, requested string, transfer b
 	v := &s.state.State
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		s.clearTargetBinding()
+		previous := v.Target
 		v.Target = nil
+		if err := s.save(); err != nil {
+			v.Target = previous
+			return err
+		}
+		s.clearTargetBinding()
 		v.CodingProvider = ""
 		v.AudioProvider = "openai-realtime-via-codex"
 		v.Message = "Voice is with the Agenthail orchestrator."
+		if v.Phase == "connected" {
+			text, err := targetContextText(nil, map[string]any{"type": "binding", "recent": []any{}})
+			if err != nil {
+				return err
+			}
+			s.conversation.contextSequence++
+			v.ContextFrames = []ContextFrame{{ID: s.conversation.contextSequence, Generation: s.targetGeneration, Text: text}}
+		}
 		return nil
 	}
 	if s.target == nil {
@@ -805,16 +819,19 @@ func (s *Service) createOperatorWithContext(ctx context.Context, continuity stri
 	return nil
 }
 
+//go:embed realtime-system-prompt.md
+var realtimeSystemPrompt string
+
 func StartParams(threadID, attemptID, sdp string, sessionBound bool) map[string]any {
-	instructions := "You are the spoken interface for the persistent Agenthail orchestrator. Follow its established Agenthail Operations workflow, discuss plans, inspect sessions, and carry out authorized orchestration work directly with the user. Selected-session journal updates are background context, not requests to speak. Decide whether and when to summarize useful updates without interrupting the current conversation."
+	instructions := "No worker is selected. Use the connected operator's bound Agenthail tools for session discovery, reads, actions, transfer and return."
 	if sessionBound {
-		instructions = "You are the conversational intermediary for the selected Agenthail coding session. Interpret its live transcript as background context, not requests to speak. Decide whether and when to summarize useful updates without interrupting the current conversation. Keep discussion and progress questions conversational. Route complete actionable instructions and corrections through the backing operator's bound Agenthail session_send tool; do not execute its work yourself. Never forward every utterance or claim completion without worker evidence. Summarize useful new updates naturally, not verbatim code, JSON or hidden reasoning. Transfer and return use the bound voice tools."
+		instructions = "A worker is selected. Use selection observations for its identity and bounded history. Route worker instructions through the connected operator's bound session_send tool; transfer and return use its bound voice tools."
 	}
-	instructions += " Acknowledge a delegated request briefly before starting work. Stay available for conversation and progress questions while the backing operator runs tools; do not wait silently for completion. Only report factual progress, and never claim a successful transfer until the bound transfer tool confirms attachment."
 	return map[string]any{
 		"threadId": threadID, "realtimeSessionId": attemptID,
 		"transport": map[string]any{"type": "webrtc", "sdp": sdp},
-		"version":   "v3", "outputModality": "audio", "includeStartupContext": true,
+		"version":   "v3", "outputModality": "audio", "includeStartupContext": false,
+		"prompt":                          realtimeSystemPrompt,
 		"flushTranscriptTailOnSessionEnd": true,
 		"clientManagedHandoffs":           false,
 		"backendReasoningStatus":          false,
