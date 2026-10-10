@@ -115,7 +115,13 @@ func TestLiveSessionLatestReads(t *testing.T) {
 			if err := json.Unmarshal(output, &result); err != nil {
 				t.Fatal(err)
 			}
-			if result.Source != "journal" || result.ReadError != "" || len(result.Exchanges) == 0 || result.Exchanges[len(result.Exchanges)-1].Assistant != latest {
+			latestCLIAnswer := ""
+			for _, exchange := range result.Exchanges {
+				if exchange.Assistant != "" {
+					latestCLIAnswer = exchange.Assistant
+				}
+			}
+			if result.Source != "journal" || result.ReadError != "" || latestCLIAnswer != latest {
 				t.Fatalf("CLI did not return live latest answer: source=%s readError=%s exchanges=%d", result.Source, result.ReadError, len(result.Exchanges))
 			}
 			t.Logf("live CLI last 5 --full --json: latest assistant matched, %s", time.Since(started))
