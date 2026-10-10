@@ -178,6 +178,8 @@ type Service struct {
 	toolCancels             map[string]context.CancelFunc
 	toolQueue               []toolCall
 	toolWorkerActive        bool
+	toolDrainContext        context.Context
+	toolDrainCancel         context.CancelFunc
 	readSlots               chan struct{}
 	conversation            conversation
 }
@@ -732,8 +734,14 @@ func (s *Service) Close() {
 	s.stop()
 	s.mu.Lock()
 	s.closed = true
+	if s.toolDrainContext == nil {
+		s.toolDrainContext, s.toolDrainCancel = context.WithTimeout(context.Background(), 5*time.Second)
+	}
 	s.unlock()
 	s.tasks.Wait()
+	s.mu.Lock()
+	s.toolDrainCancel()
+	s.unlock()
 }
 
 // spawn starts background work the service owns, unless it is closed. The
@@ -985,7 +993,7 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 			}
 		}
 		attempt := s.state.State.AttemptID
-		responseCtx, cancel := context.WithTimeout(s.background, 5*time.Second)
+		responseCtx, cancel := s.toolResponseContext()
 		s.mu.Unlock()
 		err := responder.RespondDynamicToolCall(responseCtx, requestID, threadID, success, text)
 		cancel()

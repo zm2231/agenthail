@@ -129,7 +129,7 @@ func TestInstalledVoiceSessionCheckpointRecovery(t *testing.T) {
 	if err := reg.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := db.Query("SELECT kind,provider_key,payload,observed_at FROM session_journal WHERE session_id=? ORDER BY seq DESC LIMIT 200", id)
+	rows, err := db.Query("SELECT j.kind,j.provider_key,j.payload,j.observed_at,j.body_ref,b.body FROM session_journal j LEFT JOIN session_journal_bodies b ON b.session_id=j.session_id AND b.ref=j.body_ref WHERE j.session_id=? ORDER BY j.seq DESC LIMIT 200", id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestInstalledVoiceSessionCheckpointRecovery(t *testing.T) {
 	for rows.Next() {
 		entry := registry.SessionJournalEntry{SessionID: id}
 		var observed string
-		if err := rows.Scan(&entry.Kind, &entry.ProviderKey, &entry.Payload, &observed); err != nil {
+		if err := rows.Scan(&entry.Kind, &entry.ProviderKey, &entry.Payload, &observed, &entry.BodyRef, &entry.FullBody); err != nil {
 			t.Fatal(err)
 		}
 		entry.ObservedAt, _ = time.Parse(time.RFC3339Nano, observed)

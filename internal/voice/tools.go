@@ -54,7 +54,7 @@ func (s *Service) runToolCalls() {
 				call.cancel()
 			}
 			s.handleDynamicToolCall(call.ctx, call.event)
-		} else if !s.closed {
+		} else {
 			s.respondRetiredToolCall(call.event)
 		}
 		call.cancel()
@@ -70,11 +70,21 @@ func (s *Service) respondRetiredToolCall(e Event) {
 	}
 	requestID, _ := e.Params["requestId"].(string)
 	threadID, _ := e.Params["threadId"].(string)
-	ctx, cancel := context.WithTimeout(s.background, 5*time.Second)
+	ctx, cancel := s.toolResponseContext()
 	s.mu.Unlock()
 	_ = responder.RespondDynamicToolCall(ctx, requestID, threadID, false, "The voice call changed during this tool operation. Check its outcome before repeating an action.")
 	cancel()
 	s.mu.Lock()
+}
+
+func (s *Service) toolResponseContext() (context.Context, context.CancelFunc) {
+	if s.background.Err() == nil {
+		return context.WithTimeout(s.background, 5*time.Second)
+	}
+	if s.toolDrainContext == nil {
+		s.toolDrainContext, s.toolDrainCancel = context.WithTimeout(context.Background(), 5*time.Second)
+	}
+	return context.WithCancel(s.toolDrainContext)
 }
 
 func (s *Service) cancelToolCalls() {

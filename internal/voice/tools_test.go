@@ -148,3 +148,32 @@ func TestToolCallsKeepProviderRequestOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestCloseReturnsQueuedToolFailures(t *testing.T) {
+	f := newFixture(t, fixtureOptions{stream: newJournalFixture()})
+	connectFixture(t, f)
+	f.service.mu.Lock()
+	f.service.provider = deadlineCheckingToolProvider{f.provider}
+	for _, id := range []string{"first", "second"} {
+		f.service.dispatchDynamicToolCall(Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": "operator", "namespace": "agenthail", "tool": "session_list"}})
+	}
+	done := make(chan struct{})
+	go func() { f.service.Close(); close(done) }()
+	<-f.service.background.Done()
+	f.service.unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish returning queued failures")
+	}
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if len(f.provider.toolCalls) != 2 {
+		t.Fatalf("shutdown abandoned queued requests: %+v", f.provider.toolCalls)
+	}
+	for _, call := range f.provider.toolCalls {
+		if call.success {
+			t.Fatal("retired request executed during shutdown")
+		}
+	}
+}
