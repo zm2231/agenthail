@@ -96,6 +96,13 @@ does not advance that item's provider cursor or body state, so a replay of the
 same provider cursor is persisted. A provider absence or partial read never deletes
 historical journal content.
 
+Codex journal checkpoints retain the source path, inode and a digest of the
+rollout header. Discovery can update the catalog path without erasing the
+checkpoint's provenance. Catch-up validates the exact thread and its indexed
+rollout before advancing the checkpoint. Legacy inode-only checkpoints recover
+an earlier source only when the indexed rollout's paginated history boundary
+matches that source; an ambiguous or replaced source remains unavailable.
+
 Claude records prompts it injected on the user's behalf as user-role records
 with an `origin.kind`. Only `human` prompts, and legacy records with no origin
 that are not a task notification envelope, are user messages. The others carry

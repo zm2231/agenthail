@@ -41,7 +41,7 @@ func TestCodexContinuationReachesJournalAndSurvivesSourceRestart(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			index, err := sql.Open("sqlite", filepath.Join(home, "state_5.sqlite"))
+			index, err := sql.Open("sqlite", filepath.Join(home, "state_5.sqlite")+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 			if err != nil {
 				t.Fatal(err)
 			}

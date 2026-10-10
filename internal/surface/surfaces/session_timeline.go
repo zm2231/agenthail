@@ -56,7 +56,7 @@ func (c *Codex) ReadSession(ctx context.Context, session *surface.Session, reque
 	if request.Before > 0 {
 		return local, nil
 	}
-	if !c.managed {
+	if session.Transport != codexTransportManaged {
 		return local, nil
 	}
 	remote, remoteErr := c.readSessionFromRPC(ctx, session, request.Limit)
@@ -154,7 +154,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 	if err != nil {
 		return fmt.Errorf("Codex local transcript is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
-	identity := transcriptFileIdentity(fileInfo)
+	identity := codexTranscriptIdentity(path, fileInfo)
 	if identity == "" {
 		return fmt.Errorf("Codex transcript identity is unavailable: %w", surface.ErrTranscriptUnavailable)
 	}
@@ -179,7 +179,7 @@ func (c *Codex) streamTranscript(ctx context.Context, session *surface.Session, 
 			session.TranscriptOffset = 0
 			currentTurnID = ""
 			session.Transcript = path
-			session.TranscriptIdentity = transcriptFileIdentity(nextInfo)
+			session.TranscriptIdentity = codexTranscriptIdentity(nextPath, nextInfo)
 			session.CodexPendingEventUser = false
 			session.CodexPendingEventTurn = ""
 		}
@@ -386,6 +386,9 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 	result.TranscriptOffset = completeEnd
 	result.TranscriptOffsetSet = true
 	result.TranscriptIdentity = transcriptFileIdentity(info)
+	if source == "codex" {
+		result.TranscriptIdentity = codexTranscriptIdentity(path, info)
+	}
 	start := max(int64(0), end-timelineReadBudget)
 	windowStart := start
 	data := make([]byte, end-start)

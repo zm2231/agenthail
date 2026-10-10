@@ -297,14 +297,19 @@ func (s *sessionSource) run() {
 		current.CodexPendingEventTurn = s.session.CodexPendingEventTurn
 		current.CodexCurrentTurnID = s.session.CodexCurrentTurnID
 		var continuationErr error
-		streamErr := s.adapter.Stream(s.ctx, &current, "", func(event surface.StreamEvent) {
+		streamContext, stopStream := context.WithCancel(s.ctx)
+		streamErr := s.adapter.Stream(streamContext, &current, "", func(event surface.StreamEvent) {
 			if continuationErr == nil {
 				continuationErr = s.advanceTranscript(current)
+			}
+			if continuationErr != nil {
+				stopStream()
 			}
 			if continuationErr == nil {
 				s.append(event)
 			}
 		}, 30*time.Minute)
+		stopStream()
 		if continuationErr == nil {
 			continuationErr = s.advanceTranscript(current)
 		}
@@ -351,10 +356,13 @@ func (s *sessionSource) closeSubscribers() {
 
 func (s *sessionSource) advanceTranscript(current surface.Session) error {
 	validator, ok := s.adapter.(interface {
-		ValidateTranscriptContinuation(surface.Session, surface.Session) bool
+		ValidateTranscriptContinuation(context.Context, surface.Session, surface.Session) bool
 	})
-	if !ok || !validator.ValidateTranscriptContinuation(s.session, current) {
+	if !ok || current.Transcript == s.session.Transcript && current.TranscriptIdentity == s.session.TranscriptIdentity {
 		return nil
+	}
+	if !validator.ValidateTranscriptContinuation(s.ctx, s.session, current) {
+		return fmt.Errorf("session transcript continuation could not be verified: %w", surface.ErrTranscriptUnavailable)
 	}
 	if err := s.manager.registry.AdvanceSessionTranscript(s.session.ID, s.session.Transcript, current.Transcript, current.TranscriptIdentity); err != nil {
 		return err
@@ -496,7 +504,7 @@ func (s *sessionSource) loadSeed() error {
 		return err
 	}
 	if trustedIdentity != "" && read.TranscriptIdentity != trustedIdentity {
-		if err := s.acceptTranscriptRead(previous, read.TranscriptIdentity, trustedIdentity); err != nil {
+		if err := s.acceptTranscriptRead(ctx, previous, read.TranscriptIdentity, trustedIdentity); err != nil {
 			return err
 		}
 	}
@@ -549,6 +557,7 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	pages := make([][]surface.TimelineItem, 0, 2)
 	before := int64(0)
 	transcriptIdentity := trustedIdentity
+	continuation := false
 	for {
 		s.providerMu.Lock()
 		previous := s.session
@@ -567,10 +576,11 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			transcriptIdentity = read.TranscriptIdentity
 		} else if read.TranscriptIdentity != transcriptIdentity {
 			if len(pages) == 0 {
-				if err := s.acceptTranscriptRead(previous, read.TranscriptIdentity, transcriptIdentity); err != nil {
+				if err := s.acceptTranscriptRead(ctx, previous, read.TranscriptIdentity, transcriptIdentity); err != nil {
 					return err
 				}
 				transcriptIdentity = read.TranscriptIdentity
+				continuation = true
 			} else {
 				phase := "during catch-up"
 				if len(pages) == 0 {
@@ -588,6 +598,12 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 			s.session.TranscriptIdentity = read.TranscriptIdentity
 		}
 		pages = append(pages, read.Items)
+		if continuation {
+			if err := s.manager.registry.RecordSessionJournalHistoryBoundary(s.session.ID, max(0, read.NextBefore)); err != nil {
+				return err
+			}
+			break
+		}
 		if timelineItemsOverlapJournal(read.Items, known) || read.NextBefore == 0 {
 			break
 		}
@@ -602,14 +618,14 @@ func (s *sessionSource) catchUpLocalTranscript(ctx context.Context, trustedIdent
 	return nil
 }
 
-func (s *sessionSource) acceptTranscriptRead(previous surface.Session, identity, trustedIdentity string) error {
+func (s *sessionSource) acceptTranscriptRead(ctx context.Context, previous surface.Session, identity, trustedIdentity string) error {
 	previous.TranscriptIdentity = trustedIdentity
 	current := s.session
 	current.TranscriptIdentity = identity
 	validator, ok := s.adapter.(interface {
-		ValidateTranscriptContinuation(surface.Session, surface.Session) bool
+		ValidateTranscriptContinuation(context.Context, surface.Session, surface.Session) bool
 	})
-	if !ok || !validator.ValidateTranscriptContinuation(previous, current) {
+	if !ok || !validator.ValidateTranscriptContinuation(ctx, previous, current) {
 		s.session.Transcript = previous.Transcript
 		return fmt.Errorf("local transcript was replaced before catch-up: %w", surface.ErrTranscriptUnavailable)
 	}

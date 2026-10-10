@@ -43,7 +43,7 @@ func NewCodex(remoteURL string) *Codex {
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
 
 func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
-	return session != nil && !c.managed && session.Transport != codexTransportManaged
+	return session != nil && session.Transport != codexTransportManaged
 }
 
 func (c *Codex) Capabilities() surface.Capabilities {
