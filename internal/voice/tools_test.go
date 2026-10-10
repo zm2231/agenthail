@@ -36,7 +36,7 @@ func pollToolFixture(t *testing.T, f *voiceFixture, events ...Event) {
 	}
 }
 
-func TestToolTransferDoesNotBlockInputOrProgressSpeech(t *testing.T) {
+func TestToolTransferDoesNotBlockInputOrProviderProgress(t *testing.T) {
 	worker := &targetFixture{session: surface.Session{ID: "worker", Name: "Worker", Surface: surface.KindCodex, Transport: "desktop"}}
 	f := boundFixture(t, worker, newJournalFixture())
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -58,14 +58,13 @@ func TestToolTransferDoesNotBlockInputOrProgressSpeech(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	pollToolFixture(t, f,
 		Event{Method: "thread/realtime/transcript/delta", Params: map[string]any{"role": "user", "delta": "Are you still there?"}},
+		Event{Method: "thread/realtime/transcript/delta", Params: map[string]any{"role": "assistant", "delta": "I’m attaching the worker’s live updates."}},
 		Event{Sequence: 10, Method: "item/completed", Params: map[string]any{"turnId": "delegated", "item": map[string]any{"type": "agentMessage", "id": "progress", "phase": "commentary", "text": "I’m attaching the worker’s live updates."}}})
-	spoken := f.provider.spoken()
-	found := false
-	for _, text := range spoken {
-		found = found || strings.Contains(text, "attaching the worker")
+	if !hasEventWith(f.View(), "thread/realtime/transcript/delta", "delta", "Are you still there?") {
+		t.Fatal("input blocked while tool running")
 	}
-	if !found || !hasEventWith(f.View(), "thread/realtime/transcript/delta", "delta", "Are you still there?") {
-		t.Fatalf("input/progress blocked while tool running: spoken=%v", spoken)
+	if !hasEventWith(f.View(), "thread/realtime/transcript/delta", "delta", "I’m attaching the worker’s live updates.") {
+		t.Fatal("provider progress blocked while tool running")
 	}
 	f.provider.mu.Lock()
 	completed := len(f.provider.toolCalls)

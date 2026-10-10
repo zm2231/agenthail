@@ -1064,6 +1064,52 @@ func TestPrepareStreamDropsSeedBufferAndKeepsFastPostCursorEvent(t *testing.T) {
 	}
 }
 
+func TestPrepareStreamSurvivesLargeSeedAndSlowConsumer(t *testing.T) {
+	_, reg, fake, from, _ := daemonFixture(t)
+	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 200)}
+	for i := range 160 {
+		adapter.items = append(adapter.items, surface.TimelineItem{ID: fmt.Sprintf("seed-%d", i), Kind: "text", Role: "assistant", Text: "seed"})
+	}
+	adapter.caps.Stream = true
+	manager := newSessionSourceManager(reg)
+	defer manager.shutdown()
+	subscription, err := manager.prepareStream(context.Background(), &from, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Cancel()
+	if subscription.Cursor != 160 {
+		t.Fatalf("seed cursor=%d", subscription.Cursor)
+	}
+	for i := range 160 {
+		adapter.events <- surface.StreamEvent{ID: fmt.Sprintf("reply-%d", i), ProviderKey: fmt.Sprintf("reply-%d", i), Operation: "upsert", Kind: "text", Role: "assistant", Text: fmt.Sprintf("reply-%d", i)}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		window, err := reg.SessionJournalAfter(from.ID, subscription.Cursor, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(window.Entries) == 160 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("producer did not persist the burst")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for i := range 160 {
+		select {
+		case event, ok := <-subscription.Events:
+			if !ok || event.Body != fmt.Sprintf("reply-%d", i) {
+				t.Fatalf("event %d: %+v open=%v", i, event, ok)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("missing event %d", i)
+		}
+	}
+}
+
 func TestSessionSourceAccumulatesStableProviderAppendIntoOneJournalEntry(t *testing.T) {
 	_, registry, fake, from, _ := daemonFixture(t)
 	adapter := &sourceCountingSurface{daemonSurface: fake, started: make(chan struct{}, 1), events: make(chan surface.StreamEvent, 2)}

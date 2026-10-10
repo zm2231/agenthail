@@ -337,22 +337,6 @@ func (s *Service) flushTargetContextLocked(ctx context.Context, generation uint6
 			payload[key] = value
 		}
 		payload["item"] = out
-		if data["channel"] == "speakable" {
-			delete(s.conversation.pending, id)
-			s.conversation.speechPending = true
-			session := s.state.State.Session
-			if _, err := voiceCall(s, ctx, func(ctx context.Context) (struct{}, error) {
-				return struct{}{}, s.provider.Request(ctx, session, "thread/realtime/appendSpeech", map[string]any{"threadId": session.ID, "text": body})
-			}); err != nil {
-				if !errors.Is(err, errVoiceOperationStale) {
-					s.state.State.Phase = "unknown"
-					s.state.State.Message = "A spoken response could not be confirmed. End this call before reconnecting; it will not be replayed automatically."
-					_ = s.save()
-				}
-				return false
-			}
-			return true
-		}
 		if !s.appendTargetContextLocked(ctx, generation, attemptID, target, payload) {
 			return false
 		}

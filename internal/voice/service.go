@@ -816,7 +816,7 @@ func StartParams(threadID, attemptID, sdp string, sessionBound bool) map[string]
 		"transport": map[string]any{"type": "webrtc", "sdp": sdp},
 		"version":   "v3", "outputModality": "audio", "includeStartupContext": true,
 		"flushTranscriptTailOnSessionEnd": true,
-		"clientManagedHandoffs":           true,
+		"clientManagedHandoffs":           false,
 		"backendReasoningStatus":          false,
 		"delegationAckFiller":             false,
 		"initialItems":                    []map[string]any{{"role": "developer", "text": instructions}},
@@ -905,7 +905,6 @@ func (s *Service) poll(ctx context.Context) error {
 			params["inputMuted"] = v.InputMuted
 			e.Params = params
 		}
-		s.conversation.backend(e, s.targetGeneration)
 		if e.Method == "item/tool/call" {
 			s.dispatchDynamicToolCall(e)
 		}
@@ -1033,9 +1032,6 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	}
 	arguments, _ := e.Params["arguments"].(map[string]any)
 	targetID, _ := arguments["targetId"].(string)
-	turnID, _ := e.Params["turnId"].(string)
-	ownedGeneration, ownsTurn := s.conversation.ownedTurns[turnID]
-	ownsTurn = ownsTurn && ownedGeneration == s.targetGeneration
 	var err error
 	switch tool {
 	case "voice_transfer":
@@ -1094,10 +1090,6 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	if err != nil {
 		respond(false, err.Error())
 		return
-	}
-	if ownsTurn && (tool == "voice_transfer" || tool == "voice_return_to_orchestrator") {
-		s.conversation.turns[turnID] = s.targetGeneration
-		s.conversation.ownedTurns[turnID] = s.targetGeneration
 	}
 	message := "Voice is now with the Agenthail orchestrator."
 	if target := s.state.State.Target; target != nil {

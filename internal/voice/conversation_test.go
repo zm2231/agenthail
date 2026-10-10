@@ -9,142 +9,25 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestConversationOnlyDelegatedOperatorTurnsAreSpeakable(t *testing.T) {
-	for _, generation := range []uint64{0, 7} {
-		var c conversation
-		answer := Event{Method: "item/completed", Params: map[string]any{"turnId": "turn", "item": map[string]any{"type": "agentMessage", "id": "answer", "phase": "final_answer", "text": "Answer"}}}
-		c.backend(answer, generation)
-		if len(c.pending) != 0 {
-			t.Fatal("unregistered turn became speech")
-		}
-		c.backend(Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": "turn"}}}, generation)
-		c.backend(answer, generation)
-		if len(c.pending) != 0 {
-			t.Fatal("ordinary backing turn became speech")
-		}
-		user := Event{Method: "item/started", Params: map[string]any{"turnId": "turn", "item": map[string]any{"type": "userMessage", "content": []any{map[string]any{"text": "<realtime_delegation>\n<source>transcript_tail_flush</source>\n</realtime_delegation>"}}}}}
-		c.backend(user, generation)
-		c.backend(answer, generation)
-		if len(c.pending) != 0 {
-			t.Fatal("transcript flush became speech")
-		}
-		user.Params["item"].(map[string]any)["content"] = []any{map[string]any{"text": "<realtime_delegation>\n<input>Check the work</input>\n</realtime_delegation>"}}
-		c.backend(user, generation)
-		c.backend(answer, generation+1)
-		if len(c.pending) != 0 {
-			t.Fatal("retired binding produced speech")
-		}
-		c.backend(answer, generation)
-		if c.pending["answer"]["channel"] != "speakable" {
-			t.Fatal("delegated answer not explicitly speakable")
-		}
-		c.backend(Event{Method: "turn/completed", Params: map[string]any{"turn": map[string]any{"id": "turn"}}}, generation)
-		delete(c.pending, "answer")
-		c.backend(answer, generation)
-		if len(c.pending) != 0 {
-			t.Fatal("completed turn replayed")
-		}
-	}
-}
-
-func TestConversationSpeechSerializesWithNoSelectedWorker(t *testing.T) {
+func TestOperatorBackendResponsesNeverCreateAnotherSpeechSubmission(t *testing.T) {
 	f := newFixture(t, fixtureOptions{})
 	apply(t, f, Action{Action: "prepare"})
 	connectFixture(t, f)
-	f.service.mu.Lock()
-	defer f.service.unlock()
-	for i, id := range []string{"first", "second"} {
-		f.service.conversation.stage(map[string]any{"channel": "speakable", "sequence": uint64(i + 1), "item": map[string]any{"itemId": id, "text": id}})
+	for _, turn := range []string{"first", "follow-up", "third"} {
+		pollToolFixture(t, f,
+			Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": turn}}},
+			Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "userMessage", "content": []any{map[string]any{"text": "<realtime_delegation>\n<input>Follow up</input>\n</realtime_delegation>"}}}}},
+			Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "agentMessage", "id": turn, "phase": "commentary", "text": "Checking"}}},
+			Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "agentMessage", "id": turn + "-final", "phase": "final_answer", "text": "Done"}}})
 	}
-	flush := func() {
-		if !f.service.flushTargetContextLocked(context.Background(), f.service.targetGeneration, "call-a", nil) {
-			t.Fatal("flush rejected")
-		}
-	}
-	flush()
-	flush()
 	requests, _, _ := f.provider.snapshot()
-	count := 0
-	for _, request := range requests {
-		if request == "thread/realtime/appendSpeech" {
-			count++
+	for _, method := range requests {
+		if method == "thread/realtime/appendSpeech" || method == "thread/realtime/appendText" {
+			t.Fatalf("backend response resubmitted through %s", method)
 		}
 	}
-	if count != 1 || len(f.service.conversation.pending) != 1 {
-		t.Fatal("concurrent speech submissions")
-	}
-	for _, method := range []string{"thread/realtime/item/started", "thread/realtime/item/completed"} {
-		f.service.conversation.observe(Event{Method: method, Params: map[string]any{"item": map[string]any{"type": "transcriptSegment", "role": "assistant", "id": "spoken-first"}}}, f.service.clock.now().Add(-time.Second))
-	}
-	flush()
-	requests, _, _ = f.provider.snapshot()
-	count = 0
-	for _, request := range requests {
-		if request == "thread/realtime/appendSpeech" {
-			count++
-		}
-	}
-	if count != 2 || len(f.service.conversation.pending) != 0 {
-		t.Fatal("second response not released after completion")
-	}
-}
-
-func TestConversationFollowUpSpeechWithOpenInputAndMirroredEvents(t *testing.T) {
-	f := newFixture(t, fixtureOptions{})
-	apply(t, f, Action{Action: "prepare"})
-	connectFixture(t, f)
-	f.service.mu.Lock()
-	defer f.service.unlock()
-	now := f.service.clock.now().Add(-time.Second)
-	observe := func(method, role, id string) {
-		params := map[string]any{"role": role}
-		if id != "" {
-			params["item"] = map[string]any{"type": "transcriptSegment", "role": role, "id": id}
-		}
-		f.service.conversation.observe(Event{Method: method, Params: params}, now)
-	}
-	flush := func() {
-		t.Helper()
-		if !f.service.flushTargetContextLocked(context.Background(), f.service.targetGeneration, "call-a", nil) {
-			t.Fatal("flush rejected")
-		}
-	}
-	for _, id := range []string{"first", "follow-up", "third"} {
-		// The live provider keeps this user segment open across delegations.
-		observe("thread/realtime/item/started", "user", "open-input")
-		observe("thread/realtime/transcript/delta", "user", "")
-		observe("thread/realtime/itemAdded", "", "")
-		turn := "turn-" + id
-		f.service.conversation.backend(Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": turn}}}, f.service.targetGeneration)
-		f.service.conversation.backend(Event{Method: "item/completed", Params: map[string]any{
-			"turnId": turn,
-			"item": map[string]any{"type": "userMessage", "content": []any{
-				map[string]any{"text": "<realtime_delegation>\n<input>Follow up</input>\n</realtime_delegation>"},
-			}},
-		}}, f.service.targetGeneration)
-		f.service.conversation.backend(Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "agentMessage", "id": id, "phase": "final_answer", "text": id}}}, f.service.targetGeneration)
-		flush()
-		if !f.service.conversation.speechPending || len(f.service.conversation.pending) != 0 {
-			t.Fatalf("%s did not reach speech while input remained open", id)
-		}
-		observe("thread/realtime/item/started", "assistant", "spoken-"+id)
-		observe("thread/realtime/transcript/delta", "assistant", "")
-		observe("thread/realtime/item/completed", "assistant", "spoken-"+id)
-		// The canonical completion is sufficient even without a flat done.
-		if f.service.conversation.speechPending || len(f.service.conversation.responses) != 0 {
-			t.Fatal("mirrored transcript retained output ownership")
-		}
-	}
-	f.provider.mu.Lock()
-	defer f.provider.mu.Unlock()
-	var spoken []string
-	for _, p := range f.provider.params {
-		if value, ok := p["text"].(string); ok {
-			spoken = append(spoken, value)
-		}
-	}
-	if len(spoken) != 3 || spoken[0] != "first" || spoken[1] != "follow-up" || spoken[2] != "third" {
-		t.Fatalf("follow-up speech requests = %v", spoken)
+	if len(f.service.conversation.pending) != 0 {
+		t.Fatal("backend response entered worker context queue")
 	}
 }
 
@@ -152,10 +35,9 @@ func TestConversationLateFlatDoneCannotReleaseCanonicalSpeech(t *testing.T) {
 	var c conversation
 	now := time.Now()
 	c.observe(Event{Method: "thread/realtime/transcript/delta", Params: map[string]any{"role": "assistant"}}, now)
-	c.speechPending = true
 	c.observe(Event{Method: "thread/realtime/item/started", Params: map[string]any{"item": map[string]any{"type": "transcriptSegment", "role": "assistant", "id": "current"}}}, now)
 	c.observe(Event{Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "assistant"}}, now)
-	if !c.speechPending || len(c.responses) != 1 || !c.responses["current"] {
+	if len(c.responses) != 1 || !c.responses["current"] {
 		t.Fatal("late flat done released a canonical response")
 	}
 }

@@ -753,8 +753,8 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 	if p["version"] != "v3" || p["outputModality"] != "audio" {
 		t.Fatalf("params=%v", p)
 	}
-	if p["clientManagedHandoffs"] != true || p["backendReasoningStatus"] != false || p["delegationAckFiller"] != false {
-		t.Fatalf("unowned automatic output remains enabled: %v", p)
+	if p["clientManagedHandoffs"] != false || p["backendReasoningStatus"] != false || p["delegationAckFiller"] != false {
+		t.Fatalf("native handoff ownership or quiet context settings changed: %v", p)
 	}
 	if _, ok := p["codexResponseHandoffMode"]; ok {
 		t.Fatal("legacy realtime handoff remains enabled")

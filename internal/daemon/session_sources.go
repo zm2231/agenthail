@@ -78,6 +78,8 @@ type sessionSource struct {
 	mu              sync.Mutex
 	providerMu      sync.Mutex
 	subscribers     map[uint64]chan registry.SessionJournalEntry
+	journalWatchers map[uint64]chan struct{}
+	journalClosed   bool
 	nextID          uint64
 	holders         map[string]int
 	appendBodies    map[string]string
@@ -348,9 +350,14 @@ func (s *sessionSource) run() {
 func (s *sessionSource) closeSubscribers() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.journalClosed = true
 	for id, subscriber := range s.subscribers {
 		delete(s.subscribers, id)
 		close(subscriber)
+	}
+	for id, watcher := range s.journalWatchers {
+		delete(s.journalWatchers, id)
+		close(watcher)
 	}
 }
 
@@ -880,6 +887,12 @@ func (s *sessionSource) persist(payload sessionJournalPayload) (registry.Session
 
 func (s *sessionSource) publish(entry registry.SessionJournalEntry) {
 	s.mu.Lock()
+	for _, watcher := range s.journalWatchers {
+		select {
+		case watcher <- struct{}{}:
+		default:
+		}
+	}
 	for id, subscriber := range s.subscribers {
 		select {
 		case subscriber <- entry:
@@ -948,37 +961,57 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 }
 
 func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surface.Session, adapter surface.Surface) (sessionstream.Subscription, error) {
-	subscription, err := m.subscribeContext(ctx, session, adapter)
+	if session == nil || adapter == nil {
+		return sessionstream.Subscription{}, fmt.Errorf("session source requires session and adapter")
+	}
+	source, release, err := m.holdSource(session, adapter, "voice-stream")
 	if err != nil {
 		return sessionstream.Subscription{}, err
-	}
-	m.mu.Lock()
-	source := m.sources[session.ID]
-	m.mu.Unlock()
-	if source == nil {
-		subscription.Cancel()
-		return sessionstream.Subscription{}, fmt.Errorf("session source disappeared while preparing stream")
 	}
 	select {
 	case <-source.seeded:
 	case <-ctx.Done():
-		subscription.Cancel()
+		release()
 		return sessionstream.Subscription{}, ctx.Err()
 	}
 	if err := source.seedError(); err != nil {
-		subscription.Cancel()
+		release()
 		return sessionstream.Subscription{}, fmt.Errorf("seed session source: %w", err)
+	}
+	source.mu.Lock()
+	source.nextID++
+	watcherID := source.nextID
+	wake := make(chan struct{}, 1)
+	if source.journalWatchers == nil {
+		source.journalWatchers = map[uint64]chan struct{}{}
+	}
+	if source.journalClosed {
+		close(wake)
+	} else {
+		source.journalWatchers[watcherID] = wake
+	}
+	source.mu.Unlock()
+	streamCtx, stop := context.WithCancel(ctx)
+	var cancelOnce sync.Once
+	cancel := func() {
+		cancelOnce.Do(func() {
+			stop()
+			source.mu.Lock()
+			delete(source.journalWatchers, watcherID)
+			source.mu.Unlock()
+			release()
+		})
 	}
 	page, err := m.registry.ReadSessionJournalContext(session.ID, 40)
 	if err != nil {
-		subscription.Cancel()
+		cancel()
 		return sessionstream.Subscription{}, fmt.Errorf("capture session journal cursor: %w", err)
 	}
 	initial := make([]sessionstream.Event, 0, len(page.Entries))
 	for _, entry := range page.Entries {
 		event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
 		if decodeErr != nil {
-			subscription.Cancel()
+			cancel()
 			return sessionstream.Subscription{}, decodeErr
 		}
 		initial = append(initial, event)
@@ -986,32 +1019,50 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 	events := make(chan sessionstream.Event, 64)
 	go func() {
 		defer close(events)
-		for {
+		defer cancel()
+		cursor := page.LatestSeq
+		sendError := func(reason string) {
 			select {
-			case <-ctx.Done():
+			case events <- sessionstream.Event{Seq: cursor, Kind: "source-error", Reason: reason}:
+			case <-streamCtx.Done():
+			}
+		}
+		for {
+			window, err := m.registry.SessionJournalAfter(session.ID, cursor, 64)
+			if err != nil {
+				sendError(err.Error())
 				return
-			case entry, ok := <-subscription.Entries:
-				if !ok {
-					return
-				}
-				if entry.Seq <= page.LatestSeq {
-					continue
-				}
+			}
+			if window.Gap {
+				sendError("session stream journal retention gap; reselect the session")
+				return
+			}
+			for _, entry := range window.Entries {
 				event, decodeErr := sessionstream.DecodePayload(entry.Seq, entry.Payload)
 				if decodeErr != nil {
-					select {
-					case events <- sessionstream.Event{Seq: entry.Seq, Kind: "source-error", Reason: decodeErr.Error()}:
-					case <-ctx.Done():
-					}
+					sendError(decodeErr.Error())
 					return
 				}
 				select {
 				case events <- event:
-				case <-ctx.Done():
+				case <-streamCtx.Done():
+					return
+				}
+				cursor = entry.Seq
+			}
+			if len(window.Entries) > 0 {
+				continue
+			}
+			select {
+			case <-streamCtx.Done():
+				return
+			case _, ok := <-wake:
+				if !ok {
+					sendError("session source ended")
 					return
 				}
 			}
 		}
 	}()
-	return sessionstream.Subscription{Cursor: page.LatestSeq, Initial: initial, Events: events, Cancel: subscription.Cancel}, nil
+	return sessionstream.Subscription{Cursor: page.LatestSeq, Initial: initial, Events: events, Cancel: cancel}, nil
 }

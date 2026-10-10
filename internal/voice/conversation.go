@@ -2,7 +2,6 @@ package voice
 
 import (
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -17,10 +16,6 @@ type conversation struct {
 	lastActivity    time.Time
 	flushing        uint64
 	flushActive     bool
-	turns           map[string]uint64
-	ownedTurns      map[string]uint64
-	speechPending   bool
-	speechItem      string
 	contextSequence uint64
 }
 
@@ -41,10 +36,6 @@ func (c *conversation) observe(e Event, now time.Time) {
 			c.responses["transcript:"+role] = true
 		case "thread/realtime/transcript/done":
 			delete(c.responses, "transcript:"+role)
-			if role == "assistant" {
-				c.speechPending = false
-				c.speechItem = ""
-			}
 		default:
 			return
 		}
@@ -68,19 +59,12 @@ func (c *conversation) observe(e Event, now time.Time) {
 	switch e.Method {
 	case "thread/realtime/item/started":
 		c.responses[id] = true
-		if c.speechPending && c.speechItem == "" && item["role"] == "assistant" {
-			c.speechItem = id
-		}
 	case "thread/realtime/item/completed":
 		delete(c.responses, id)
 	default:
 		return
 	}
 	c.lastActivity = now
-	if e.Method == "thread/realtime/item/completed" && id == c.speechItem {
-		c.speechPending = false
-		c.speechItem = ""
-	}
 }
 
 func (c *conversation) stage(data map[string]any) {
@@ -117,60 +101,5 @@ func (c *conversation) ordered() []string {
 }
 
 func (c *conversation) ready(now time.Time) bool {
-	return len(c.pending) > 0 && !c.speechPending && len(c.responses) == 0 && now.Sub(c.lastActivity) >= 750*time.Millisecond
-}
-
-func (c *conversation) backend(e Event, generation uint64) {
-	turnID, _ := e.Params["turnId"].(string)
-	if e.Method == "turn/completed" {
-		turn, _ := e.Params["turn"].(map[string]any)
-		id, _ := turn["id"].(string)
-		delete(c.turns, id)
-		delete(c.ownedTurns, id)
-		return
-	}
-	if e.Method == "turn/started" {
-		turn, _ := e.Params["turn"].(map[string]any)
-		turnID, _ = turn["id"].(string)
-		if turnID == "" {
-			return
-		}
-		if c.turns == nil {
-			c.turns = map[string]uint64{}
-		}
-		c.turns[turnID] = generation
-		return
-	}
-	item, _ := e.Params["item"].(map[string]any)
-	owner, exists := c.turns[turnID]
-	if turnID == "" || !exists || owner != generation {
-		return
-	}
-	if item["type"] == "userMessage" {
-		content, _ := item["content"].([]any)
-		for _, block := range content {
-			value, _ := block.(map[string]any)
-			text, _ := value["text"].(string)
-			if strings.HasPrefix(text, "<realtime_delegation>\n") && !strings.Contains(text, "<source>transcript_tail_flush</source>") {
-				if c.ownedTurns == nil {
-					c.ownedTurns = map[string]uint64{}
-				}
-				c.ownedTurns[turnID] = generation
-			}
-		}
-		return
-	}
-	owner, exists = c.ownedTurns[turnID]
-	if e.Method != "item/completed" || item["type"] != "agentMessage" || !exists || owner != generation {
-		return
-	}
-	if item["phase"] != "commentary" && item["phase"] != "final_answer" {
-		return
-	}
-	id, _ := item["id"].(string)
-	text, _ := item["text"].(string)
-	if id == "" || strings.TrimSpace(text) == "" {
-		return
-	}
-	c.stage(map[string]any{"type": "operator-response", "channel": "speakable", "sequence": uint64(e.Sequence), "item": map[string]any{"itemId": id, "turnId": turnID, "text": voiceContextText(text, 4000)}})
+	return len(c.pending) > 0 && len(c.responses) == 0 && now.Sub(c.lastActivity) >= 750*time.Millisecond
 }
