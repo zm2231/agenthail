@@ -11,6 +11,7 @@ import (
 // the quiet interval is a scheduling guard, not evidence of speaker completion.
 type conversation struct {
 	responses       map[string]bool
+	canonicalSpeech bool
 	pending         map[string]map[string]any
 	emitted         map[string]string
 	lastActivity    time.Time
@@ -29,7 +30,7 @@ func (c *conversation) observe(e Event, now time.Time) {
 	item, _ := e.Params["item"].(map[string]any)
 	if item["type"] != "transcriptSegment" {
 		role, _ := e.Params["role"].(string)
-		if role != "user" && role != "assistant" {
+		if role != "assistant" || c.canonicalSpeech {
 			return
 		}
 		if c.responses == nil {
@@ -50,6 +51,11 @@ func (c *conversation) observe(e Event, now time.Time) {
 		c.lastActivity = now
 		return
 	}
+	// Input segments can span multiple delegated turns. They are transcript
+	// assembly, not ownership of output audio.
+	if item["role"] != "assistant" {
+		return
+	}
 	id, _ := item["id"].(string)
 	if id == "" {
 		return
@@ -57,6 +63,8 @@ func (c *conversation) observe(e Event, now time.Time) {
 	if c.responses == nil {
 		c.responses = map[string]bool{}
 	}
+	c.canonicalSpeech = true
+	delete(c.responses, "transcript:assistant")
 	switch e.Method {
 	case "thread/realtime/item/started":
 		c.responses[id] = true

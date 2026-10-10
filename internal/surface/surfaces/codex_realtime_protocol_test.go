@@ -187,5 +187,37 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 			t.Fatalf("installed speech lifecycle incomplete: started=%v completed=%v", started, completed)
 		}
 	}
+	for _, text := range []string{"Synthetic follow-up one", "Synthetic follow-up two"} {
+		request("thread/realtime/appendSpeech", map[string]any{"threadId": id, "text": text})
+		select {
+		case frame := <-frames:
+			var value map[string]any
+			if err := json.Unmarshal(frame, &value); err != nil {
+				t.Fatal(err)
+			}
+			content, _ := value["content"].([]any)
+			var body string
+			if len(content) == 1 {
+				block, _ := content[0].(map[string]any)
+				body, _ = block["text"].(string)
+			}
+			if value["channel"] != "speakable" || body != text {
+				t.Fatalf("follow-up did not reach the remote speech channel: %s", frame)
+			}
+		case <-ctx.Done():
+			t.Fatal("follow-up speech frame timed out")
+		}
+		completed = false
+		for !completed {
+			select {
+			case notification := <-notifications:
+				params, _ := notification["params"].(map[string]any)
+				completed = notification["method"] == "thread/realtime/transcript/done" && params["role"] == "assistant"
+			case <-ctx.Done():
+				t.Fatal("follow-up speech completion timed out")
+			}
+		}
+		t.Logf("installed follow-up speech and completion received: %s", text)
+	}
 	request("thread/realtime/stop", map[string]any{"threadId": id})
 }

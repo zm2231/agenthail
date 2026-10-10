@@ -271,9 +271,13 @@ details sheet shows the digest. No call, worker or approval policy is restarted.
 
 Recent voice events are limited to 100 records and 16 KiB per record. Normal
 session activity uses the existing bounded, paginated timeline. Large or missing
-records are labeled; neither channel is an unlimited transcript export. Codex owns
-the size and cadence of native spoken responses; Agenthail does not duplicate or
-truncate them through a second speech-submission path.
+records are labeled; neither channel is an unlimited transcript export. Only
+responses from current delegated operator turns enter the serialized speakable
+queue. Worker updates remain commentary context. Assistant transcript lifecycles
+own the output gate; user transcript segments can span several delegations and
+must not block replies. Canonical assistant item lifecycles supersede their flat
+transcript mirrors, so a duplicate completion cannot release a newer response.
+Transcript completion is not evidence that physical playback has finished.
 
 ## Implementation and parent UI hook
 
