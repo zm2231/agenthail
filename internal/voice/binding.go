@@ -168,7 +168,7 @@ func contextItem(event sessionstream.Event) map[string]any {
 	if event.BodyRef != "" {
 		item["bodyRef"] = event.BodyRef
 	}
-	if event.Operation != "remove" && event.Kind != "reasoning" && event.Kind != "tool_call" && event.Kind != "tool_output" {
+	if event.Operation != "remove" && event.Kind != "reasoning" && !event.ToolContent() {
 		text := voiceContextText(event.Body, 4000)
 		item["text"] = text
 		item["truncated"] = event.Truncated || text != event.Body
@@ -185,7 +185,7 @@ func recentContext(events []sessionstream.Event) []sessionstream.Event {
 	}
 	result := make([]sessionstream.Event, 0, len(latest))
 	for index, event := range events {
-		if event.ItemID == "" || latest[event.ItemID] != index || event.Operation == "remove" || event.Kind == "reasoning" {
+		if event.ItemID == "" || latest[event.ItemID] != index || event.Operation == "remove" || event.Kind == "reasoning" || event.ToolContent() {
 			continue
 		}
 		result = append(result, event)
@@ -259,7 +259,7 @@ func (s *Service) watchTargetContext(ctx context.Context, generation uint64, att
 				bodies = map[string]string{event.ItemID: event.Body}
 				versions = map[string]uint64{event.ItemID: event.Version}
 			}
-			if event.Kind == "reasoning" || event.Kind == "tool_call" || event.Kind == "tool_output" || event.Role == "user" {
+			if event.Kind == "reasoning" || event.ToolContent() || event.Role == "user" {
 				continue
 			}
 			if event.Operation == "remove" {

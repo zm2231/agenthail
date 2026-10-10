@@ -129,6 +129,14 @@ func (r *Registry) SessionJournalSeedCheckpoint(sessionID string) (string, uint6
 }
 
 func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit int) (SessionJournalPage, error) {
+	return r.readSessionJournalPage(sessionID, before, limit, false)
+}
+
+func (r *Registry) ReadSessionJournalContext(sessionID string, limit int) (SessionJournalPage, error) {
+	return r.readSessionJournalPage(sessionID, 0, limit, true)
+}
+
+func (r *Registry) readSessionJournalPage(sessionID string, before uint64, limit int, contextOnly bool) (SessionJournalPage, error) {
 	if strings.TrimSpace(sessionID) == "" || limit < 1 || limit > 200 {
 		return SessionJournalPage{}, fmt.Errorf("invalid journal page request")
 	}
@@ -162,7 +170,7 @@ func (r *Registry) ReadSessionJournalPage(sessionID string, before uint64, limit
 			return SessionJournalPage{}, &SessionJournalHistoryGapError{EarliestSeq: earliestSeq, LatestSeq: latestSeq}
 		}
 	}
-	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, limit+1)
+	rows, err := tx.Query(`SELECT session_id,seq,kind,provider_key,payload,observed_at,bytes,body_ref FROM session_journal WHERE session_id=? AND (?=0 OR seq<?) AND (?=0 OR COALESCE(json_extract(payload,'$.kind'),'') NOT IN ('reasoning','tool_call','tool_output','toolCall','toolResult')) ORDER BY seq DESC LIMIT ?`, sessionID, before, before, contextOnly, limit+1)
 	if err != nil {
 		return SessionJournalPage{}, err
 	}

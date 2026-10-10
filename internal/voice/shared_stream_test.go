@@ -216,6 +216,11 @@ func TestVoiceBlockedOperationsKeepLifecycleResponsive(t *testing.T) {
 			if len(target.sent) != 0 || len(target.steered) != 0 || target.interrupts != 0 || f.View().Phase == "connected" {
 				t.Fatal("stale operation changed or resurrected the call")
 			}
+			waitFor(t, "stale tool response", func() bool {
+				f.provider.mu.Lock()
+				defer f.provider.mu.Unlock()
+				return len(f.provider.toolCalls) == 1
+			})
 			f.provider.mu.Lock()
 			defer f.provider.mu.Unlock()
 			if len(f.provider.toolCalls) != 1 || f.provider.toolCalls[0].success {
@@ -278,11 +283,11 @@ func TestVoiceBlockedCatalogDoesNotBlockHeartbeatOrHangup(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("tool did not return at its deadline")
 	}
-	f.provider.mu.Lock()
-	defer f.provider.mu.Unlock()
-	if len(f.provider.toolCalls) != 1 || f.provider.toolCalls[0].success {
-		t.Fatal("blocked read did not return a failed tool result")
-	}
+	waitFor(t, "cancelled catalog response", func() bool {
+		f.provider.mu.Lock()
+		defer f.provider.mu.Unlock()
+		return len(f.provider.toolCalls) == 1 && !f.provider.toolCalls[0].success
+	})
 }
 
 func TestVoiceStaleContextCannotChangeHangupMessage(t *testing.T) {
@@ -389,7 +394,7 @@ func TestVoiceToolResponseFailureIsVisibleAndPersisted(t *testing.T) {
 			f.provider.toolErr = errors.New("response transport unavailable")
 			f.provider.mu.Unlock()
 			f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": tool, "threadId": "operator", "namespace": "agenthail", "tool": tool, "arguments": map[string]any{"targetId": "worker"}}})
-			if !strings.Contains(f.View().Message, "Voice tool response could not be returned") {
+			if !strings.Contains(f.View().Message, "Voice tool result delivery interrupted") {
 				t.Fatal("tool response failure was hidden")
 			}
 			data, err := os.ReadFile(f.path)

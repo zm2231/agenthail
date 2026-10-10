@@ -969,7 +969,7 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 		subscription.Cancel()
 		return sessionstream.Subscription{}, fmt.Errorf("seed session source: %w", err)
 	}
-	page, err := m.registry.ReadSessionJournalPage(session.ID, 0, 40)
+	page, err := m.registry.ReadSessionJournalContext(session.ID, 40)
 	if err != nil {
 		subscription.Cancel()
 		return sessionstream.Subscription{}, fmt.Errorf("capture session journal cursor: %w", err)

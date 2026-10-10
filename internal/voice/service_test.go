@@ -341,6 +341,15 @@ func (f *voiceFixture) observe(events ...Event) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	for _, event := range events {
+		if event.Method == "item/tool/call" {
+			waitFor(f.t, "tool completion", func() bool {
+				f.service.mu.Lock()
+				defer f.service.mu.Unlock()
+				return len(f.service.toolInFlight) == 0
+			})
+		}
+	}
 }
 
 func (f *voiceFixture) loseEvents(events ...Event) {

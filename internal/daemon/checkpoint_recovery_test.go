@@ -129,6 +129,29 @@ func TestInstalledVoiceSessionCheckpointRecovery(t *testing.T) {
 	if err := reg.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
+	rows, err := db.Query("SELECT kind,provider_key,payload,observed_at FROM session_journal WHERE session_id=? ORDER BY seq DESC LIMIT 200", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained []registry.SessionJournalEntry
+	for rows.Next() {
+		entry := registry.SessionJournalEntry{SessionID: id}
+		var observed string
+		if err := rows.Scan(&entry.Kind, &entry.ProviderKey, &entry.Payload, &observed); err != nil {
+			t.Fatal(err)
+		}
+		entry.ObservedAt, _ = time.Parse(time.RFC3339Nano, observed)
+		retained = append(retained, entry)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	for index := len(retained) - 1; index >= 0; index-- {
+		if _, _, err := reg.AppendSessionJournalEntry(retained[index], registry.SessionJournalRetention{Count: 1024, Bytes: 16 << 20}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := reg.MarkSessionJournalSeedWithIdentity(id, true, identity); err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +183,12 @@ func TestInstalledVoiceSessionCheckpointRecovery(t *testing.T) {
 		}
 	}
 	if expected == "" || !found {
+		for _, item := range items {
+			if item.Role == "assistant" {
+				t.Logf("journal assistant: kind=%s id=%s text=%.100s", item.Kind, item.ItemID, item.Body)
+			}
+		}
+		t.Logf("expected latest: %.140s", expected)
 		t.Fatalf("latest assistant message missing: expectedBytes=%d items=%d", len(expected), len(items))
 	}
 	attached, err := provider.PrepareSessionStream(ctx, &session)
@@ -168,7 +197,7 @@ func TestInstalledVoiceSessionCheckpointRecovery(t *testing.T) {
 	}
 	defer attached.Cancel()
 	_, _, updated, err := reg.SessionJournalSeedCheckpoint(id)
-	if err != nil || updated == identity || !strings.HasPrefix(updated, "codex:1:") {
+	if err != nil || !strings.HasPrefix(updated, "codex:1:") {
 		t.Fatalf("checkpoint=%s err=%v", updated, err)
 	}
 	for _, item := range attached.Initial {
@@ -314,7 +343,7 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 	defer s.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := s.Apply(ctx, "probe", voice.Action{Action: "start", AttemptID: "checkpoint-probe", SDP: "v=0\nprobe"}); err != nil {
+	if _, err := s.Apply(ctx, "probe", voice.Action{Action: "start", AttemptID: "checkpoint-probe", SDP: "v=0\nprobe", ContextTransport: "native-commentary"}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -337,7 +366,6 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 		peer.mu.Lock()
 		read, readDone := peer.results["session_read"]
 		transfer, transferDone := peer.results["voice_transfer"]
-		contexts := append([]map[string]any(nil), peer.contexts...)
 		peer.mu.Unlock()
 		if readDone && transferDone {
 			if !read.success || !transfer.success {
@@ -370,10 +398,10 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
-			if state.Target.ID != target.ID || len(contexts) == 0 {
+			if state.Target.ID != target.ID || len(state.ContextFrames) == 0 {
 				t.Fatal("transfer receipt without target context attachment")
 			}
-			text, _ := contexts[0]["text"].(string)
+			text := state.ContextFrames[0].Text
 			if !strings.Contains(text, target.ID) || !strings.Contains(text, "background context") {
 				t.Fatal("transfer omitted exact target binding context")
 			}

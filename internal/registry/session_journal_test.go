@@ -44,6 +44,29 @@ func TestSessionJournalReplaysUpsertsAndReportsRetentionGap(t *testing.T) {
 	}
 }
 
+func TestJournalContextKeepsConversationAcrossToolTraffic(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "session")
+	retention := SessionJournalRetention{Count: 200, Bytes: 1 << 20}
+	if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: "message", ProviderKey: "answer", Payload: []byte(`{"kind":"message","role":"assistant","body":"Actual latest answer"}`)}, retention); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 60; index++ {
+		kind := []string{"tool_call", "tool_output", "toolCall", "toolResult", "reasoning"}[index%5]
+		if _, _, err := r.AppendSessionJournalEntry(SessionJournalEntry{SessionID: "session", Kind: kind, ProviderKey: fmt.Sprint(index), Payload: []byte(fmt.Sprintf(`{"kind":%q,"body":"Not conversation"}`, kind))}, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := r.ReadSessionJournalContext("session", 40)
+	if err != nil || len(page.Entries) != 1 || page.Entries[0].ProviderKey != "answer" || page.LatestSeq != 61 {
+		t.Fatalf("conversation page=%+v error=%v", page, err)
+	}
+	all, err := r.ReadSessionJournalPage("session", 0, 40)
+	if err != nil || len(all.Entries) != 40 || all.LatestSeq != page.LatestSeq {
+		t.Fatalf("ordinary page changed: %+v %v", all, err)
+	}
+}
+
 func TestSessionJournalIdenticalProviderReplayDoesNotAdvanceWatermark(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")

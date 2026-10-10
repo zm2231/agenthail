@@ -62,6 +62,15 @@ func (e Event) Terminal() bool {
 	return e.Kind == "done" || e.Kind == "source-error"
 }
 
+func (e Event) ToolContent() bool {
+	switch e.Kind {
+	case "tool_call", "tool_output", "toolCall", "toolResult":
+		return true
+	default:
+		return false
+	}
+}
+
 func (e Event) Failed() bool {
 	if e.Kind == "source-error" {
 		return true
