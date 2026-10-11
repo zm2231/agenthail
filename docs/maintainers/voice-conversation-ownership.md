@@ -8,6 +8,8 @@ The ordered native data channel forwards `delegation.created`, transcript lifecy
 
 Explicit delegations create coding-executor requests serialized through turn completion so two requests cannot claim the same active turn. The realtime model remains conversational while execution is pending. Worker instructions use the bound `session_send` tool, which steers busy workers rather than queuing instructions.
 
+Native tools require the same executor-turn receipt as output frames. Events arriving before that receipt wait for correlation; an unrelated turn in the persistent executor cannot send to workers or change the call's binding.
+
 Only assistant results correlated to an executor receipt produce output frames: `{kind, id, generation, delegationId, channel: "speakable", text}`. For a native delegation the phone sends each once as `delegation.context.append`, then acknowledges local data-channel acceptance. That is not evidence of audible completion. Tool arguments, results, reasoning and unrelated assistant messages never become speech frames.
 
 Worker subscriptions retain bounded latest observations on the host. They produce no realtime append and no speech. Current facts are available through `session_read`; initial selected-worker history is a bounded, untrusted developer message in a fresh conversation. Ordinary activity cannot independently start or interrupt an answer. This does not implement unsolicited milestone announcements.

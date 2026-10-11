@@ -46,6 +46,7 @@ func TestToolTransferDoesNotBlockInputOrProviderProgress(t *testing.T) {
 	f.service.stream = stream
 	f.service.unlock()
 	call := Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "voice_transfer", "turnId": "delegated", "arguments": map[string]any{"targetId": "worker"}}}
+	call = f.ownTool(call)
 	pollToolFixture(t, f,
 		Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": "delegated"}}},
 		Event{Method: "item/completed", Params: map[string]any{"turnId": "delegated", "item": map[string]any{"type": "userMessage", "content": []any{map[string]any{"text": "<realtime_delegation>\nTransfer please"}}}}}, call)
@@ -153,10 +154,14 @@ func TestToolCallsKeepProviderRequestOrder(t *testing.T) {
 func TestCloseReturnsQueuedToolFailures(t *testing.T) {
 	f := newFixture(t, fixtureOptions{stream: newJournalFixture()})
 	connectFixture(t, f)
+	var calls []Event
+	for _, id := range []string{"first", "second"} {
+		calls = append(calls, f.ownTool(Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}}))
+	}
 	f.service.mu.Lock()
 	f.service.provider = deadlineCheckingToolProvider{f.provider}
-	for _, id := range []string{"first", "second"} {
-		f.service.dispatchDynamicToolCall(Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}})
+	for _, call := range calls {
+		f.service.dispatchDynamicToolCall(call)
 	}
 	done := make(chan struct{})
 	go func() { f.service.Close(); close(done) }()
@@ -176,5 +181,77 @@ func TestCloseReturnsQueuedToolFailures(t *testing.T) {
 		if call.success {
 			t.Fatal("retired request executed during shutdown")
 		}
+	}
+}
+
+func TestUnownedExecutorTurnCannotChangeVoiceBinding(t *testing.T) {
+	worker := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop"}}
+	f := boundFixture(t, worker, newJournalFixture())
+	generation := f.View().BindingGeneration
+	pollToolFixture(t, f, Event{Method: "item/tool/call", Params: map[string]any{
+		"requestId": "unrelated", "threadId": f.View().Session.ID, "turnId": "external-turn",
+		"namespace": "agenthail", "tool": "voice_return_to_orchestrator", "arguments": map[string]any{},
+	}})
+	waitFor(t, "unowned tool rejection", func() bool {
+		f.provider.mu.Lock()
+		defer f.provider.mu.Unlock()
+		return len(f.provider.toolCalls) == 1
+	})
+	f.provider.mu.Lock()
+	result := f.provider.toolCalls[0]
+	f.provider.mu.Unlock()
+	if result.success || !strings.Contains(result.text, "does not belong") || f.View().BindingGeneration != generation || f.View().Target == nil {
+		t.Fatal("unrelated executor turn affected the call")
+	}
+}
+
+type receiptBlockedProvider struct {
+	*fixtureProvider
+	entered, release chan struct{}
+}
+
+func (p receiptBlockedProvider) Execute(ctx context.Context, session *surface.Session, text string) (string, error) {
+	close(p.entered)
+	select {
+	case <-p.release:
+		return p.fixtureProvider.Execute(ctx, session, text)
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func TestToolArrivingBeforeExecutorReceiptWaitsForOwnership(t *testing.T) {
+	f := newFixture(t, fixtureOptions{stream: newJournalFixture()})
+	connectFixture(t, f)
+	p := receiptBlockedProvider{fixtureProvider: f.provider, entered: make(chan struct{}), release: make(chan struct{})}
+	f.service.mu.Lock()
+	f.service.provider = p
+	f.service.unlock()
+	apply(t, f, Action{Action: "text", AttemptID: "call-a", MessageID: "owned", Text: "List sessions"})
+	<-p.entered
+	pollToolFixture(t, f, Event{Method: "item/tool/call", Params: map[string]any{
+		"requestId": "early", "threadId": f.View().Session.ID, "turnId": "executor-turn",
+		"namespace": "agenthail", "tool": "session_list", "arguments": map[string]any{},
+	}})
+	f.service.mu.Lock()
+	buffered := len(f.service.executionEvents)
+	queued := len(f.service.toolQueue)
+	f.service.unlock()
+	f.provider.mu.Lock()
+	responses := len(f.provider.toolCalls)
+	f.provider.mu.Unlock()
+	close(p.release)
+	if buffered != 1 || queued != 0 || responses != 0 {
+		t.Fatal("tool escaped before the executor receipt")
+	}
+	waitFor(t, "owned tool response", func() bool {
+		f.provider.mu.Lock()
+		defer f.provider.mu.Unlock()
+		return len(f.provider.toolCalls) == 1
+	})
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if !f.provider.toolCalls[0].success {
+		t.Fatal("correlated pre-receipt tool was rejected")
 	}
 }

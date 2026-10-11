@@ -246,6 +246,9 @@ func (s *Service) runExecutions() {
 		}
 		for _, event := range events {
 			s.observeExecution(event)
+			if event.Method == "item/tool/call" {
+				s.dispatchDynamicToolCall(event)
+			}
 		}
 	}
 }

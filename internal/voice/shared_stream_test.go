@@ -200,8 +200,9 @@ func TestVoiceBlockedOperationsKeepLifecycleResponsive(t *testing.T) {
 				f.service.stream = &blockedVoiceStream{newJournalFixture(), block}
 			}
 			f.service.unlock()
+			call := f.ownTool(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "blocked", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": variant.tool, "arguments": map[string]any{"targetId": "worker", "text": "Authorized instruction"}}})
 			f.provider.mu.Lock()
-			f.provider.pending = append(f.provider.pending, Batch{Events: []Event{{Method: "item/tool/call", Params: map[string]any{"requestId": "blocked", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": variant.tool, "arguments": map[string]any{"targetId": "worker", "text": "Authorized instruction"}}}}})
+			f.provider.pending = append(f.provider.pending, Batch{Events: []Event{call}})
 			f.provider.mu.Unlock()
 			done := make(chan error, 1)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -265,8 +266,9 @@ func TestVoiceBlockedCatalogDoesNotBlockHeartbeatOrHangup(t *testing.T) {
 	f := newFixture(t, fixtureOptions{stream: stream})
 	connectFixture(t, f)
 	attempt := f.View().AttemptID
+	call := f.ownTool(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "blocked", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}})
 	f.provider.mu.Lock()
-	f.provider.pending = append(f.provider.pending, Batch{Events: []Event{{Method: "item/tool/call", Params: map[string]any{"requestId": "blocked", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}}}})
+	f.provider.pending = append(f.provider.pending, Batch{Events: []Event{call}})
 	f.provider.mu.Unlock()
 	done := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

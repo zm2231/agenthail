@@ -934,7 +934,7 @@ func (s *Service) poll(ctx context.Context) error {
 			params["inputMuted"] = v.InputMuted
 			e.Params = params
 		}
-		if e.Method == "item/tool/call" {
+		if e.Method == "item/tool/call" && !s.executionSubmitting {
 			s.dispatchDynamicToolCall(e)
 		}
 		data, _ := json.Marshal(e)
@@ -1029,6 +1029,10 @@ func (s *Service) handleDynamicToolCall(ctx context.Context, e Event) {
 	}
 	turnID, _ := e.Params["turnId"].(string)
 	request := s.delegations[s.turnDelegations[turnID]]
+	if request == nil || request.generation != s.targetGeneration || request.attempt != s.state.State.AttemptID {
+		respond(false, "This tool request does not belong to the active voice conversation. No action was taken.")
+		return
+	}
 	typed := request != nil && request.typed && request.generation == s.targetGeneration && request.attempt == s.state.State.AttemptID
 	if s.state.State.InputMuted && !typed && (tool == "session_send" || tool == "session_interrupt" || tool == "voice_transfer" || tool == "voice_return_to_orchestrator") {
 		respond(false, "Microphone input is muted. No voice-requested action was taken; use the call controls or unmute to request it.")

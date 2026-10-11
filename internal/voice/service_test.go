@@ -330,6 +330,11 @@ func (f *voiceFixture) tick() {
 
 func (f *voiceFixture) observe(events ...Event) {
 	f.t.Helper()
+	for i, event := range events {
+		if event.Method == "item/tool/call" {
+			events[i] = f.ownTool(event)
+		}
+	}
 	expected := len(f.View().Events)
 	for _, event := range events {
 		if !strings.HasPrefix(event.Method, "thread/realtime/") {
@@ -359,6 +364,27 @@ func (f *voiceFixture) observe(events ...Event) {
 			})
 		}
 	}
+}
+
+func (f *voiceFixture) ownTool(event Event) Event {
+	f.service.mu.Lock()
+	defer f.service.unlock()
+	turn, _ := event.Params["turnId"].(string)
+	if turn == "" {
+		turn = "fixture-tool-" + event.Params["requestId"].(string)
+		event.Params["turnId"] = turn
+	}
+	if f.service.delegations == nil {
+		f.service.delegations = map[string]*delegation{}
+	}
+	if f.service.turnDelegations == nil {
+		f.service.turnDelegations = map[string]string{}
+	}
+	if f.service.turnDelegations[turn] == "" {
+		f.service.turnDelegations[turn] = turn
+		f.service.delegations[turn] = &delegation{id: turn, turn: turn, attempt: f.service.state.State.AttemptID, generation: f.service.targetGeneration, items: map[string]bool{}}
+	}
+	return event
 }
 
 func (f *voiceFixture) loseEvents(events ...Event) {
