@@ -545,7 +545,7 @@ func TestQueuedDeliveryBindsProviderTurnForReconciliation(t *testing.T) {
 	}
 }
 
-func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
+func TestQueuedRelayTerminalFailureRecordsOneProblemWithoutNotifyingSource(t *testing.T) {
 	daemon, r, fake, from, to := daemonFixture(t)
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
@@ -554,7 +554,7 @@ func TestQueuedRelayTerminalFailureNotifiesSourceOnce(t *testing.T) {
 	fake.sendErr = surface.DeliveryTerminal(errors.New("target rejected input"), surface.DeliveryInvalidRequest)
 	daemon.drainMessageQueue(context.Background(), fake, &to)
 	daemon.fireRelays(&from, "relay-turn", 0, "forwarded reply")
-	if count := r.QueueCount(from.ID); count != 1 {
+	if count := r.QueueCount(from.ID); count != 0 {
 		t.Fatalf("source notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)
@@ -1152,7 +1152,7 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
+func TestDroppedRelayRecordsOneProblemWithoutNotifyingSource(t *testing.T) {
 	daemon, r, _, from, to := daemonFixture(t)
 	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
@@ -1162,7 +1162,7 @@ func TestReplyForwardFailureNotifiesActualSenderOnce(t *testing.T) {
 	}
 	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
 	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
-	if count := r.QueueCount(from.ID); count != 1 {
+	if count := r.QueueCount(from.ID); count != 0 {
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err := r.CatalogEventsAfter(0, 10)

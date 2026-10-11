@@ -194,6 +194,9 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("delivery_intents", "dismissed_at", `TEXT`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if version < 9 {
 		if _, err := r.db.Exec(`
 			UPDATE session_journal
@@ -448,6 +451,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	provider_key TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL DEFAULT '',
 	queue_id INTEGER NOT NULL DEFAULT 0,
+	relayed INTEGER NOT NULL DEFAULT 0,
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
@@ -1184,7 +1188,7 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	}
 	var deliveryID int64
 	if recordIntent && options.SourceSessionID != "" {
-		if deliveryID, err = insertQueuedDeliveryIntent(tx, options.SourceSessionID, sessionID, message, id); err != nil {
+		if deliveryID, err = insertQueuedDeliveryIntent(tx, options.SourceSessionID, sessionID, message, id, relayHops > 0); err != nil {
 			return 0, 0, err
 		}
 	}
