@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -28,6 +29,8 @@ const (
 	managerReplyBytes    = 128 << 10
 	workerReadyBytes     = 8 << 10
 	maxManagedPeers      = 128
+	senderPeerReserve    = 16
+	peerStartTimeout     = 12 * time.Second
 	maxManagerRequests   = 32
 	maxManagerRejections = 8
 )
@@ -108,6 +111,9 @@ type Manager struct {
 	mu         sync.Mutex
 	children   map[string]*child
 	relays     map[string]*child
+	advertised map[string]int
+	peerLimit  int
+	reserve    int
 	closed     bool
 	generation string
 	requests   chan struct{}
@@ -186,7 +192,7 @@ func start(ctx context.Context, home string, reg *registry.Registry, executable,
 		listener.Close()
 		return nil, err
 	}
-	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, relays: map[string]*child{}, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint}
+	m := &Manager{home: home, socketDir: socketDir, registry: reg, executable: executable, ctx: ctx, listener: listener, children: map[string]*child{}, relays: map[string]*child{}, peerLimit: maxManagedPeers, reserve: senderPeerReserve, generation: uuid.NewString()[:12], requests: make(chan struct{}, maxManagerRequests), rejections: make(chan struct{}, maxManagerRejections), ownerLock: startupLock, endpoint: endpoint}
 	lockTransferred = true
 	go m.serve()
 	return m, nil
@@ -243,7 +249,7 @@ func (m *Manager) serve() {
 				_ = json.NewEncoder(conn).Encode(managerResponse{Error: &managerError{Class: "terminal", Kind: string(surface.DeliveryInvalidRequest), Error: "invalid or oversized Claude peer manager request"}})
 				return
 			}
-			ctx, cancel := context.WithTimeout(m.ctx, 12*time.Second)
+			ctx, cancel := context.WithTimeout(m.ctx, peerStartTimeout)
 			defer cancel()
 			response := managerResponse{}
 			switch request.Operation {
@@ -276,6 +282,11 @@ func (m *Manager) rejectBusy(conn net.Conn) {
 	_ = json.NewEncoder(conn).Encode(managerResponse{Error: &managerError{Class: "unavailable", Error: "Claude peer manager is at its 32-request concurrency limit; retry shortly"}})
 }
 
+var errPeerPoolFull = errors.New("Claude peer pool is full")
+
+// Ensure starts or reuses the peer for a sender. A send is activity: it
+// refreshes the peer's last use and, when the pool is full, replaces the
+// least useful peer rather than failing the delivery.
 func (m *Manager) Ensure(ctx context.Context, id string) error {
 	if id == "" {
 		id = OperatorID
@@ -285,17 +296,78 @@ func (m *Manager) Ensure(ctx context.Context, id string) error {
 	if m.closed {
 		return fmt.Errorf("peer manager is stopping")
 	}
+	return m.ensureLocked(ctx, id, true)
+}
+
+// Advertise keeps the most active sessions discoverable as Claude peers.
+// Busy sessions rank first, then the most recently active, and the pool keeps
+// a reserve for senders outside that set. Advertising is not activity, so it
+// never extends a peer's life. It returns the start failures by session ID.
+func (m *Manager) Advertise(ctx context.Context, sessions []surface.Session) map[string]error {
+	ranked := append([]surface.Session(nil), sessions...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		left, right := ranked[i], ranked[j]
+		if (left.Status == surface.StatusBusy) != (right.Status == surface.StatusBusy) {
+			return left.Status == surface.StatusBusy
+		}
+		if !left.LastActive.Equal(right.LastActive) {
+			return left.LastActive.After(right.LastActive)
+		}
+		return left.ID < right.ID
+	})
+	m.mu.Lock()
+	if limit := max(m.peerLimit-m.reserve, 0); len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	advertised := make(map[string]int, len(ranked))
+	for rank, session := range ranked {
+		advertised[session.ID] = rank
+	}
+	m.advertised = advertised
+	m.mu.Unlock()
+	failures := map[string]error{}
+	for _, session := range ranked {
+		if ctx.Err() != nil {
+			return failures
+		}
+		operationCtx, cancel := context.WithTimeout(ctx, peerStartTimeout)
+		m.mu.Lock()
+		var err error
+		if m.closed {
+			err = fmt.Errorf("peer manager is stopping")
+		} else if _, current := m.advertised[session.ID]; current {
+			err = m.ensureLocked(operationCtx, session.ID, false)
+		}
+		m.mu.Unlock()
+		cancel()
+		if err != nil && !errors.Is(err, errPeerPoolFull) {
+			failures[session.ID] = err
+		}
+	}
+	return failures
+}
+
+func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error {
 	if existing := m.children[id]; existing != nil {
 		if existing.healthy() {
-			existing.lastUsed = time.Now()
+			if send {
+				existing.lastUsed = time.Now()
+			}
 			return nil
 		}
 		existing.stop(2 * time.Second)
 		existing.cleanup()
 		delete(m.children, id)
 	}
-	if len(m.children) >= maxManagedPeers {
-		return fmt.Errorf("Claude peer limit (%d) reached; wait for inactive peers to retire before retrying", maxManagedPeers)
+	if len(m.children) >= m.peerLimit {
+		if !send {
+			return errPeerPoolFull
+		}
+		victim := m.evictionCandidateLocked()
+		if victim == "" {
+			return fmt.Errorf("Claude peer limit (%d) reached by the operator peer alone", m.peerLimit)
+		}
+		m.retireChildLocked(victim)
 	}
 	var session *surface.Session
 	var err error
@@ -344,7 +416,10 @@ func (m *Manager) Ensure(ctx context.Context, id string) error {
 		output.Close()
 		return err
 	}
-	entry := &child{input: input, done: make(chan struct{}), process: command.Process, lastUsed: time.Now()}
+	entry := &child{input: input, done: make(chan struct{}), process: command.Process}
+	if send {
+		entry.lastUsed = time.Now()
+	}
 	go func() { _ = command.Wait(); close(entry.done) }()
 	fail := func(err error) error {
 		input.Close()
@@ -526,9 +601,9 @@ func (m *Manager) ensureRelay(ctx context.Context, session surface.Session) erro
 	return nil
 }
 
-// RetireInactive bounds the set of Claude-visible Agenthail peers. Busy and
-// recently active sessions remain discoverable; older sessions are recreated
-// on demand by the next outbound send.
+// RetireInactive bounds the set of Claude-visible Agenthail peers. Peers for
+// advertised sessions and recent senders remain; others are recreated on
+// demand by the next outbound send.
 func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 	m.mu.Lock()
 	var retired []*child
@@ -543,9 +618,7 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 			continue
 		default:
 		}
-		session, err := m.registry.Session(id)
-		keep := keepPeerAlive(now, maxIdle, entry.lastUsed, session, err)
-		if keep {
+		if _, advertised := m.advertised[id]; advertised || now.Sub(entry.lastUsed) <= maxIdle {
 			continue
 		}
 		delete(m.children, id)
@@ -586,6 +659,40 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 		}
 		entry.cleanup()
 	}
+}
+
+// evictionCandidateLocked picks the peer a new sender replaces: the least
+// recently used peer outside the advertised set, else the lowest ranked
+// advertised peer. The operator peer is never replaced.
+func (m *Manager) evictionCandidateLocked() string {
+	victim, victimRank := "", -1
+	var victimUsed time.Time
+	for id, entry := range m.children {
+		if id == OperatorID {
+			continue
+		}
+		rank, advertised := m.advertised[id]
+		if !advertised {
+			rank = len(m.children) + 1
+		}
+		if victim == "" || rank > victimRank || (rank == victimRank && entry.lastUsed.Before(victimUsed)) {
+			victim, victimRank, victimUsed = id, rank, entry.lastUsed
+		}
+	}
+	return victim
+}
+
+func (m *Manager) retireChildLocked(id string) {
+	entry := m.children[id]
+	delete(m.children, id)
+	entry.input.Close()
+	select {
+	case <-entry.done:
+	case <-time.After(2 * time.Second):
+		_ = entry.process.Kill()
+		<-entry.done
+	}
+	entry.cleanup()
 }
 
 func keepPeerAlive(now time.Time, maxIdle time.Duration, lastUsed time.Time, session *surface.Session, err error) bool {
