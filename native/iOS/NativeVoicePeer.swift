@@ -13,6 +13,14 @@ final class NativeVoicePeer: VoicePeerClient {
     private var channelDelegate: NativeChannelDelegate?
     private var generation = 0
     private var muted = false
+    private var speakablePending = false
+    private var playbackMonitor: Task<Void, Never>?
+    var canSubmitResult: Bool { !speakablePending && playback.canPublish }
+    private lazy var playback = VoicePlayback { [weak self] suppressed in
+        for transceiver in self?.connection?.transceivers ?? [] {
+            (transceiver.receiver.track as? RTCAudioTrack)?.isEnabled = !suppressed
+        }
+    }
 
     init() {
         let audio = RTCAudioSession.sharedInstance()
@@ -36,6 +44,7 @@ final class NativeVoicePeer: VoicePeerClient {
         let events: @Sendable (String, String) -> Void = { [weak self] type, value in
             Task { @MainActor in
                 guard let self, current == self.generation else { return }
+                if type == "realtime-event" { self.observe(value) }
                 self.onMessage?(type, value)
             }
         }
@@ -45,6 +54,25 @@ final class NativeVoicePeer: VoicePeerClient {
             throw AgenthailAPIError.unavailable("Native WebRTC could not create an audio peer.")
         }
         self.connection = connection
+        playbackMonitor = Task { [weak self, weak connection] in
+            var previousEnergy = 0.0
+            while !Task.isCancelled {
+                guard let self, let connection, current == self.generation else { return }
+                let energy: Double = await withCheckedContinuation { continuation in
+                    connection.statistics { report in
+                        let total = report.statistics.values.reduce(0.0) { sum, stat in
+                            guard stat.type == "inbound-rtp", (stat.values["kind"] as? NSString) == "audio" else { return sum }
+                            return sum + ((stat.values["totalAudioEnergy"] as? NSNumber)?.doubleValue ?? 0)
+                        }
+                        continuation.resume(returning: total)
+                    }
+                }
+                guard !Task.isCancelled, current == self.generation else { return }
+                if energy > previousEnergy { self.playback.audioActivity() }
+                previousEnergy = energy
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
         let source = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
         let track = factory.audioTrack(with: source, trackId: "agenthail-microphone")
         track.isEnabled = !muted
@@ -93,31 +121,73 @@ final class NativeVoicePeer: VoicePeerClient {
         onMessage?("input-muted", muted ? "true" : "false")
     }
 
-    func appendContext(_ text: String) throws {
+    func appendResult(_ frame: VoiceContextFrame) throws {
         guard let channel, channel.readyState == .open else {
             throw AgenthailAPIError.unavailable("Voice data channel is not open.")
         }
-        for data in try Self.contextFrames(text) {
+        for data in try Self.resultFrames(frame) {
             guard channel.sendData(RTCDataBuffer(data: data, isBinary: false)) else {
                 throw AgenthailAPIError.unavailable("Voice data channel rejected context.")
             }
         }
+        speakablePending = true
     }
 
-    static func contextFrames(_ text: String) throws -> [Data] {
-        guard text.utf8.count <= 48 * 1024 else { throw AgenthailAPIError.unavailable("Voice context exceeds the frame budget.") }
-        var chunks: [String] = []; var chunk = ""
-        for scalar in text.unicodeScalars {
-            let value = String(scalar)
-            if chunk.utf8.count + value.utf8.count > 500 { chunks.append(chunk); chunk = "" }
-            chunk += value
+    static func resultFrames(_ frame: VoiceContextFrame) throws -> [Data] {
+        guard frame.channel == "speakable", frame.text.utf8.count <= 16 * 1024 else { throw AgenthailAPIError.unavailable("Invalid voice delegation result.") }
+        var payload: [String: Any] = ["channel": frame.channel, "content": [["type": "input_text", "text": frame.text]]]
+        switch frame.kind {
+        case "delegation-result":
+            guard !frame.delegationId.isEmpty else { throw AgenthailAPIError.unavailable("Missing voice delegation identity.") }
+            payload["type"] = "delegation.context.append"
+            payload["delegation_item_id"] = frame.delegationId
+        case "typed-result":
+            guard frame.delegationId.isEmpty else { throw AgenthailAPIError.unavailable("Unexpected typed delegation identity.") }
+            payload["type"] = "session.context.append"
+        default: throw AgenthailAPIError.unavailable("Unsupported voice result origin.")
         }
-        if !chunk.isEmpty { chunks.append(chunk) }
-        return try chunks.map { try JSONSerialization.data(withJSONObject: ["type": "session.context.append", "channel": "commentary", "content": [["type": "input_text", "text": $0]]]) }
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        guard data.count <= 64 * 1024 else { throw AgenthailAPIError.unavailable("Voice result exceeds the frame budget.") }
+        return [data]
+    }
+
+    private func observe(_ raw: String) {
+        guard let data = raw.data(using: .utf8), let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        switch event["type"] as? String {
+        case "input_transcript.added":
+            if !muted, Self.transcriptText(event) != nil { playback.inputStarted(speechPending: speakablePending) }
+        case "output_transcript.added":
+            if Self.transcriptText(event) != nil { playback.outputAdded() }
+        case "turn.done":
+            guard let turn = event["turn"] as? [String: Any] else { return }
+            if turn["role"] as? String == "user", !muted {
+                playback.inputFinished(speechPending: speakablePending, hasTranscript: !(turn["transcript"] as? String ?? "").isEmpty)
+            } else if turn["role"] as? String == "assistant" {
+                playback.outputFinished(); speakablePending = false
+            }
+        default: break
+        }
+    }
+
+    nonisolated private static func transcriptText(_ event: [String: Any]) -> String? {
+        guard let item = event["item"] as? [String: Any], let text = item["text"] as? String,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
+    }
+
+    nonisolated static func providerEvent(_ data: Data) -> (String, String)? {
+        guard data.count <= 64 * 1024,
+              let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = event["type"] as? String else { return nil }
+        if type == "error" { return ("error", "The voice provider rejected a call event. Reconnect before repeating an action.") }
+        guard ["input_transcript.added", "output_transcript.added", "turn.done", "delegation.created"].contains(type),
+              let raw = String(data: data, encoding: .utf8) else { return nil }
+        return ("realtime-event", raw)
     }
 
     func end() {
         generation += 1
+        playbackMonitor?.cancel(); playbackMonitor = nil
         microphone?.isEnabled = false
         channel?.delegate = nil
         channel?.close()
@@ -163,12 +233,7 @@ private final class NativeChannelDelegate: NSObject, RTCDataChannelDelegate, @un
         if dataChannel.readyState == .closed { events("error", "The voice data channel closed.") }
     }
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        guard !buffer.isBinary, buffer.data.count <= 64 * 1024,
-              let value = try? JSONSerialization.jsonObject(with: buffer.data) as? [String: Any],
-              let type = value["type"] as? String else { return }
-        // Keep only event identity, never captured audio or transcript contents.
-        if ["input_transcript.added", "output_transcript.added", "turn.done", "delegation.created"].contains(type) {
-            events("realtime-event", type)
-        }
+        guard !buffer.isBinary, let (type, value) = NativeVoicePeer.providerEvent(buffer.data) else { return }
+        events(type, value)
     }
 }

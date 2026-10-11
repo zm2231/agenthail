@@ -31,6 +31,11 @@ final class VoiceOperatorModel: ObservableObject {
     private var activityRefresh: Task<Void, Never>?
     private var mediaRecovery: Task<Void, Never>?
     private var contextDispatching = false
+    private var mediaRebinding = false
+    private var nativeEvents: [(UInt64, VoiceNativeEvent)] = []
+    private var nativeSequence: UInt64 = 0
+    private var nativeEventTask: Task<Void, Never>?
+    private var nativeEventGeneration = 0
     private var contextSent: UInt64 = 0
     private var contextAttempt: String?
     private var contextBindingGeneration: UInt64 = 0
@@ -135,6 +140,7 @@ final class VoiceOperatorModel: ObservableObject {
         do {
             let next = try await api.state()
             guard !closed, current == generation else { return }
+            if next.attemptId == attemptID, (next.bindingGeneration ?? 0) < (state?.bindingGeneration ?? 0) { return }
             if next.phase == "unknown", hasLocalCall, next.attemptId == attemptID {
                 state = next
                 error = error ?? next.message ?? "The host can no longer confirm this call. Audio has stopped."
@@ -155,6 +161,16 @@ final class VoiceOperatorModel: ObservableObject {
             }
             state = next
             connectionError = nil
+            if next.rebindRequested == true, next.phase == "connected", !mediaRebinding, next.attemptId == attemptID {
+                mediaRebinding = true
+                audioConnected = false; channelOpen = false; connectedReported = false
+                appliedSDP = nil
+                nativeEventGeneration += 1
+                nativeEventTask?.cancel(); nativeEventTask = nil
+                nativeEvents = []; nativeSequence = 0
+                try await audio.replacePeer()
+                return
+            }
             if terminal {
                 let hadLocalCall = dialing || audioConnected || attemptID != nil
                 if let id = attemptID ?? hostHangupAttemptID, id == next.attemptId {
@@ -182,6 +198,11 @@ final class VoiceOperatorModel: ObservableObject {
             refreshActivity(sessionID: next.session?.id, generation: current)
         } catch {
             guard !closed, current == generation else { return }
+            if mediaRebinding {
+                self.error = "Transfer could not connect the destination. Start a new call."
+                hangup(cause: "transfer_connection_failed")
+                return
+            }
             connectionError = "Reconnecting: \(error.localizedDescription)"
         }
     }
@@ -197,9 +218,11 @@ final class VoiceOperatorModel: ObservableObject {
                 guard !closed, generation == current, attemptID == id else { return }
                 contextBindingGeneration = max(contextBindingGeneration, state?.bindingGeneration ?? 0)
                 guard frame.generation == contextBindingGeneration else { contextSent = frame.id; continue }
-                try audio.appendContext(frame.text)
+                guard audio.canSubmitResult else { break }
+                try audio.appendResult(frame)
                 contextSent = frame.id
-                diagnostics.event("context_commentary_sent", id: id)
+                diagnostics.event("delegation_result_sent", id: id)
+                break
             }
             if contextSent > 0, !(next.contextFrames ?? []).isEmpty {
                 _ = try await api.action(VoiceAction(action: "context-ack", attemptId: id, contextAck: contextSent))
@@ -333,7 +356,8 @@ final class VoiceOperatorModel: ObservableObject {
             Task {
                 guard !closed, generation == current else { return }
                 do {
-                    let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value, heartbeatMode: "explicit", contextTransport: "native-commentary"))
+                    let action = mediaRebinding ? "rebind" : "start"
+                    let next = try await api.action(VoiceAction(action: action, attemptId: id, sdp: value, heartbeatMode: "explicit", contextTransport: "native-delegation", bindingGeneration: state?.bindingGeneration))
                     if closed || generation != current {
                         _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
                     }
@@ -379,7 +403,7 @@ final class VoiceOperatorModel: ObservableObject {
                 do {
                     let next = try await api.action(VoiceAction(action: "input-state", attemptId: id, muted: value == "true", inputRevision: revision))
                     guard !closed, current == generation else { return }
-                    if (next.inputRevision ?? 0) >= revision { state = next }
+                    if (next.inputRevision ?? 0) >= revision, (next.bindingGeneration ?? 0) >= (state?.bindingGeneration ?? 0) { state = next }
                 } catch {
                     guard !closed, current == generation else { return }
                     diagnostics.failure(error, stage: "input_state", id: id)
@@ -388,7 +412,12 @@ final class VoiceOperatorModel: ObservableObject {
                 }
             }
         case "realtime-event":
-            if let attemptID { diagnostics.event("\(value)_\(muted || held ? "muted" : "unmuted")", id: attemptID) }
+            guard let data = value.data(using: .utf8), let fields = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let type = fields["type"] as? String else { return }
+            if let attemptID { diagnostics.event("\(type)_\(muted || held ? "muted" : "unmuted")", id: attemptID) }
+            guard nativeEvents.count < 128 else { error = "Voice event delivery is backlogged. Reconnect before taking further actions."; hangup(cause: "event_backlog"); return }
+            nativeSequence += 1
+            nativeEvents.append((nativeSequence, VoiceNativeEvent(fields: fields)))
+            dispatchNativeEvents()
         case "suspended": audioSuspended = value == "true"
         case "held": held = value == "true"
         case "ended": hangup(cause: value == "system_reset" ? "system_reset" : "user_hangup")
@@ -406,11 +435,14 @@ final class VoiceOperatorModel: ObservableObject {
             logger.info("Native voice media connected after \(String(describing: elapsed), privacy: .public)")
         }
         let current = generation
+        let binding = state?.bindingGeneration ?? 0
         Task {
             do {
-                let next = try await api.action(VoiceAction(action: "connected", attemptId: id))
-                if !closed, current == generation {
+                let next = try await api.action(VoiceAction(action: "connected", attemptId: id, bindingGeneration: binding))
+                if !closed, current == generation, binding == (state?.bindingGeneration ?? 0) {
                     state = next
+                    mediaRebinding = false
+                    dispatchNativeEvents()
                     diagnostics.mark("host_connected", id: id)
                 }
             }
@@ -420,9 +452,37 @@ final class VoiceOperatorModel: ObservableObject {
 
     func toggleMute() { muted.toggle(); audio.mute(muted) }
 
+    private func dispatchNativeEvents() {
+        guard nativeEventTask == nil, let api, let id = attemptID, connectedReported, state?.phase == "connected" else { return }
+        let current = generation
+        let binding = state?.bindingGeneration ?? 0
+        let eventGeneration = nativeEventGeneration
+        nativeEventTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if eventGeneration == self.nativeEventGeneration { self.nativeEventTask = nil } }
+            while !Task.isCancelled, current == self.generation, id == self.attemptID, binding == self.state?.bindingGeneration, !self.nativeEvents.isEmpty {
+                let (sequence, event) = self.nativeEvents[0]
+                do {
+                    let next = try await api.action(VoiceAction(action: "realtime-event", attemptId: id, bindingGeneration: binding, eventSequence: sequence, event: event))
+                    guard !Task.isCancelled, current == self.generation, binding == self.state?.bindingGeneration else { return }
+                    self.nativeEvents.removeFirst()
+                    self.state = next
+                } catch {
+                    guard !Task.isCancelled, current == self.generation else { return }
+                    self.error = "Voice request delivery failed. Reconnect before repeating actions."
+                    self.hangup(cause: "event_delivery_failed")
+                    return
+                }
+            }
+        }
+    }
+
     func hangup(cause: String = "user_hangup") {
         if let attemptID { diagnostics.end(cause, id: attemptID) }
         generation += 1
+        nativeEventGeneration += 1
+        nativeEventTask?.cancel(); nativeEventTask = nil; nativeEvents = []; nativeSequence = 0
+        mediaRebinding = false
         working = false
         activityRefresh?.cancel(); activityRefresh = nil
         heartbeat?.cancel(); heartbeat = nil
@@ -474,7 +534,7 @@ final class VoiceOperatorModel: ObservableObject {
         let submitted = text; text = ""
         do {
             let next = try await api.action(VoiceAction(action: "text", attemptId: id, text: submitted, messageId: messageID))
-            if !closed, generation == current { state = next }
+            if !closed, generation == current, (next.bindingGeneration ?? 0) >= (state?.bindingGeneration ?? 0) { state = next }
         }
         catch { if !closed, generation == current { self.error = "Text outcome is unknown. Check the conversation before resending. \(error.localizedDescription)" } }
     }

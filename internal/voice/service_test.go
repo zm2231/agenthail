@@ -168,7 +168,7 @@ func (p *fixtureProvider) Poll(_ context.Context, after Cursor, _ string) (Batch
 }
 
 func (p *fixtureProvider) RespondDynamicToolCall(_ context.Context, requestID, threadID string, success bool, text string) error {
-	if threadID != "operator" {
+	if threadID != "operator" && !strings.HasPrefix(threadID, "operator-") {
 		return errors.New("unexpected tool response thread")
 	}
 	p.mu.Lock()
@@ -195,6 +195,15 @@ func (p *fixtureProvider) Request(ctx context.Context, _ *surface.Session, metho
 	p.requests = append(p.requests, method)
 	p.params = append(p.params, params)
 	return p.err
+}
+
+func (p *fixtureProvider) StartCall(ctx context.Context, call CallRequest) (string, error) {
+	err := p.Request(ctx, nil, "voice/call/start", map[string]any{"prompt": call.Instructions, "sdp": call.SDP})
+	return "v=0 answer", err
+}
+
+func (p *fixtureProvider) Execute(ctx context.Context, session *surface.Session, text string) (string, error) {
+	return "executor-turn", p.Request(ctx, session, "turn/start", map[string]any{"text": text})
 }
 func (p *fixtureProvider) Interrupt(context.Context, *surface.Session) error {
 	p.mu.Lock()
@@ -284,7 +293,7 @@ func newFixture(t *testing.T, options fixtureOptions) *voiceFixture {
 
 func (f *voiceFixture) Apply(a Action) (State, error) {
 	if a.Action == "start" && a.ContextTransport == "" {
-		a.ContextTransport = "native-commentary"
+		a.ContextTransport = "native-delegation"
 	}
 	return f.service.Apply(context.Background(), "phone", a)
 }
@@ -323,7 +332,7 @@ func (f *voiceFixture) observe(events ...Event) {
 	f.t.Helper()
 	expected := len(f.View().Events)
 	for _, event := range events {
-		if event.Method != "thread/realtime/sdp" && event.Method != "thread/realtime/outputAudio/delta" {
+		if !strings.HasPrefix(event.Method, "thread/realtime/") {
 			expected++
 		}
 	}
@@ -376,17 +385,15 @@ func startFixture(t *testing.T, f *voiceFixture) {
 
 func connectFixture(t *testing.T, f *voiceFixture) {
 	startFixture(t, f)
-	f.observe(Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
-	apply(t, f, Action{Action: "connected", AttemptID: "call-a"})
+	apply(t, f, Action{Action: "connected", AttemptID: "call-a", BindingGeneration: f.View().BindingGeneration})
 }
 
 func hangUp(t *testing.T, f *voiceFixture) {
 	apply(t, f, Action{Action: "stop", AttemptID: "call-a"})
-	f.observe(Event{Method: "thread/realtime/closed", Params: map[string]any{}})
 }
 
 func targetSelected(t *testing.T, target *targetFixture) *voiceFixture {
-	f := newFixture(t, fixtureOptions{target: target})
+	f := newFixture(t, fixtureOptions{target: target, stream: newJournalFixture()})
 	apply(t, f, Action{Action: "prepare"})
 	apply(t, f, Action{Action: "select", TargetID: target.session.ID})
 	connectFixture(t, f)
@@ -450,6 +457,9 @@ func TestNewOperatorCreatesDistinctPersistentThreadAndRetainsOldThread(t *testin
 		return nil
 	}})
 	connectFixture(t, f)
+	f.service.mu.Lock()
+	f.service.recordNativeTranscript("assistant", "Hello")
+	f.service.unlock()
 	hangUp(t, f)
 	first := f.View()
 	if len(first.Events) == 0 {
@@ -491,12 +501,12 @@ func TestNewOperatorFailsClosedAcrossActiveAndUnknownCreation(t *testing.T) {
 func TestCallLifecycleIsAudioSeparateFromWork(t *testing.T) {
 	f, p := fixture(t)
 	startFixture(t, f)
-	if v := f.View(); v.Phase != "starting" || v.SDP != "" {
+	if v := f.View(); v.Phase != "negotiating" || v.SDP != "v=0 answer" {
 		t.Fatalf("accepted RPC is not connected: %+v", v)
 	}
 	f.observe(Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}})
-	if f.View().Phase != "starting" {
-		t.Fatal("started event is not an SDP answer")
+	if f.View().Phase != "negotiating" {
+		t.Fatal("legacy sideband event changed call state")
 	}
 	f.observe(Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 answer"}})
 	if v := f.View(); v.Phase != "negotiating" || v.SDP != "v=0 answer" {
@@ -504,12 +514,11 @@ func TestCallLifecycleIsAudioSeparateFromWork(t *testing.T) {
 	}
 	apply(t, f, Action{Action: "connected", AttemptID: "call-a"})
 	apply(t, f, Action{Action: "stop", AttemptID: "call-a"})
-	if _, interrupts, _ := p.snapshot(); f.View().Phase != "stopping" || interrupts != 0 {
-		t.Fatal("hangup must await closure and not interrupt agent work")
+	if _, interrupts, _ := p.snapshot(); f.View().Phase != "ended" || interrupts != 0 {
+		t.Fatal("hangup must end the phone conversation without interrupting agent work")
 	}
-	f.observe(Event{Method: "thread/realtime/closed", Params: map[string]any{}})
 	apply(t, f, Action{Action: "start", AttemptID: "call-b", SDP: "v=0 offer-b"})
-	if requests, _, creates := p.snapshot(); creates != 1 || !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop", "thread/realtime/start"}) {
+	if requests, _, creates := p.snapshot(); creates != 1 || !reflect.DeepEqual(requests, []string{"voice/call/start", "voice/call/start"}) {
 		t.Fatalf("flow: %+v", requests)
 	}
 	apply(t, f, Action{Action: "interrupt"})
@@ -534,8 +543,8 @@ func TestUnknownStartupIsNotReplayed(t *testing.T) {
 		t.Fatal("replaced an unconfirmed call")
 	}
 	f.observe(Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 delayed answer"}})
-	if f.View().Phase != "negotiating" {
-		t.Fatal("late acceptance did not reconcile")
+	if f.View().Phase != "unknown" {
+		t.Fatal("legacy sideband events reconciled a different direct call")
 	}
 	reopened := New(f.path, p, nil, "/fixture/agenthail")
 	if reopened.View("phone").Phase != "unknown" || reopened.View("phone").SDP != "" {
@@ -592,7 +601,7 @@ func TestNativeCallHeartbeatSurvivesWithoutViewsAndRejectsWrongIdentity(t *testi
 	f.advance(11 * time.Second)
 	f.tick()
 	requests, interrupts, _ := p.snapshot()
-	if requests[len(requests)-1] != "thread/realtime/stop" || interrupts != 0 {
+	if requests[len(requests)-1] != "voice/call/start" || interrupts != 0 || f.View().Phase != "ended" {
 		t.Fatalf("expiry affected coding work or did not stop audio: %v / %d", requests, interrupts)
 	}
 }
@@ -623,19 +632,19 @@ func TestOperatorSourceLifecycleTracksOnlyActiveTransitions(t *testing.T) {
 	}
 }
 
-func TestTextUnknownReceiptPreventsDuplicate(t *testing.T) {
+func TestTextAuditReceiptPreventsDuplicateWithoutSecondTransport(t *testing.T) {
 	f, p := fixture(t)
 	connectFixture(t, f)
 	p.failRequests(errors.New("response lost"))
 	a := Action{Action: "text", AttemptID: "call-a", MessageID: "message-a", Text: "Please inspect my agents"}
 	v, err := f.Apply(a)
-	if err == nil || v.TextReceipt != "unknown:message-a" {
+	if err != nil || v.TextReceipt != "submitted:message-a" {
 		t.Fatalf("v=%+v err=%v", v, err)
 	}
 	if _, err = f.Apply(a); err == nil {
 		t.Fatal("duplicate text accepted")
 	}
-	if requests, _, _ := p.snapshot(); len(requests) != 2 {
+	if requests, _, _ := p.snapshot(); len(requests) != 1 {
 		t.Fatalf("unknown text was replayed: %v", requests)
 	}
 }
@@ -749,36 +758,21 @@ func TestCorruptStateFailsClosedAndUnknownCreateDoesNotDuplicate(t *testing.T) {
 }
 
 func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T) {
-	p := StartParams("operator", "call", "offer", false)
-	if p["version"] != "v3" || p["outputModality"] != "audio" {
-		t.Fatalf("params=%v", p)
-	}
-	if p["clientManagedHandoffs"] != false || p["backendReasoningStatus"] != false || p["delegationAckFiller"] != false {
-		t.Fatalf("native handoff ownership or quiet context settings changed: %v", p)
-	}
-	if _, ok := p["codexResponseHandoffMode"]; ok {
-		t.Fatal("legacy realtime handoff remains enabled")
-	}
-	transport := p["transport"].(map[string]any)
-	if transport["type"] != "webrtc" || transport["sdp"] != "offer" {
-		t.Fatalf("transport=%v", transport)
-	}
+	f, provider := fixture(t)
+	startFixture(t, f)
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	p := provider.params[0]
 	for key := range p {
 		if strings.Contains(strings.ToLower(key), "token") || strings.Contains(strings.ToLower(key), "apikey") {
 			t.Fatal("credential in voice params")
 		}
 	}
-	initial := p["initialItems"].([]map[string]any)
-	boundInitial := StartParams("operator", "call", "offer", true)["initialItems"].([]map[string]any)
-	orchestrator, _ := initial[0]["text"].(string)
-	sessionBound, _ := boundInitial[0]["text"].(string)
-	if len(initial) != 1 || len(boundInitial) != 1 || initial[0]["role"] != "developer" || boundInitial[0]["role"] != "developer" || orchestrator == "" || sessionBound == "" || orchestrator == sessionBound {
-		t.Fatalf("session-bound calls need their own developer instructions: orchestrator=%v bound=%v", initial, boundInitial)
-	}
-	if p["prompt"] != realtimeSystemPrompt || p["includeStartupContext"] != false {
+	prompt, _ := p["prompt"].(string)
+	if !strings.HasPrefix(prompt, realtimeSystemPrompt) || !strings.Contains(prompt, "No worker is selected") {
 		t.Fatal("realtime system prompt must replace the built-in prompt without inherited startup context")
 	}
-	if !strings.Contains(realtimeSystemPrompt, "Receiving an observation requires no acknowledgement and no speech") || !strings.Contains(realtimeSystemPrompt, "Do not restart, repeat") {
+	if !strings.Contains(realtimeSystemPrompt, "never authorizes an unsolicited check-in or interruption") || !strings.Contains(realtimeSystemPrompt, "never restart or repeat") {
 		t.Fatal("realtime prompt must distinguish background observations from request-owned answers")
 	}
 }
@@ -788,7 +782,7 @@ func TestCompletedAnswersAreNotReinjectedAsSessionSpeech(t *testing.T) {
 	connectFixture(t, f)
 	f.observe(Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": "current-turn"}}})
 	f.observe(Event{Method: "item/completed", Params: map[string]any{"turnId": "current-turn", "item": map[string]any{"id": "final", "type": "agentMessage", "phase": "final_answer", "text": "The selected task replied."}}})
-	if requests, _, _ := p.snapshot(); len(requests) != 1 || requests[0] != "thread/realtime/start" {
+	if requests, _, _ := p.snapshot(); len(requests) != 1 || requests[0] != "voice/call/start" {
 		t.Fatalf("completed answer was duplicated through a manual request: %v", requests)
 	}
 }
@@ -804,10 +798,10 @@ func TestDisconnectedPhoneWatchdogRequestsAudioStopWithoutDeadlock(t *testing.T)
 	f.advance(2 * time.Second)
 	f.tick()
 	requests, interrupts, _ := p.snapshot()
-	if !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) || interrupts != 0 {
+	if !reflect.DeepEqual(requests, []string{"voice/call/start"}) || interrupts != 0 {
 		t.Fatalf("watchdog requests=%v interrupts=%d", requests, interrupts)
 	}
-	if v := f.View(); v.Phase != "stopping" {
+	if v := f.View(); v.Phase != "ended" {
 		t.Fatalf("hangup not represented: %+v", v)
 	}
 }
@@ -816,8 +810,8 @@ func TestSDPRequiresMatchingStartAndEventLossPreventsReattachment(t *testing.T) 
 	f, _ := fixture(t)
 	startFixture(t, f)
 	f.observe(Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "old-call"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 old"}})
-	if f.View().SDP != "" {
-		t.Fatal("accepted an unbound SDP")
+	if f.View().SDP != "v=0 answer" {
+		t.Fatal("legacy events changed the direct call answer")
 	}
 	f.loseEvents(Event{Method: "thread/realtime/started", Params: map[string]any{"realtimeSessionId": "call-a"}}, Event{Method: "thread/realtime/sdp", Params: map[string]any{"sdp": "v=0 untrusted"}})
 	if v := f.View(); v.Phase != "unknown" || v.SDP != "" || !v.Truncated {
@@ -843,7 +837,7 @@ func TestPersistenceFailureDoesNotPreventAudioTeardown(t *testing.T) {
 	if _, err := f.Apply(Action{Action: "stop", AttemptID: "call-a"}); err == nil {
 		t.Fatal("persistence failure hidden from hangup")
 	}
-	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"thread/realtime/start", "thread/realtime/stop"}) {
+	if requests, _, _ := p.snapshot(); !reflect.DeepEqual(requests, []string{"voice/call/start"}) {
 		t.Fatalf("audio teardown skipped: %v", requests)
 	}
 }

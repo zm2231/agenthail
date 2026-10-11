@@ -1,114 +1,68 @@
 package voice
 
 import (
-	"context"
-	"path/filepath"
-	"testing"
-	"time"
-
+	"encoding/json"
+	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
+	"testing"
 )
 
-func TestOperatorBackendResponsesNeverCreateAnotherSpeechSubmission(t *testing.T) {
+func TestClientOwnedDelegationResultsAreCorrelatedAndDeduplicated(t *testing.T) {
 	f := newFixture(t, fixtureOptions{})
 	apply(t, f, Action{Action: "prepare"})
 	connectFixture(t, f)
-	for _, turn := range []string{"first", "follow-up", "third"} {
+	for index, id := range []string{"first", "follow-up", "repeated-question"} {
+		raw, _ := json.Marshal(map[string]any{"type": "delegation.created", "item": map[string]any{"type": "delegation", "target": "client", "id": id, "content": []map[string]any{{"type": "input_text", "text": "Check the session"}}}})
+		apply(t, f, Action{Action: "realtime-event", AttemptID: "call-a", EventSequence: uint64(index + 1), Event: raw})
+		waitFor(t, "executor receipt", func() bool {
+			f.service.mu.Lock()
+			defer f.service.mu.Unlock()
+			return f.service.delegations[id].turn != ""
+		})
 		pollToolFixture(t, f,
-			Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": turn}}},
-			Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "userMessage", "content": []any{map[string]any{"text": "<realtime_delegation>\n<input>Follow up</input>\n</realtime_delegation>"}}}}},
-			Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "agentMessage", "id": turn, "phase": "commentary", "text": "Checking"}}},
-			Event{Method: "item/completed", Params: map[string]any{"turnId": turn, "item": map[string]any{"type": "agentMessage", "id": turn + "-final", "phase": "final_answer", "text": "Done"}}})
-	}
-	requests, _, _ := f.provider.snapshot()
-	for _, method := range requests {
-		if method == "thread/realtime/appendSpeech" || method == "thread/realtime/appendText" {
-			t.Fatalf("backend response resubmitted through %s", method)
+			Event{Method: "item/completed", Params: map[string]any{"turnId": "executor-turn", "item": map[string]any{"type": "agentMessage", "id": id + "-progress", "phase": "commentary", "text": "Checking"}}},
+			Event{Method: "item/completed", Params: map[string]any{"turnId": "executor-turn", "item": map[string]any{"type": "agentMessage", "id": id + "-final", "phase": "final_answer", "text": "Complete"}}},
+			Event{Method: "item/completed", Params: map[string]any{"turnId": "executor-turn", "item": map[string]any{"type": "agentMessage", "id": id + "-final", "phase": "final_answer", "text": "Complete"}}})
+		frames := f.View().ContextFrames
+		if len(frames) != 2 || frames[0].DelegationID != id || frames[1].DelegationID != id || frames[0].Channel != "speakable" {
+			t.Fatalf("misrouted frames: %+v", frames)
 		}
-	}
-	if len(f.service.conversation.pending) != 0 {
-		t.Fatal("backend response entered worker context queue")
-	}
-}
-
-func TestConversationLateFlatDoneCannotReleaseCanonicalSpeech(t *testing.T) {
-	var c conversation
-	now := time.Now()
-	c.observe(Event{Method: "thread/realtime/transcript/delta", Params: map[string]any{"role": "assistant"}}, now)
-	c.observe(Event{Method: "thread/realtime/item/started", Params: map[string]any{"item": map[string]any{"type": "transcriptSegment", "role": "assistant", "id": "current"}}}, now)
-	c.observe(Event{Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "assistant"}}, now)
-	if len(c.responses) != 1 || !c.responses["current"] {
-		t.Fatal("late flat done released a canonical response")
+		apply(t, f, Action{Action: "context-ack", AttemptID: "call-a", ContextAck: frames[1].ID})
+		pollToolFixture(t, f, Event{Method: "turn/completed", Params: map[string]any{"turn": map[string]any{"id": "executor-turn"}}})
 	}
 }
 
-func TestVoiceContextQueueAndAcknowledgmentDoNotWriteCallState(t *testing.T) {
+func TestWorkerJournalRetainsStateWithoutEmittingVoiceFrames(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude, Transport: "uds"}}
-	f := boundFixture(t, target, newJournalFixture())
+	stream := newJournalFixture()
+	f := boundFixture(t, target, stream)
+	stream.events <- sessionstream.Event{Seq: 13, ItemID: "status", Version: 1, Kind: "message", Role: "assistant", Body: "I will inspect this call", Final: true}
+	waitFor(t, "retained worker observation", func() bool { return len(workerItems(f.service)) == 1 })
+	if frames := f.View().ContextFrames; len(frames) != 0 {
+		t.Fatalf("unsolicited voice output: %+v", frames)
+	}
+}
+
+func TestVoiceNativeResultAcknowledgmentIsAttemptBound(t *testing.T) {
+	f := newFixture(t, fixtureOptions{})
+	apply(t, f, Action{Action: "prepare"})
+	connectFixture(t, f)
 	f.service.mu.Lock()
-	f.service.path = filepath.Join(f.path, "cannot-create-under-a-file")
-	generation := f.service.targetGeneration
+	d := &delegation{id: "request", attempt: "call-a", generation: f.service.targetGeneration}
+	f.service.queueDelegationResult(d, "Result", true)
 	f.service.unlock()
-	if !f.service.appendTargetContext(context.Background(), generation, "call-a", &target.session, map[string]any{"sequence": uint64(1), "item": map[string]any{"itemId": "update", "text": "Quiet latest update"}}) {
-		t.Fatal("context queue depended on a filesystem write")
-	}
-	frames := f.View().ContextFrames
-	apply(t, f, Action{Action: "context-ack", AttemptID: "call-a", ContextAck: frames[len(frames)-1].ID})
-}
-
-func TestConversationResponseOwnershipAndCoalescing(t *testing.T) {
-	var c conversation
-	now := time.Now()
-	event := func(method, id string) Event {
-		return Event{Method: method, Params: map[string]any{"item": map[string]any{"type": "transcriptSegment", "id": id, "role": "assistant"}}}
-	}
-	c.observe(event("thread/realtime/item/started", "first"), now)
-	c.observe(event("thread/realtime/item/started", "second"), now)
-	c.stage(map[string]any{"sequence": uint64(1), "item": map[string]any{"itemId": "answer", "text": "partial"}})
-	c.stage(map[string]any{"sequence": uint64(2), "item": map[string]any{"itemId": "answer", "text": "complete"}})
-	c.observe(event("thread/realtime/item/completed", "first"), now)
-	if c.ready(now.Add(time.Hour)) {
-		t.Fatal("another response still owns the conversation")
-	}
-	c.observe(event("thread/realtime/item/completed", "second"), now)
-	if c.ready(now) || !c.ready(now.Add(time.Second)) {
-		t.Fatal("quiet interval not enforced")
-	}
-	if len(c.pending) != 1 || c.pending["answer"]["item"].(map[string]any)["text"] != "complete" {
-		t.Fatal("snapshot was not coalesced")
-	}
-	c.reset()
-	if c.ready(now.Add(time.Hour)) || len(c.responses) != 0 {
-		t.Fatal("old ownership survived reset")
-	}
-}
-
-func TestVoiceNativeContextAcknowledgmentIsAttemptBoundAndMonotonic(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindClaude, Transport: "uds"}}
-	f := boundFixture(t, target, newJournalFixture())
 	frame := f.View().ContextFrames[0]
-	if _, err := f.Apply(Action{Action: "context-ack", AttemptID: "old-call", ContextAck: frame.ID}); err == nil {
-		t.Fatal("stale call acknowledged context")
+	if _, err := f.Apply(Action{Action: "context-ack", AttemptID: "retired", ContextAck: frame.ID}); err == nil {
+		t.Fatal("retired attempt acknowledged a result")
 	}
 	if _, err := f.Apply(Action{Action: "context-ack", AttemptID: "call-a", ContextAck: frame.ID + 1}); err == nil {
-		t.Fatal("future acknowledgment accepted")
+		t.Fatal("future result acknowledged")
 	}
-	apply(t, f, Action{Action: "context-ack", AttemptID: "call-a", ContextAck: frame.ID})
 	apply(t, f, Action{Action: "context-ack", AttemptID: "call-a", ContextAck: frame.ID})
 	if len(f.View().ContextFrames) != 0 {
-		t.Fatal("acknowledged context replayed")
-	}
-	if len(f.service.View("other-phone").ContextFrames) != 0 {
-		t.Fatal("foreign device received call context")
-	}
-	requests, _, _ := f.provider.snapshot()
-	for _, method := range requests {
-		if method == "thread/realtime/appendText" || method == "thread/realtime/appendSpeech" {
-			t.Fatal("worker context used an implicit speech channel")
-		}
+		t.Fatal("acknowledged result replayed")
 	}
 }
-
 func TestMutedCallBlocksDynamicWorkerActionsAndIgnoresStaleMuteRevision(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "worker", Surface: surface.KindCodex, Transport: "desktop"}}
 	f := boundFixture(t, target, newJournalFixture())
@@ -118,7 +72,7 @@ func TestMutedCallBlocksDynamicWorkerActionsAndIgnoresStaleMuteRevision(t *testi
 	if !v.InputMuted || v.InputRevision != 2 {
 		t.Fatal("stale input state unmuted the call")
 	}
-	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "muted-request", "threadId": "operator", "namespace": "agenthail", "tool": "session_send", "arguments": map[string]any{"targetId": "worker", "text": "Ghost input must not send this"}}})
+	f.observe(Event{Method: "item/tool/call", Params: map[string]any{"requestId": "muted-request", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_send", "arguments": map[string]any{"targetId": "worker", "text": "Ghost input must not send this"}}})
 	if len(target.sent) != 0 || len(target.steered) != 0 {
 		t.Fatal("muted input instructed the worker")
 	}

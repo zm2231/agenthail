@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/zm2231/agenthail/internal/voice"
 )
 
 func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
@@ -136,7 +135,7 @@ func TestInstalledCodexRealtimeContextChannels(t *testing.T) {
 	if id == "" {
 		t.Fatal("no disposable thread ID")
 	}
-	request("thread/realtime/start", voice.StartParams(id, "synthetic-call", "v=0 synthetic offer", false))
+	request("thread/realtime/start", installedRealtimeProbeParams(t, id, "synthetic-call", "v=0 synthetic offer"))
 	for _, method := range []string{"thread/realtime/appendText", "thread/realtime/appendSpeech"} {
 		params := map[string]any{"threadId": id, "text": "Synthetic selected-worker update"}
 		if method == "thread/realtime/appendText" {

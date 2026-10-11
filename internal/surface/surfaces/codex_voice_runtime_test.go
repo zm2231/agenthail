@@ -44,9 +44,9 @@ emit({type:'mcp-notification',hostId:'local',method:'turn/started',params:{threa
 emit({type:'mcp-request',hostId:'local',request:{id:'request-1',method:'item/tool/call',params:{threadId:'operator',namespace:'agenthail',tool:'voice_transfer',arguments:{targetId:'target'}}}});
 const result=JSON.parse(vm.runInContext(programs.voice,context));
 assert.equal(result.cursor,6);assert.equal(result.lost,false);
-assert.deepEqual(result.events.map(e=>e.method),['thread/realtime/started','thread/realtime/sdp','turn/started','item/tool/call']);
-assert.equal(result.events[1].params.sdp,'v=0 answer');
-assert.equal(result.events[3].params.requestId,'request-1');
+assert.deepEqual(result.events.map(e=>e.method),['turn/started','item/tool/call']);
+assert.equal(result.events[1].params.requestId,'request-1');
+assert.equal(result.events.some(e=>e.method.startsWith('thread/realtime/')),false);
 vm.runInContext(programs.response,context).then(value=>{
   assert.equal(value,'ok');
   assert.deepEqual(JSON.parse(JSON.stringify(sent[0])),{type:'mcp-response',hostId:'local',threadId:'operator',response:{id:'request-1',result:{success:true,contentItems:[{type:'inputText',text:'Transferred'}]}}});

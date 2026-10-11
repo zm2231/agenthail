@@ -46,6 +46,7 @@
 		B6D305B6D6F47E2203575903 /* PairingLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3085052480F0B14328A21215 /* PairingLink.swift */; };
 		B935C015C6F2FA2321613C35 /* SessionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24B656FE4EB45788315815D /* SessionStyle.swift */; };
 		BA1BE89FDF679AB91E1F9396 /* VoiceSystemCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */; };
+		C279052013A95E5F26DA8007 /* VoicePlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F248AEB53252A5585AA9583 /* VoicePlayback.swift */; };
 		CB330794781001FBDB837948 /* LiveSessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88B8E00B9B48773EC294B1B /* LiveSessionActivity.swift */; };
 		CBCA932E315251D8765B458D /* ActivityReadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3244752A0EB724F241568485 /* ActivityReadingTests.swift */; };
 		DE883C8BB5916D7DCC2A68FF /* ToolContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35D92AE806F316D43805F232 /* ToolContentView.swift */; };
@@ -96,6 +97,7 @@
 		35D92AE806F316D43805F232 /* ToolContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolContentView.swift; sourceTree = "<group>"; };
 		41DF0D6EBD30C6D301B896D2 /* TranscriptContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptContext.swift; sourceTree = "<group>"; };
 		4297F79B0E285D005AC6D64C /* SessionPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPreview.swift; sourceTree = "<group>"; };
+		4F248AEB53252A5585AA9583 /* VoicePlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePlayback.swift; sourceTree = "<group>"; };
 		5754FCCBE0D9C3A064B3D17E /* SessionSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSelection.swift; sourceTree = "<group>"; };
 		57BABF4D52336F4B67989152 /* AgenthailIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailIOSApp.swift; sourceTree = "<group>"; };
 		5EB73667A631B4855B108997 /* AgenthailAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenthailAPI.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 				91A23D43BE6185EB08D3D29A /* VoiceCallCoordinator.swift */,
 				872EE78A8F020CEFB6832D77 /* VoiceCallDiagnostics.swift */,
 				BF500C1DA5AFE6F58961158D /* VoiceOperator.swift */,
+				4F248AEB53252A5585AA9583 /* VoicePlayback.swift */,
 				7EDE788460A077CFD53DEB5B /* VoiceSystemCall.swift */,
 				789528763CE17FBC1B2E59AA /* WebRTC-LICENSE.txt */,
 			);
@@ -385,6 +388,7 @@
 				71E1B11E844EB9A03D8BCCC4 /* VoiceCallCoordinator.swift in Sources */,
 				FF2FFF47010815EA89B1FF8A /* VoiceCallDiagnostics.swift in Sources */,
 				4DC82E4C2D6E0E89DCE4ED84 /* VoiceOperator.swift in Sources */,
+				C279052013A95E5F26DA8007 /* VoicePlayback.swift in Sources */,
 				BA1BE89FDF679AB91E1F9396 /* VoiceSystemCall.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

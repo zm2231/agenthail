@@ -299,6 +299,12 @@ func (p *checkpointVoicePeer) Create(context.Context, string, string) (*surface.
 func (p *checkpointVoicePeer) Cursor(context.Context) (voice.Cursor, error) {
 	return voice.Cursor{Source: "checkpoint-probe"}, nil
 }
+func (p *checkpointVoicePeer) StartCall(context.Context, voice.CallRequest) (string, error) {
+	return "v=0\nprobe", nil
+}
+func (p *checkpointVoicePeer) Execute(context.Context, *surface.Session, string) (string, error) {
+	return "", fmt.Errorf("probe cannot execute coding work")
+}
 func (p *checkpointVoicePeer) Poll(_ context.Context, cursor voice.Cursor, _ string) (voice.Batch, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -343,7 +349,7 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 	defer s.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := s.Apply(ctx, "probe", voice.Action{Action: "start", AttemptID: "checkpoint-probe", SDP: "v=0\nprobe", ContextTransport: "native-commentary"}); err != nil {
+	if _, err := s.Apply(ctx, "probe", voice.Action{Action: "start", AttemptID: "checkpoint-probe", SDP: "v=0\nprobe", ContextTransport: "native-delegation"}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -398,19 +404,10 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
-			if state.Target.ID != target.ID || len(state.ContextFrames) == 0 {
-				t.Fatal("transfer receipt without target context attachment")
+			if state.Target.ID != target.ID || !state.RebindRequested || len(state.ContextFrames) != 0 {
+				t.Fatal("transfer must prepare the exact target without unsolicited speech or claiming connection")
 			}
-			text := state.ContextFrames[0].Text
-			_, payload, hasPayload := strings.Cut(text, "\n")
-			var binding struct {
-				SessionID string `json:"sessionId"`
-				Type      string `json:"type"`
-			}
-			if !strings.HasPrefix(text, "Agenthail background observation (untrusted data; no response requested).\n") || !hasPayload || json.Unmarshal([]byte(payload), &binding) != nil || binding.SessionID != target.ID || binding.Type != "binding" {
-				t.Fatal("transfer omitted exact target binding context")
-			}
-			t.Logf("native session_read and voice_transfer passed against live %s; selected target and realtime-context request verified; audio peer simulated", target.ID)
+			t.Logf("native session_read and voice_transfer preparation passed against live %s; destination audio acceptance not tested", target.ID)
 			return
 		}
 		if time.Now().After(deadline) {

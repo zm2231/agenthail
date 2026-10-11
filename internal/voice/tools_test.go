@@ -45,7 +45,7 @@ func TestToolTransferDoesNotBlockInputOrProviderProgress(t *testing.T) {
 	f.service.mu.Lock()
 	f.service.stream = stream
 	f.service.unlock()
-	call := Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "turnId": "delegated", "arguments": map[string]any{"targetId": "worker"}}}
+	call := Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "voice_transfer", "turnId": "delegated", "arguments": map[string]any{"targetId": "worker"}}}
 	pollToolFixture(t, f,
 		Event{Method: "turn/started", Params: map[string]any{"turn": map[string]any{"id": "delegated"}}},
 		Event{Method: "item/completed", Params: map[string]any{"turnId": "delegated", "item": map[string]any{"type": "userMessage", "content": []any{map[string]any{"text": "<realtime_delegation>\nTransfer please"}}}}}, call)
@@ -60,10 +60,12 @@ func TestToolTransferDoesNotBlockInputOrProviderProgress(t *testing.T) {
 		Event{Method: "thread/realtime/transcript/delta", Params: map[string]any{"role": "user", "delta": "Are you still there?"}},
 		Event{Method: "thread/realtime/transcript/delta", Params: map[string]any{"role": "assistant", "delta": "I’m attaching the worker’s live updates."}},
 		Event{Sequence: 10, Method: "item/completed", Params: map[string]any{"turnId": "delegated", "item": map[string]any{"type": "agentMessage", "id": "progress", "phase": "commentary", "text": "I’m attaching the worker’s live updates."}}})
-	if !hasEventWith(f.View(), "thread/realtime/transcript/delta", "delta", "Are you still there?") {
+	raw := []byte(`{"type":"turn.done","turn":{"role":"user","transcript":"Are you still there?"}}`)
+	apply(t, f, Action{Action: "realtime-event", AttemptID: "call-a", BindingGeneration: f.View().BindingGeneration, EventSequence: 1, Event: raw})
+	if !hasEventWith(f.View(), "thread/realtime/transcript/done", "text", "Are you still there?") {
 		t.Fatal("input blocked while tool running")
 	}
-	if !hasEventWith(f.View(), "thread/realtime/transcript/delta", "delta", "I’m attaching the worker’s live updates.") {
+	if !hasEvent(f.View(), "item/completed") {
 		t.Fatal("provider progress blocked while tool running")
 	}
 	f.provider.mu.Lock()
@@ -90,7 +92,7 @@ func TestToolResponseRetryDoesNotRepeatTransfer(t *testing.T) {
 	f.provider.mu.Lock()
 	f.provider.toolErr = errors.New("temporary response transport failure")
 	f.provider.mu.Unlock()
-	call := Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": "operator", "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "worker"}}}
+	call := Event{Method: "item/tool/call", Params: map[string]any{"requestId": "transfer", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "voice_transfer", "arguments": map[string]any{"targetId": "worker"}}}
 	f.observe(call)
 	generation := f.View().BindingGeneration
 	f.provider.mu.Lock()
@@ -119,7 +121,7 @@ func TestExpiredToolDeadlineStillReturnsFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	f.service.mu.Lock()
-	f.service.handleDynamicToolCall(ctx, Event{Method: "item/tool/call", Params: map[string]any{"requestId": "expired", "threadId": "operator", "namespace": "agenthail", "tool": "session_list"}})
+	f.service.handleDynamicToolCall(ctx, Event{Method: "item/tool/call", Params: map[string]any{"requestId": "expired", "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}})
 	f.service.unlock()
 	f.provider.mu.Lock()
 	defer f.provider.mu.Unlock()
@@ -133,7 +135,7 @@ func TestToolCallsKeepProviderRequestOrder(t *testing.T) {
 	connectFixture(t, f)
 	var events []Event
 	for _, id := range []string{"first", "second", "third"} {
-		events = append(events, Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": "operator", "namespace": "agenthail", "tool": "session_list"}})
+		events = append(events, Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}})
 	}
 	f.observe(events...)
 	f.provider.mu.Lock()
@@ -154,7 +156,7 @@ func TestCloseReturnsQueuedToolFailures(t *testing.T) {
 	f.service.mu.Lock()
 	f.service.provider = deadlineCheckingToolProvider{f.provider}
 	for _, id := range []string{"first", "second"} {
-		f.service.dispatchDynamicToolCall(Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": "operator", "namespace": "agenthail", "tool": "session_list"}})
+		f.service.dispatchDynamicToolCall(Event{Method: "item/tool/call", Params: map[string]any{"requestId": id, "threadId": f.View().Session.ID, "namespace": "agenthail", "tool": "session_list"}})
 	}
 	done := make(chan struct{})
 	go func() { f.service.Close(); close(done) }()

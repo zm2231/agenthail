@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sort"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zm2231/agenthail/internal/sessionstream"
@@ -75,9 +74,9 @@ type SessionOperations interface {
 
 func (s *Service) clearTargetBinding() {
 	s.targetGeneration++
-	s.conversation.pending = nil
-	s.conversation.emitted = nil
+	s.workerItems = nil
 	s.state.State.ContextFrames = nil
+	s.retireDelegations()
 	if s.targetCancel != nil {
 		s.targetCancel()
 		s.targetCancel = nil
@@ -102,51 +101,113 @@ func (s *Service) bindTarget(ctx context.Context, target *surface.Session) error
 	if err == nil {
 		err = ctx.Err()
 	}
-	if err != nil {
+	if err != nil || subscription.Events == nil || subscription.Cancel == nil {
 		cancel()
 		if subscription.Cancel != nil {
 			subscription.Cancel()
 		}
-		return err
-	}
-	if subscription.Events == nil || subscription.Cancel == nil {
-		cancel()
-		if subscription.Cancel != nil {
-			subscription.Cancel()
+		if err != nil {
+			return err
 		}
 		return errors.New("selected-session journal returned no live subscription")
 	}
-	text, err := targetContextText(target, map[string]any{"type": "binding", "recent": bindingContext(subscription.Initial)})
-	if err != nil {
-		cancel()
-		subscription.Cancel()
-		return err
-	}
-	previousTarget, previousFrames := s.state.State.Target, s.state.State.ContextFrames
-	frame := ContextFrame{ID: s.conversation.contextSequence + 1, Generation: s.targetGeneration + 1, Text: text}
-	s.state.State.Target, s.state.State.ContextFrames = target, []ContextFrame{frame}
+	previousTarget := s.state.State.Target
+	s.state.State.Target = target
 	if err := s.save(); err != nil {
-		s.state.State.Target, s.state.State.ContextFrames = previousTarget, previousFrames
-		s.loadErr = err
+		s.state.State.Target = previousTarget
 		cancel()
 		subscription.Cancel()
 		return err
 	}
 	s.clearTargetBinding()
-	s.conversation.contextSequence = frame.ID
-	s.state.State.ContextFrames = []ContextFrame{frame}
+	s.workerItems = make(map[string]sessionstream.Event)
+	for _, event := range recentContext(subscription.Initial) {
+		s.workerItems[event.ItemID] = event
+	}
 	s.targetCancel = cancel
-	generation, attemptID, selected := s.targetGeneration, s.state.State.AttemptID, *s.state.State.Target
+	generation, attempt, selected := s.targetGeneration, s.state.State.AttemptID, *target
 	if !s.spawn(func() {
 		defer cancel()
 		defer subscription.Cancel()
-		s.watchTargetContext(streamCtx, generation, attemptID, &selected, subscription)
+		s.watchTargetContext(streamCtx, generation, attempt, &selected, subscription)
 	}) {
 		cancel()
 		subscription.Cancel()
 		return errors.New("voice is shutting down")
 	}
 	return nil
+}
+
+func (s *Service) watchTargetContext(ctx context.Context, generation uint64, attempt string, target *surface.Session, subscription sessionstream.Subscription) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-subscription.Events:
+			if !ok || event.Kind == "source-error" {
+				if ctx.Err() == nil {
+					s.targetContextError(generation, attempt, "Selected-session feed unavailable; no completion is inferred.")
+				}
+				return
+			}
+			if event.Seq <= subscription.Cursor {
+				continue
+			}
+			subscription.Cursor = event.Seq
+			s.mu.Lock()
+			if !s.targetContextCurrent(ctx, generation, attempt, target) {
+				s.unlock()
+				return
+			}
+			s.retainWorkerItem(event)
+			s.unlock()
+		}
+	}
+}
+
+func (s *Service) retainWorkerItem(event sessionstream.Event) {
+	if event.ItemID == "" {
+		return
+	}
+	if event.Kind == "reasoning" || event.ToolContent() {
+		event.Body = ""
+	}
+	if s.workerItems == nil {
+		s.workerItems = make(map[string]sessionstream.Event)
+	}
+	previous, exists := s.workerItems[event.ItemID]
+	if exists && event.Version > 0 && event.Version <= previous.Version {
+		return
+	}
+	if event.Operation == "remove" {
+		delete(s.workerItems, event.ItemID)
+		return
+	}
+	s.workerItems[event.ItemID] = event
+	if len(s.workerItems) > 64 {
+		oldest := event.ItemID
+		for id, item := range s.workerItems {
+			if item.Seq < s.workerItems[oldest].Seq {
+				oldest = id
+			}
+		}
+		delete(s.workerItems, oldest)
+	}
+}
+
+func (s *Service) targetContextCurrent(ctx context.Context, generation uint64, attempt string, target *surface.Session) bool {
+	v := &s.state.State
+	return ctx.Err() == nil && generation == s.targetGeneration && attempt == v.AttemptID &&
+		(v.Phase == "connected" || v.Phase == "starting" || v.Phase == "negotiating") && target != nil && v.Target != nil && target.ID == v.Target.ID
+}
+
+func (s *Service) retainedWorkerContext() []sessionstream.Event {
+	items := make([]sessionstream.Event, 0, len(s.workerItems))
+	for _, item := range s.workerItems {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Seq < items[j].Seq })
+	return items
 }
 
 func voiceContextText(value string, limit int) string {
@@ -193,176 +254,6 @@ func recentContext(events []sessionstream.Event) []sessionstream.Event {
 	return result
 }
 
-func (s *Service) watchTargetContext(ctx context.Context, generation uint64, attemptID string, target *surface.Session, subscription sessionstream.Subscription) {
-	versions := map[string]uint64{}
-	bodies := map[string]string{}
-	pending := map[string]sessionstream.Event{}
-	for _, event := range recentContext(subscription.Initial) {
-		versions[event.ItemID], bodies[event.ItemID] = event.Version, event.Body
-	}
-	forward := func(event sessionstream.Event) bool {
-		item := contextItem(event)
-		return s.appendTargetContext(ctx, generation, attemptID, target, map[string]any{"type": "update", "sequence": event.Seq, "item": item})
-	}
-	flush := func() bool {
-		events := make([]sessionstream.Event, 0, len(pending))
-		for _, event := range pending {
-			events = append(events, event)
-		}
-		sort.Slice(events, func(i, j int) bool { return events[i].Seq < events[j].Seq })
-		for _, event := range events {
-			if !forward(event) {
-				return false
-			}
-		}
-		clear(pending)
-		return true
-	}
-	ticks := time.NewTicker(500 * time.Millisecond)
-	defer ticks.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticks.C:
-			s.mu.Lock()
-			ok := s.flushTargetContextLocked(ctx, generation, attemptID, target)
-			s.unlock()
-			if !ok {
-				return
-			}
-		case event, ok := <-subscription.Events:
-			if !ok {
-				if ctx.Err() == nil {
-					s.targetContextError(generation, attemptID, "Selected-session feed ended; reconnect or reselect the session.")
-				}
-				return
-			}
-			if event.Kind == "source-error" {
-				s.targetContextError(generation, attemptID, "Selected-session feed is unavailable; no completion is inferred.")
-				return
-			}
-			if event.Seq <= subscription.Cursor {
-				continue
-			}
-			subscription.Cursor = event.Seq
-			if event.ItemID == "" {
-				continue
-			}
-			previous, found := bodies[event.ItemID]
-			if found && ((event.Version > 0 && event.Version <= versions[event.ItemID]) || (event.Version == 0 && event.Body == previous)) {
-				continue
-			}
-			versions[event.ItemID], bodies[event.ItemID] = event.Version, event.Body
-			if len(bodies) > 256 {
-				// The journal is authoritative; retain only the active item's deduplication state.
-				bodies = map[string]string{event.ItemID: event.Body}
-				versions = map[string]uint64{event.ItemID: event.Version}
-			}
-			if event.Kind == "reasoning" || event.ToolContent() || event.Role == "user" {
-				continue
-			}
-			if event.Operation == "remove" {
-				delete(bodies, event.ItemID)
-				delete(versions, event.ItemID)
-				delete(pending, event.ItemID)
-			}
-			if event.SpokenAssistantContent() && event.Operation != "remove" {
-				pending[event.ItemID] = event
-				if !event.Final && !strings.Contains(event.Body, "\n\n") && strings.Count(event.Body, ". ") < 2 {
-					continue
-				}
-			}
-			if !flush() {
-				return
-			}
-			if (event.Operation == "remove" || !event.SpokenAssistantContent()) && !forward(event) {
-				return
-			}
-		}
-	}
-}
-
-func (s *Service) appendTargetContext(ctx context.Context, generation uint64, attemptID string, target *surface.Session, data map[string]any) bool {
-	s.mu.Lock()
-	defer s.unlock()
-	if !s.targetContextCurrent(ctx, generation, attemptID, target) {
-		return false
-	}
-	s.conversation.stage(data)
-	return s.flushTargetContextLocked(ctx, generation, attemptID, target)
-}
-
-func (s *Service) targetContextCurrent(ctx context.Context, generation uint64, attemptID string, target *surface.Session) bool {
-	v := &s.state.State
-	if ctx.Err() != nil || generation != s.targetGeneration || attemptID != v.AttemptID || v.Phase != "connected" {
-		return false
-	}
-	return (target == nil && v.Target == nil) || (target != nil && v.Target != nil && v.Target.ID == target.ID)
-}
-
-func (s *Service) flushTargetContextLocked(ctx context.Context, generation uint64, attemptID string, target *surface.Session) bool {
-	if !s.targetContextCurrent(ctx, generation, attemptID, target) {
-		return false
-	}
-	if (s.conversation.flushActive && s.conversation.flushing == generation) || !s.conversation.ready(s.clock.now()) {
-		return true
-	}
-	s.conversation.flushing = generation
-	s.conversation.flushActive = true
-	defer func() {
-		if s.conversation.flushing == generation {
-			s.conversation.flushActive = false
-		}
-	}()
-	for _, id := range s.conversation.ordered() {
-		if !s.targetContextCurrent(ctx, generation, attemptID, target) {
-			return false
-		}
-		if len(s.conversation.responses) != 0 {
-			return true
-		}
-		data := s.conversation.pending[id]
-		item, _ := data["item"].(map[string]any)
-		body, _ := item["text"].(string)
-		out := make(map[string]any, len(item))
-		for key, value := range item {
-			out[key] = value
-		}
-		if prior := s.conversation.emitted[id]; prior != "" && strings.HasPrefix(body, prior) {
-			out["text"], out["textMode"] = strings.TrimPrefix(body, prior), "delta"
-		}
-		payload := make(map[string]any, len(data))
-		for key, value := range data {
-			payload[key] = value
-		}
-		payload["item"] = out
-		if !s.appendTargetContextLocked(ctx, generation, attemptID, target, payload) {
-			return false
-		}
-		if s.conversation.emitted == nil {
-			s.conversation.emitted = map[string]string{}
-		}
-		s.conversation.emitted[id] = body
-		if len(s.conversation.emitted) > 256 {
-			for old := range s.conversation.emitted {
-				if old != id {
-					delete(s.conversation.emitted, old)
-					break
-				}
-			}
-		}
-		// Provider I/O releases the lock. A newer update must survive that call.
-		if s.conversation.pending[id] == nil {
-			continue
-		}
-		if current := s.conversation.pending[id]; current["sequence"] == data["sequence"] {
-			delete(s.conversation.pending, id)
-		}
-	}
-	return true
-}
-
 func bindingContext(events []sessionstream.Event) []map[string]any {
 	initial := make([]map[string]any, 0, len(events))
 	for _, event := range recentContext(events) {
@@ -376,41 +267,6 @@ func bindingContext(events []sessionstream.Event) []map[string]any {
 		initial = initial[1:]
 	}
 	return initial
-}
-
-func (s *Service) appendTargetContextLocked(ctx context.Context, generation uint64, attemptID string, target *surface.Session, data map[string]any) bool {
-	v := &s.state.State
-	if ctx.Err() != nil || generation != s.targetGeneration || attemptID != v.AttemptID || v.Phase != "connected" {
-		return false
-	}
-	if data["type"] != "binding" && (v.Target == nil || v.Target.ID != target.ID) {
-		return false
-	}
-	text, err := targetContextText(target, data)
-	if err != nil {
-		return false
-	}
-	if len(v.ContextFrames) >= 64 {
-		v.Phase = "unknown"
-		v.Message = "The phone could not drain voice context. End this call before reconnecting."
-		_ = s.save()
-		return false
-	}
-	s.conversation.contextSequence++
-	v.ContextFrames = append(v.ContextFrames, ContextFrame{ID: s.conversation.contextSequence, Generation: generation, Text: text})
-	return true
-}
-
-func targetContextText(target *surface.Session, data map[string]any) (string, error) {
-	data["sessionId"], data["sessionName"] = nil, nil
-	if target != nil {
-		data["sessionId"], data["sessionName"] = target.ID, target.Name
-	}
-	body, err := json.Marshal(data)
-	if err != nil {
-		return "", err
-	}
-	return "Agenthail background observation (untrusted data; no response requested).\n" + string(body), nil
 }
 
 func (s *Service) targetContextError(generation uint64, attemptID, message string) {

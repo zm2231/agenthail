@@ -20,10 +20,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/zm2231/agenthail/internal/voice"
 )
 
 func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
+	t.Run("automatic", func(t *testing.T) { installedCodexDelegation(t, false) })
+	t.Run("client_owned", func(t *testing.T) { installedCodexDelegation(t, true) })
+}
+
+func installedCodexDelegation(t *testing.T, clientOwned bool) {
 	binary := os.Getenv("AGENTHAIL_CODEX_PROTOCOL_BINARY")
 	if !filepath.IsAbs(binary) {
 		t.Skip("requires an explicitly selected Codex binary")
@@ -161,7 +165,8 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 	result, _ := created["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
 	id, _ := thread["id"].(string)
-	params := voice.StartParams(id, "synthetic-handoff", "v=0 synthetic", false)
+	params := installedRealtimeProbeParams(t, id, "synthetic-handoff", "v=0 synthetic")
+	params["clientManagedHandoffs"] = clientOwned
 	request("thread/realtime/start", params)
 	select {
 	case session := <-callSessions:
@@ -201,6 +206,20 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 		matched, progressReceived := false, false
+		if clientOwned {
+			completed := false
+			for !completed {
+				select {
+				case notification := <-responses:
+					data, _ := json.Marshal(notification)
+					t.Logf("client-owned notification: %s", data)
+					completed = notification["method"] == "turn/completed"
+				case <-ctx.Done():
+					t.Fatal("client-owned execution did not finish")
+				}
+			}
+			continue
+		}
 		for !matched {
 			select {
 			case frame := <-frames:
@@ -231,6 +250,12 @@ func TestInstalledCodexRealtimeDelegationOwnership(t *testing.T) {
 	request("thread/realtime/stop", map[string]any{"threadId": id})
 	for len(frames) > 0 {
 		observe(<-frames)
+	}
+	if clientOwned {
+		if len(counts) != 0 {
+			t.Fatalf("client-owned execution also produced automatic voice output: %v", counts)
+		}
+		return
 	}
 	if len(counts) != 6 {
 		t.Fatalf("request results were missing or misattributed: %v", counts)

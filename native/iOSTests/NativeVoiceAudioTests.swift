@@ -94,6 +94,32 @@ final class NativeVoiceAudioTests: XCTestCase {
         XCTAssertEqual(peer.starts, 0)
     }
 
+    func testTransferReplacesPeerWithoutReplacingSystemCallAndDropsOldEvents() async throws {
+        let system = SystemCallFixture(); let first = VoicePeerFixture(); let second = VoicePeerFixture()
+        var count = 0
+        let bridge = VoiceAudioBridge(system: system, makePeer: { count += 1; return count == 1 ? first : second }, permission: { true })
+        let id = UUID()
+        bridge.configureCall(id: id, name: "Operator")
+        bridge.load(URLRequest(url: URL(string: "https://paired.test")!))
+        var forwarded: [String] = []
+        bridge.onMessage = { type, _ in forwarded.append(type) }
+        let start = Task { try await bridge.start() }
+        for _ in 0..<1000 where system.pending == nil { await Task.yield() }
+        system.activate(); try await start.value
+        let stale = first.onMessage
+        bridge.mute(true)
+        try await bridge.replacePeer()
+        stale?("realtime-event", "old")
+        XCTAssertFalse(forwarded.contains("realtime-event"))
+        XCTAssertEqual(first.ends, 1)
+        XCTAssertEqual(second.starts, 1)
+        XCTAssertEqual(second.activations, [true])
+        XCTAssertEqual(second.mutes, [true])
+        XCTAssertEqual(system.callID, id)
+        XCTAssertEqual(system.ends, 0)
+        bridge.end()
+    }
+
     func testSystemHangupStopsMediaWithoutAViewOrMessageListener() async throws {
         let system = SystemCallFixture(); let peer = VoicePeerFixture()
         let bridge = VoiceAudioBridge(system: system, makePeer: { peer }, permission: { true })

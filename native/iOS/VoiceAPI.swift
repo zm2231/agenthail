@@ -19,6 +19,7 @@ struct VoiceState: Decodable {
     let inputRevision: UInt64?
     let contextFrames: [VoiceContextFrame]?
     let bindingGeneration: UInt64?
+    let rebindRequested: Bool?
 
     var hasCall: Bool { ["starting", "negotiating", "connected", "stopping", "unknown"].contains(phase) }
     var transcripts: [VoiceTranscript] {
@@ -57,7 +58,7 @@ struct VoiceState: Decodable {
             case "thread/realtime/transcript/done":
                 guard let text = event.params.text else { continue }
                 if let index = pending.removeValue(forKey: role) { result[index].text = text; result[index].inputMuted = result[index].inputMuted || event.params.inputMuted == true }
-                else { result.append(VoiceTranscript(id: String(event.sequence), role: role, text: text, inputMuted: event.params.inputMuted == true)) }
+                else { result.append(VoiceTranscript(id: String(event.sequence), role: role, text: text, inputMuted: event.params.inputMuted == true, inputSource: event.params.inputSource)) }
             default: break
             }
         }
@@ -66,9 +67,12 @@ struct VoiceState: Decodable {
 }
 
 struct VoiceContextFrame: Decodable {
+    let kind: String
     let id: UInt64
     let generation: UInt64
     let text: String
+    let delegationId: String
+    let channel: String
 }
 
 struct VoiceEvent: Decodable {
@@ -83,7 +87,8 @@ struct VoiceEvent: Decodable {
         let itemId: String?
         let item: Item?
         let inputMuted: Bool?
-        private enum CodingKeys: String, CodingKey { case delta, role, text, reason, itemId, item, inputMuted }
+        let inputSource: String?
+        private enum CodingKeys: String, CodingKey { case delta, role, text, reason, itemId, item, inputMuted, inputSource }
         init(from decoder: any Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             delta = try values.decodeIfPresent(String.self, forKey: .delta)
@@ -92,6 +97,7 @@ struct VoiceEvent: Decodable {
             reason = try values.decodeIfPresent(String.self, forKey: .reason)
             itemId = try values.decodeIfPresent(String.self, forKey: .itemId)
             inputMuted = try values.decodeIfPresent(Bool.self, forKey: .inputMuted)
+            inputSource = try values.decodeIfPresent(String.self, forKey: .inputSource)
             // itemAdded also carries arbitrary JSON, not a canonical transcript item.
             item = try? values.decode(Item.self, forKey: .item)
         }
@@ -110,7 +116,8 @@ struct VoiceTranscript: Identifiable {
     let role: String
     var text: String
     var inputMuted = false
-    var label: String { role == "user" ? (inputMuted ? "Provider transcript · mic muted" : "You") : "Assistant" }
+    var inputSource: String? = nil
+    var label: String { role == "user" ? (inputSource == "typed" ? "You · typed" : (inputMuted ? "Provider transcript · mic muted" : "You")) : "Assistant" }
 }
 
 struct VoiceAction: Encodable {
@@ -125,6 +132,42 @@ struct VoiceAction: Encodable {
     var inputRevision: UInt64? = nil
     var contextAck: UInt64? = nil
     var contextTransport: String? = nil
+    var bindingGeneration: UInt64? = nil
+    var eventSequence: UInt64? = nil
+    var event: VoiceNativeEvent? = nil
+}
+
+struct VoiceNativeEvent: Encodable {
+    let fields: [String: Any]
+    func encode(to encoder: any Encoder) throws {
+        let data = try JSONSerialization.data(withJSONObject: fields)
+        let value = try JSONDecoder().decode(VoiceWireValue.self, from: data)
+        try value.encode(to: encoder)
+    }
+}
+
+private enum VoiceWireValue: Codable {
+    case object([String: VoiceWireValue]), array([VoiceWireValue]), string(String), number(Double), bool(Bool), null
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let value = try? c.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? c.decode(String.self) { self = .string(value) }
+        else if let value = try? c.decode(Double.self) { self = .number(value) }
+        else if let value = try? c.decode([VoiceWireValue].self) { self = .array(value) }
+        else { self = .object(try c.decode([String: VoiceWireValue].self)) }
+    }
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .object(let value): try c.encode(value)
+        case .array(let value): try c.encode(value)
+        case .string(let value): try c.encode(value)
+        case .number(let value): try c.encode(value)
+        case .bool(let value): try c.encode(value)
+        case .null: try c.encodeNil()
+        }
+    }
 }
 
 @MainActor

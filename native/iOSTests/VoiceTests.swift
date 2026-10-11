@@ -11,16 +11,16 @@ final class VoiceTests: XCTestCase {
         audio.onMessage?("offer", "v=0 fixture")
         for _ in 0..<1000 where !api.actions.contains(where: { $0.action == "start" }) { await Task.yield() }
         let start = try XCTUnwrap(api.actions.first { $0.action == "start" })
-        XCTAssertEqual(start.contextTransport, "native-commentary")
+        XCTAssertEqual(start.contextTransport, "native-delegation")
         let id = try XCTUnwrap(start.attemptId)
         audio.onMessage?("connection", "connected")
         audio.onMessage?("channel", "open")
-        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"\#(id)","bindingGeneration":2,"events":[],"occupied":false,"truncated":false,"contextFrames":[{"id":1,"generation":2,"text":"Quiet context"}]}"#.utf8))
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"\#(id)","bindingGeneration":2,"events":[],"occupied":false,"truncated":false,"contextFrames":[{"kind":"delegation-result","id":1,"generation":2,"text":"Quiet context","delegationId":"request","channel":"speakable"}]}"#.utf8))
         await model.refresh()
         await model.refresh()
         XCTAssertEqual(audio.contexts, ["Quiet context"])
         XCTAssertEqual(api.actions.filter { $0.action == "context-ack" }.last?.contextAck, 1)
-        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"\#(id)","bindingGeneration":1,"events":[],"occupied":false,"truncated":false,"contextFrames":[{"id":2,"generation":1,"text":"Retired worker"}]}"#.utf8))
+        api.snapshot = try JSONDecoder().decode(VoiceState.self, from: Data(#"{"protocol":1,"phase":"connected","attemptId":"\#(id)","bindingGeneration":1,"events":[],"occupied":false,"truncated":false,"contextFrames":[{"kind":"delegation-result","id":2,"generation":1,"text":"Retired worker","delegationId":"retired","channel":"speakable"}]}"#.utf8))
         await model.refresh()
         XCTAssertEqual(audio.contexts, ["Quiet context"])
         model.close()
@@ -525,6 +525,7 @@ private final class VoiceFixtureAudio: VoiceAudioClient {
     var holdStart = false
     var pending: CheckedContinuation<Void, Never>?
     var contexts: [String] = []
+    var canSubmitResult: Bool { true }
     func load(_ request: URLRequest) {}
     func start() async throws {
         starts += 1
@@ -534,7 +535,8 @@ private final class VoiceFixtureAudio: VoiceAudioClient {
     func end() { ends += 1 }
     func answer(_ sdp: String) async throws {}
     func mute(_ muted: Bool) {}
-    func appendContext(_ text: String) throws { contexts.append(text) }
+    func sendText(_ text: String) throws {}
+    func appendResult(_ frame: VoiceContextFrame) throws { contexts.append(frame.text) }
     func close() {}
 }
 
