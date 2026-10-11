@@ -832,9 +832,8 @@ func TestFullPeerPoolAdmitsSendersAndAdvertisingNeverExtendsLife(t *testing.T) {
 
 	c.Status = surface.StatusBusy
 	f.manager.Advertise(f.ctx, []surface.Session{a, b, c})
+	f.expectWorkers("a", "c", "s2")
 	f.manager.RetireInactive(now, 24*time.Hour)
-	f.expectWorkers("a", "s2")
-	f.manager.Advertise(f.ctx, []surface.Session{a, b, c})
 	f.expectWorkers("a", "c", "s2")
 	f.manager.RetireInactive(now.Add(25*time.Hour), 24*time.Hour)
 	f.expectWorkers("a", "c")
@@ -842,4 +841,24 @@ func TestFullPeerPoolAdmitsSendersAndAdvertisingNeverExtendsLife(t *testing.T) {
 	f.manager.Advertise(f.ctx, []surface.Session{c})
 	f.manager.RetireInactive(now, 24*time.Hour)
 	f.expectWorkers("c")
+}
+
+func TestAdvertisedSessionDisplacesSenderPeersInAFullPool(t *testing.T) {
+	f := newPeerFixture(t, "a", "s1", "s2", "s3")
+	f.manager.peerLimit, f.manager.reserve = 3, 1
+	for _, sender := range []string{"s1", "s2", "s3"} {
+		if err := f.manager.Ensure(f.ctx, sender); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.expectWorkers("s1", "s2", "s3")
+	busy := surface.Session{ID: "a", Surface: surface.KindNotion, Status: surface.StatusBusy, LastActive: time.Now()}
+	if failures := f.manager.Advertise(f.ctx, []surface.Session{busy}); len(failures) != 0 {
+		t.Fatalf("advertise failures=%v", failures)
+	}
+	f.expectWorkers("a", "s2", "s3")
+	if err := f.manager.Ensure(f.ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	f.expectWorkers("a", "s1", "s3")
 }

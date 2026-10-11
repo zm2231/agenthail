@@ -360,11 +360,13 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 		delete(m.children, id)
 	}
 	if len(m.children) >= m.peerLimit {
-		if !send {
-			return errPeerPoolFull
-		}
-		victim := m.evictionCandidateLocked()
+		// An advertised session may only displace a peer outside the
+		// advertised set; a sender may displace any peer but the operator.
+		victim := m.evictionCandidateLocked(send)
 		if victim == "" {
+			if !send {
+				return errPeerPoolFull
+			}
 			return fmt.Errorf("Claude peer limit (%d) reached by the operator peer alone", m.peerLimit)
 		}
 		m.retireChildLocked(victim)
@@ -661,10 +663,10 @@ func (m *Manager) RetireInactive(now time.Time, maxIdle time.Duration) {
 	}
 }
 
-// evictionCandidateLocked picks the peer a new sender replaces: the least
-// recently used peer outside the advertised set, else the lowest ranked
-// advertised peer. The operator peer is never replaced.
-func (m *Manager) evictionCandidateLocked() string {
+// evictionCandidateLocked picks the peer a new peer replaces: the least
+// recently used peer outside the advertised set, else, when advertised peers
+// may be replaced, the lowest ranked one. The operator peer is never replaced.
+func (m *Manager) evictionCandidateLocked(replaceAdvertised bool) string {
 	victim, victimRank := "", -1
 	var victimUsed time.Time
 	for id, entry := range m.children {
@@ -672,6 +674,9 @@ func (m *Manager) evictionCandidateLocked() string {
 			continue
 		}
 		rank, advertised := m.advertised[id]
+		if advertised && !replaceAdvertised {
+			continue
+		}
 		if !advertised {
 			rank = len(m.children) + 1
 		}
