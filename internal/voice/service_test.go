@@ -632,7 +632,7 @@ func TestOperatorSourceLifecycleTracksOnlyActiveTransitions(t *testing.T) {
 	}
 }
 
-func TestTextAuditReceiptPreventsDuplicateWithoutSecondTransport(t *testing.T) {
+func TestTypedRequestFailureDoesNotRepeatExecutorSubmission(t *testing.T) {
 	f, p := fixture(t)
 	connectFixture(t, f)
 	p.failRequests(errors.New("response lost"))
@@ -644,8 +644,9 @@ func TestTextAuditReceiptPreventsDuplicateWithoutSecondTransport(t *testing.T) {
 	if _, err = f.Apply(a); err == nil {
 		t.Fatal("duplicate text accepted")
 	}
-	if requests, _, _ := p.snapshot(); len(requests) != 1 {
-		t.Fatalf("unknown text was replayed: %v", requests)
+	waitFor(t, "failed typed result", func() bool { return len(f.View().ContextFrames) == 1 })
+	if requests, _, _ := p.snapshot(); len(requests) != 2 || requests[1] != "turn/start" {
+		t.Fatalf("typed request must submit exactly one executor turn: %v", requests)
 	}
 }
 
