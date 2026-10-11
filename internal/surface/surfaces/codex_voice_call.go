@@ -3,13 +3,11 @@ package surfaces
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -19,39 +17,16 @@ import (
 // Call setup uses the Codex login manager, but does not attach a coding thread
 // as a realtime sideband. Delegations arrive only through the phone channel.
 func (v *CodexVoice) StartCall(ctx context.Context, call voice.CallRequest) (string, error) {
-	client, err := v.Codex.openDesktop(ctx)
+	credential, err := resolveVoiceCredential(ctx, codexHome(), time.Now(), v.Codex.openDesktop)
 	if err != nil {
-		return "", err
+		return "", &voice.CallNotStartedError{Cause: err}
 	}
-	defer client.Close()
-	response, err := client.Request(ctx, "getAuthStatus", map[string]any{"includeToken": true, "refreshToken": true}, 10*time.Second)
-	if err != nil {
-		return "", errors.New("Codex voice login is unavailable; renew the Codex login")
-	}
-	result, _ := response["result"].(map[string]any)
-	token, _ := result["authToken"].(string)
-	account, err := voiceAccount(token)
-	if err != nil {
-		return "", err
-	}
-	return setupVoiceCall(ctx, http.DefaultClient, "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas", token, account, call)
+	return setupVoiceCall(ctx, http.DefaultClient, "https://chatgpt.com/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas", credential.token, credential.account, call)
 }
 
 func voiceAccount(token string) (string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", errors.New("voice requires a ChatGPT Codex login")
-	}
-	body, err := base64.RawURLEncoding.DecodeString(parts[1])
-	var claims struct {
-		Auth struct {
-			Account string `json:"chatgpt_account_id"`
-		} `json:"https://api.openai.com/auth"`
-	}
-	if err != nil || json.Unmarshal(body, &claims) != nil || claims.Auth.Account == "" {
-		return "", errors.New("Codex voice account is unavailable; renew the Codex login")
-	}
-	return claims.Auth.Account, nil
+	c, err := parseVoiceCredential(token)
+	return c.account, err
 }
 
 func setupVoiceCall(ctx context.Context, client *http.Client, endpoint, token, account string, call voice.CallRequest) (string, error) {
@@ -84,7 +59,11 @@ func setupVoiceCall(ctx context.Context, client *http.Client, endpoint, token, a
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("voice call setup rejected (HTTP %d)", response.StatusCode)
+		err := fmt.Errorf("voice call setup rejected (HTTP %d)", response.StatusCode)
+		if response.StatusCode >= 400 && response.StatusCode < 500 {
+			return "", &voice.CallNotStartedError{Cause: err}
+		}
+		return "", err
 	}
 	answer, err := io.ReadAll(io.LimitReader(response.Body, (96<<10)+1))
 	if err != nil || len(answer) > 96<<10 || !bytes.HasPrefix(answer, []byte("v=0")) {

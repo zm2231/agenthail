@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,6 +70,12 @@ func TestVoiceCallRejectsRedirectsAndBoundsProviderBody(t *testing.T) {
 			if err == nil || strings.Contains(err.Error(), "fixture-secret") || hits != 1 {
 				t.Fatalf("unsafe setup failure: hits=%d error=%v", hits, err)
 			}
+			if mode == "rejected" {
+				var notStarted *voice.CallNotStartedError
+				if !errors.As(err, &notStarted) {
+					t.Fatal("definitive provider rejection reported as ambiguous startup")
+				}
+			}
 		})
 	}
 }
@@ -90,19 +97,9 @@ func TestLiveCodexVoiceLoginCapability(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	client, err := NewCodex("").openDesktop(ctx)
-	if err != nil {
-		t.Fatal("desktop login connection unavailable")
-	}
-	defer client.Close()
-	response, err := client.Request(ctx, "getAuthStatus", map[string]any{"includeToken": true, "refreshToken": false}, 10*time.Second)
-	if err != nil {
-		t.Fatal("desktop does not expose the required login capability")
-	}
-	result, _ := response["result"].(map[string]any)
-	token, _ := result["authToken"].(string)
-	if _, err = voiceAccount(token); err != nil {
-		t.Fatal("desktop login does not provide a usable voice account")
+	credential, err := resolveVoiceCredential(ctx, codexHome(), time.Now(), NewCodex("").openDesktop)
+	if err != nil || credential.token == "" || credential.account == "" {
+		t.Fatal("existing Codex login could not supply a usable voice credential")
 	}
 	t.Log("Codex login capability verified; credentials not printed, no model call started")
 }

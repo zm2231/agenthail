@@ -414,6 +414,17 @@ func connectFixture(t *testing.T, f *voiceFixture) {
 	apply(t, f, Action{Action: "connected", AttemptID: "call-a", BindingGeneration: f.View().BindingGeneration})
 }
 
+func TestCredentialFailureDoesNotClaimUnknownCallStartup(t *testing.T) {
+	f := newFixture(t, fixtureOptions{})
+	apply(t, f, Action{Action: "prepare"})
+	f.provider.failRequests(&CallNotStartedError{Cause: errors.New("Existing Codex voice credential unavailable")})
+	_, err := f.Apply(Action{Action: "start", AttemptID: "call-a", SDP: "v=0 offer"})
+	v := f.View()
+	if err == nil || v.Phase != "ended" || strings.Contains(v.Message, "unknown") || v.SDP != "" {
+		t.Fatal("credential failure reported ambiguous audio startup")
+	}
+}
+
 func hangUp(t *testing.T, f *voiceFixture) {
 	apply(t, f, Action{Action: "stop", AttemptID: "call-a"})
 }

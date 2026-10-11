@@ -82,6 +82,11 @@ type CallRequest struct {
 	InitialItems []map[string]any
 }
 
+type CallNotStartedError struct{ Cause error }
+
+func (e *CallNotStartedError) Error() string { return e.Cause.Error() }
+func (e *CallNotStartedError) Unwrap() error { return e.Cause }
+
 // DynamicToolResponder completes a caller-owned Agenthail tool invoked by the
 // persistent Codex operator. It is intentionally separate from Provider so
 // other voice transports remain usable without exposing a tool callback.
@@ -563,8 +568,13 @@ func (s *Service) apply(ctx context.Context, owner string, a Action) error {
 		}
 		err = s.startConversation(ctx, a.SDP, false)
 		if err != nil {
-			v.Phase = "unknown"
-			v.Message = "Call startup outcome is unknown: " + err.Error()
+			var notStarted *CallNotStartedError
+			if errors.As(err, &notStarted) {
+				v.Phase, v.Message = "ended", err.Error()
+			} else {
+				v.Phase = "unknown"
+				v.Message = "Call startup outcome is unknown: " + err.Error()
+			}
 		}
 		s.observe()
 		if saveErr := s.save(); saveErr != nil {

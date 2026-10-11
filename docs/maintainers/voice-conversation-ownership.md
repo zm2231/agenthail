@@ -2,6 +2,8 @@
 
 Agenthail owns the voice delegation lifecycle. The phone connects directly to a Codex-authenticated realtime call with `delegation.type: client`. The app-server is the coding executor and login manager, not a second realtime sideband. The embedded realtime system prompt becomes the direct call's `session.instructions`.
 
+Voice credentials come from the existing ChatGPT OAuth login in `CODEX_HOME` (default `~/.codex`). An unexpired `auth.json` access token is used without a forced refresh or a dependency on Desktop exporting it. Codex owns renewal and non-file credential retrieval. Agenthail validates account consistency and expiry, never rotates or copies stored tokens, and never logs credentials. A credential-acquisition failure happens before the audio request and is reported as a definite failed startup, not an unknown outcome or a claim that the user is logged out.
+
 ## Inputs and outputs
 
 The ordered native data channel forwards `delegation.created`, transcript lifecycle and `turn.done` through the authenticated voice endpoint. Each envelope carries a call attempt, binding generation and contiguous sequence. Duplicates are ignored; gaps fail closed rather than replaying uncertain actions.
