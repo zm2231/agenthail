@@ -284,9 +284,10 @@ func TestCodexLiveContinuationRejectsReplacedCheckpointBeforePublication(t *test
 }
 
 type checkpointVoicePeer struct {
-	mu      sync.Mutex
-	events  []voice.Event
-	results map[string]struct {
+	mu       sync.Mutex
+	targetID string
+	events   []voice.Event
+	results  map[string]struct {
 		success bool
 		text    string
 	}
@@ -302,8 +303,13 @@ func (p *checkpointVoicePeer) Cursor(context.Context) (voice.Cursor, error) {
 func (p *checkpointVoicePeer) StartCall(context.Context, voice.CallRequest) (string, error) {
 	return "v=0\nprobe", nil
 }
-func (p *checkpointVoicePeer) Execute(context.Context, *surface.Session, string) (string, error) {
-	return "", fmt.Errorf("probe cannot execute coding work")
+func (p *checkpointVoicePeer) Execute(_ context.Context, session *surface.Session, _ string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, tool := range []string{"session_read", "voice_transfer"} {
+		p.events = append(p.events, voice.Event{Method: "item/tool/call", Params: map[string]any{"threadId": session.ID, "turnId": "checkpoint-owned-turn", "requestId": tool, "namespace": "agenthail", "tool": tool, "arguments": map[string]any{"targetId": p.targetID}}})
+	}
+	return "checkpoint-owned-turn", nil
 }
 func (p *checkpointVoicePeer) Poll(_ context.Context, cursor voice.Cursor, _ string) (voice.Batch, error) {
 	p.mu.Lock()
@@ -341,7 +347,7 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	peer := &checkpointVoicePeer{results: map[string]struct {
+	peer := &checkpointVoicePeer{targetID: target.ID, results: map[string]struct {
 		success bool
 		text    string
 	}{}}
@@ -362,11 +368,9 @@ func verifyLiveCheckpointVoiceTools(t *testing.T, d *Daemon, target surface.Sess
 	if _, err := s.Apply(ctx, "probe", voice.Action{Action: "connected", AttemptID: "checkpoint-probe"}); err != nil {
 		t.Fatal(err)
 	}
-	peer.mu.Lock()
-	for _, tool := range []string{"session_read", "voice_transfer"} {
-		peer.events = append(peer.events, voice.Event{Method: "item/tool/call", Params: map[string]any{"threadId": "checkpoint-probe-operator", "requestId": tool, "namespace": "agenthail", "tool": tool, "arguments": map[string]any{"targetId": target.ID}}})
+	if _, err := s.Apply(ctx, "probe", voice.Action{Action: "text", AttemptID: "checkpoint-probe", MessageID: "checkpoint-request", Text: "Read the selected target, then prepare its transfer"}); err != nil {
+		t.Fatal(err)
 	}
-	peer.mu.Unlock()
 	for {
 		state := s.View("probe")
 		peer.mu.Lock()
