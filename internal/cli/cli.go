@@ -174,7 +174,7 @@ Channels:
   channel send <name> "msg"     Broadcast to all members (--from <name>)
 
 Automatic handoffs:
-  relay add <from> <to> [regex] [--once]  Send-to-on-completion rule
+  relay add <from> <to> [regex] [--once] [--when turn_finished|goal_completed]
   relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
@@ -462,7 +462,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -511,6 +511,7 @@ func validateCommandFlags(command string, args []string) error {
 		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
+		spec.values = map[string]bool{"--when": true}
 		spec.bools = map[string]bool{"--once": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "list" {

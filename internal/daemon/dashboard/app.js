@@ -674,7 +674,7 @@ function renderOperations() {
     relays
       .map(
         (relay) =>
-          `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(relay.from)} <span class="route-arrow">→</span> ${escape(relay.to)}</div><div class="operation-detail">Matches /${escape(relay.pattern)}/ · ${relay.once ? "once" : "persistent"} · ${relay.active ? "active" : "complete"} · fired ${relay.fireCount || 0}${relay.lastFiredAt ? ` · last ${escape(relay.lastFiredAt)}` : ""}</div></div><button class="button quiet" data-network-action="relay-remove" data-relay-id="${relay.id}" type="button">Remove</button></article>`,
+          `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(relay.from)} <span class="route-arrow">→</span> ${escape(relay.to)}</div><div class="operation-detail">${relay.handoff === "goal_completed" ? "Goal completed" : "Turn finished"} · Matches /${escape(relay.pattern)}/ · ${relay.once ? "once" : "persistent"} · ${relay.active ? "active" : "complete"} · queued ${relay.fireCount || 0} · pending ${relay.pendingCount || 0}${relay.lastError ? ` · ${escape(relay.lastError)}` : ""}${relay.lastFiredAt ? ` · last ${escape(relay.lastFiredAt)}` : ""}</div></div><button class="button quiet" data-network-action="relay-remove" data-relay-id="${relay.id}" type="button">Remove</button></article>`,
       )
       .join("") || '<div class="empty-card">No automatic handoffs yet.</div>';
   renderAudit();

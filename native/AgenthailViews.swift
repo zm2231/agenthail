@@ -511,6 +511,7 @@ struct OperationsView: View {
     @State private var relayFrom = ""
     @State private var relayTo = ""
     @State private var relayPattern = ".*"
+    @State private var relayHandoff = "turn_finished"
     @State private var channelName = ""
     @State private var selectedChannel = ""
     @State private var channelTarget = ""
@@ -604,11 +605,15 @@ struct OperationsView: View {
                             Text("Choose a destination").tag("")
                             ForEach(writableSessions) { session in Text(session.displayName).tag(session.id) }
                         }
+                        Picker("Handoff when", selection: $relayHandoff) {
+                            Text("Turn finished").tag("turn_finished")
+                            Text("Goal completed").tag("goal_completed")
+                        }
                         TextField("Completion pattern", text: $relayPattern)
                         HStack {
                             Spacer()
                             Button("Add handoff") {
-                                model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern)
+                                model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, handoff: relayHandoff)
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(agenthailOrange)
@@ -623,6 +628,8 @@ struct OperationsView: View {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text("\(relay.from) → \(relay.to)").fontWeight(.semibold)
                                         Text(relay.pattern).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                                        Text("\(relay.handoff == "goal_completed" ? "Goal completed" : "Turn finished") · \(relay.pendingCount) pending").font(.caption)
+                                        if let error = relay.lastError, !error.isEmpty { Text(error).font(.caption).foregroundStyle(.secondary) }
                                     }
                                     Spacer(minLength: 12)
                                     Button("Remove") { model.performOperation(action: "relay-remove", relayID: relay.id) }

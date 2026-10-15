@@ -28,7 +28,7 @@ func TestV10JournalStateWithoutSeedColumnsMigratesToSchema12(t *testing.T) {
 	}
 	defer second.Close()
 	var version int
-	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 12 {
+	if err := second.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
 		t.Fatalf("schema version=%d err=%v", version, err)
 	}
 	status, seq, identity, err := second.SessionJournalSeedCheckpoint("session")

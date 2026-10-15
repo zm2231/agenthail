@@ -217,7 +217,7 @@ func TestQueueExpiryNotifiesBoundDeliveryIntentOnce(t *testing.T) {
 	}
 }
 
-func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplayAndReopen(t *testing.T) {
+func TestQueuedRelayExpiryRecordsOneProblemWithoutSourceNoticeAcrossReplayAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	first, err := Open(path)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 		t.Fatal(err)
 	}
 	intent, err := first.DeliveryIntent(deliveryID)
-	if err != nil || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || intent.NotificationQueueID == 0 {
+	if err != nil || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || !intent.Relayed || intent.NotificationQueueID != 0 {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 	window, err := first.CatalogEventsAfter(0, 10)
@@ -273,7 +273,7 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 	if _, err := second.ExpireMessages(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if count := second.QueueCount("sender"); count != 1 {
+	if count := second.QueueCount("sender"); count != 0 {
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err = second.CatalogEventsAfter(0, 10)

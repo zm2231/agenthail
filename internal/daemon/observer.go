@@ -69,6 +69,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			continue
 		}
 		if relayTargetInactive(session) {
+			d.syncRelays(ctx, adapter, session)
 			continue
 		}
 		if queueCounts[session.ID] == 0 && !d.observationAllowed(session.ID) {
@@ -115,6 +116,9 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 	}
 	removed := 0
 	for _, route := range routes {
+		if route.Active {
+			continue
+		}
 		stale := ""
 		for _, sessionID := range []string{route.FromSession, route.ToSession} {
 			session, sessionErr := d.Registry.Session(sessionID)
@@ -141,6 +145,7 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 }
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.syncRelays(ctx, adapter, session)
 	source, transport := session.Source, session.Transport
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	observation, err := adapter.Observe(operationCtx, session)
@@ -194,13 +199,6 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, CompletionID: observation.CompletedTurnID, Result: "provider completion correlated to delivery intent"})
 				}
 			}
-		}
-		text := ""
-		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			text = observation.Reply.Text
-		}
-		if text != "" {
-			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
 		terminalCompletion := observation.ActiveTurnID == ""
 		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done {

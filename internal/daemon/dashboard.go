@@ -169,14 +169,18 @@ type dashboardChannelMember struct {
 }
 
 type dashboardRelay struct {
-	ID          int64  `json:"id"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Pattern     string `json:"pattern"`
-	Once        bool   `json:"once"`
-	Active      bool   `json:"active"`
-	FireCount   int64  `json:"fireCount"`
-	LastFiredAt string `json:"lastFiredAt,omitempty"`
+	Handoff      string `json:"handoff"`
+	EventCursor  int64  `json:"eventCursor"`
+	PendingCount int64  `json:"pendingCount"`
+	LastError    string `json:"lastError,omitempty"`
+	ID           int64  `json:"id"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Pattern      string `json:"pattern"`
+	Once         bool   `json:"once"`
+	Active       bool   `json:"active"`
+	FireCount    int64  `json:"fireCount"`
+	LastFiredAt  string `json:"lastFiredAt,omitempty"`
 }
 
 type dashboardHistory struct {
@@ -775,7 +779,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.Channels = append(state.Channels, dashboardChannel{Name: channel.Name, Members: members, MemberDetails: memberDetails})
 	}
 	for _, route := range routes {
-		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern, Once: route.Once, Active: route.Active, FireCount: route.FireCount, LastFiredAt: route.LastFiredAt})
+		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern, Handoff: route.Handoff, EventCursor: route.EventCursor, PendingCount: route.PendingCount, LastError: route.LastError, Once: route.Once, Active: route.Active, FireCount: route.FireCount, LastFiredAt: route.LastFiredAt})
 	}
 	for _, entry := range history {
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
@@ -1026,6 +1030,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		FromID          string                     `json:"fromId"`
 		ToID            string                     `json:"toId"`
 		Pattern         string                     `json:"pattern"`
+		Handoff         string                     `json:"handoff"`
 		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
 		DeliveryID      int64                      `json:"deliveryId"`
@@ -1433,7 +1438,21 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if pattern == "" {
 			pattern = ".*"
 		}
-		if _, err := d.Registry.AddRouteWithOptions(fromID, toID, pattern, request.Once); err != nil {
+		fromSession, err := d.Registry.Session(fromID)
+		if err != nil {
+			http.Error(w, "source session not found", http.StatusNotFound)
+			return
+		}
+		fromAdapter := d.surfaceForKind(fromSession.Surface)
+		if fromAdapter == nil {
+			http.Error(w, "source surface is not configured", http.StatusConflict)
+			return
+		}
+		if err := d.Registry.PrepareRelaySource(r.Context(), fromAdapter, fromSession, request.Handoff); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, err := d.Registry.AddRelayRoute(fromID, toID, pattern, request.Once, request.Handoff); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

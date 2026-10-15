@@ -29,6 +29,10 @@ struct DashboardSnapshotTest {
         let visibleChange = snapshot(updatedAt: "2026-07-24T00:00:30Z", eventCursor: 13, hostEpoch: "host-a", catalogSeq: 13, totalSessions: 5)
         precondition(current.hasSamePresentation(as: transportOnlyChange))
         precondition(!current.hasSamePresentation(as: visibleChange))
+        let relayJSON = #"{"id":1,"from":"source","to":"target","pattern":"READY","handoff":"goal_completed","pendingCount":3,"lastError":"waiting for explicit goal completion"}"#.data(using: .utf8)!
+        let relay = try! JSONDecoder().decode(RelayState.self, from: relayJSON)
+        precondition(relay.handoff == "goal_completed" && relay.pendingCount == 3)
+        precondition(relay.lastError == "waiting for explicit goal completion")
         print("dashboard snapshot tests passed")
     }
 }

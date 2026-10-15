@@ -244,11 +244,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, relayID: Int64? = nil) {
+    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, handoff: String? = nil, relayID: Int64? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, relayID: relayID)
+                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, handoff: handoff, relayID: relayID)
                 operationError = nil
                 _ = await refresh(fresh: true)
                 await loadAudit(reset: true)

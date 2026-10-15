@@ -10,6 +10,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -250,10 +251,10 @@ func (a *App) cmdRelay(args []string) error {
 	case "add":
 		positional := stripFlags(args)
 		if len(positional) < 3 || len(positional) > 4 {
-			return fmt.Errorf("usage: agenthail relay add <from-target> <to-target> [regex] [--once]")
+			return fmt.Errorf("usage: agenthail relay add <from-target> <to-target> [regex] [--once] [--when turn_finished|goal_completed]")
 		}
 		ctx := context.Background()
-		fromSess, _, err := a.resolveTarget(ctx, positional[1])
+		fromSess, fromAdapter, err := a.resolveTarget(ctx, positional[1])
 		if err != nil {
 			return fmt.Errorf("from-target: %w", err)
 		}
@@ -269,7 +270,14 @@ func (a *App) cmdRelay(args []string) error {
 			pattern = positional[3]
 		}
 		once := hasFlag(args, "--once")
-		id, err := a.Registry.AddRouteWithOptions(fromSess.ID, toSess.ID, pattern, once)
+		handoff := flagVal(args, "--when")
+		if handoff == "" {
+			handoff = registry.HandoffTurnFinished
+		}
+		if err := a.Registry.PrepareRelaySource(ctx, fromAdapter, fromSess, handoff); err != nil {
+			return fmt.Errorf("relay source: %w", err)
+		}
+		id, err := a.Registry.AddRelayRoute(fromSess.ID, toSess.ID, pattern, once, handoff)
 		if err != nil {
 			return err
 		}
@@ -280,8 +288,8 @@ func (a *App) cmdRelay(args []string) error {
 		if once {
 			mode = "once"
 		}
-		fmt.Printf("relay #%d: %s -> %s (pattern /%s/, %s)\n",
-			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern, mode)
+		fmt.Printf("relay #%d: %s -> %s (pattern /%s/, %s, %s)\n",
+			id, a.resolveDisplay(fromSess.ID), a.resolveDisplay(toSess.ID), pattern, mode, handoff)
 		return nil
 	case "list":
 		if len(stripFlags(args)) != 1 {
@@ -314,8 +322,8 @@ func (a *App) cmdRelay(args []string) error {
 			if !r.Active {
 				state = "complete"
 			}
-			fmt.Printf("#%-3d %s -> %s /%s/ %s %s fires=%d last-fired=%s\n",
-				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired)
+			fmt.Printf("#%-3d %s -> %s /%s/ %s %s fires=%d last-fired=%s when=%s pending=%d error=%q\n",
+				r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired, r.Handoff, r.PendingCount, r.LastError)
 		}
 		return nil
 	case "rm", "remove", "delete":

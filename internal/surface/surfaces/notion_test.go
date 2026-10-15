@@ -134,6 +134,9 @@ func TestNotionRepeatSendsToExistingThreadReturnPerTurnKeys(t *testing.T) {
 		}
 		records := map[string]any{}
 		for _, id := range messages {
+			if strings.HasPrefix(id, "user-") {
+				records[id] = map[string]any{"value": map[string]any{"value": map[string]any{"step": map[string]any{"type": "user", "value": [][]string{{"question"}}}}}}
+			}
 			if strings.HasPrefix(id, "reply-") {
 				records[id] = map[string]any{"value": map[string]any{"value": map[string]any{"step": map[string]any{"type": "agent-inference", "value": []map[string]string{{"type": "text", "content": "answer " + id}}}}}}
 			}
