@@ -246,7 +246,7 @@ AgentHail has four distinct completion behaviors:
 
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
-3. A relay is an agent-to-agent subscription to completed turns. Closed Claude Code targets do not receive work, rebind when the same conversation resumes, and remove the rule after one hour without a resume.
+3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. Active routes remain until removed; queued messages retain the one-hour expiry.
 4. Daemon notifications alert the human through the AgentHail Mac app and,
    when paired, the optional iPhone app.
 
@@ -256,15 +256,16 @@ Persistent agent-to-agent subscription:
 agenthail relay add @researcher @builder
 agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
 agenthail relay add @researcher @builder 'READY' --once
+agenthail relay add @researcher @builder --when goal_completed
 agenthail relay list [--json]
 agenthail relay rm <id>
 ```
 
 The first target is the completion source. The second receives each matching
 completed reply. The optional filter is a regular expression. Relays reject
-self-routes and cycles, remember delivered completion IDs across restarts, and
+self-routes and cycles, remember queued completion IDs across restarts, and
 require the daemon. `relay list` derives per-route firing evidence from that
-delivery ledger, reporting each rule's fire count and last-fired timestamp in
+enqueue ledger, reporting each rule's fire count and last-fired timestamp in
 both text and `--json` output. `--once` deactivates the rule after its first
 matching completion while retaining that firing evidence. A relay that cannot be
 delivered or expires is reported as a delivery problem to the human; the source
@@ -409,3 +410,9 @@ Sending, queueing, steering, interruption, compaction, model or goal changes,
 aliases, channels, relays, notification changes, dashboard changes, and daemon
 lifecycle operations mutate local state or active sessions. Run them only when
 the user's request calls for them, then verify the resulting status or receipt.
+
+Relay completion capture and per-route consumption use durable SQLite cursors.
+Check `pendingCount`, `eventCursor`, and `lastError` in `relay list --json` when a handoff waits.
+Capture/enqueue failures retain retry state. Delivery failure/expiry records a human-visible
+problem without sending a failure notice into the relay source. Do not equate a queued
+receipt with destination consumption. See `docs/maintainers/durable-relays.md` for recovery.

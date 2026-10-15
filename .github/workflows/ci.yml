@@ -57,6 +57,7 @@ jobs:
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-timeline.mjs
           node scripts/test-shared-conversation.mjs
+          node scripts/test-dashboard-relays.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Race tests

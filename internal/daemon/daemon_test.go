@@ -424,6 +424,9 @@ func TestAcceptedDeliveryMakesFirstCompletionObservable(t *testing.T) {
 	if _, err := r.AddRoute("from", "to", ".*"); err != nil {
 		t.Fatal(err)
 	}
+	if err := r.PrepareRelaySource(context.Background(), fake, &from, registry.HandoffTurnFinished); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.MarkDeliveryStarted(from.ID, "request-1", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -709,7 +712,7 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	}
 }
 
-func TestRelayDoesNotQueueForClosedClaudeSession(t *testing.T) {
+func TestRelayQueuesDurablyForClosedClaudeSession(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647}
 	if err := r.RegisterSession(closed); err != nil {
@@ -719,11 +722,11 @@ func TestRelayDoesNotQueueForClosedClaudeSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.fireRelays(&from, "done", 0, "finished")
-	if count := r.QueueCount(closed.ID); count != 0 {
+	if count := r.QueueCount(closed.ID); count != 1 {
 		t.Fatalf("closed target queued=%d", count)
 	}
 	history, err := r.ListHistory(10, closed.ID)
-	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" || !strings.Contains(history[0].Error, "no longer active") {
+	if err != nil || len(history) == 0 || history[0].Kind != "relay" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
 }
@@ -747,7 +750,7 @@ func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
 	}
 }
 
-func TestInactiveClaudeRouteIsRemovedAfterGracePeriod(t *testing.T) {
+func TestActiveClaudeRouteSurvivesOfflineGracePeriod(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
 	offlineCodex := surface.Session{ID: "offline-codex", Surface: surface.KindCodex, Status: surface.StatusOffline}
@@ -773,14 +776,14 @@ func TestInactiveClaudeRouteIsRemovedAfterGracePeriod(t *testing.T) {
 	d.Surfaces = append(d.Surfaces, &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}})
 	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour), true)
 	routes, err := r.ListRoutes()
-	if err != nil || len(routes) != 2 || routes[0].ToSession == closed.ID || routes[1].ToSession == closed.ID {
+	if err != nil || len(routes) != 3 || routes[0].ToSession != closed.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
 }
 
 func TestRelayStopsAtHopLimit(t *testing.T) {
 	daemon, r, fake, _, _ := daemonFixture(t)
-	for index := 0; index <= maxRelayHops; index++ {
+	for index := 0; index <= maxRelayHops+1; index++ {
 		id := fmt.Sprintf("hop-%d", index)
 		session := surface.Session{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 		if err := r.RegisterSession(session); err != nil {
@@ -788,7 +791,7 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 		}
 		fake.sessions[id] = session
 	}
-	for index := 0; index < maxRelayHops; index++ {
+	for index := 0; index <= maxRelayHops; index++ {
 		if _, err := r.AddRoute(fmt.Sprintf("hop-%d", index), fmt.Sprintf("hop-%d", index+1), ".*"); err != nil {
 			t.Fatal(err)
 		}
@@ -799,23 +802,30 @@ func TestRelayStopsAtHopLimit(t *testing.T) {
 	daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions["hop-0"]))
 	for index := 1; index <= maxRelayHops; index++ {
 		id := fmt.Sprintf("hop-%d", index)
+		item, err := r.QueueItem(int64(index))
+		if err != nil {
+			t.Fatal(err)
+		}
 		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "baseline-" + id, Reply: &surface.ReplyResult{Text: "baseline", Done: true}}
 		daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions[id]))
-		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, CompletedTurnID: "done-" + id, Reply: &surface.ReplyResult{Text: "Done", Done: true}}
+		fake.observations[id] = &surface.TurnObservation{Status: surface.StatusIdle, InputTurnID: "input-" + id, CompletedTurnID: "done-" + id, Reply: &surface.ReplyResult{Text: "Done", UserText: item.Message, Done: true}}
 		daemon.observeSession(context.Background(), fake, sessionPointer(fake.sessions[id]))
 	}
 	if r.QueueCount(fmt.Sprintf("hop-%d", maxRelayHops)) != 0 {
 		t.Fatal("relay exceeded hop limit")
 	}
-	history, err := r.ListHistory(20, fmt.Sprintf("hop-%d", maxRelayHops))
-	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
-		t.Fatalf("history=%+v err=%v", history, err)
+	if r.QueueCount(fmt.Sprintf("hop-%d", maxRelayHops+1)) != 0 {
+		t.Fatal("handoff crossed hop limit")
+	}
+	routes, err := r.ListRoutes()
+	if err != nil || routes[len(routes)-1].PendingCount != 0 || routes[len(routes)-1].FireCount != 0 {
+		t.Fatalf("route=%+v err=%v", routes, err)
 	}
 }
 
 func sessionPointer(session surface.Session) *surface.Session { return &session }
 
-func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
+func TestRelayHoldsReadOnlyCodexTerminalDestination(t *testing.T) {
 	daemon, r, _, from, to := daemonFixture(t)
 	to.Source = "cli"
 	to.Transport = "readOnly"
@@ -829,9 +839,9 @@ func TestRelayDropsReadOnlyCodexTerminalDestination(t *testing.T) {
 	if r.QueueCount(to.ID) != 0 {
 		t.Fatal("read-only relay destination was queued")
 	}
-	history, err := r.ListHistory(10, to.ID)
-	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" {
-		t.Fatalf("history=%+v err=%v", history, err)
+	routes, err := r.ListRoutes()
+	if err != nil || routes[0].PendingCount != 1 || routes[0].EventCursor != 0 || !strings.Contains(routes[0].LastError, "read-only") {
+		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
 }
 
@@ -1152,27 +1162,17 @@ func TestRelayIsPersistedWhileDestinationIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestDroppedRelayRecordsOneProblemWithoutNotifyingSource(t *testing.T) {
-	daemon, r, _, from, to := daemonFixture(t)
+func TestRelayToUnavailableSurfaceRemainsQueuedWithoutNotifyingSource(t *testing.T) {
+	d, r, _, from, to := daemonFixture(t)
 	if err := r.RegisterSession(surface.Session{ID: to.ID, Surface: surface.KindNotion, Status: surface.StatusIdle}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(from.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
-	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
-	daemon.fireRelays(&from, "reply-turn", 0, "reply body")
-	if count := r.QueueCount(from.ID); count != 0 {
-		t.Fatalf("sender notices=%d", count)
-	}
-	window, err := r.CatalogEventsAfter(0, 10)
-	problems := 0
-	for _, event := range window.Events {
-		if event.Type == "delivery.problem" {
-			problems++
-		}
-	}
-	if err != nil || problems != 1 {
-		t.Fatalf("events=%+v err=%v", window, err)
+	d.fireRelays(&from, "reply-turn", 0, "reply body")
+	d.fireRelays(&from, "reply-turn", 0, "reply body")
+	if r.QueueCount(from.ID) != 0 || r.QueueCount(to.ID) != 1 {
+		t.Fatal("relay must queue once without notifying source")
 	}
 }

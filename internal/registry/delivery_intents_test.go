@@ -366,3 +366,66 @@ func TestDroppedRelayRecordsAProblemWithoutNotifyingTheRelaySource(t *testing.T)
 		t.Fatalf("problems=%+v err=%v", problems, err)
 	}
 }
+
+func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "source", "target")
+	if _, err := r.AddRoute("source", "target", ".*"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("source", "", surface.CompletionBatch{Cursor: "turn-1", Events: []surface.Completion{{ID: "turn-1", Text: "relay body"}}}); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := r.ListRoutes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := r.PendingRelayEvents(routes[0])
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	queueID, err := r.ConsumeRelay(routes[0], events[0], "[agenthail relay hops=1] relay body", "queue", "")
+	if err != nil || queueID == 0 {
+		t.Fatalf("queueID=%d err=%v", queueID, err)
+	}
+	if expired, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil || expired != 1 {
+		t.Fatalf("expired=%d err=%v", expired, err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if err := r.CaptureRelayCompletions("source", "turn-1", surface.CompletionBatch{Cursor: "turn-1b", Events: []surface.Completion{{ID: "turn-1", Text: "relay body"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if count := r.QueueCount("source"); count != 0 {
+		t.Fatalf("source notices=%d", count)
+	}
+	routes, err = r.ListRoutes()
+	if err != nil || routes[0].PendingCount != 0 || routes[0].FireCount != 1 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil || len(problems) != 1 {
+		t.Fatalf("problems=%+v err=%v", problems, err)
+	}
+	intent, err := r.DeliveryIntent(problems[0].DeliveryID)
+	if err != nil || intent.QueueID != queueID || !intent.Relayed || intent.NotificationQueueID != 0 || intent.SenderSessionID != "source" {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	window, err := r.CatalogEventsAfter(0, 20)
+	if err != nil || len(catalogEventsOfType(window, "delivery.problem")) != 1 {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+}
