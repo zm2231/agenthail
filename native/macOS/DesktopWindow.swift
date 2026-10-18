@@ -19,6 +19,7 @@ struct DesktopWindow: View {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .ignoresSafeArea(.container, edges: .top)
+                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
                 .inspector(isPresented: $pane.inspectorVisible) {
                     SessionInspector(model: model, pane: pane)
                         .ignoresSafeArea(.container, edges: .top)
