@@ -221,5 +221,9 @@ jobs:
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
         run: scripts/test-pkg-artifact.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
+      - name: Verify main window layout at narrow widths
+        run: |
+          pkgutil --expand-full dist/Agenthail-v0.0.0-ci-arm64.pkg "$RUNNER_TEMP/layout-pkg"
+          scripts/test-mac-window-layout.sh "$RUNNER_TEMP/layout-pkg/Agenthail-component.pkg/Payload/Applications/Agenthail.app"
       - name: Verify install, upgrade, and uninstall
         run: scripts/test-pkg-install.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
