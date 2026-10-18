@@ -18,10 +18,10 @@ func TestTurnOptionValidationRejectsSilentDowngrades(t *testing.T) {
 
 func TestEffectiveCapabilitiesKeepsClaudeTranscriptStream(t *testing.T) {
 	base := Capabilities{Stream: true, Send: true}
-	if got := EffectiveCapabilities(&Session{Surface: KindClaude, Transport: "uds", Transcript: "/tmp/session.jsonl", HasLocal: true}, base); !got.Stream {
+	if got := EffectiveCapabilities(&Session{Surface: KindClaude, RuntimeKind: RuntimeClaudeCLI, Transport: "uds", Transcript: "/tmp/session.jsonl", HasLocal: true}, base); !got.Stream {
 		t.Fatal("reliable local Claude transcript should remain streamable")
 	}
-	if got := EffectiveCapabilities(&Session{Surface: KindClaude, Transport: "uds", Transcript: "/tmp/session.jsonl"}, base); got.Stream {
+	if got := EffectiveCapabilities(&Session{Surface: KindClaude, RuntimeKind: RuntimeClaudeCLI, Transport: "uds", Transcript: "/tmp/session.jsonl"}, base); got.Stream {
 		t.Fatal("Claude UDS session without a local transcript should not claim stream support")
 	}
 }

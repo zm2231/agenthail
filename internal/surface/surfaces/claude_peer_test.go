@@ -211,7 +211,7 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 		}
 	}()
 	adapter := NewClaude("", home)
-	result, err := adapter.Send(surface.WithSourceSessionID(context.Background(), "source-native"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, PID: process.Process.Pid, Transport: "uds"}, "status?")
+	result, err := adapter.Send(surface.WithSourceSessionID(context.Background(), "source-native"), &surface.Session{ID: "target-native", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.Process.Pid, Transport: "uds"}, "status?")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -252,7 +252,7 @@ func TestClaudeProcessStartMatchesOnlyTheSameInstant(t *testing.T) {
 
 func TestNativeClaudeRejectsControlsBeforeExternalIO(t *testing.T) {
 	adapter := NewClaude("", t.TempDir())
-	session := &surface.Session{ID: "native", Transport: "uds", Surface: surface.KindClaude}
+	session := &surface.Session{ID: "native", Transport: "uds", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
 	ctx := context.Background()
 	if _, err := adapter.Send(ctx, session, "/compact"); !surface.IsDeliveryTerminal(err) {
 		t.Fatalf("slash error=%v", err)
@@ -375,7 +375,7 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 	if adapter.CanSendHumanTurn(&sessions[0]) {
 		t.Fatal("person-authored send routed to Remote Control")
 	}
-	if _, err := adapter.postMessage(context.Background(), &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude}, "hello"); !surface.IsDeliveryUnavailable(err) {
+	if _, err := adapter.postMessage(context.Background(), &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}, "hello"); !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("remote control post err=%v", err)
 	}
 	record["messagingSocketPath"] = filepath.Join(home, "missing.sock")

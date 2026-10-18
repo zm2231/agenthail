@@ -63,6 +63,10 @@ func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
+func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI}
+}
+
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
 	return ObserveClaudeRuns(ctx, c.home)
 }
@@ -419,11 +423,12 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 		return claudeProcess{}, false
 	}
 	sess := surface.Session{
-		ID:      conversation,
-		Bridge:  bridge,
-		Surface: surface.KindClaude,
-		Cwd:     str(m, "cwd"),
-		Status:  surface.SessionStatus(str(m, "status")),
+		ID:          conversation,
+		Bridge:      bridge,
+		Surface:     surface.KindClaude,
+		RuntimeKind: surface.RuntimeClaudeCLI,
+		Cwd:         str(m, "cwd"),
+		Status:      surface.SessionStatus(str(m, "status")),
 	}
 	if pid, ok := m["pid"].(float64); ok {
 		sess.PID = int(pid)

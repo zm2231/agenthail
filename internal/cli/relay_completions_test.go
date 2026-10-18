@@ -16,7 +16,7 @@ func (f *cliSurface) ReadCompletions(context.Context, *surface.Session, string) 
 
 func TestRelayCLIConditionPersistsAndAppearsInBothOutputs(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Transport: "desktop", Source: "vscode"}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transport: "desktop", Source: "vscode"}
 	to := from
 	to.ID = "to"
 	fake := &cliSurface{kind: surface.KindCodex, caps: surface.Capabilities{Send: true, Goal: true}, sessions: map[string]surface.Session{"from": from, "to": to}}

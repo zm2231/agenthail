@@ -15,6 +15,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 type fixtureProvider struct {
@@ -52,6 +53,10 @@ type targetFixture struct {
 }
 
 func (f *targetFixture) Name() surface.SurfaceKind { return f.session.Surface }
+
+func (f *targetFixture) RuntimeKinds() []surface.RuntimeKind {
+	return surfacetest.RuntimeKinds(f.Name())
+}
 func (f *targetFixture) List(context.Context) ([]surface.Session, error) {
 	return []surface.Session{f.session}, nil
 }
@@ -145,7 +150,7 @@ func (p *fixtureProvider) Create(_ context.Context, cwd, instructions string) (*
 	if p.creates > 1 {
 		id = fmt.Sprintf("operator-%d", p.creates)
 	}
-	return &surface.Session{ID: id, Surface: surface.KindCodex, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, p.createErr
+	return &surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Voice operator", Cwd: cwd, Transport: "desktop"}, p.createErr
 }
 func (p *fixtureProvider) Cursor(context.Context) (Cursor, error) {
 	return Cursor{Source: "fixture", Position: 10}, nil
@@ -552,7 +557,7 @@ func TestTextUnknownReceiptPreventsDuplicate(t *testing.T) {
 }
 
 func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Disposable Claude", Transport: "browser"}}
 	spoken := make(chan struct{})
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{Kind: "text", Text: "The correlated answer."})
@@ -582,7 +587,7 @@ func TestDelegationUsesSelectedTargetAndOnlySpeaksCorrelatedTurn(t *testing.T) {
 }
 
 func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Disposable Claude", Transport: "browser"}, watchDone: make(chan struct{})}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Disposable Claude", Transport: "browser"}, watchDone: make(chan struct{})}
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "codex:target-turn:done", Operation: "phase", TurnID: "target-turn", Kind: "done"})
 	}
@@ -602,7 +607,7 @@ func TestDelegationEmptyButCompletedTurnIsNotFailure(t *testing.T) {
 }
 
 func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude", Transport: "browser"}}
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "user", Role: "user", Kind: "message", Text: "do not speak"})
 		callback(surface.StreamEvent{ID: "call", Role: "assistant", Kind: "toolCall", Text: "Read x"})
@@ -620,7 +625,7 @@ func TestDirectDelegationNormalizesClaudeMessagesPerItem(t *testing.T) {
 }
 
 func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, Name: "Claude", Transport: "browser"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Claude", Transport: "browser"}}
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "partial"})
 		callback(surface.StreamEvent{Kind: "done", Status: "cancelled"})
@@ -631,7 +636,7 @@ func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
 }
 
 func TestDelegationToClaudePeerDeliversAndSaysItCannotFollowTheReply(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, Name: "Peer", Transport: "uds"}}
+	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Peer", Transport: "uds"}}
 	f := targetSelected(t, target)
 	state, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Do work"})
 	if err != nil || !reflect.DeepEqual(target.sent, []string{"Do work"}) {
@@ -643,7 +648,7 @@ func TestDelegationToClaudePeerDeliversAndSaysItCannotFollowTheReply(t *testing.
 }
 
 func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Disposable Codex", Transport: "desktop"}}
 	f := targetSelected(t, target)
 	spoken := Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}}
 	f.observe(spoken)
@@ -654,7 +659,7 @@ func TestSpokenTranscriptDelegatesToSelectedTargetOnce(t *testing.T) {
 }
 
 func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}, streaming: make(chan struct{})}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Disposable Codex", Transport: "desktop"}, streaming: make(chan struct{})}
 	f := targetSelected(t, target)
 	f.observe(Event{Sequence: 27, Method: "thread/realtime/transcript/done", Params: map[string]any{"role": "user", "text": "Inspect this session"}})
 	select {
@@ -672,7 +677,7 @@ func TestCloseStopsADelegationWatchBeforeReturning(t *testing.T) {
 }
 
 func TestCloseCancelsSpeechStillWaitingOnTheOperator(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Disposable Codex", Transport: "desktop"}}
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
 	}
@@ -697,7 +702,7 @@ func TestCloseCancelsSpeechStillWaitingOnTheOperator(t *testing.T) {
 }
 
 func TestSpeechWaitingOnTheOperatorLeavesViewAndActionsResponsive(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Disposable Codex", Transport: "desktop"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Disposable Codex", Transport: "desktop"}}
 	target.stream = func(callback func(surface.StreamEvent)) {
 		callback(surface.StreamEvent{ID: "answer", Role: "assistant", Final: true, Kind: "message", Text: "The answer."})
 	}
@@ -769,7 +774,7 @@ func TestCloseWaitsForAnActionInProgressAndRefusesLaterWork(t *testing.T) {
 }
 
 func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build session", Transport: "desktop"}}
 	f := newFixture(t, fixtureOptions{target: target})
 	p := f.provider
 	connectFixture(t, f)
@@ -794,7 +799,7 @@ func TestDynamicVoiceToolsTransferAndReturnThroughSharedState(t *testing.T) {
 }
 
 func TestTargetInterruptRequiresConfirmedSelectedTurn(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Build session", Transport: "desktop"}, capabilities: surface.Capabilities{Send: true, Stream: true, Interrupt: true}, observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-a"}, activeTurnID: "turn-a"}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Build session", Transport: "desktop"}, capabilities: surface.Capabilities{Send: true, Stream: true, Interrupt: true}, observation: &surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-a"}, activeTurnID: "turn-a"}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "target-interrupt", AttemptID: "call-a"})
 	if v := f.View(); target.interrupts != 1 || target.interruptTurnID != "turn-a" || !hasEventWith(v, "voice/target/interrupt", "turnId", "turn-a") {
@@ -864,7 +869,7 @@ func TestRealtimeSettingsUseAudioOnlyTargetUpdatesAndNoCredentials(t *testing.T)
 }
 
 func TestDelegationHoldsWhenTargetDoesNotProvideAnAuthoritativeTurnID(t *testing.T) {
-	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
+	target := &targetFixture{session: surface.Session{ID: "target-a", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Codex", Transport: "desktop"}, turnID: "target-a"}
 	f := targetSelected(t, target)
 	apply(t, f, Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Inspect the target"})
 	if v := f.View(); !hasEventWith(v, "voice/delegation/held", "turnId", "target-a") || hasEvent(v, "voice/delegation/dispatched") {

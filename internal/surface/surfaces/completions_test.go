@@ -196,7 +196,7 @@ func TestNotionCompletionReplayPreservesBurstAndInputProvenance(t *testing.T) {
 		return 200, string(payload), nil
 	}
 	reader := NewNotion("00000000-0000-0000-0000-000000000000", "user")
-	session := &surface.Session{ID: "source", Surface: surface.KindNotion}
+	session := &surface.Session{ID: "source", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
 	baseline, err := reader.ReadCompletions(context.Background(), session, "")
 	if err != nil || len(baseline.Events) != 0 {
 		t.Fatalf("baseline=%+v err=%v", baseline, err)

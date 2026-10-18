@@ -42,7 +42,10 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 			}
 		}
 		if session != nil {
-			adapter = a.surfaceByKind(session.Surface)
+			adapter, err = a.adapters().For(session)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	if session == nil {

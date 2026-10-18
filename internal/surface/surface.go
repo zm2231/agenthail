@@ -26,10 +26,11 @@ const (
 )
 
 // Session is one conversation. ID is the provider's native conversation id
-// (Claude session id, Codex thread id) and never changes. PID, Transport and
-// Bridge (the Claude Remote Control id) describe the process currently
-// attached to the conversation and can come and go. ForkedFrom is the
-// conversation this one was branched from.
+// (Claude session id, Codex thread id) and never changes. RuntimeKind is what
+// carries it now and picks its adapter. PID, Transport and Bridge (the Claude
+// Remote Control id) describe the process currently attached to the
+// conversation and can come and go. ForkedFrom is the conversation this one was
+// branched from.
 type Session struct {
 	ID                    string          `json:"id"`
 	Surface               SurfaceKind     `json:"surface"`
@@ -41,6 +42,7 @@ type Session struct {
 	HasLocal              bool            `json:"hasLocal"`
 	Source                string          `json:"source,omitempty"`
 	Transport             string          `json:"transport,omitempty"`
+	RuntimeKind           RuntimeKind     `json:"runtimeKind,omitempty"`
 	ConfiguredModel       string          `json:"configuredModel,omitempty"`
 	Bridge                string          `json:"bridge,omitempty"`
 	ForkedFrom            string          `json:"forkedFrom,omitempty"`
@@ -315,9 +317,6 @@ type SessionAccessChecker interface {
 }
 
 func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) error {
-	if err := ValidateRuntimeTransport(sess); err != nil {
-		return err
-	}
 	if checker, ok := adapter.(SessionAccessChecker); ok {
 		if err := checker.EnsureWritable(ctx, sess); err != nil {
 			return err
@@ -549,6 +548,8 @@ func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionC
 
 type Surface interface {
 	Name() SurfaceKind
+	// RuntimeKinds are the runtimes whose sessions this adapter serves.
+	RuntimeKinds() []RuntimeKind
 	List(ctx context.Context) ([]Session, error)
 	Resolve(ctx context.Context, target string) (*Session, error)
 	Observe(ctx context.Context, sess *Session) (*TurnObservation, error)

@@ -12,14 +12,17 @@ type humanTurnFake struct {
 	bridged bool
 }
 
-func (f humanTurnFake) Name() surface.SurfaceKind              { return surface.KindClaude }
+func (f humanTurnFake) Name() surface.SurfaceKind { return surface.KindClaude }
+func (f humanTurnFake) RuntimeKinds() []surface.RuntimeKind {
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI}
+}
 func (f humanTurnFake) CanSendHumanTurn(*surface.Session) bool { return f.bridged }
 func (f humanTurnFake) SendHumanTurn(context.Context, *surface.Session, string) (*surface.SendResult, error) {
 	return &surface.SendResult{Accepted: true}, nil
 }
 
 func TestRouteForDecidesByAuthorAndBridge(t *testing.T) {
-	peer := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds"}
+	peer := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
 	for _, tc := range []struct {
 		name    string
 		bridged bool

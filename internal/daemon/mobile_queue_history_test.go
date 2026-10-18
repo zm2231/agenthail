@@ -15,7 +15,7 @@ import (
 func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
 	for _, sessionID := range []string{"history"} {
-		if err := registry.RegisterSession(surface.Session{ID: sessionID, Surface: surface.KindCodex}); err != nil {
+		if err := registry.RegisterSession(surface.Session{ID: sessionID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}

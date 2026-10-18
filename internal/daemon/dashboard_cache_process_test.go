@@ -52,7 +52,7 @@ func TestDashboardSnapshotCursorTracksFilterAndRejectsCatalogChanges(t *testing.
 		t.Fatalf("filter mismatch status=%d body=%s", filteredResponse.Code, filteredResponse.Body.String())
 	}
 
-	fake.sessions["third"] = surface.Session{ID: "third", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	fake.sessions["third"] = surface.Session{ID: "third", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	d.discoverCatalog(context.Background())
 	stale := httptest.NewRequest(http.MethodGet, "/api/state?limit=1&cursor="+first.NextCursor, nil)
 	stale.AddCookie(&http.Cookie{Name: "agenthail_dashboard", Value: "secret"})

@@ -20,7 +20,7 @@ func (r *Registry) EnsureOperatorSession() error {
 	} else if err != sql.ErrNoRows {
 		return err
 	}
-	return r.RegisterSession(surface.Session{ID: OperatorSessionID, Surface: surface.SurfaceKind("agenthail"), Name: "Agenthail operator"})
+	return r.RegisterSession(surface.Session{ID: OperatorSessionID, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator, Name: "Agenthail operator"})
 }
 
 const (

@@ -275,7 +275,7 @@ func (d *Daemon) dashboardModelsHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	adapter := d.surfaceForKind(surface.SurfaceKind(r.URL.Query().Get("surface")))
+	adapter := d.adapters().ForSurface(surface.SurfaceKind(r.URL.Query().Get("surface")))
 	lister, ok := adapter.(surface.ModelLister)
 	if adapter == nil || !ok {
 		http.Error(w, "this surface does not list models", http.StatusBadRequest)
@@ -1119,7 +1119,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, cwdErr.Error(), http.StatusBadRequest)
 				return
 			}
-			adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
+			adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface))
 			if adapter == nil {
 				http.Error(w, "surface is not configured", http.StatusConflict)
 				return
@@ -1206,7 +1206,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			writeDashboardJSON(w, http.StatusCreated, launchFields)
 			return
 		}
-		adapter := d.surfaceForKind(surface.SurfaceKind(request.Surface))
+		adapter := d.adapters().ForSurface(surface.SurfaceKind(request.Surface))
 		starter, ok := adapter.(surface.SessionStarter)
 		if adapter == nil || !ok {
 			http.Error(w, "this surface cannot start conversations", http.StatusBadRequest)
@@ -1297,8 +1297,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, targetErr.Error(), http.StatusBadRequest)
 			return
 		}
-		adapter := d.surfaceForKind(target.Surface)
-		if adapter == nil {
+		adapter, adapterErr := d.adapters().For(target)
+		if adapterErr != nil {
 			http.Error(w, "target surface is not configured", http.StatusConflict)
 			return
 		}
@@ -1369,8 +1369,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				failed++
 				continue
 			}
-			adapter := d.surfaceForKind(session.Surface)
-			if adapter == nil {
+			adapter, adapterErr := d.adapters().For(session)
+			if adapterErr != nil {
 				failed++
 				continue
 			}
@@ -1416,8 +1416,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "session not found", http.StatusNotFound)
 				return
 			}
-			adapter := d.surfaceForKind(target.Surface)
-			if adapter == nil {
+			adapter, adapterErr := d.adapters().For(target)
+			if adapterErr != nil {
 				http.Error(w, "target surface is not configured", http.StatusConflict)
 				return
 			}
@@ -1456,8 +1456,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "destination session not found", http.StatusNotFound)
 			return
 		}
-		adapter := d.surfaceForKind(toSession.Surface)
-		if adapter == nil {
+		adapter, adapterErr := d.adapters().For(toSession)
+		if adapterErr != nil {
 			http.Error(w, "destination surface is not configured", http.StatusConflict)
 			return
 		}
@@ -1474,8 +1474,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "source session not found", http.StatusNotFound)
 			return
 		}
-		fromAdapter := d.surfaceForKind(fromSession.Surface)
-		if fromAdapter == nil {
+		fromAdapter, fromAdapterErr := d.adapters().For(fromSession)
+		if fromAdapterErr != nil {
 			http.Error(w, "source surface is not configured", http.StatusConflict)
 			return
 		}
@@ -1517,14 +1517,14 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, detail, http.StatusBadGateway)
 			return
 		}
-		if adapter := d.surfaceForKind(surface.KindCodex); adapter != nil {
+		if adapter := d.adapters().ForSurface(surface.KindCodex); adapter != nil {
 			d.recordSurfaceHealth(ctx, adapter, nil)
 		}
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "result": strings.TrimSpace(string(output))})
 		return
 	}
 	if request.Action == "runtime-ensure" {
-		adapter := d.surfaceForKind(surface.KindCodex)
+		adapter := d.adapters().ForSurface(surface.KindCodex)
 		ensurer, ok := adapter.(surface.RuntimeEnsurer)
 		if adapter == nil || !ok {
 			http.Error(w, "Codex managed runtime cannot be repaired here", http.StatusConflict)
@@ -1564,8 +1564,8 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "launcher cannot focus sessions", http.StatusConflict)
 			return
 		}
-		adapter := d.surfaceForKind(session.Surface)
-		if adapter == nil {
+		adapter, adapterErr := d.adapters().For(session)
+		if adapterErr != nil {
 			session.Runtime.Focusable = false
 			_ = d.Registry.SaveSessionRuntime(session.ID, session.Runtime)
 			http.Error(w, "session surface is unavailable", http.StatusConflict)
@@ -1612,7 +1612,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true, "alias": alias})
 		return
 	}
-	adapter, transportErr := d.surfaceForSession(session)
+	adapter, transportErr := d.adapters().For(session)
 	if transportErr != nil {
 		http.Error(w, transportErr.Error(), http.StatusConflict)
 		return
@@ -1794,7 +1794,7 @@ func (d *Daemon) dashboardSearchHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "search requires at least 3 characters", http.StatusBadRequest)
 		return
 	}
-	adapter := d.surfaceForKind(surface.KindCodex)
+	adapter := d.adapters().ForSurface(surface.KindCodex)
 	searcher, ok := adapter.(surface.SessionSearcher)
 	if !ok {
 		http.Error(w, "Codex history search is unavailable", http.StatusNotImplemented)
@@ -1878,8 +1878,8 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	adapter := d.surfaceForKind(session.Surface)
-	if adapter == nil {
+	adapter, adapterErr := d.adapters().For(session)
+	if adapterErr != nil {
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}
@@ -1957,8 +1957,8 @@ func (d *Daemon) dashboardSessionMetadataHandler(w http.ResponseWriter, r *http.
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	adapter := d.surfaceForKind(session.Surface)
-	if adapter == nil {
+	adapter, adapterErr := d.adapters().For(session)
+	if adapterErr != nil {
 		http.Error(w, "surface is not configured", http.StatusConflict)
 		return
 	}

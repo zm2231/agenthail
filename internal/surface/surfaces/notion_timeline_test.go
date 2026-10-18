@@ -53,7 +53,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 	}
 
 	notion := NewNotion("00000000-0000-0000-0000-000000000000", "user")
-	read, err := surface.ReadSession(context.Background(), notion, &surface.Session{ID: "thread-1", Surface: surface.KindNotion}, surface.SessionReadRequest{Limit: 2})
+	read, err := surface.ReadSession(context.Background(), notion, &surface.Session{ID: "thread-1", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}, surface.SessionReadRequest{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 		t.Fatalf("provider request=%v", requested)
 	}
 
-	older, err := notion.ReadSession(context.Background(), &surface.Session{ID: "thread-1", Surface: surface.KindNotion}, surface.SessionReadRequest{Limit: 2, Before: read.NextBefore})
+	older, err := notion.ReadSession(context.Background(), &surface.Session{ID: "thread-1", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}, surface.SessionReadRequest{Limit: 2, Before: read.NextBefore})
 	if err != nil {
 		t.Fatal(err)
 	}

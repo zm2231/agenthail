@@ -67,19 +67,6 @@ func (e LaunchAcceptedError) Error() string {
 
 func (e LaunchAcceptedError) Unwrap() error { return e.Err }
 
-type RuntimeTransportUnavailableError struct{ Launcher string }
-
-func (e RuntimeTransportUnavailableError) Error() string {
-	return "runtime transport unavailable for launcher " + e.Launcher
-}
-
-func ValidateRuntimeTransport(session *Session) error {
-	if session != nil && session.Runtime != nil && session.Runtime.Launcher == LauncherClaudeSDK {
-		return RuntimeTransportUnavailableError{Launcher: LauncherClaudeSDK}
-	}
-	return nil
-}
-
 type starterLauncher struct {
 	id      string
 	agents  []SurfaceKind

@@ -42,6 +42,21 @@ func NewCodex(remoteURL string) *Codex {
 
 func (c *Codex) Name() surface.SurfaceKind { return surface.KindCodex }
 
+func (c *Codex) RuntimeKinds() []surface.RuntimeKind {
+	return []surface.RuntimeKind{surface.RuntimeCodexDesktop, surface.RuntimeCodexAppServer}
+}
+
+// setCodexTransport routes a session and records the runtime that carries it:
+// the managed app-server for managed threads, Codex Desktop for the rest,
+// including read-only threads whose Desktop bridge is unavailable.
+func setCodexTransport(session *surface.Session, transport string) {
+	session.Transport = transport
+	session.RuntimeKind = surface.RuntimeCodexDesktop
+	if transport == codexTransportManaged {
+		session.RuntimeKind = surface.RuntimeCodexAppServer
+	}
+}
+
 func (c *Codex) RequiresLocalTranscript(session *surface.Session) bool {
 	return session != nil && !c.managed && session.Transport != codexTransportManaged
 }
@@ -371,6 +386,7 @@ func codexSession(thread map[string]any) surface.Session {
 		Source:   codexSource(thread["source"]),
 		Subagent: codexSubagent(thread),
 	}
+	setCodexTransport(&session, "")
 	if timestamp, ok := thread["recencyAt"].(float64); ok && timestamp > 0 {
 		session.LastActive = time.Unix(int64(timestamp), 0)
 	}
@@ -608,7 +624,7 @@ func prepareManagedTerminalSession(ctx context.Context, client codexClient, cwd,
 	session := codexSession(thread)
 	session.ID = threadID
 	session.Surface = surface.KindCodex
-	session.Transport = codexTransportManaged
+	setCodexTransport(&session, codexTransportManaged)
 	session.Source = "agenthail"
 	if session.Cwd == "" {
 		session.Cwd = str(result, "cwd")
@@ -658,9 +674,9 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 		Status:     surface.StatusBusy,
 		HasLocal:   true,
 		Source:     "agenthail",
-		Transport:  transport,
 		LastActive: time.Now(),
 	}
+	setCodexTransport(session, transport)
 	if session.Cwd == "" {
 		session.Cwd = options.Cwd
 	}

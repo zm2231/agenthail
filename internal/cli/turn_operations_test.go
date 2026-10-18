@@ -11,7 +11,7 @@ import (
 
 func TestThreadCreateClaudeForwardsAdvancedOptions(t *testing.T) {
 	cwd := t.TempDir()
-	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, session: &surface.Session{ID: "claude-new", Surface: surface.KindClaude, Cwd: cwd}}
+	starter := &starterCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}, session: &surface.Session{ID: "claude-new", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: cwd}}
 	app := threadFixture(t, starter)
 	output, err := captureStdout(t, func() error {
 		return app.Run([]string{"thread", "create", "claude", "hello", "--cwd", cwd, "--effort", "high", "--worktree", "branch", "--permission-mode", "plan", "--json"})
@@ -28,7 +28,7 @@ func TestThreadOperationJSONFailurePreservesUnknown(t *testing.T) {
 	adapter := &lifecycleCLISurface{cliSurface: &cliSurface{kind: surface.KindClaude}}
 	app, _ := cliFixture(t, adapter.cliSurface)
 	app.Surfaces[0].Surface = adapter
-	session := surface.Session{ID: "stopped", Surface: surface.KindClaude}
+	session := surface.Session{ID: "stopped", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
 	if err := app.Registry.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func (*lifecycleCLISurface) SessionAction(context.Context, *surface.Session, str
 }
 
 func TestThreadForkPassesLastTurnAndRejectsRemovedFlags(t *testing.T) {
-	source := surface.Session{ID: "source", Surface: surface.KindCodex, Cwd: "/source"}
+	source := surface.Session{ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/source"}
 	adapter := &forkCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"source": source}}}
 	app, _ := cliFixture(t, adapter.cliSurface)
 	app.Surfaces[0].Surface = adapter

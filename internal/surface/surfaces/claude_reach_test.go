@@ -47,7 +47,7 @@ func (p *claudePosts) count(message string) int {
 }
 
 func exitedSession(fixture *claudetest.Fixture) surface.Session {
-	return surface.Session{ID: fixtureConversation, Bridge: "session_fixture", Surface: surface.KindClaude, PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(fixtureConversation, fixture.Home)}
+	return surface.Session{ID: fixtureConversation, Bridge: "session_fixture", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(fixtureConversation, fixture.Home)}
 }
 
 func TestClaudeConcurrentSendsToExitedSessionResumeItOnce(t *testing.T) {
