@@ -224,13 +224,23 @@ func TestActiveCatalogSubscriberReceivesReplyForwardFailureOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cancel()
-	route := registry.RouteRow{ID: routeID, FromSession: sender.ID, ToSession: target.ID, Pattern: ".*", Active: true}
-	d.dropRelay(sender.ID, route, "reply-turn", "reply body", "target surface unavailable")
+	_ = routeID
+	if _, err := store.RecordReplyForwardFailure(sender.ID, target.ID, "reply-turn", "reply body", "target surface unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
+	}
 	first := receiveCatalogEvent(t, events)
 	if first.Type != "delivery.problem" {
 		t.Fatalf("first=%+v", first)
 	}
-	d.dropRelay(sender.ID, route, "reply-turn", "reply body", "target surface unavailable")
+	if _, err := store.RecordReplyForwardFailure(sender.ID, target.ID, "reply-turn", "reply body", "target surface unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		t.Fatal(err)
+	}
 	ensureNoCatalogEvent(t, events)
 }
 
