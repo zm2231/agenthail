@@ -24,6 +24,18 @@ enum AgenthailAPIError: LocalizedError {
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
     }
+
+    static let disconnectedGuidance = "Agenthail is not connected. Restart it from the menu bar, then refresh."
+
+    static func userMessage(_ error: Error) -> String {
+        guard let urlError = error as? URLError else { return error.localizedDescription }
+        switch urlError.code {
+        case .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .cannotFindHost, .dnsLookupFailed, .timedOut:
+            return disconnectedGuidance
+        default:
+            return error.localizedDescription
+        }
+    }
 }
 
 final class AgenthailAPI: @unchecked Sendable {

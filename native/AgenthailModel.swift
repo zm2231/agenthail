@@ -183,6 +183,14 @@ final class AgenthailModel: ObservableObject {
         return true
     }
 
+    func refreshNow(_ pane: SessionPane? = nil) {
+        Task {
+            guard await refresh(fresh: true) else { return }
+            operationError = nil
+            (pane ?? mainPane).reloadDetail()
+        }
+    }
+
     func cachedDetail(_ id: String) -> SessionDetail? {
         guard let cached = detailCache[id] else { return nil }
         touchCachedDetail(id)
@@ -261,7 +269,7 @@ final class AgenthailModel: ObservableObject {
         do {
             creationOptions = try await api.sessionOptions()
         } catch {
-            if !error.isCancellation { operationError = error.localizedDescription }
+            if !error.isCancellation { operationError = AgenthailAPIError.userMessage(error) }
         }
     }
 
@@ -309,7 +317,7 @@ final class AgenthailModel: ObservableObject {
         } catch AgenthailAPIError.unavailable(let message) {
             return .failed(message)
         } catch let error as URLError where ActionRetryKeys.notSent.contains(error.code) {
-            return .failed(error.localizedDescription)
+            return .failed(AgenthailAPIError.userMessage(error))
         } catch {
             return .uncertain(error.localizedDescription)
         }
@@ -355,7 +363,7 @@ final class AgenthailModel: ObservableObject {
                 searchError = response.remoteError?.isEmpty == false ? response.remoteError : nil
             } catch {
                 guard !Task.isCancelled, searchQuery == query, !error.isCancellation else { return }
-                searchError = error.localizedDescription
+                searchError = AgenthailAPIError.userMessage(error)
             }
             if searchQuery == query { searching = false }
         }
@@ -397,7 +405,7 @@ final class AgenthailModel: ObservableObject {
             _ = await refresh(fresh: true)
             return true
         } catch {
-            operationError = error.localizedDescription
+            operationError = AgenthailAPIError.userMessage(error)
             if let message, let sessionID { restoreToComposer(message, sessionID: sessionID) }
             return false
         }
@@ -408,7 +416,7 @@ final class AgenthailModel: ObservableObject {
         do {
             devices = try await api.devices()
         } catch {
-            operationError = error.localizedDescription
+            operationError = AgenthailAPIError.userMessage(error)
         }
     }
 
@@ -419,7 +427,7 @@ final class AgenthailModel: ObservableObject {
             settings = try await api.settings()
             await loadAudit(reset: true)
         } catch {
-            operationError = error.localizedDescription
+            operationError = AgenthailAPIError.userMessage(error)
         }
     }
 
@@ -433,7 +441,7 @@ final class AgenthailModel: ObservableObject {
             auditHasMore = page.hasMore
             operationError = nil
         } catch {
-            operationError = error.localizedDescription
+            operationError = AgenthailAPIError.userMessage(error)
         }
     }
 
@@ -446,7 +454,7 @@ final class AgenthailModel: ObservableObject {
                 _ = await refresh(fresh: true)
                 await loadAudit(reset: true)
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
             }
         }
     }
@@ -459,7 +467,7 @@ final class AgenthailModel: ObservableObject {
                 settings = try await api.settings()
                 operationError = nil
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
                 settings = try? await api.settings()
             }
         }
@@ -474,7 +482,7 @@ final class AgenthailModel: ObservableObject {
                 pairing = nil
                 operationError = nil
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
             }
         }
     }
@@ -486,7 +494,7 @@ final class AgenthailModel: ObservableObject {
                 pairing = try await api.createPairing(name: "iPhone")
                 operationError = nil
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
             }
         }
     }
@@ -498,7 +506,7 @@ final class AgenthailModel: ObservableObject {
                 try await api.revokeDevice(id: id)
                 await loadDevices()
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
             }
         }
     }
@@ -583,7 +591,7 @@ final class AgenthailModel: ObservableObject {
             } catch {
                 localSends[sessionID]?.removeAll { $0.id == pending.id }
                 restoreToComposer(message.trimmingCharacters(in: .whitespacesAndNewlines), attachments: attachments, sessionID: sessionID)
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
                 completion?(false)
             }
         }
@@ -604,7 +612,7 @@ final class AgenthailModel: ObservableObject {
         do {
             try await api.nameSession(id: sessionID, alias: alias)
         } catch {
-            return error.localizedDescription
+            return AgenthailAPIError.userMessage(error)
         }
         _ = await refresh(fresh: true)
         return nil
@@ -630,7 +638,7 @@ final class AgenthailModel: ObservableObject {
                 settings = try await api.settings()
                 operationError = nil
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
             }
             _ = await refresh(fresh: true)
         }
@@ -642,7 +650,7 @@ final class AgenthailModel: ObservableObject {
             try await api.action(action)
             operationError = nil
         } catch {
-            operationError = error.localizedDescription
+            operationError = AgenthailAPIError.userMessage(error)
         }
         _ = await refresh(fresh: true)
     }
@@ -657,7 +665,7 @@ final class AgenthailModel: ObservableObject {
             do {
                 try await api.action("queue-cancel", queueID: item.id)
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
                 return
             }
             do {
@@ -665,7 +673,7 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
             } catch {
                 restoreToComposer(item.message, sessionID: item.sessionId)
-                operationError = "Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(error.localizedDescription)"
+                operationError = "Steer may not have reached the agent. The message is back in the composer; check the conversation before resending. \(AgenthailAPIError.userMessage(error))"
             }
             _ = await refresh(fresh: true)
         }
@@ -679,7 +687,7 @@ final class AgenthailModel: ObservableObject {
                 if restoreToComposer { self.restoreToComposer(item.message, sessionID: item.sessionId) }
                 operationError = nil
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
             }
             _ = await refresh(fresh: true)
         }
@@ -697,7 +705,7 @@ final class AgenthailModel: ObservableObject {
                 try await api.action("delivery-dismiss", deliveryID: problem.deliveryId)
                 operationError = nil
             } catch {
-                operationError = error.localizedDescription
+                operationError = AgenthailAPIError.userMessage(error)
                 _ = await refresh(fresh: true)
             }
         }
@@ -872,7 +880,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func connectionFailed(_ error: Error) {
-        connectionError = error.localizedDescription
+        connectionError = AgenthailAPIError.userMessage(error)
         daemonSlow = error.isTimeout
     }
 }

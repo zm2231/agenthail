@@ -258,7 +258,7 @@ struct DeliverySettings: View {
 
     var body: some View {
         Form {
-            Section("Waiting to go out") {
+            Section("Waiting to go out · \(model.snapshot?.queue.count ?? 0)") {
                 if (model.snapshot?.queue ?? []).isEmpty {
                     Text("Nothing is waiting to be delivered.").foregroundStyle(DesktopPalette.text2)
                 }
@@ -266,6 +266,9 @@ struct DeliverySettings: View {
             }
             RecentOutcomesSection(history: model.snapshot?.history ?? [])
             Section {
+                if (model.snapshot?.relays ?? []).isEmpty {
+                    Text("No automatic handoffs yet.").foregroundStyle(DesktopPalette.text2)
+                }
                 ForEach(model.snapshot?.relays ?? []) { relay in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -304,13 +307,16 @@ struct DeliverySettings: View {
                 }
                 .disabled(relayFrom.isEmpty || relayTo.isEmpty)
             } header: {
-                Text("Automatic handoffs")
+                Text("Automatic handoffs · \(model.snapshot?.relays.count ?? 0)")
             } footer: {
                 Text("When one session finishes with matching text, Agenthail sends its reply to another.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section("Channels") {
+                if (model.snapshot?.channels ?? []).isEmpty {
+                    Text("No shared channels yet.").foregroundStyle(DesktopPalette.text2)
+                }
                 HStack {
                     TextField("New channel", text: $channelName)
                     Button("Create") {
@@ -380,39 +386,19 @@ struct ActivitySettings: View {
                     TextField("Search activity", text: $model.auditQuery)
                         .onSubmit { Task { await model.loadAudit(reset: true) } }
                     Picker("", selection: $model.auditKind) {
-                        Text("All activity").tag("")
-                        ForEach(model.auditKinds, id: \.self) { Text(label($0)).tag($0) }
+                        Text("All events").tag("")
+                        ForEach(model.auditKinds, id: \.self) { Text(AuditFacts.kindLabel($0)).tag($0) }
                     }
                     .labelsHidden()
                     .frame(maxWidth: 170)
                     .onChange(of: model.auditKind) { Task { await model.loadAudit(reset: true) } }
                 }
             }
-            Section {
+            Section("Recent activity · \(SettingsCounts.history(model.snapshot?.history.count ?? 0))") {
                 if model.audit.isEmpty {
-                    Text("No matching activity.").foregroundStyle(DesktopPalette.text2)
+                    Text("No activity matches these filters.").foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(model.audit) { entry in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(label(entry.kind))
-                            Spacer()
-                            Text(relativeAge(entry.createdAt))
-                                .font(.system(size: 11))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .help(entry.createdAt)
-                        }
-                        if let target = entry.target, !target.isEmpty {
-                            Text(target).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2)
-                        }
-                        if let message = entry.message, !message.isEmpty {
-                            Text(PeerEnvelope(message).summary).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2).lineLimit(2)
-                        }
-                        if let error = entry.error, !error.isEmpty {
-                            Text(error).font(.system(size: 12)).foregroundStyle(DesktopPalette.red).lineLimit(3)
-                        }
-                    }
-                }
+                ForEach(model.audit) { AuditEventRow(entry: $0) }
                 if model.auditHasMore {
                     Button("Load More") { Task { await model.loadAudit(reset: false) } }
                 }
@@ -422,9 +408,5 @@ struct ActivitySettings: View {
         .formStyle(.grouped)
         .onAppear { model.operationsVisible = true }
         .onDisappear { model.operationsVisible = false }
-    }
-
-    private func label(_ kind: String) -> String {
-        kind.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }

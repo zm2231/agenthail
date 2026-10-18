@@ -141,7 +141,7 @@ final class SessionPane: ObservableObject, Identifiable {
             return true
         } catch {
             guard !closed, sessionLoadIsCurrent(id, selectedID: selectedSessionID), !error.isCancellation else { return true }
-            detailLoadError = error.localizedDescription
+            detailLoadError = AgenthailAPIError.userMessage(error)
             if detail?.session.id == id {
                 detailStale = true
                 detailRefreshFailed = true
@@ -184,7 +184,7 @@ final class SessionPane: ObservableObject, Identifiable {
         } catch {
             guard selectionGeneration == selection, !error.isCancellation else { return }
             if case AgenthailAPIError.historyGap = error { olderCursor = nil }
-            olderError = error.localizedDescription
+            olderError = AgenthailAPIError.userMessage(error)
         }
     }
 
@@ -336,7 +336,7 @@ final class SessionPane: ObservableObject, Identifiable {
             model.operationError = nil
             model.pendingForks.insert(session.id)
         } catch {
-            model.operationError = error.localizedDescription
+            model.operationError = AgenthailAPIError.userMessage(error)
         }
     }
 
@@ -387,6 +387,10 @@ final class SessionPane: ObservableObject, Identifiable {
         let merged = metadata.apply(to: current)
         detail = merged
         model.refreshCachedDetail(merged, for: id)
+    }
+
+    func reloadDetail() {
+        if let selectedSessionID { scheduleDetailReload(selectedSessionID) }
     }
 
     private func startDetailLoad(_ id: String) {
