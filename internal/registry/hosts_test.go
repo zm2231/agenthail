@@ -176,3 +176,37 @@ func TestRemoveHostDeletesOwnedSessionsAndAnnouncesRemoval(t *testing.T) {
 		t.Fatalf("second remove err=%v", err)
 	}
 }
+
+func TestHeldHostDeliveryIsInvisibleToLocalClaimsAndMatchesByAlias(t *testing.T) {
+	r := openTestRegistry(t)
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `","alias":"builder"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueHostDelivery("remote-thread", "held", "cli-key", []byte(`{"action":"send"}`), false); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.ClaimNextMessage("remote-thread", time.Now()); err != nil || item != nil {
+		t.Fatalf("local claim took a held host delivery: item=%+v err=%v", item, err)
+	}
+	held, err := r.HostDeliveries(hostID)
+	if err != nil || len(held) != 1 || held[0].Status != "pending" || held[0].Key != "cli-key" {
+		t.Fatalf("held=%+v err=%v", held, err)
+	}
+	for _, target := range []string{"@builder", "builder", "remote-thread"} {
+		matches, err := r.MatchHostSessions("", target)
+		if err != nil || len(matches) != 1 || matches[0].HostID != hostID || matches[0].ID != "remote-thread" || matches[0].Alias != "builder" {
+			t.Fatalf("target %q matches=%+v err=%v", target, matches, err)
+		}
+	}
+	if matches, err := r.MatchHostSessions("hffffffffffff", "builder"); err != nil || len(matches) != 0 {
+		t.Fatalf("other host matches=%+v err=%v", matches, err)
+	}
+	if matches, err := r.MatchHostSessions("", "remote"); err != nil || len(matches) != 0 {
+		t.Fatalf("prefix matched mirrored row: %+v err=%v", matches, err)
+	}
+}

@@ -8,4 +8,5 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Push notification service](push-relay.md)
 - [Mobile session fidelity audit](mobile-session-ux.md)
 - [Subagents: identity, families, targets, and cost](subagents.md)
+- [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
 - [Dashboard design reference](../../design.md)

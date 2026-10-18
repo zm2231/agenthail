@@ -135,8 +135,8 @@ that surface is unavailable for this call; report it and continue with sessions
 from healthy surfaces. Do not describe an unavailable Notion surface as active
 or configured.
 
-Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, or a
-qualified `surface:target` value. A cwd/name fragment resolves to a family's
+Targets accept `@alias`, PID, session-ID prefix, cwd/name fragment, a
+qualified `surface:target` value, or `host::target` for a paired host. A cwd/name fragment resolves to a family's
 root session, never to one of its subagents. Address a Codex subagent by its
 ID or as `@<parent>/<nickname>` (for example `@lead/Ada/Euclid` for a nested
 one). Claude subagents are read-only and cannot be targeted. If AgentHail
@@ -334,6 +334,29 @@ agenthail channel rm launch --all
 
 Channels broadcast to every member. Busy members queue. Partial failure exits
 nonzero so the caller can report which deliveries failed.
+
+## Paired Hosts
+
+Another Agenthail daemon on the tailnet can be paired so its sessions appear
+here. Pairing needs remote access on the other host and both daemons running.
+
+```bash
+agenthail hosts                     # this host, paired hosts, state, session counts
+agenthail hosts invite              # on the other host: prints a pairing link
+agenthail hosts add '<link>' --address <tailnet-ip>
+agenthail hosts remove forge
+agenthail hosts name mac
+```
+
+Address a paired host's session as `forge::@builder` or `forge::<id>`.
+An unqualified target that matches on two hosts is an error listing each
+`host::target`; show the candidates and ask which one. `send`, `steer`,
+`interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
+paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
+unreachable host stays listed as `down` with the host named. A send to it is
+held by the local daemon (`queued`) and delivered once when the host returns;
+`delivery submitted` means the outcome is unknown, so do not resend. Other
+commands refuse remote sessions.
 
 ## Daemon
 

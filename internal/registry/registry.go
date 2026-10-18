@@ -1782,7 +1782,7 @@ func (r *Registry) ClaimNextSteerMessage(sessionID string, now time.Time) (*Queu
 // claimCandidateFilter selects the session's next queued message, the one a
 // claim acts on.
 func claimCandidateFilter(sessionID, busyDelivery string) (string, []any) {
-	filter := `session_id=? AND status IN ('pending','inflight')`
+	filter := `session_id=? AND host_request='' AND status IN ('pending','inflight')`
 	args := []any{sessionID}
 	if busyDelivery != "" {
 		filter += ` AND busy_delivery=?`

@@ -541,6 +541,15 @@ function scopedSessions() {
     return app.state.sessions.filter(sessionIsCurrent);
   return app.state.sessions;
 }
+function remoteHostName(session) {
+  return session?.host && session.host.state !== "local" ? session.host.name : "";
+}
+function hostBadge(session) {
+  const host = remoteHostName(session);
+  if (!host) return "";
+  const unavailable = Boolean(session.unavailableReason);
+  return `<span class="host-badge${unavailable ? " unavailable" : ""}" title="${escape(session.unavailableReason || `On ${host}`)}">${escape(unavailable ? `${host} unavailable` : host)}</span>`;
+}
 function renderSessions() {
   const mobileViewport = window.matchMedia("(max-width: 800px)").matches;
   if (app.sessionViewport !== mobileViewport) {
@@ -552,7 +561,7 @@ function renderSessions() {
   const sessions = scopedSessions().filter((session) => {
     const matchesQuery =
       !query ||
-      `${displayName(session)} ${session.surface} ${session.name}`
+      `${displayName(session)} ${session.surface} ${session.name} ${remoteHostName(session)}`
         .toLowerCase()
         .includes(query);
     const matchesSurface =
@@ -596,7 +605,7 @@ function renderSessions() {
     visible
       .map(
         (session) =>
-          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span>${sharedBadge(session)}</div><div class="session-detail"><span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
+          `<button class="session ${app.selected?.id === session.id ? "selected" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span>${sharedBadge(session)}</div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}</div></button>`,
       )
       .join("");
   const historyItems = historyResults

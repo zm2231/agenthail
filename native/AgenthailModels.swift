@@ -122,6 +122,8 @@ struct SessionState: Codable, Identifiable, Hashable {
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
     var sharedWith: [SharedProcess]? = nil
+    var host: SessionHost? = nil
+    var unavailableReason: String? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -130,6 +132,36 @@ struct SessionState: Codable, Identifiable, Hashable {
 
     var isWorking: Bool { status == "busy" }
     var isReadOnly: Bool { readOnly == true }
+    var remoteHostName: String? {
+        guard let host, host.state != "local" else { return nil }
+        return host.name
+    }
+    var isUnavailable: Bool { remoteHostName != nil && !(unavailableReason ?? "").isEmpty }
+}
+
+struct SessionHost: Codable, Hashable {
+    let id: String
+    let name: String
+    let state: String
+}
+
+struct HostHealth: Decodable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let state: String
+    var detail: String? = nil
+
+    var stateLabel: String {
+        switch state {
+        case "connected": return "Connected"
+        case "connecting": return "Connecting"
+        case "unreachable": return "Unreachable"
+        case "unauthorized": return "Pairing revoked"
+        case "incompatible": return "Needs update"
+        default: return state.capitalized
+        }
+    }
+    var isHealthy: Bool { state == "connected" }
 }
 
 struct SubagentIdentity: Codable, Hashable {
@@ -480,6 +512,8 @@ struct DaemonState: Decodable, Equatable {
     let pid: Int?
     let stale: Bool?
     let refreshError: String?
+    var host: SessionHost? = nil
+    var hosts: [HostHealth]? = nil
 }
 
 struct DashboardSnapshot: Decodable {

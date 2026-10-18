@@ -613,11 +613,17 @@ func (d *Daemon) publicSessionID(sessionID string) string {
 	return hosts.Qualify(owner, sessionID)
 }
 
-func (d *Daemon) hostSummaries() []dashboardHost {
+type dashboardHostHealth struct {
+	dashboardHost
+	Detail string `json:"detail,omitempty"`
+}
+
+func (d *Daemon) hostSummaries() []dashboardHostHealth {
 	paired := d.pairedHosts()
-	result := make([]dashboardHost, 0, len(paired))
+	result := make([]dashboardHostHealth, 0, len(paired))
 	for _, host := range paired {
-		result = append(result, host.ref())
+		state, detail := host.status()
+		result = append(result, dashboardHostHealth{dashboardHost: dashboardHost{ID: host.record.ID, Name: host.record.Name, State: state}, Detail: detail})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result

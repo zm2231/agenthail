@@ -791,6 +791,18 @@ select {
   font-size: 10px;
   font-weight: 700;
 }
+.host-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--quiet);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.host-badge.unavailable {
+  color: var(--warn);
+}
 .thread-meta {
   display: flex;
   justify-content: space-between;
