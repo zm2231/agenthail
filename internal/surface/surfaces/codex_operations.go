@@ -62,10 +62,7 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	}
 	response, err := c.requestSession(ctx, session, true, "thread/fork", params, 15*time.Second)
 	if err != nil {
-		if surface.IsDeliveryUnavailable(err) {
-			return nil, err
-		}
-		return nil, surface.DeliveryOutcomeUnknown(err)
+		return nil, codexOperationOutcome(err)
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
@@ -149,10 +146,7 @@ func (c *Codex) NativeQueue(ctx context.Context, session *surface.Session, reque
 	response, err := c.requestSession(ctx, session, request.Action != "list", method, params, 10*time.Second)
 	if err != nil {
 		if request.Action != "list" {
-			if surface.IsDeliveryUnavailable(err) {
-				return nil, err
-			}
-			return nil, surface.DeliveryOutcomeUnknown(err)
+			return nil, codexOperationOutcome(err)
 		}
 		return nil, err
 	}

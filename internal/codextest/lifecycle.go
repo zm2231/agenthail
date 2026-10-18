@@ -63,7 +63,8 @@ printf '%%s\n' '{"status":"started","backend":"pid"}'
 	return lifecycle
 }
 
-// Start brings the daemon up, carrying over the previous daemon's threads.
+// Start brings the daemon up, carrying over the previous daemon's threads;
+// a turn that was running reads back as interrupted, as it does in Codex.
 func (l *Lifecycle) Start(t testing.TB) *Daemon {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -78,6 +79,12 @@ func (l *Lifecycle) Start(t testing.TB) *Daemon {
 		previous.mu.Lock()
 		for _, id := range previous.order {
 			thread := *previous.threads[id]
+			thread.Turns = append([]Turn(nil), thread.Turns...)
+			for index := range thread.Turns {
+				if thread.Turns[index].Status == "inProgress" {
+					thread.Turns[index].Status = "interrupted"
+				}
+			}
 			daemon.threads[id] = &thread
 			daemon.order = append(daemon.order, id)
 		}

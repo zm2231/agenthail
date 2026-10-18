@@ -212,12 +212,14 @@ func TestCodexUnknownLoadedStateFailsClosedForWrites(t *testing.T) {
 	}
 }
 
-func TestCodexWriterConflictIsTerminalForEveryWrite(t *testing.T) {
+type codexWrite struct {
+	name  string
+	write func(*Codex, *surface.Session) error
+}
+
+func codexWrites() []codexWrite {
 	ctx := context.Background()
-	for _, test := range []struct {
-		name  string
-		write func(*Codex, *surface.Session) error
-	}{
+	return []codexWrite{
 		{name: "send", write: func(c *Codex, s *surface.Session) error { _, err := c.Send(ctx, s, "hello"); return err }},
 		{name: "steer", write: func(c *Codex, s *surface.Session) error { return c.Steer(ctx, s, "focus") }},
 		{name: "interrupt", write: func(c *Codex, s *surface.Session) error { return c.Interrupt(ctx, s) }},
@@ -228,26 +230,85 @@ func TestCodexWriterConflictIsTerminalForEveryWrite(t *testing.T) {
 			_, err := c.ForkSession(ctx, s, surface.ForkOptions{})
 			return err
 		}},
-	} {
+		{name: "queue add", write: func(c *Codex, s *surface.Session) error {
+			_, err := c.NativeQueue(ctx, s, surface.NativeQueueRequest{Action: "add", Message: "later", ClientID: "client-1"})
+			return err
+		}},
+		{name: "queue delete", write: func(c *Codex, s *surface.Session) error {
+			_, err := c.NativeQueue(ctx, s, surface.NativeQueueRequest{Action: "delete", ID: "queued-1"})
+			return err
+		}},
+	}
+}
+
+var codexOperationMethods = []string{"turn/start", "turn/steer", "turn/interrupt", "thread/compact/start", "thread/goal/clear", "thread/fork", "thread/queue/add", "thread/queue/delete"}
+
+func requireNoCodexOperation(t *testing.T, fake *codextest.Daemon) {
+	t.Helper()
+	for _, method := range codexOperationMethods {
+		if calls := fake.Calls(method); len(calls) != 0 {
+			t.Fatalf("%s ran: %v", method, fake.Methods())
+		}
+	}
+}
+
+func requireOwnershipConflict(t *testing.T, err error) {
+	t.Helper()
+	var terminal surface.DeliveryTerminalError
+	if !errors.As(err, &terminal) || terminal.Kind != surface.DeliveryOwnershipConflict || surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v, want only a terminal ownership conflict", err)
+	}
+}
+
+func writerConflict(method string, _ map[string]any) map[string]any {
+	if method == "thread/resume" {
+		return map[string]any{"error": map[string]any{"code": -32600, "message": "thread " + managedThreadID + " already has an active writer"}}
+	}
+	return nil
+}
+
+func TestCodexWriterConflictIsTerminalForEveryWrite(t *testing.T) {
+	for _, test := range codexWrites() {
+		t.Run(test.name, func(t *testing.T) {
+			fake := startManagedCodex(t, writerConflict)
+			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail", Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
+			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex})
+			requireOwnershipConflict(t, err)
+			requireNoCodexOperation(t, fake)
+		})
+	}
+}
+
+func TestCodexModelChangeWriterConflictIsTerminal(t *testing.T) {
+	fake := startManagedCodex(t, func(method string, params map[string]any) map[string]any {
+		if params["model"] != nil {
+			return writerConflict(method, params)
+		}
+		return nil
+	})
+	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
+	_, err := isolatedManagedRuntime(t).Model(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex}, "gpt-5.6-sol")
+	requireOwnershipConflict(t, err)
+	if resumes := fake.Calls("thread/resume"); len(resumes) != 2 || resumes[1]["model"] != "gpt-5.6-sol" {
+		t.Fatalf("want the preflight resume, then the conflicting model change, got %v", resumes)
+	}
+}
+
+func TestCodexResumedThreadWithoutDirectInputStaysRetryable(t *testing.T) {
+	for _, test := range codexWrites() {
 		t.Run(test.name, func(t *testing.T) {
 			fake := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
-				if method == "thread/resume" {
-					return map[string]any{"error": map[string]any{"code": -32600, "message": "thread " + managedThreadID + " already has an active writer"}}
+				if method == "thread/read" {
+					return map[string]any{"thread": map[string]any{"canAcceptDirectInput": false}}
 				}
 				return nil
 			})
 			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail", Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
-			fake.Unload(managedThreadID)
 			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex})
-			var terminal surface.DeliveryTerminalError
-			if !errors.As(err, &terminal) || terminal.Kind != surface.DeliveryOwnershipConflict || surface.IsDeliveryUnavailable(err) {
-				t.Fatalf("err=%v, want a terminal ownership conflict", err)
+			if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) || surface.IsDeliveryOutcomeUnknown(err) {
+				t.Fatalf("err=%v, want only retryable unavailable", err)
 			}
-			for _, method := range []string{"turn/start", "turn/steer", "turn/interrupt", "thread/compact/start", "thread/goal/clear", "thread/fork"} {
-				if calls := fake.Calls(method); len(calls) != 0 {
-					t.Fatalf("%s ran after a writer conflict", method)
-				}
-			}
+			requireNoCodexOperation(t, fake)
 		})
 	}
 }

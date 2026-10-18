@@ -1031,6 +1031,20 @@ func (a *App) registeredSessionUnavailable(ctx context.Context, sid, target stri
 	return fmt.Errorf("%s session %s is not reachable yet: background job %v is %v", adapter.Name(), sid, status["id"], status["state"])
 }
 
+// resolveSession refreshes a session through its surface. An unreachable
+// runtime is not a missing session: a session the registry already knows
+// stands as registered, and each operation decides whether it can proceed.
+func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector string) (*surface.Session, error) {
+	session, err := adapter.Resolve(ctx, selector)
+	if !surface.IsDeliveryUnavailable(err) || a.Registry == nil {
+		return session, err
+	}
+	if registered, lookupErr := a.Registry.Session(selector); lookupErr == nil && registered.Surface == kind {
+		return registered, nil
+	}
+	return nil, err
+}
+
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
 	if kindText, selector, ok := strings.Cut(target, ":"); ok {
 		kind := surface.SurfaceKind(strings.ToLower(kindText))
@@ -1038,7 +1052,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
-		session, err := adapter.Resolve(ctx, selector)
+		session, err := a.resolveSession(ctx, kind, adapter, selector)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
@@ -1072,13 +1086,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				if adapter == nil {
 					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
 				}
-				session, resolveErr := adapter.Resolve(ctx, sid)
-				if surface.IsDeliveryUnavailable(resolveErr) {
-					// An unreachable runtime is not a missing session; the operation decides.
-					if registered, lookupErr := a.Registry.Session(sid); lookupErr == nil {
-						session, resolveErr = registered, nil
-					}
-				}
+				session, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid)
 				if resolveErr != nil {
 					return nil, nil, a.registeredSessionUnavailable(ctx, sid, target, adapter, resolveErr)
 				}

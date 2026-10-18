@@ -206,9 +206,8 @@ func (c *Codex) openWriter(ctx context.Context, sess *surface.Session) (codexCli
 	}
 	if err := c.requireDirectInput(ctx, client, sess); err != nil {
 		_ = client.Close()
-		var notWritable *codexNotWritableError
-		if errors.As(err, &notWritable) {
-			return nil, surface.DeliveryTerminal(err, surface.DeliveryOwnershipConflict)
+		if surface.IsDeliveryTerminal(err) {
+			return nil, err
 		}
 		return nil, surface.DeliveryUnavailable(err)
 	}

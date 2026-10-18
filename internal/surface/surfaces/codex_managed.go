@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,10 +21,6 @@ type codexClient interface {
 	Request(context.Context, string, map[string]any, time.Duration) (map[string]any, error)
 	Close() error
 }
-
-type codexNotWritableError struct{ reason string }
-
-func (e *codexNotWritableError) Error() string { return e.reason }
 
 type desktopCodexClient struct {
 	owner *Codex
@@ -184,6 +181,25 @@ func codexWriterConflict(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "already has an active writer")
 }
 
+// classifyCodexWrite turns Codex's writer-conflict response to any request
+// into a terminal ownership conflict and leaves every other error as is.
+func classifyCodexWrite(err error) error {
+	if !codexWriterConflict(err) {
+		return err
+	}
+	return surface.DeliveryTerminal(fmt.Errorf("Codex session is owned by another runtime; release that writer before delivery: %w", err), surface.DeliveryOwnershipConflict)
+}
+
+// codexOperationOutcome classifies a failed write whose request may have
+// reached Codex: failures decided before or by Codex keep their class, and
+// anything else is an unknown outcome.
+func codexOperationOutcome(err error) error {
+	if surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) {
+		return err
+	}
+	return surface.DeliveryOutcomeUnknown(err)
+}
+
 // requireDirectInput makes the route's runtime the thread's live writer:
 // a loaded thread that accepts direct input is used as is, otherwise the
 // thread is resumed there and must then accept direct input.
@@ -193,17 +209,14 @@ func (c *Codex) requireDirectInput(ctx context.Context, client codexClient, sess
 		return nil
 	}
 	if _, err := client.Request(ctx, "thread/resume", codexResumeParams(sess), 10*time.Second); err != nil {
-		if codexWriterConflict(err) {
-			return &codexNotWritableError{reason: "Codex session is owned by another runtime; release that writer before delivery"}
-		}
-		return fmt.Errorf("thread/resume: %w", err)
+		return classifyCodexWrite(fmt.Errorf("thread/resume: %w", err))
 	}
 	readResponse, err = client.Request(ctx, "thread/read", map[string]any{"threadId": sess.ID, "includeTurns": false}, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("thread/read after resume: %w", err)
 	}
 	if !codexDirectInputAccepted(readResponse) {
-		return &codexNotWritableError{reason: "Codex loaded the session without direct-input capability"}
+		return errors.New("Codex loaded the session without direct-input capability")
 	}
 	result, _ := readResponse["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
@@ -280,7 +293,8 @@ func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writa
 		return nil, err
 	}
 	defer client.Close()
-	return client.Request(ctx, method, params, wait)
+	response, err := client.Request(ctx, method, params, wait)
+	return response, classifyCodexWrite(err)
 }
 
 func codexSource(value any) string {

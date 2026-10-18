@@ -68,4 +68,18 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	if commands := lifecycle.Commands(); len(commands) != 2 {
 		t.Fatalf("lifecycle commands=%v, want a second start after the daemon stopped", commands)
 	}
+
+	lifecycle.Crash()
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:" + id, "By thread id"}) }); err != nil {
+		t.Fatalf("send by qualified id after the daemon stopped err=%v", err)
+	}
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 4 || thread.Turns[3].User != "By thread id" {
+		t.Fatalf("thread=%+v", thread)
+	}
+	if resumes := lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 {
+		t.Fatalf("restarted daemon resumes=%v", resumes)
+	}
+	if commands := lifecycle.Commands(); len(commands) != 3 {
+		t.Fatalf("lifecycle commands=%v, want a third start", commands)
+	}
 }
