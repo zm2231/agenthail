@@ -1520,7 +1520,7 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
-	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || sess.Transport == "uds") {
+	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || delivery.RouteFor(surf, sess, options.Author).TransportOnly()) {
 		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
 		wantStream, wantReply = false, false
 	}
