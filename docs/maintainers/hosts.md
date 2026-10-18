@@ -117,4 +117,6 @@ Every place that treats `host_id = ''` as "this daemon's session":
   (`host_request <> ''`); only the host delivery loop touches them.
 - `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
   their stored projection.
+- `registerRecentClaudePeers` never advertises a mirrored session as a local
+  Claude peer.
 - The CLI `list` renders rows with a host id from their projection.

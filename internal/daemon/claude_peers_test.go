@@ -36,6 +36,12 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 	if _, err := reg.MarkCatalogDiscoveryFailure(surface.KindNotion, "catalog discovery failed", now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := reg.AddHost(registry.PairedHost{ID: "h0123456789ab", Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_synthetic"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.ApplyHostCatalogRow("h0123456789ab", registry.HostCatalogRow{Session: surface.Session{ID: "mirrored", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle, LastActive: now}, EntityID: "h0123456789ab::mirrored", Projection: []byte(`{"id":"h0123456789ab::mirrored"}`), ObservedAt: now.UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	seen := map[string]int{}
 	d.registerRecentClaudePeers(context.Background(), func(_ context.Context, sessions []surface.Session) map[string]error {
 		for _, session := range sessions {

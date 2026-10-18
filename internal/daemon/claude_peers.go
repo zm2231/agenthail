@@ -129,7 +129,7 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(c
 	for _, record := range snapshot.Sessions {
 		session := record.Session
 		// Native Claude sessions publish their own records and socket endpoints.
-		if session.Surface == surface.KindClaude || !configured[session.Surface] || record.Freshness.Stale || !claudePeerEligible(session, now) {
+		if record.HostID != "" || session.Surface == surface.KindClaude || !configured[session.Surface] || record.Freshness.Stale || !claudePeerEligible(session, now) {
 			continue
 		}
 		eligible = append(eligible, session)
