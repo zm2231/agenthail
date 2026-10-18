@@ -1201,9 +1201,13 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)) { attention in
-                AttentionBanner(model: model, attention: attention)
-                    .padding(.bottom, 8)
+            let attention = QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)
+            if !attention.isEmpty {
+                BoundedDock {
+                    VStack(spacing: 0) {
+                        ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, 8) }
+                    }
+                }
             }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
