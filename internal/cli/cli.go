@@ -1039,17 +1039,14 @@ func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adap
 	if !surface.IsDeliveryUnavailable(err) || a.Registry == nil {
 		return session, err
 	}
-	sid, lookupErr := a.Registry.ResolveTarget(selector)
+	sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
+	if errors.Is(lookupErr, sql.ErrNoRows) {
+		return nil, err
+	}
 	if lookupErr != nil {
-		if errors.Is(lookupErr, sql.ErrNoRows) {
-			return nil, err
-		}
 		return nil, lookupErr
 	}
-	if registered, lookupErr := a.Registry.Session(sid); lookupErr == nil && registered.Surface == kind {
-		return registered, nil
-	}
-	return nil, err
+	return a.Registry.Session(sid)
 }
 
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
