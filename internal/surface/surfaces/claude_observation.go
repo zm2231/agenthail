@@ -6,7 +6,16 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
+
+// claudeWaitingTools are the tools whose tool_use blocks the turn on the
+// user until a matching tool_result is written.
+var claudeWaitingTools = map[string]surface.WaitingKind{
+	"AskUserQuestion": surface.WaitingQuestion,
+	"ExitPlanMode":    surface.WaitingPlan,
+}
 
 // initialClaudeObservationBytes bounds the transcript tail read when a Claude
 // session is first observed. Tests shrink it to exercise overlap cheaply.
@@ -19,6 +28,7 @@ type claudeObservationState struct {
 	completed            claudeTurn
 	hasCurrent           bool
 	hasCompleted         bool
+	waiting              *surface.Waiting
 	latestCommandAt      time.Time
 	latestCompletedAt    time.Time
 	pendingWithoutTime   int
@@ -76,8 +86,12 @@ func (s *claudeObservationState) apply(line []byte) error {
 func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 	switch record.Type {
 	case "user":
+		if s.waiting != nil && claudeHasToolResult(record.Message.Content, s.waiting.ID) {
+			s.waiting = nil
+		}
 		text := transcriptText(record.Message.Content)
 		if isClaudeInterruptMarker(text) {
+			s.waiting = nil
 			if s.hasCurrent {
 				s.current.Interrupted = true
 			}
@@ -88,6 +102,7 @@ func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 		}
 		s.current = claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)}
 		s.hasCurrent = true
+		s.waiting = nil
 	case "assistant":
 		if !s.hasCurrent {
 			s.hasCurrent = true
@@ -114,6 +129,9 @@ func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 		s.current.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
 		if s.current.Done || s.current.Interrupted {
 			s.current.TerminalAt = at
+			s.waiting = nil
+		} else if waiting := claudeWaitingToolUse(record.Message.Content, at); waiting != nil {
+			s.waiting = waiting
 		}
 		if s.current.Done && s.current.MessageID != "" {
 			s.completed = s.current
@@ -121,6 +139,7 @@ func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 		}
 	case "system":
 		if record.Subtype == "turn_duration" && s.hasCurrent {
+			s.waiting = nil
 			s.current.Done = true
 			s.current.TerminalAt = at
 			if s.current.MessageID != "" {
@@ -129,6 +148,36 @@ func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
 			}
 		}
 	}
+}
+
+// claudeWaitingToolUse returns the last tool_use in content that waits on the
+// user, if any.
+func claudeWaitingToolUse(content any, at time.Time) *surface.Waiting {
+	blocks, _ := content.([]any)
+	var waiting *surface.Waiting
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if block["type"] != "tool_use" {
+			continue
+		}
+		name, _ := block["name"].(string)
+		id, _ := block["id"].(string)
+		if kind, ok := claudeWaitingTools[name]; ok && id != "" {
+			waiting = &surface.Waiting{Kind: kind, ID: id, Since: at}
+		}
+	}
+	return waiting
+}
+
+func claudeHasToolResult(content any, toolUseID string) bool {
+	blocks, _ := content.([]any)
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if block["type"] == "tool_result" && block["tool_use_id"] == toolUseID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *claudeObservationState) applyCompact(record claudeRecord, at time.Time) {

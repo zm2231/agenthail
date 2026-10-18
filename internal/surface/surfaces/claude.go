@@ -484,9 +484,11 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 		sess.LastActive = time.UnixMilli(int64(ts))
 	}
 	sess.Status = claudePeerStatus(record)
+	sess.WaitingOn = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
+			sess.WaitingOn = observation.WaitingOn
 		}
 	}
 }
@@ -663,6 +665,10 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 	if compactPending && transcriptCanSetReady {
 		observation.Status = surface.StatusBusy
 		observation.ActiveTurnID = "compact"
+	}
+	if state.waiting != nil && observation.Status == surface.StatusBusy && observation.ActiveTurnID == last.UserID {
+		waiting := *state.waiting
+		observation.WaitingOn = &waiting
 	}
 	if state.hasCompleted && state.completed.MessageID != "" {
 		observation.CompletedTurnID = state.completed.MessageID

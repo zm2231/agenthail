@@ -25,6 +25,32 @@ const (
 	StatusUnknown SessionStatus = "unknown"
 )
 
+// WaitingKind names what an open turn is waiting for from its user.
+type WaitingKind string
+
+const (
+	WaitingQuestion WaitingKind = "question"
+	WaitingPlan     WaitingKind = "plan"
+	WaitingApproval WaitingKind = "approval"
+	WaitingInput    WaitingKind = "input"
+)
+
+// Waiting marks a busy turn that cannot continue until its user answers. ID
+// is stable for one question, so a new ID means a new question.
+type Waiting struct {
+	Kind  WaitingKind `json:"kind"`
+	ID    string      `json:"id"`
+	Since time.Time   `json:"since,omitzero"`
+}
+
+// SameWaiting reports whether two waiting states describe the same question.
+func SameWaiting(left, right *Waiting) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Kind == right.Kind && left.ID == right.ID
+}
+
 type Session struct {
 	ID                    string          `json:"id"`
 	Surface               SurfaceKind     `json:"surface"`
@@ -32,6 +58,7 @@ type Session struct {
 	Cwd                   string          `json:"cwd"`
 	PID                   int             `json:"pid"`
 	Status                SessionStatus   `json:"status"`
+	WaitingOn             *Waiting        `json:"waitingOn,omitempty"`
 	Transcript            string          `json:"transcript"`
 	HasLocal              bool            `json:"hasLocal"`
 	Source                string          `json:"source,omitempty"`
@@ -380,6 +407,7 @@ type TurnObservation struct {
 	TerminalTurnID  string        `json:"terminalTurnId,omitempty"`
 	CompletedTurnID string        `json:"completedTurnId,omitempty"`
 	InputTurnID     string        `json:"inputTurnId,omitempty"`
+	WaitingOn       *Waiting      `json:"waitingOn,omitempty"`
 	Reply           *ReplyResult  `json:"reply,omitempty"`
 }
 

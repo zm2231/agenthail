@@ -65,7 +65,9 @@ type codexThread struct {
 	Name   string
 	Cwd    string
 	Status surface.SessionStatus
-	Turns  []codexTurn
+	// Waiting is the kind of user response an active thread waits on.
+	Waiting surface.WaitingKind
+	Turns   []codexTurn
 }
 
 func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID string) (*codexThread, error) {
@@ -84,7 +86,7 @@ func (c *Codex) readThread(ctx context.Context, conn codexClient, threadID strin
 	if !ok {
 		return nil, fmt.Errorf("thread/read response missing thread")
 	}
-	thread := &codexThread{ID: str(value, "id"), Name: surface.DeriveName(str(value, "name"), str(value, "preview"), 60), Cwd: str(value, "cwd"), Status: codexStatus(value["status"])}
+	thread := &codexThread{ID: str(value, "id"), Name: surface.DeriveName(str(value, "name"), str(value, "preview"), 60), Cwd: str(value, "cwd"), Status: codexStatus(value["status"]), Waiting: codexWaitingKind(value["status"])}
 	if thread.ID == "" {
 		thread.ID = threadID
 	}
@@ -288,6 +290,9 @@ func codexObservation(thread *codexThread) *surface.TurnObservation {
 			observation.ActiveTurnID = turn.ID
 			break
 		}
+	}
+	if thread.Waiting != "" && observation.Status == surface.StatusBusy {
+		observation.WaitingOn = codexWaiting(thread.ID, thread.Waiting)
 	}
 	for i := len(thread.Turns) - 1; i >= 0; i-- {
 		turn := thread.Turns[i]
