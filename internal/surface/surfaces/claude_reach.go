@@ -108,12 +108,12 @@ func (c *Claude) conversationOf(sess *surface.Session) string {
 		return sess.ID
 	}
 	bridge := toCse(sess.ID)
-	entries, err := os.ReadDir(filepath.Join(c.home, ".claude", "jobs"))
+	entries, err := os.ReadDir(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs"))
 	if err != nil {
 		return ""
 	}
 	for _, entry := range entries {
-		raw, err := os.ReadFile(filepath.Join(c.home, ".claude", "jobs", entry.Name(), "state.json"))
+		raw, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs", entry.Name(), "state.json"))
 		if err != nil {
 			continue
 		}

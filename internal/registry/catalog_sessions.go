@@ -149,6 +149,24 @@ func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event Catalog
 	return persisted, created, nil
 }
 
+// RetainCatalogSurfaces drops the health rows of surfaces this host no longer
+// registers, so a removed surface does not report its last health forever.
+func (r *Registry) RetainCatalogSurfaces(kinds []surface.SurfaceKind) error {
+	if err := r.EnsureCatalogState(); err != nil {
+		return err
+	}
+	query := `DELETE FROM catalog_surfaces`
+	args := make([]any, 0, len(kinds))
+	if len(kinds) > 0 {
+		query += ` WHERE surface NOT IN (?` + strings.Repeat(",?", len(kinds)-1) + `)`
+		for _, kind := range kinds {
+			args = append(args, string(kind))
+		}
+	}
+	_, err := r.db.Exec(query, args...)
+	return err
+}
+
 func (r *Registry) RecordCatalogSession(state CatalogSessionState, event CatalogEvent) (CatalogEvent, bool, error) {
 	if err := r.EnsureCatalogState(); err != nil {
 		return CatalogEvent{}, false, err

@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -173,7 +175,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
 		return err
 	}
-	recordPath := filepath.Join(c.Home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	recordPath := filepath.Join(surface.ClaudeConfigDir(c.Home), "sessions", strconv.Itoa(pid)+".json")
 	if err := requireAbsent(socketPath, controlPath, recordPath, manifestPath); err != nil {
 		return err
 	}
@@ -717,7 +719,7 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 		return false
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(root)))
-	return manifest.RecordPath == filepath.Join(home, ".claude", "sessions", strconv.Itoa(manifest.PID)+".json")
+	return manifest.RecordPath == filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(manifest.PID)+".json")
 }
 
 func processMatches(pid int, expected string) bool {
@@ -797,8 +799,28 @@ func removeManifestSocket(path string, device, inode uint64) bool {
 	if !ok || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || uint64(stat.Dev) != device || uint64(stat.Ino) != inode {
 		return false
 	}
+	if !SocketRefusesConnections(path) {
+		return false
+	}
 	removeErr := os.Remove(path)
 	return removeErr == nil || os.IsNotExist(removeErr)
+}
+
+var dialSocket = func(path string) (net.Conn, error) {
+	return net.DialTimeout("unix", path, 200*time.Millisecond)
+}
+
+// SocketRefusesConnections reports whether nothing listens at path. A
+// filesystem can hand a freed inode to the next socket made at the same path,
+// so a matching device and inode do not prove a socket is stale; only a
+// refused connection does, and any other dial result keeps the socket.
+func SocketRefusesConnections(path string) bool {
+	connection, err := dialSocket(path)
+	if err == nil {
+		connection.Close()
+		return false
+	}
+	return errors.Is(err, syscall.ECONNREFUSED)
 }
 
 func removeOwnedRecord(path string, manifest OwnershipManifest) {
@@ -874,7 +896,7 @@ func validateNativeSender(home, socketDir, from string) error {
 	if err != nil {
 		return errors.New("sender socket has no valid owner pid")
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "sessions", pidText+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", pidText+".json"))
 	if err != nil {
 		return errors.New("sender has no current native Claude record")
 	}
@@ -1091,13 +1113,35 @@ func classifyControlError(err error) *controlError {
 	return &controlError{Class: "unknown", Error: err.Error()}
 }
 
+// ClaudeSocketDirs returns the directories Claude Code binds peer sockets in:
+// /tmp/cc-socks, and on Linux $XDG_RUNTIME_DIR/cc-socks or the default
+// /run/user/<uid>/cc-socks, matching Claude Code's own default namespaces.
+func ClaudeSocketDirs() []string {
+	return claudeSocketDirsFor(runtime.GOOS, os.Getenv("XDG_RUNTIME_DIR"), os.Getuid())
+}
+
+func claudeSocketDirsFor(goos, runtimeDir string, uid int) []string {
+	dirs := []string{DefaultSocketDir}
+	if goos != "linux" {
+		return dirs
+	}
+	if runtimeDir = strings.TrimSpace(runtimeDir); runtimeDir != "" {
+		dirs = append(dirs, filepath.Join(runtimeDir, "cc-socks"))
+	}
+	if dir := filepath.Join("/run/user", strconv.Itoa(uid), "cc-socks"); !slices.Contains(dirs, dir) {
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
 func validateTargetSocket(dir, target string) error {
 	if dir == "" {
 		dir = defaultSocketDir
 	}
 	cleanDir, _ := filepath.Abs(dir)
 	cleanTarget, _ := filepath.Abs(target)
-	if filepath.Dir(cleanTarget) != cleanDir || !strings.HasSuffix(filepath.Base(cleanTarget), ".sock") {
+	targetDir := filepath.Dir(cleanTarget)
+	if (targetDir != cleanDir && !slices.Contains(ClaudeSocketDirs(), targetDir)) || !strings.HasSuffix(filepath.Base(cleanTarget), ".sock") {
 		return surface.DeliveryTerminal(errors.New("target socket is outside the Claude socket namespace"), surface.DeliveryInvalidRequest)
 	}
 	st, err := os.Lstat(cleanTarget)
@@ -1160,7 +1204,7 @@ func sendFrame(target string, payload []byte) error {
 func sendAuthenticatedFrame(home, target string, payload []byte) error {
 	hash := sha256.Sum256([]byte(target))
 	pid := strings.TrimSuffix(filepath.Base(target), ".sock")
-	keyPath := filepath.Join(home, ".claude", "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
+	keyPath := filepath.Join(surface.ClaudeConfigDir(home), "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
 	if info, err := os.Lstat(keyPath); err == nil {
 		if !info.Mode().IsRegular() {
 			return surface.DeliveryTerminal(errors.New("invalid Claude peer key file"), surface.DeliveryAuthenticationNeeded)

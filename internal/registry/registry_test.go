@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +23,27 @@ func openTestRegistry(t *testing.T) *Registry {
 	}
 	t.Cleanup(func() { r.Close() })
 	return r
+}
+
+func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := filepath.Join(home, ".agenthail")
+	if err := os.Mkdir(state, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	info, err := os.Stat(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0700 {
+		t.Fatalf("state directory mode=%o, want 700", mode)
+	}
 }
 
 func TestOpenUsesWALAndAllowsReadsDuringAWrite(t *testing.T) {

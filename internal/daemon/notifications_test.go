@@ -59,6 +59,9 @@ func TestNotifyPassesSessionToHelper(t *testing.T) {
 }
 
 func TestEnableNotificationsPersistsOnlyAuthorizedState(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop notifications use the macOS app helper")
+	}
 	home := t.TempDir()
 	helper := filepath.Join(home, "helper")
 	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf '%s\\n' '{\"available\":true,\"authorization\":\"authorized\",\"authorized\":true,\"alerts\":true,\"sounds\":true}'\n"), 0700); err != nil {

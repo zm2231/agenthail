@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"syscall"
+	"time"
 
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -16,91 +17,6 @@ const (
 	maxRelayText = 24000
 	maxRelayHops = 8
 )
-
-func (d *Daemon) fireRelays(from *surface.Session, completionID string, hops int, text string) {
-	if hops >= maxRelayHops {
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SourceSessionID: from.ID, CompletionID: completionID, Message: text, Error: "relay hop limit reached"})
-		d.log.Printf("drop relay from %s: hop limit %d reached", d.resolveDisplay(from.ID), maxRelayHops)
-		return
-	}
-	routes, err := d.Registry.ListRoutes()
-	if err != nil {
-		d.log.Printf("list relays: %s", err)
-		return
-	}
-	for _, route := range routes {
-		if !route.Active || route.FromSession != from.ID || !matchPattern(route.Pattern, text) {
-			continue
-		}
-		target, targetErr := d.Registry.Session(route.ToSession)
-		if targetErr != nil {
-			d.dropRelay(from.ID, route, completionID, text, "target session no longer exists")
-			continue
-		}
-		if relayTargetInactive(target) {
-			d.dropRelay(from.ID, route, completionID, text, "target session is no longer active")
-			continue
-		}
-		adapter := d.surfaceForKind(target.Surface)
-		if adapter == nil {
-			d.dropRelay(from.ID, route, completionID, text, "target surface is unavailable")
-			continue
-		}
-		if err := surface.EnsureWritableSession(context.Background(), adapter, target); err != nil {
-			d.dropRelay(from.ID, route, completionID, text, err.Error())
-			continue
-		}
-		if err := d.Registry.RegisterSession(*target); err != nil {
-			d.dropRelay(from.ID, route, completionID, text, err.Error())
-			continue
-		}
-		payloadText := text
-		if len(payloadText) > maxRelayText {
-			payloadText = payloadText[:maxRelayText] + "\n[relay text truncated by agenthail]"
-		}
-		payload := fmt.Sprintf("[agenthail relay hops=%d id=%d source=%s turn=%s] %s", hops+1, route.ID, d.resolveDisplay(from.ID), completionID, payloadText)
-		key := fmt.Sprintf("relay:%d:%s", route.ID, completionID)
-		busyDelivery, policyErr := deliverypolicy.Load()
-		if policyErr != nil {
-			d.log.Printf("load busy delivery policy for relay %d: %s", route.ID, policyErr)
-			continue
-		}
-		queueID, err := d.Registry.QueueRelayMessageWithOptions(route.ToSession, payload, key, hops+1, surface.SendOptions{SourceSessionID: from.ID, BusyDelivery: string(busyDelivery)})
-		if err != nil {
-			d.log.Printf("queue relay %d: %s", route.ID, err)
-			continue
-		}
-		reserved, err := d.Registry.RecordRelayDelivery(route.ID, completionID)
-		if err != nil {
-			d.log.Printf("record relay %d after queue item %d: %s", route.ID, queueID, err)
-			continue
-		}
-		if !reserved {
-			continue
-		}
-		if route.Once {
-			if err := d.Registry.DeactivateRoute(route.ID); err != nil {
-				d.log.Printf("deactivate one-shot relay %d: %s", route.ID, err)
-			}
-		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay", SessionID: route.ToSession, SourceSessionID: from.ID, RouteID: route.ID, QueueID: queueID, CompletionID: completionID, Message: text, Result: "queued"})
-		d.log.Printf("relay %d %s -> %s (queued #%d)", route.ID, d.resolveDisplay(from.ID), d.resolveDisplay(route.ToSession), queueID)
-	}
-}
-
-func (d *Daemon) dropRelay(sourceID string, route registry.RouteRow, completionID, text, reason string) {
-	providerKey := fmt.Sprintf("relay:%d:%s", route.ID, completionID)
-	if queued, err := d.Registry.RecordReplyForwardFailure(sourceID, route.ToSession, providerKey, text, reason); err != nil {
-		d.log.Printf("record relay failure %d: %s", route.ID, err)
-	} else if queued {
-		if err := d.catalog.flushCommitted(); err != nil {
-			d.log.Printf("publish relay delivery problem %d: %s", route.ID, err)
-		}
-		d.publishEvent("state.changed", sourceID, map[string]string{"source": "delivery-problem"})
-	}
-	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-dropped", SessionID: route.ToSession, SourceSessionID: sourceID, RouteID: route.ID, CompletionID: completionID, Message: text, Error: reason})
-	d.log.Printf("drop relay %d to %s: %s", route.ID, d.resolveDisplay(route.ToSession), reason)
-}
 
 func relayTargetInactive(session *surface.Session) bool {
 	return session.Status == surface.StatusOffline
@@ -122,4 +38,147 @@ func matchPattern(pattern, text string) bool {
 	}
 	match, err := regexp.Compile(pattern)
 	return err == nil && match.MatchString(text)
+}
+
+func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	routes, err := d.Registry.ListRoutes()
+	if err != nil {
+		d.log.Printf("list relays: %s", err)
+		return
+	}
+	var active []registry.RouteRow
+	for _, route := range routes {
+		if route.Active && route.FromSession == session.ID {
+			active = append(active, route)
+		}
+	}
+	if len(active) == 0 {
+		return
+	}
+	reader, ok := adapter.(surface.CompletionReader)
+	captureErr := error(nil)
+	if !ok {
+		captureErr = fmt.Errorf("source does not support replayable completions")
+	} else {
+		cursor, err := d.Registry.RelaySourceCursor(session.ID)
+		if err == nil {
+			readCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+			batch, readErr := reader.ReadCompletions(readCtx, session, cursor)
+			cancel()
+			err = readErr
+			if err == nil {
+				err = d.Registry.CaptureRelayCompletions(session.ID, cursor, batch)
+				if err == nil && len(batch.Events) > 0 {
+					d.publishEvent("state.changed", session.ID, map[string]string{"source": "relay-capture"})
+				}
+				if errors.Is(err, registry.ErrRelayCursorMoved) {
+					err = nil
+				}
+			}
+		}
+		captureErr = err
+	}
+	d.consumeRelays(ctx, adapter, session, active, captureErr)
+}
+
+func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, from *surface.Session, routes []registry.RouteRow, captureErr error) {
+	for _, route := range routes {
+		if !route.Active || route.FromSession != from.ID {
+			continue
+		}
+		events, err := d.Registry.PendingRelayEvents(route)
+		goalKey := route.LastGoalKey
+		if err == nil && route.Handoff == registry.HandoffGoalCompleted && len(events) > 0 {
+			if captureErr != nil {
+				err = captureErr
+			} else if !surface.EffectiveCapabilities(from, adapter.Capabilities()).Goal {
+				err = fmt.Errorf("source does not support goal-completed handoffs")
+			} else {
+				goalCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+				goal, goalErr := adapter.GoalGet(goalCtx, from)
+				cancel()
+				if goalErr != nil {
+					err = fmt.Errorf("goal state unavailable: %w", goalErr)
+				} else if goal == nil || goal.Status != surface.GoalStatusComplete || goal.CreatedAt.IsZero() {
+					err = fmt.Errorf("waiting for explicit goal completion")
+				} else {
+					observeCtx, observeCancel := context.WithTimeout(ctx, surfaceOperationTimeout)
+					observation, observeErr := adapter.Observe(observeCtx, from)
+					observeCancel()
+					if observeErr != nil {
+						err = observeErr
+					} else if observation == nil || observation.ActiveTurnID != "" || observation.CompletedTurnID != events[len(events)-1].CompletionID {
+						err = fmt.Errorf("waiting for the goal's final turn to finish")
+					}
+					latest := events[len(events)-1]
+					if err == nil && (latest.CompletedAt.IsZero() || latest.CompletedAt.Before(goal.CreatedAt)) {
+						err = fmt.Errorf("waiting for a completion timestamp within this goal")
+					}
+					goalKey = goal.CreatedAt.UTC().Format(time.RFC3339Nano) + ":" + goal.Objective
+					if err == nil {
+						if goalKey == route.LastGoalKey {
+							err = fmt.Errorf("waiting for a new completed goal")
+						} else {
+							events = events[len(events)-1:]
+						}
+					}
+				}
+			}
+		}
+		if err == nil {
+			for _, event := range events {
+				payload, busy := "", ""
+				if event.Message != "" && event.RelayHops < maxRelayHops && matchPattern(route.Pattern, event.Message) {
+					target, targetErr := d.Registry.Session(route.ToSession)
+					if targetErr != nil {
+						err = targetErr
+						break
+					}
+					if surface.IsReadOnlySession(target) {
+						err = fmt.Errorf("destination is read-only: %s", surface.ReadOnlySessionReason(target))
+						break
+					}
+					policy, policyErr := deliverypolicy.Load()
+					if policyErr != nil {
+						err = policyErr
+						break
+					}
+					busy = string(policy)
+					text := event.Message
+					if len(text) > maxRelayText {
+						text = text[:maxRelayText] + "\n[relay text truncated by agenthail]"
+					}
+					payload = fmt.Sprintf("[agenthail relay hops=%d id=%d turn=%s source=%s] %s", event.RelayHops+1, route.ID, event.CompletionID, d.resolveDisplay(from.ID), text)
+				}
+				_, err = d.Registry.ConsumeRelay(route, event, payload, busy, goalKey)
+				if err != nil {
+					break
+				}
+				route.EventCursor = event.ID
+				route.LastError = ""
+				d.publishEvent("state.changed", from.ID, map[string]string{"source": "relay"})
+				if payload != "" && route.Once {
+					break
+				}
+			}
+		}
+		if err == nil {
+			err = captureErr
+		}
+		message := ""
+		if err != nil {
+			message = err.Error()
+		}
+		if message == route.LastError {
+			continue
+		}
+		if message != "" {
+			d.log.Printf("relay %d: %s", route.ID, err)
+		}
+		if saveErr := d.Registry.SetRelayError(route.ID, message); saveErr != nil {
+			d.log.Printf("record relay status %d: %s", route.ID, saveErr)
+		} else {
+			d.publishEvent("state.changed", from.ID, map[string]string{"source": "relay-status"})
+		}
+	}
 }
