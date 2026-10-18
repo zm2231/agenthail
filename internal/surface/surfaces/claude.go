@@ -37,6 +37,7 @@ type Claude struct {
 	modelsFlight *claudeModelsFlight
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
+	host         *claudeHost
 	request      ClaudeRequest
 	localOnly    bool
 }
@@ -58,7 +59,7 @@ func NewClaudeWithRequest(profile, home string, request ClaudeRequest) *Claude {
 	if bridge == "" {
 		bridge = cookieBridgePath("cookie")
 	}
-	return &Claude{profile: profile, home: home, cookieBridge: bridge, subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home)}
+	return &Claude{profile: profile, home: home, cookieBridge: bridge, subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(home), host: newClaudeHost(home)}
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
@@ -92,7 +93,7 @@ func (c *Claude) Health(ctx context.Context) error {
 	sessions, err := c.List(ctx)
 	if err == nil {
 		for _, session := range sessions {
-			if session.Transport == "uds" {
+			if claudeNativeSocket(session.Transport) {
 				return nil
 			}
 		}
@@ -431,6 +432,9 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 	if socket != "" {
 		sess.Transport = "uds"
 	}
+	if c.host.runs(ctx, sess.PID, conversation) {
+		sess.Transport = "host"
+	}
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
 	}
@@ -659,7 +663,7 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
-	if sess.Transport == "uds" {
+	if claudeNativeSocket(sess.Transport) {
 		if err := peerSlashCommand(sess, message); err != nil {
 			return nil, err
 		}
@@ -672,7 +676,7 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 // run one. It is checked before reaching the session and again on the
 // transport the session was reached through.
 func peerSlashCommand(sess *surface.Session, message string) error {
-	if sess.Transport == "uds" && strings.HasPrefix(strings.TrimSpace(message), "/") {
+	if claudeNativeSocket(sess.Transport) && strings.HasPrefix(strings.TrimSpace(message), "/") {
 		return surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
 	}
 	return nil
@@ -689,10 +693,10 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 	return c.postMessage(ctx, sess, message)
 }
 
-// CanSendHumanTurn reports whether the session has a web bridge identity, the
-// only route that records the message as the user's own turn.
+// CanSendHumanTurn reports whether a route records the message as the user's
+// own turn: the session host, or the session's web bridge identity.
 func (c *Claude) CanSendHumanTurn(sess *surface.Session) bool {
-	return sess != nil && sess.Surface == surface.KindClaude && !c.localOnly && !nativeClaudeOnly(sess)
+	return sess != nil && sess.Surface == surface.KindClaude && (sess.Transport == "host" || !c.localOnly && !nativeClaudeOnly(sess))
 }
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as
@@ -706,6 +710,9 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
+	}
+	if sess.Transport == "host" {
+		return c.sendHostTurn(ctx, sess, message, "")
 	}
 	if !c.CanSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
@@ -1119,6 +1126,9 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
+	if sess.Transport == "host" {
+		return c.interruptHost(ctx, sess)
+	}
 	if c.localOnly || nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
@@ -1161,6 +1171,9 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 }
 
 func (c *Claude) Steer(ctx context.Context, sess *surface.Session, message string) error {
+	if sess.Transport == "host" {
+		return c.steerHost(ctx, sess, message)
+	}
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}

@@ -4,6 +4,7 @@
 // holds its transcript, one JSON line per turn, which also deduplicates
 // message uuids across processes the way the real transcript does.
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -68,6 +69,35 @@ async function turn(message) {
   write({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: crypto.randomUUID(), session_id: sessionId });
 }
 
+// With FAKE_CLAUDE_RECORD set it also writes the session record and serves
+// the messaging socket a real Claude process has, so discovery finds it and
+// native peer messages reach it.
+if (process.env.FAKE_CLAUDE_RECORD) {
+  const socket = `/tmp/cc-socks/${process.pid}.sock`;
+  const record = path.join(process.env.HOME, '.claude', 'sessions', `${process.pid}.json`);
+  fs.mkdirSync('/tmp/cc-socks', { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.dirname(record), { recursive: true });
+  const cleanup = () => {
+    for (const file of [socket, record]) {
+      try {
+        fs.unlinkSync(file);
+      } catch {}
+    }
+  };
+  process.on('exit', cleanup);
+  net
+    .createServer((conn) => {
+      readline.createInterface({ input: conn }).on('line', (line) => {
+        const frame = JSON.parse(line);
+        if (frame.type !== 'user') return;
+        turns = turns.then(() => turn({ uuid: crypto.randomUUID(), origin: { kind: 'peer', from: frame.from }, message: frame.message }));
+      });
+    })
+    .listen(socket, () => {
+      fs.writeFileSync(record, JSON.stringify({ pid: process.pid, sessionId, cwd: process.cwd(), startedAt: Date.now(), kind: 'interactive', entrypoint: 'sdk-cli', status: 'idle', messagingSocketPath: socket, peerProtocol: 1 }));
+    });
+}
+
 const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 lines.on('line', (line) => {
   const message = JSON.parse(line);
@@ -87,3 +117,4 @@ lines.on('close', async () => {
   await turns;
   process.exit(0);
 });
+process.on('SIGTERM', () => process.exit(0));

@@ -81,6 +81,7 @@ func (d Dispatcher) Steer(ctx context.Context, adapter surface.Surface, session 
 		if err != nil {
 			return nil, fmt.Errorf("persist submitted delivery intent: %w", err)
 		}
+		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 	}
 	if err := adapter.Steer(ctx, session, message); err != nil {
 		if intent != nil {
@@ -144,6 +145,9 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 				if intentErr != nil {
 					return nil, intentErr
 				}
+				if intent != nil {
+					ctx = surface.WithMessageUUID(ctx, intent.UUID)
+				}
 			}
 			return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, busyMode, "", intent)
 		}
@@ -169,6 +173,9 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 		if intentErr != nil {
 			return nil, intentErr
 		}
+	}
+	if intent != nil {
+		ctx = surface.WithMessageUUID(ctx, intent.UUID)
 	}
 	addressed := *session
 	result, err := route.Send(ctx, adapter, session, message, options)

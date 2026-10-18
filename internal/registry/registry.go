@@ -218,6 +218,15 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("delivery_intents", "uuid", `TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`UPDATE delivery_intents SET uuid=` + sqlRandomUUID + ` WHERE uuid=''`); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS delivery_intents_uuid ON delivery_intents(uuid)`); err != nil {
+		return err
+	}
 	if version < 13 {
 		if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
 			return err
@@ -506,6 +515,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	message TEXT NOT NULL DEFAULT '',
 	queue_id INTEGER NOT NULL DEFAULT 0,
 	relayed INTEGER NOT NULL DEFAULT 0,
+	uuid TEXT NOT NULL DEFAULT '',
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',

@@ -23,7 +23,7 @@ func RouteFor(adapter surface.Surface, session *surface.Session, author surface.
 	if sender, ok := adapter.(surface.HumanTurnSender); ok && author == surface.AuthorPerson && sender.CanSendHumanTurn(session) {
 		return RouteHumanTurn
 	}
-	if session.Surface == surface.KindClaude && session.Transport == "uds" {
+	if session.Surface == surface.KindClaude && (session.Transport == "uds" || session.Transport == "host") {
 		return RoutePeer
 	}
 	return RouteSend

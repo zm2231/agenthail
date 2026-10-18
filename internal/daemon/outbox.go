@@ -50,6 +50,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
+	if messageUUID, err := d.Registry.DeliveryIntentUUIDForQueue(item.ID); err != nil {
+		d.log.Printf("read delivery intent of queue item %d: %s", item.ID, err)
+	} else if messageUUID != "" {
+		operationCtx = surface.WithMessageUUID(operationCtx, messageUUID)
+	}
 	var result *surface.SendResult
 	var sendErr error
 	addressed := *session

@@ -50,3 +50,14 @@ func TestHumanTurnRouteRejectsEveryPerMessageOption(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRouteForAHostSessionTakesAPersonsTurnThroughTheHostAndAgentsThroughTheSocket(t *testing.T) {
+	hosted := &surface.Session{ID: "0b8f5d4e-3a51-4c2e-9a0e-2f3c4d5e6f70", Surface: surface.KindClaude, Transport: "host"}
+	adapter := humanTurnFake{bridged: true}
+	if got := RouteFor(adapter, hosted, surface.AuthorPerson); got != RouteHumanTurn || got.TransportOnly() {
+		t.Fatalf("person route = %v, want a followed human turn", got)
+	}
+	if got := RouteFor(adapter, hosted, ""); got != RoutePeer || !got.TransportOnly() {
+		t.Fatalf("agent route = %v, want the native socket", got)
+	}
+}

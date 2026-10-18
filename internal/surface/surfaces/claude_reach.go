@@ -64,7 +64,7 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if cwd == "" {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
-	resumed, err := c.resume(ctx, conversation, cwd, state.job, sess.Transport != "uds" && !c.localOnly)
+	resumed, err := c.resume(ctx, conversation, cwd, state.job, !claudeNativeSocket(sess.Transport) && !c.localOnly)
 	if err != nil {
 		return false, err
 	}
@@ -93,7 +93,7 @@ func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool 
 	if !c.localOnly {
 		sess.Bridge = str(record, "bridgeSessionId")
 	}
-	if sess.Transport == "uds" {
+	if claudeNativeSocket(sess.Transport) {
 		return c.peerSocket(ctx, record) != ""
 	}
 	return sess.Bridge != ""

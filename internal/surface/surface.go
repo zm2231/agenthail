@@ -541,6 +541,11 @@ func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionC
 			capabilities.Interrupt = false
 		}
 	}
+	if session != nil && session.Surface == KindClaude && session.Transport == "host" {
+		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
+		capabilities.Compact = false
+		capabilities.Model = false
+	}
 	if IsReadOnlySession(session) {
 		return SessionCapabilities{ReadOnly: true, ReadOnlyReason: ReadOnlySessionReason(session)}
 	}

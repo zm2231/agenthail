@@ -20,6 +20,7 @@ const MAX_EVENTS = 4096;
 const MAX_LINE = 1 << 20;
 const MAX_SUBSCRIBER_BUFFER = 8 << 20;
 const OPEN_TIMEOUT_MS = 60_000;
+const TAKE_TIMEOUT_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PERMISSION_MODES = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']);
 const DENIED = 'Agenthail cannot answer permission prompts for this session; allow the tool through its permission mode or Claude settings.';
@@ -69,7 +70,11 @@ class Session {
 
   async *input() {
     for (;;) {
-      while (this.inbox.length) yield this.inbox.shift();
+      while (this.inbox.length) {
+        const { message, taken } = this.inbox.shift();
+        taken();
+        yield message;
+      }
       if (this.ended) return;
       await new Promise((resolve) => (this.wake = resolve));
       this.wake = null;
@@ -77,8 +82,9 @@ class Session {
   }
 
   push(message) {
-    this.inbox.push(message);
+    const taken = new Promise((resolve) => this.inbox.push({ message, taken: resolve }));
     this.wake?.();
+    return taken;
   }
 
   end() {
@@ -178,7 +184,7 @@ async function open(params) {
   return s.describe();
 }
 
-function send(params) {
+async function send(params) {
   const s = session(params.sessionId);
   if (draining) throw new HostError('draining', 'the Claude host is shutting down; the message is delivered on the next host');
   if (typeof params.uuid !== 'string' || !UUID.test(params.uuid)) throw new HostError('invalid', 'uuid must be a uuid');
@@ -197,8 +203,13 @@ function send(params) {
   }
   if (params.origin) message.origin = origin(params.origin);
   s.accepted.add(params.uuid);
-  s.push(message);
+  const taken = s.push(message);
   s.setState('busy');
+  try {
+    await Promise.race([taken, timeout(TAKE_TIMEOUT_MS, 'Claude did not take the message')]);
+  } catch (error) {
+    throw new HostError('unknown', `${error.message}; it is delivered if Claude takes it later`);
+  }
   return { accepted: true, duplicate: false };
 }
 
