@@ -257,7 +257,7 @@ struct DeliverySettings: View {
 
     var body: some View {
         Form {
-            Section("Waiting to go out") {
+            Section("Waiting to go out · \(model.snapshot?.queue.count ?? 0)") {
                 if (model.snapshot?.queue ?? []).isEmpty {
                     Text("No messages are waiting.").foregroundStyle(DesktopPalette.text2)
                 }
@@ -283,6 +283,9 @@ struct DeliverySettings: View {
             }
             RecentOutcomesSection(history: model.snapshot?.history ?? [])
             Section {
+                if (model.snapshot?.relays ?? []).isEmpty {
+                    Text("No automatic handoffs yet.").foregroundStyle(DesktopPalette.text2)
+                }
                 ForEach(model.snapshot?.relays ?? []) { relay in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -314,13 +317,16 @@ struct DeliverySettings: View {
                 }
                 .disabled(relayFrom.isEmpty || relayTo.isEmpty)
             } header: {
-                Text("Automatic handoffs")
+                Text("Automatic handoffs · \(model.snapshot?.relays.count ?? 0)")
             } footer: {
                 Text("When one session finishes with matching text, Agenthail sends its reply to another.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section("Channels") {
+                if (model.snapshot?.channels ?? []).isEmpty {
+                    Text("No shared channels yet.").foregroundStyle(DesktopPalette.text2)
+                }
                 HStack {
                     TextField("New channel", text: $channelName)
                     Button("Create") {
@@ -398,7 +404,7 @@ struct ActivitySettings: View {
                     .onChange(of: model.auditKind) { Task { await model.loadAudit(reset: true) } }
                 }
             }
-            Section {
+            Section("Recent activity · \(SettingsCounts.history(model.snapshot?.history.count ?? 0))") {
                 if model.audit.isEmpty {
                     Text("No matching activity.").foregroundStyle(DesktopPalette.text2)
                 }

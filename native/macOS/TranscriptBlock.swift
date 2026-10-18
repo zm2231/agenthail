@@ -76,3 +76,27 @@ func stripImageMarkers(_ text: String) -> (text: String, images: Int) {
     }
     return (kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines), images)
 }
+
+enum LongReply {
+    static let characters = 2400
+
+    static func isLong(_ text: String) -> Bool {
+        text.utf16.count > characters
+    }
+}
+
+enum TimelineMetadata {
+    static func fields(_ item: TimelineItem) -> [String] {
+        var fields: [String] = []
+        if !item.title.isEmpty { fields.append("Title: \(item.title)") }
+        if let callId = item.callId, !callId.isEmpty { fields.append("Call: \(callId)") }
+        if let status = item.status, !status.isEmpty { fields.append("Status: \(status)") }
+        if let timestamp = item.timestamp, !timestamp.isEmpty { fields.append(timestamp) }
+        if item.truncated {
+            let reason = item.truncationReason.flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""
+            fields.append("Content truncated\(reason)")
+        }
+        if let bodyRef = item.bodyRef, !bodyRef.isEmpty { fields.append("Body reference: \(bodyRef)") }
+        return fields
+    }
+}
