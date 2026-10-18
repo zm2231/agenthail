@@ -122,6 +122,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
     var sharedWith: [SharedProcess]? = nil
+    var transport: String? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }

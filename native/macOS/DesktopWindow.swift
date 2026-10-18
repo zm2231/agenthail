@@ -1218,6 +1218,10 @@ struct ComposerView: View {
                             DeliveryProblemBanner(problem: problem, model: model)
                                 .padding(.bottom, 8)
                         }
+                        ForEach(QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)) { attention in
+                            AttentionBanner(model: model, attention: attention)
+                                .padding(.bottom, 8)
+                        }
                         if !queued.isEmpty {
                             QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
                                 .padding(.horizontal, 10)
@@ -1742,7 +1746,7 @@ struct DeliveryTab: View {
     let session: SessionState
 
     var body: some View {
-        let queued = model.snapshot?.queue.filter { $0.sessionId == session.id && $0.status != "delivered" } ?? []
+        let queued = QueueFacts.undelivered(model.snapshot?.queue ?? [], for: session.id)
         let history = model.snapshot?.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id } ?? []
         let problems = model.deliveryProblems(for: session.id)
         VStack(alignment: .leading, spacing: 8) {
@@ -1753,9 +1757,13 @@ struct DeliveryTab: View {
                 }
             }
             if !queued.isEmpty {
-                SidebarCaption("Queued").padding(.horizontal, -8)
+                SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
-                    deliveryCard(title: item.target, status: "Queued", text: item.message, problem: false)
+                    VStack(alignment: .leading, spacing: 4) {
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.detail(item, target: session, attention: model.snapshot?.attention ?? []).joined(separator: " · "), problem: item.status == "dead")
+                        HStack { QueueItemActions(model: model, item: item) }
+                            .controlSize(.small)
+                    }
                 }
             }
             if history.isEmpty && queued.isEmpty && problems.isEmpty {
@@ -1770,7 +1778,7 @@ struct DeliveryTab: View {
         }
     }
 
-    private func deliveryCard(title: String, status: String, text: String, problem: Bool) -> some View {
+    private func deliveryCard(title: String, status: String, text: String, detail: String? = nil, problem: Bool) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(title)
@@ -1782,6 +1790,12 @@ struct DeliveryTab: View {
             Text(text)
                 .lineLimit(1)
                 .foregroundStyle(DesktopPalette.text2)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(problem ? DesktopPalette.amber : DesktopPalette.text2)
+                    .lineLimit(3)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
