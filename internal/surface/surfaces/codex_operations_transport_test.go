@@ -19,7 +19,7 @@ func TestCodexOperationsUseNativeSocketAndReturnedIdentity(t *testing.T) {
 	})
 	codex := isolatedManagedRuntime(t)
 	session := &surface.Session{ID: "source", Surface: surface.KindCodex, Transport: codexTransportManaged, Source: "agenthail", Cwd: "/source"}
-	fork, err := codex.ForkSession(context.Background(), session, surface.ForkOptions{BeforeTurnID: "cutoff"})
+	fork, err := codex.ForkSession(context.Background(), session, surface.ForkOptions{LastTurnID: "cutoff"})
 	if err != nil || fork.ID != "fork-id" || fork.Cwd != "/fork" || fork.Source != "appServer" || fork.Transport != codexTransportManaged {
 		t.Fatalf("fork=%+v err=%v", fork, err)
 	}
@@ -33,8 +33,13 @@ func TestCodexOperationsUseNativeSocketAndReturnedIdentity(t *testing.T) {
 		}
 	}
 	forkParams := fake.Calls("thread/fork")[0]
-	if forkParams["beforeTurnId"] != "cutoff" || forkParams["deferGoalContinuation"] != true || forkParams["threadSource"] != "agenthail" {
+	if forkParams["lastTurnId"] != "cutoff" || forkParams["threadId"] != "source" || forkParams["deferGoalContinuation"] != true || forkParams["threadSource"] != "agenthail" {
 		t.Fatal(forkParams)
+	}
+	for _, key := range []string{"beforeTurnId", "cwd"} {
+		if _, ok := forkParams[key]; ok {
+			t.Fatalf("fork params carry %s: %v", key, forkParams)
+		}
 	}
 	if fake.Calls("thread/queue/add")[0]["clientUserMessageId"] != "stable" || fake.Calls("thread/queue/list")[0]["cursor"] != "page-one" {
 		t.Fatal(fake.Methods())
