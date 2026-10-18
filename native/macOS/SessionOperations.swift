@@ -80,7 +80,7 @@ final class ActionRetryKeys {
             pending[identity]?.recorded = true
             throw AgenthailAPIError.outcomeUnknown(message)
         } catch let error as URLError where !Self.notSent.contains(error.code) {
-            throw AgenthailAPIError.outcomeUnknown(error.localizedDescription)
+            throw AgenthailAPIError.outcomeUnknown(AgenthailAPIError.userMessage(error))
         } catch {
             abandon(request.scope)
             throw error

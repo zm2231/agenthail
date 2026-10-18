@@ -71,6 +71,7 @@ struct CommandPalette: View {
                 actions.append(Entry(id: "focus", icon: "terminal", title: "Open in \(host)", detail: session.title) { model.focusInTerminal(session) })
             }
         }
+        actions.append(Entry(id: "refresh", icon: "arrow.triangle.2.circlepath", title: "Refresh", detail: "", shortcut: shortcuts.label(.refresh)) { model.refreshNow(pane) })
         actions.append(Entry(id: "restart", icon: "arrow.clockwise", title: "Restart Agenthail", detail: "") { model.restartDaemon() })
         return actions
     }
