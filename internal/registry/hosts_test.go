@@ -210,3 +210,70 @@ func TestHeldHostDeliveryIsInvisibleToLocalClaimsAndMatchesByAlias(t *testing.T)
 		t.Fatalf("prefix matched mirrored row: %+v err=%v", matches, err)
 	}
 }
+
+func TestLocalRegistrationRefusesHostOwnedSession(t *testing.T) {
+	r := openTestRegistry(t)
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex, Name: "remote work"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := r.Session("remote-thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	takeover := surface.Session{ID: "remote-thread", Surface: surface.KindClaude, Name: "local takeover", PID: 7, Transcript: "/tmp/local.jsonl"}
+	if err := r.RegisterSession(takeover); !errors.As(err, &SessionOwnedError{}) {
+		t.Fatalf("RegisterSession err=%v", err)
+	}
+	pendingID, err := r.RecordPendingLaunch("terminal", surface.KindClaude, "/work", "local takeover", "", surface.Location{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterSessionAndDeletePending(takeover, pendingID, "takeover"); !errors.As(err, &SessionOwnedError{}) {
+		t.Fatalf("RegisterSessionAndDeletePending err=%v", err)
+	}
+	after, err := r.Session("remote-thread")
+	if err != nil || after.Name != before.Name || after.Surface != before.Surface || after.PID != before.PID || after.Transcript != before.Transcript {
+		t.Fatalf("before=%+v after=%+v err=%v", before, after, err)
+	}
+	if owner, err := r.SessionHost("remote-thread"); err != nil || owner != hostID {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+	pending, err := r.PendingLaunches()
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("refused registration consumed the pending launch: %+v err=%v", pending, err)
+	}
+	rows, err := r.HostCatalogRows(hostID)
+	if err != nil || len(rows) != 1 || rows[0].Session.ID != "remote-thread" {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func TestHostCatalogRowRequiresPairedHost(t *testing.T) {
+	r := openTestRegistry(t)
+	hostID := "h0123456789ab"
+	entity := hostID + "::remote-thread"
+	row := HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err == nil {
+		t.Fatal("mirrored a row for a host that is not paired")
+	}
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RemoveHost(hostID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.ApplyHostCatalogRow(hostID, row); err == nil {
+		t.Fatal("mirrored a row after the host was removed")
+	}
+	if _, err := r.Session("remote-thread"); err == nil {
+		t.Fatal("removed host row came back")
+	}
+}

@@ -51,6 +51,7 @@ type pairedHost struct {
 	record registry.PairedHost
 	client *hosts.Client
 	cancel context.CancelFunc
+	done   sync.WaitGroup
 	mu     sync.Mutex
 	state  string
 	detail string
@@ -73,8 +74,26 @@ func (h *pairedHost) ref() dashboardHost {
 	return dashboardHost{ID: h.record.ID, Name: h.record.Name, State: state}
 }
 
+func (d *Daemon) hostIdentity() registry.HostIdentity {
+	d.identityMu.RLock()
+	defer d.identityMu.RUnlock()
+	return d.identity
+}
+
+func (d *Daemon) setHostIdentity(identity registry.HostIdentity) {
+	d.identityMu.Lock()
+	defer d.identityMu.Unlock()
+	d.identity = identity
+}
+
+func (d *Daemon) isLocalHostRef(ref string) bool {
+	identity := d.hostIdentity()
+	return strings.EqualFold(ref, identity.ID) || strings.EqualFold(ref, identity.Name)
+}
+
 func (d *Daemon) localHost() dashboardHost {
-	return dashboardHost{ID: d.identity.ID, Name: d.identity.Name, State: hostStateLocal}
+	identity := d.hostIdentity()
+	return dashboardHost{ID: identity.ID, Name: identity.Name, State: hostStateLocal}
 }
 
 func (d *Daemon) startFederation(ctx context.Context) {
@@ -109,11 +128,9 @@ func (d *Daemon) attachHost(record registry.PairedHost) error {
 	if err != nil {
 		return err
 	}
+	d.detachHost(record.ID)
 	d.federation.mu.Lock()
 	defer d.federation.mu.Unlock()
-	if existing, found := d.federation.hosts[record.ID]; found {
-		existing.cancel()
-	}
 	parent := d.federation.ctx
 	if parent == nil || !d.federation.running {
 		parent = context.Background()
@@ -123,18 +140,23 @@ func (d *Daemon) attachHost(record registry.PairedHost) error {
 	d.federation.hosts[record.ID] = host
 	if d.federation.running {
 		d.federation.wg.Add(2)
+		host.done.Add(2)
 		go func() {
 			defer d.federation.wg.Done()
+			defer host.done.Done()
 			d.runHostMirror(ctx, host)
 		}()
 		go func() {
 			defer d.federation.wg.Done()
+			defer host.done.Done()
 			d.runHostDeliveries(ctx, host)
 		}()
 	}
 	return nil
 }
 
+// detachHost returns once the host's mirror and delivery loops have exited,
+// so no write from them can land after the caller removes the host's rows.
 func (d *Daemon) detachHost(hostID string) {
 	d.federation.mu.Lock()
 	host, found := d.federation.hosts[hostID]
@@ -142,6 +164,7 @@ func (d *Daemon) detachHost(hostID string) {
 	d.federation.mu.Unlock()
 	if found {
 		host.cancel()
+		host.done.Wait()
 	}
 }
 
@@ -177,7 +200,10 @@ var errUnknownHost = errors.New("unknown host")
 func (d *Daemon) routeSession(ref string) (*pairedHost, string, error) {
 	ref = strings.TrimSpace(ref)
 	if hostRef, target, qualified := hosts.Split(ref); qualified {
-		if strings.EqualFold(hostRef, d.identity.ID) || strings.EqualFold(hostRef, d.identity.Name) {
+		if d.isLocalHostRef(hostRef) {
+			if owner, err := d.Registry.SessionHost(target); err == nil && owner != "" {
+				return nil, "", registry.SessionOwnedError{SessionID: target, HostID: owner}
+			}
 			return nil, target, nil
 		}
 		host, found := d.pairedHost(hostRef)
@@ -271,6 +297,7 @@ func (d *Daemon) markHostDown(host *pairedHost, cause error) {
 		}
 		projection.Host = &ref
 		projection.UnavailableReason = reason
+		projection.QueueCount = row.HostQueueCount
 		if err := d.applyMirroredProjection(host.record.ID, row.Session, projection, row.HostProject, row.Checkout); err != nil {
 			d.log.Printf("host %s mark unavailable: %s", host.record.Name, err)
 		}
@@ -491,8 +518,24 @@ func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session,
 	if err != nil {
 		return err
 	}
-	_, _, err = d.catalog.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, HostProject: hostProject, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC()})
+	_, _, err = d.catalog.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, HostProject: hostProject, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
 	return err
+}
+
+func (d *Daemon) refreshHostQueueCounts() {
+	if err := d.catalog.refreshHostQueueCounts(); err != nil {
+		d.logRuntimeError("host queue counts", err)
+	}
+}
+
+func (h *catalogHub) refreshHostQueueCounts() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	changed, err := h.registry.RefreshHostQueueCounts()
+	if err != nil || changed == 0 {
+		return err
+	}
+	return h.flushCommittedLocked()
 }
 
 func (h *catalogHub) publishHostRow(hostID string, row registry.HostCatalogRow) (registry.CatalogEvent, bool, error) {
@@ -546,6 +589,10 @@ func (d *Daemon) drainHostDeliveries(ctx context.Context, host *pairedHost) {
 		d.logRuntimeError("host "+host.record.Name+" deliveries", err)
 		return
 	}
+	if len(pending) == 0 {
+		return
+	}
+	defer d.refreshHostQueueCounts()
 	for _, item := range pending {
 		if ctx.Err() != nil {
 			return

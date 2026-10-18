@@ -354,8 +354,9 @@ An unqualified target that matches on two hosts is an error listing each
 `interrupt`, `reply`, `last`, `stream` and `thread create --host forge` reach
 paired hosts, and `--cwd` with `--host` is a path on that host. A session on an
 unreachable host stays listed as `down` with the host named. A send to it is
-held by the local daemon (`queued`) and delivered once when the host returns;
-`delivery submitted` means the outcome is unknown, so do not resend. Other
+held by the local daemon (`queued`) for up to an hour and delivered once if the
+host returns in that time; otherwise it expires and appears in delivery history
+as expired. `delivery submitted` means the outcome is unknown, so do not resend. Other
 commands refuse remote sessions.
 
 ## Daemon

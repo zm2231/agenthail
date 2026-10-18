@@ -19,6 +19,9 @@ type CatalogSessionState struct {
 	ObservedAt            time.Time
 	ProjectionFingerprint string
 	Freshness             CatalogFreshness
+	// HostQueueCount is the queue count the owning host reported for a
+	// mirrored row; the projection adds this daemon's held sends to it.
+	HostQueueCount int
 }
 
 type CatalogFreshness struct {

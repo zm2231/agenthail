@@ -576,6 +576,13 @@ func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID 
 }
 
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
+	var owner string
+	if err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, s.ID).Scan(&owner); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if owner != "" {
+		return SessionOwnedError{SessionID: s.ID, HostID: owner}
+	}
 	lastActiveMS := int64(0)
 	if !s.LastActive.IsZero() {
 		lastActiveMS = s.LastActive.UnixMilli()

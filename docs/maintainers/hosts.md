@@ -25,7 +25,10 @@ Pairing reuses the device-token model the phone uses.
    protocol version and host id, and stores the pairing in `hosts`.
 
 The daemon always dials the tailnet IP and verifies TLS against the endpoint's
-DNS name, so it works where MagicDNS does not resolve. Without `--address` it
+DNS name, so it works where MagicDNS does not resolve. The address must be in
+the Tailscale ranges (`100.64.0.0/10` or `fd7a:115c:a1e0::/48`); anything else
+is refused before dialing. If the remote's protocol range does not include this
+daemon's, pairing fails and the device it just issued is revoked. Without `--address` it
 asks `tailscale status --json` for the peer's IPv4 address. No new port is
 opened: the remote is reached through the Tailscale Serve route it already
 has. Device tokens stay in the registry and never appear in API responses,
@@ -50,8 +53,15 @@ Each paired host has one mirror loop:
   host-qualified, or that names another host, is skipped. Two daemons paired
   both ways therefore show each other's sessions exactly once.
 
-A mirrored row cannot take over a local row, and discovery cannot take over a
-mirrored one (`SessionOwnedError`).
+A mirrored row cannot take over a local row, and neither discovery nor any
+local registration can take over a mirrored one (`SessionOwnedError`). A
+mirror write for a host that is no longer paired is refused, and removing a
+host waits for its mirror and delivery loops to exit before deleting its rows.
+
+A mirrored row's `queueCount` is the host's own count plus the sends this
+daemon holds for it. `catalog_sessions.host_queue_count` keeps the host's
+count, and the registry recomputes the sum in one transaction whenever the
+mirror writes the row or the held queue changes.
 
 ## Routing
 
@@ -62,7 +72,10 @@ a `host` query field, or a raw id owned by a paired host is forwarded to that
 host with its raw id; the answer comes back with every session reference
 re-qualified. An action cannot span two hosts, and actions that only make
 sense on one daemon (channels, relays, queue and delivery records, a message
-from a local source session) are refused for remote sessions.
+from a local source session) are refused for remote sessions. A qualifier
+naming this daemon on a raw id a paired host owns is an ownership conflict,
+never a local action, and a `host` field that disagrees with the qualifier is
+`host_mismatch`.
 
 ## Unreachable hosts and delivery
 
@@ -75,9 +88,13 @@ A send to a remote session carries an idempotency key (the CLI and native
 clients send one; the daemon generates one otherwise):
 
 - If no byte reached the remote, the daemon holds the exact request as a
-  pending queue row with the normal queue TTL and reports `queued`.
-- If the request was written but no answer came back, the row is inflight
-  with evidence `unknown`, and the CLI reports `delivery submitted`.
+  pending queue row with the normal one-hour queue TTL and reports `queued`.
+  A row the host does not take within the hour expires into delivery history
+  as `expired`.
+- If the request was written but no complete answer came back (no response,
+  a body cut off mid-read, or an answer from something in front of the daemon
+  such as Tailscale Serve without the `Agenthail-Host` header), the row is
+  inflight with evidence `unknown`, and the CLI reports `delivery submitted`.
 - While the host is connected the daemon replays held rows with the same key.
   The remote's action receipts make a replay return the first result instead
   of starting a second turn. A replay the remote still reports as in progress
@@ -115,8 +132,10 @@ Every place that treats `host_id = ''` as "this daemon's session":
   local `session.queue` event.
 - `claimCandidateFilter` and `RecoverInflight` skip held host deliveries
   (`host_request <> ''`); only the host delivery loop touches them.
+- `registerSessionTx` (behind `RegisterSession` and
+  `RegisterSessionAndDeletePending`) refuses a session another host owns.
 - `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
-  their stored projection.
+  their stored projection; `RefreshHostQueueCounts` keeps its queue count.
 - `registerRecentClaudePeers` never advertises a mirrored session as a local
   Claude peer.
 - The CLI `list` renders rows with a host id from their projection.

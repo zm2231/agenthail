@@ -58,7 +58,7 @@ func (d *Daemon) apiHostSelfHandler(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_host_name", err.Error())
 			return
 		}
-		d.identity = identity
+		d.setHostIdentity(identity)
 		writeDashboardJSON(w, http.StatusOK, map[string]any{"host": d.localHost()})
 	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET or PUT for this endpoint.")
@@ -150,13 +150,13 @@ func (d *Daemon) addHostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if net.ParseIP(address) == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_address", "The host address must be a tailnet IP.")
+	if err := hosts.CheckTailnetAddress(address); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_address", err.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), hostPairTimeout)
 	defer cancel()
-	token, version, err := hosts.Pair(ctx, link, address, d.identity.Name, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
+	token, version, err := hosts.Pair(ctx, link, address, d.hostIdentity().Name, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
 	if err != nil {
 		var status hosts.StatusError
 		if errors.As(err, &status) {
@@ -387,9 +387,11 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		var host *pairedHost
+		explicitLocal := false
 		if hostRef := strings.TrimSpace(query.Get("host")); hostRef != "" {
 			query.Del("host")
-			if !strings.EqualFold(hostRef, d.identity.ID) && !strings.EqualFold(hostRef, d.identity.Name) {
+			explicitLocal = d.isLocalHostRef(hostRef)
+			if !explicitLocal {
 				found, ok := d.pairedHost(hostRef)
 				if !ok {
 					writeAPIError(w, http.StatusNotFound, "host_not_found", fmt.Sprintf("No paired host is named %q.", hostRef))
@@ -402,7 +404,11 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 		if value := query.Get(param); value != "" {
 			routed, rawID, err := d.routeSession(value)
 			if err != nil {
-				writeAPIError(w, http.StatusNotFound, "host_not_found", err.Error())
+				writeRouteError(w, err)
+				return
+			}
+			if routed != nil && (explicitLocal || host != nil && host != routed) {
+				writeAPIError(w, http.StatusConflict, "host_mismatch", fmt.Sprintf("%s belongs to host %s, not the host this request names.", value, routed.record.Name))
 				return
 			}
 			if routed != nil {
@@ -423,6 +429,17 @@ func (d *Daemon) hostRouted(param string, next http.HandlerFunc) http.HandlerFun
 	}
 }
 
+// writeRouteError answers a request routeSession refused: a qualifier naming
+// this daemon on a session a paired host owns, or an unknown host.
+func writeRouteError(w http.ResponseWriter, err error) {
+	var owned registry.SessionOwnedError
+	if errors.As(err, &owned) {
+		writeAPIError(w, http.StatusConflict, "session_owned", err.Error())
+		return
+	}
+	writeAPIError(w, http.StatusNotFound, "host_not_found", err.Error())
+}
+
 func apiPath(path string) string {
 	if strings.HasPrefix(path, "/api/v1/") {
 		return path
@@ -439,6 +456,10 @@ func writeHostError(w http.ResponseWriter, host *pairedHost, err error) {
 	writeAPIError(w, http.StatusGatewayTimeout, "host_outcome_unknown", fmt.Sprintf("Host %s did not answer; the outcome is unknown: %s", host.record.Name, err))
 }
 
+func writeHostReadError(w http.ResponseWriter, host *pairedHost, err error) {
+	writeAPIError(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err))
+}
+
 func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host *pairedHost, method string, query url.Values, body []byte) {
 	header := http.Header{}
 	if key := r.Header.Get(actionIdempotencyHeader); key != "" {
@@ -446,18 +467,34 @@ func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host
 	}
 	response, err := host.client.Do(r.Context(), method, apiPath(r.URL.Path), query, body, header)
 	if err != nil {
-		writeHostError(w, host, err)
+		writeHostReadError(w, host, err)
 		return
 	}
 	writeHostResponse(w, host, response)
 }
 
 func writeHostResponse(w http.ResponseWriter, host *pairedHost, response *http.Response) {
-	defer response.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	answer, err := readHostAnswer(host, response)
 	if err != nil {
 		writeHostError(w, host, err)
 		return
+	}
+	answer.write(w)
+}
+
+type hostAnswer struct {
+	status  int
+	header  http.Header
+	payload []byte
+}
+
+// readHostAnswer reads the whole body before anything is relayed, so a
+// connection lost mid-body surfaces as an error the caller can still act on.
+func readHostAnswer(host *pairedHost, response *http.Response) (hostAnswer, error) {
+	defer response.Body.Close()
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if err != nil {
+		return hostAnswer{}, err
 	}
 	contentType := response.Header.Get("Content-Type")
 	if strings.Contains(contentType, "application/json") && len(bytes.TrimSpace(payload)) > 0 {
@@ -465,16 +502,21 @@ func writeHostResponse(w http.ResponseWriter, host *pairedHost, response *http.R
 			payload = qualified
 		}
 	}
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	}
-	for _, key := range []string{"Content-Disposition", "Cache-Control"} {
+	header := http.Header{}
+	for _, key := range []string{"Content-Type", "Content-Disposition", "Cache-Control"} {
 		if value := response.Header.Get(key); value != "" {
-			w.Header().Set(key, value)
+			header.Set(key, value)
 		}
 	}
-	w.WriteHeader(response.StatusCode)
-	_, _ = w.Write(payload)
+	return hostAnswer{status: response.StatusCode, header: header, payload: payload}, nil
+}
+
+func (a hostAnswer) write(w http.ResponseWriter) {
+	for key, values := range a.header {
+		w.Header()[key] = values
+	}
+	w.WriteHeader(a.status)
+	_, _ = w.Write(a.payload)
 }
 
 func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *pairedHost, query url.Values) {
@@ -489,7 +531,7 @@ func (d *Daemon) relayHostStream(w http.ResponseWriter, r *http.Request, host *p
 	}
 	response, err := host.client.Open(r.Context(), apiPath(r.URL.Path), query, header)
 	if err != nil {
-		writeHostError(w, host, err)
+		writeHostReadError(w, host, err)
 		return
 	}
 	if response.StatusCode != http.StatusOK {
@@ -542,6 +584,11 @@ func (d *Daemon) hostRoutedAction(next http.HandlerFunc) http.HandlerFunc {
 		}
 		host, rewritten, err := d.routeActionRequest(request)
 		if err != nil {
+			var owned registry.SessionOwnedError
+			if errors.As(err, &owned) {
+				writeRouteError(w, err)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -580,12 +627,16 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 	if hostRef, ok := request["host"].(string); ok {
 		delete(request, "host")
 		rewritten = true
-		if hostRef = strings.TrimSpace(hostRef); hostRef != "" && !strings.EqualFold(hostRef, d.identity.ID) && !strings.EqualFold(hostRef, d.identity.Name) {
-			found, exists := d.pairedHost(hostRef)
-			if !exists {
-				return nil, false, fmt.Errorf("no paired host is named %q", hostRef)
+		if hostRef = strings.TrimSpace(hostRef); hostRef != "" {
+			var named *pairedHost
+			if !d.isLocalHostRef(hostRef) {
+				found, exists := d.pairedHost(hostRef)
+				if !exists {
+					return nil, false, fmt.Errorf("no paired host is named %q", hostRef)
+				}
+				named = found
 			}
-			if err := assign(found); err != nil {
+			if err := assign(named); err != nil {
 				return nil, false, err
 			}
 		}
@@ -626,8 +677,12 @@ func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host 
 	header := http.Header{actionIdempotencyHeader: []string{key}}
 	response, err := host.client.Do(r.Context(), http.MethodPost, "/api/v1/actions", nil, body, header)
 	if err == nil {
-		writeHostResponse(w, host, response)
-		return
+		answer, readErr := readHostAnswer(host, response)
+		if readErr == nil {
+			answer.write(w)
+			return
+		}
+		err = readErr
 	}
 	action, _ := request["action"].(string)
 	sessionID, _ := request["sessionId"].(string)
@@ -643,6 +698,7 @@ func (d *Daemon) forwardHostAction(w http.ResponseWriter, r *http.Request, host 
 		writeHostError(w, host, errors.Join(err, queueErr))
 		return
 	}
+	d.refreshHostQueueCounts()
 	receipt := delivery.Receipt{Evidence: surface.EvidenceQueued, Status: "queued", SessionID: hosts.Qualify(host.record.ID, sessionID), QueueID: queueID, Detail: fmt.Sprintf("host %s is unreachable; queued until it reconnects", host.record.Name)}
 	if sent {
 		receipt.Evidence = surface.EvidenceUnknown

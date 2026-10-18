@@ -518,6 +518,7 @@ func (d *Daemon) publishSurfaceHealth(health dashboardSurface, observedAt time.T
 }
 
 func (d *Daemon) publishCatalogQueueCounts() {
+	defer d.refreshHostQueueCounts()
 	counts, err := d.Registry.QueueCounts()
 	if err != nil {
 		d.log.Printf("catalog queue counts: %s", err)

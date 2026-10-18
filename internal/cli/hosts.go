@@ -537,19 +537,21 @@ type listHostRow struct {
 	Host        hostRef
 	Alias       string
 	Unavailable string
+	QueueCount  int
 }
 
 func listRemoteSession(record registry.CatalogSessionState) (surface.Session, listHostRow) {
 	var projection struct {
-		Alias    string            `json:"alias"`
-		Subagent *surface.Subagent `json:"subagent"`
-		Host     *hostRef          `json:"host"`
+		Alias      string            `json:"alias"`
+		Subagent   *surface.Subagent `json:"subagent"`
+		Host       *hostRef          `json:"host"`
+		QueueCount int               `json:"queueCount"`
 	}
 	_ = json.Unmarshal([]byte(record.ProjectionFingerprint), &projection)
 	session := record.Session
 	session.ID = hosts.Qualify(record.HostID, record.Session.ID)
 	session.Subagent = projection.Subagent
-	row := listHostRow{Host: hostRef{ID: record.HostID, Name: record.HostID}, Alias: projection.Alias, Unavailable: record.UnavailableReason}
+	row := listHostRow{Host: hostRef{ID: record.HostID, Name: record.HostID}, Alias: projection.Alias, Unavailable: record.UnavailableReason, QueueCount: projection.QueueCount}
 	if projection.Host != nil {
 		row.Host = *projection.Host
 	}

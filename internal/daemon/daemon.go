@@ -46,6 +46,7 @@ type Daemon struct {
 	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
 	transportResolver *SessionTransportResolver
+	identityMu        sync.RWMutex
 	identity          registry.HostIdentity
 	federation        *federation
 }

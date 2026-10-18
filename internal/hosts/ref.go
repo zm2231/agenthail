@@ -25,12 +25,17 @@ func Split(ref string) (host, target string, ok bool) {
 	return host, target, true
 }
 
-var qualifiedKeys = map[string]bool{"sessionId": true, "sourceSessionId": true, "parentId": true, "rootId": true}
+var qualifiedKeys = map[string]bool{"sessionId": true, "parentId": true, "rootId": true, "fromSession": true, "toSession": true}
+
+func sessionReferenceKey(key string) bool {
+	return qualifiedKeys[key] || strings.HasSuffix(key, "SessionId")
+}
 
 // QualifyJSON rewrites a remote host's response for this daemon's clients:
-// session reference fields (sessionId, sourceSessionId, parentId, rootId) and
-// the id of session-shaped objects (objects that also carry "surface") become
-// host-qualified. Every other value passes through unchanged.
+// session reference fields (sessionId, any key ending in SessionId, parentId,
+// rootId, fromSession, toSession) and the id of session-shaped objects
+// (objects that also carry "surface") become host-qualified. Every other
+// value passes through unchanged.
 func QualifyJSON(hostID string, raw []byte) ([]byte, error) {
 	var value any
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
@@ -46,7 +51,7 @@ func qualifyValue(hostID string, value any) any {
 	case map[string]any:
 		_, sessionShaped := typed["surface"]
 		for key, item := range typed {
-			if text, ok := item.(string); ok && (qualifiedKeys[key] || (key == "id" && sessionShaped)) {
+			if text, ok := item.(string); ok && (sessionReferenceKey(key) || (key == "id" && sessionShaped)) {
 				typed[key] = Qualify(hostID, text)
 				continue
 			}

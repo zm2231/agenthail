@@ -284,6 +284,9 @@ type HostCatalogRow struct {
 	Checkout          json.RawMessage
 	UnavailableReason string
 	ObservedAt        time.Time
+	// QueueCount is the owning host's own count. The stored projection's
+	// queueCount adds the sends this daemon holds for the session.
+	QueueCount int
 }
 
 // Process and transcript columns stay empty: they describe another machine.
@@ -312,6 +315,13 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		return CatalogEvent{}, false, err
 	}
 	defer tx.Rollback()
+	var paired int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM hosts WHERE host_id=?`, hostID).Scan(&paired); err != nil {
+		return CatalogEvent{}, false, err
+	}
+	if paired == 0 {
+		return CatalogEvent{}, false, fmt.Errorf("host %s is not paired", hostID)
+	}
 	var owner string
 	err = tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, row.Session.ID).Scan(&owner)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -338,29 +348,121 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
-	fingerprint := string(row.Projection)
+	held, err := queueCountTx(tx, session.ID, time.Now())
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	projection["queueCount"] = row.QueueCount + held
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	fingerprint := string(encoded)
+	var priorHostCount int
+	if prior.found {
+		if err := tx.QueryRow(`SELECT host_queue_count FROM catalog_sessions WHERE session_id=?`, session.ID).Scan(&priorHostCount); err != nil {
+			return CatalogEvent{}, false, err
+		}
+	}
 	if prior.found && prior.fingerprint == fingerprint && prior.unavailable == row.UnavailableReason {
+		if priorHostCount != row.QueueCount {
+			if _, err := tx.Exec(`UPDATE catalog_sessions SET host_queue_count=? WHERE session_id=?`, row.QueueCount, session.ID); err != nil {
+				return CatalogEvent{}, false, err
+			}
+		}
 		return CatalogEvent{}, false, tx.Commit()
 	}
 	generation := prior.generation + 1
 	observedAt := row.ObservedAt.UTC()
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
-		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count)
+		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,projection_fingerprint=excluded.projection_fingerprint,
-		projection_generation=excluded.projection_generation,discovery_failures=0`,
-		session.ID, []byte(row.HostProject), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation); err != nil {
+		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count`,
+		session.ID, []byte(row.HostProject), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	projection["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: observedAt, Stale: row.UnavailableReason != ""}
-	payload, err := json.Marshal(map[string]any{"session": projection})
-	if err != nil {
-		return CatalogEvent{}, false, err
-	}
-	event, created, err := appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", row.EntityID, generation), Type: "session.upserted", EntityID: row.EntityID, Payload: payload})
+	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
 	return event, created, tx.Commit()
+}
+
+func appendHostUpsertTx(tx *sql.Tx, entityID string, projection map[string]any, generation int64, observedAt time.Time, unavailable string) (CatalogEvent, bool, error) {
+	projection["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: observedAt, Stale: unavailable != ""}
+	payload, err := json.Marshal(map[string]any{"session": projection})
+	if err != nil {
+		return CatalogEvent{}, false, err
+	}
+	return appendCatalogEventTx(tx, CatalogEvent{DedupeKey: fmt.Sprintf("session.upserted:%s:%d", entityID, generation), Type: "session.upserted", EntityID: entityID, Payload: payload})
+}
+
+// RefreshHostQueueCounts re-adds this daemon's held sends to every mirrored
+// row whose projected queue count no longer matches, in one transaction so a
+// concurrent mirror write is never overwritten with an older projection.
+func (r *Registry) RefreshHostQueueCounts() (int, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT cs.session_id,cs.projection_fingerprint,cs.projection_generation,cs.host_queue_count,cs.observed_at,cs.unavailable_reason
+		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id<>''`)
+	if err != nil {
+		return 0, err
+	}
+	type mirrored struct {
+		id, fingerprint, observedAt, unavailable string
+		generation                               int64
+		hostCount                                int
+	}
+	var candidates []mirrored
+	for rows.Next() {
+		var row mirrored
+		if err := rows.Scan(&row.id, &row.fingerprint, &row.generation, &row.hostCount, &row.observedAt, &row.unavailable); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, row)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	changed := 0
+	for _, row := range candidates {
+		held, err := queueCountTx(tx, row.id, now)
+		if err != nil {
+			return 0, err
+		}
+		var projection map[string]any
+		if err := json.Unmarshal([]byte(row.fingerprint), &projection); err != nil {
+			continue
+		}
+		want := row.hostCount + held
+		if current, ok := projection["queueCount"].(float64); ok && int(current) == want {
+			continue
+		}
+		projection["queueCount"] = want
+		encoded, err := json.Marshal(projection)
+		if err != nil {
+			return 0, err
+		}
+		entityID, _ := projection["id"].(string)
+		if entityID == "" {
+			continue
+		}
+		generation := row.generation + 1
+		if _, err := tx.Exec(`UPDATE catalog_sessions SET projection_fingerprint=?,projection_generation=? WHERE session_id=?`, string(encoded), generation, row.id); err != nil {
+			return 0, err
+		}
+		observedAt, _ := time.Parse(time.RFC3339Nano, row.observedAt)
+		if _, _, err := appendHostUpsertTx(tx, entityID, projection, generation, observedAt, row.unavailable); err != nil {
+			return 0, err
+		}
+		changed++
+	}
+	return changed, tx.Commit()
 }
 
 func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason string) (CatalogEvent, bool, error) {
@@ -385,7 +487,7 @@ func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason stri
 }
 
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {
-	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint
+	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=? ORDER BY s.id`, hostID)
 	if err != nil {
 		return nil, err
@@ -395,7 +497,7 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 	for rows.Next() {
 		var state CatalogSessionState
 		var kind, status, observedAt string
-		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint); err != nil {
+		if err := rows.Scan(&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &status, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &state.HostQueueCount); err != nil {
 			return nil, err
 		}
 		state.Session.Surface = surface.SurfaceKind(kind)

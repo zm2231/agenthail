@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -20,8 +21,31 @@ import (
 
 const (
 	ProtocolVersion   = 1
+	ResponseHeader    = "Agenthail-Host"
 	responseBodyLimit = 32 << 20
 )
+
+// TailnetPrefixes are the addresses Tailscale assigns. A paired host is only
+// ever dialed inside them.
+var TailnetPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("fd7a:115c:a1e0::/48"),
+}
+
+// CheckTailnetAddress accepts an IP inside TailnetPrefixes and nothing else.
+func CheckTailnetAddress(address string) error {
+	ip, err := netip.ParseAddr(address)
+	if err != nil || ip.Zone() != "" {
+		return fmt.Errorf("host address must be a tailnet IP")
+	}
+	ip = ip.Unmap()
+	for _, prefix := range TailnetPrefixes {
+		if prefix.Contains(ip) {
+			return nil
+		}
+	}
+	return fmt.Errorf("host address %s is outside the tailnet ranges", address)
+}
 
 // NotSentError means the request never reached the remote host: the dial or
 // TLS handshake failed before any request byte was written. Only this error
@@ -30,6 +54,18 @@ type NotSentError struct{ Err error }
 
 func (e NotSentError) Error() string { return e.Err.Error() }
 func (e NotSentError) Unwrap() error { return e.Err }
+
+// UnansweredError is a response written by something in front of the daemon,
+// such as Tailscale Serve answering 502 while the daemon is down. The request
+// reached that intermediary, so whether the daemon applied it is unknown.
+type UnansweredError struct {
+	Endpoint string
+	Status   int
+}
+
+func (e UnansweredError) Error() string {
+	return fmt.Sprintf("%s answered HTTP %d, but no Agenthail daemon answered behind it", e.Endpoint, e.Status)
+}
 
 type StatusError struct {
 	Status  int
@@ -67,8 +103,8 @@ func NewClient(endpoint, address, token string, options ClientOptions) (*Client,
 	if port == "" {
 		port = "443"
 	}
-	if net.ParseIP(address) == nil {
-		return nil, fmt.Errorf("host address must be a tailnet IP")
+	if err := CheckTailnetAddress(address); err != nil {
+		return nil, err
 	}
 	target := net.JoinHostPort(address, port)
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
@@ -134,6 +170,10 @@ func (c *Client) do(ctx context.Context, client *http.Client, method, path strin
 			return nil, NotSentError{Err: err}
 		}
 		return nil, err
+	}
+	if response.Header.Get(ResponseHeader) == "" {
+		response.Body.Close()
+		return nil, UnansweredError{Endpoint: c.endpoint.Host, Status: response.StatusCode}
 	}
 	return response, nil
 }
@@ -252,7 +292,12 @@ func Pair(ctx context.Context, link PairingLink, address, deviceName string, opt
 	}
 	version, err := paired.Version(ctx)
 	if err != nil {
-		return completed.Token, version, err
+		revokeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if response, revokeErr := paired.Do(revokeCtx, http.MethodDelete, "/api/v1/device", nil, nil, nil); revokeErr == nil {
+			response.Body.Close()
+		}
+		return "", version, err
 	}
 	return completed.Token, version, nil
 }

@@ -46,6 +46,13 @@ func (f *fakeDaemonAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.actions = append(f.actions, action)
 		f.keys = append(f.keys, r.Header.Get("Idempotency-Key"))
 		_, _ = io.WriteString(w, f.response)
+	case "/api/v1/hosts":
+		body, _ := io.ReadAll(r.Body)
+		var request map[string]any
+		_ = json.Unmarshal(body, &request)
+		request["method"] = r.Method
+		f.actions = append(f.actions, request)
+		_, _ = io.WriteString(w, `{"host":{"id":"`+forgeHostID+`","name":"forge","address":"100.64.0.2","state":"connecting"}}`)
 	default:
 		http.NotFound(w, r)
 	}
@@ -225,5 +232,20 @@ func TestListShowsRemoteRowsWithHostAndUnavailableState(t *testing.T) {
 	}
 	if len(document.Sessions) != 1 || document.Sessions[0].ID != forgeBuilder.ID || document.Sessions[0].Host == nil || document.Sessions[0].Host.Name != "forge" || document.Sessions[0].UnavailableReason == "" {
 		t.Fatalf("sessions=%+v", document.Sessions)
+	}
+}
+
+func TestHostsAddPassesAddressAndName(t *testing.T) {
+	app, _, _, api := federatedCLIFixture(t, true)
+	link := "agenthail://pair?endpoint=https%3A%2F%2Fforge.example.ts.net%3A7498&secret=synthetic"
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"hosts", "add", link, "--address", "100.64.0.2", "--name", "forge"})
+	})
+	if err != nil || !strings.Contains(output, "paired forge ("+forgeHostID+") at 100.64.0.2") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	actions, _ := api.recorded()
+	if len(actions) != 1 || actions[0]["method"] != http.MethodPost || actions[0]["pairingUrl"] != link || actions[0]["address"] != "100.64.0.2" || actions[0]["name"] != "forge" {
+		t.Fatalf("requests=%v", actions)
 	}
 }

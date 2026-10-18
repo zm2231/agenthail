@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -92,11 +93,21 @@ type federationNode struct {
 	gate    *actionGate
 }
 
-// actionGate drops the answers to the next N actions after applying them.
+// actionGate drops the answers to the next N actions after applying them, or
+// truncates their bodies after the headers went out.
 // net/http replays a request carrying an Idempotency-Key once on a reused
 // connection, so losing an answer for certain takes two drops.
 type actionGate struct {
-	drops atomic.Int32
+	drops     atomic.Int32
+	truncate  atomic.Int32
+	proxyDown atomic.Bool
+	snapshots atomic.Pointer[snapshotHold]
+}
+
+// snapshotHold parks snapshot requests until release is closed.
+type snapshotHold struct {
+	waiting atomic.Int32
+	release chan struct{}
 }
 
 func (g *actionGate) take() bool {
@@ -111,8 +122,16 @@ func (g *actionGate) take() bool {
 	}
 }
 
+func allowLoopbackHosts(t *testing.T) {
+	t.Helper()
+	original := hosts.TailnetPrefixes
+	hosts.TailnetPrefixes = append(append([]netip.Prefix(nil), original...), netip.MustParsePrefix("127.0.0.0/8"))
+	t.Cleanup(func() { hosts.TailnetPrefixes = original })
+}
+
 func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 	t.Helper()
+	allowLoopbackHosts(t)
 	reg, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +157,34 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	t.Helper()
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.gate.proxyDown.Load() {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		if hold := n.gate.snapshots.Load(); hold != nil && r.URL.Path == "/api/v1/snapshot" {
+			hold.waiting.Add(1)
+			<-hold.release
+		}
+		if r.URL.Path == "/api/v1/actions" && n.gate.truncate.Add(-1) >= 0 {
+			recorder := httptest.NewRecorder()
+			n.handler.ServeHTTP(recorder, r)
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("response writer cannot hijack")
+				return
+			}
+			conn, buffered, err := hijacker.Hijack()
+			if err != nil {
+				return
+			}
+			fmt.Fprintf(buffered, "HTTP/1.1 %d OK\r\n", recorder.Code)
+			_ = recorder.Header().Write(buffered)
+			fmt.Fprintf(buffered, "Content-Length: %d\r\n\r\n", recorder.Body.Len()+64)
+			_, _ = buffered.Write(recorder.Body.Bytes()[:recorder.Body.Len()/2])
+			_ = buffered.Flush()
+			conn.Close()
+			return
+		}
 		if r.URL.Path == "/api/v1/actions" && n.gate.take() {
 			n.handler.ServeHTTP(httptest.NewRecorder(), r)
 			hijacker, ok := w.(http.Hijacker)
@@ -348,7 +395,7 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 		t.Fatalf("unknown host resolve status=%d body=%s", missing.Code, missing.Body.String())
 	}
 
-	listing :=local.request(t, http.MethodGet, "/api/v1/hosts", nil)
+	listing := local.request(t, http.MethodGet, "/api/v1/hosts", nil)
 	if listing.Code != http.StatusOK || strings.Contains(listing.Body.String(), "ahd_") || !strings.Contains(listing.Body.String(), `"sessionCount":2`) {
 		t.Fatalf("hosts status=%d body=%s", listing.Code, listing.Body.String())
 	}
@@ -437,6 +484,65 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 	}
 }
 
+func mirroredQueueCount(t *testing.T, node *federationNode, id string) int {
+	t.Helper()
+	for _, session := range node.snapshot(t).Sessions {
+		if session.ID == id {
+			return session.QueueCount
+		}
+	}
+	return -1
+}
+
+func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	if err := remote.reg.QueueMessage("remote-a", "queued on forge"); err != nil {
+		t.Fatal(err)
+	}
+	remote.daemon.publishCatalogQueueCounts()
+	awaitFederation(t, "remote queue mirrored", func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
+	remote.stop()
+	awaitFederation(t, "rows marked unavailable", func() bool {
+		rows := sessionsOf(local.snapshot(t), record.ID)
+		return len(rows) == 2 && rows[0].UnavailableReason != ""
+	})
+	if got := mirroredQueueCount(t, local, qualified); got != 1 {
+		t.Fatalf("queue count after marking down=%d", got)
+	}
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "held for forge"})
+	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"queued"`) {
+		t.Fatalf("send while down status=%d body=%s", send.Code, send.Body.String())
+	}
+	state := local.snapshot(t)
+	if got := mirroredQueueCount(t, local, qualified); got != 2 {
+		t.Fatalf("queue count with held send=%d", got)
+	}
+	if len(state.Queue) != 1 || state.Queue[0].SessionID != qualified {
+		t.Fatalf("queue rows=%+v", state.Queue)
+	}
+	window, err := local.reg.CatalogEventsAfter(0, 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := -1
+	for _, event := range window.Events {
+		if event.Type != "session.upserted" || event.EntityID != qualified {
+			continue
+		}
+		var payload struct {
+			Session dashboardSession `json:"session"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		latest = payload.Session.QueueCount
+	}
+	if latest != 2 {
+		t.Fatalf("latest catalog queue count=%d", latest)
+	}
+}
+
 func TestFederationLostAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	qualified := hosts.Qualify(record.ID, "remote-a")
@@ -455,6 +561,63 @@ func TestFederationLostAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 		t.Fatalf("replay produced another turn: %v", got)
 	}
 	queue, err := local.reg.ListQueue(true)
+	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
+		t.Fatalf("queue=%+v err=%v", queue, err)
+	}
+}
+
+func TestFederationTruncatedAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	remote.gate.truncate.Store(1)
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "cut short"})
+	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"unknown"`) || !strings.Contains(send.Body.String(), `"status":"submitted"`) {
+		t.Fatalf("truncated answer status=%d body=%s", send.Code, send.Body.String())
+	}
+	queue, err := local.reg.ListQueue(true)
+	if err != nil || len(queue) != 1 || queue[0].Status != "inflight" {
+		t.Fatalf("held queue=%+v err=%v", queue, err)
+	}
+	host, _ := local.daemon.pairedHost(record.ID)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "cut short" {
+		t.Fatalf("remote delivered=%v", got)
+	}
+	queue, err = local.reg.ListQueue(true)
+	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
+		t.Fatalf("queue after replay=%+v err=%v", queue, err)
+	}
+}
+
+func TestFederationProxyAnswerWithDaemonDownHoldsSendAsUnknown(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	qualified := hosts.Qualify(record.ID, "remote-a")
+	remote.gate.proxyDown.Store(true)
+	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "behind the proxy"})
+	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"unknown"`) || !strings.Contains(send.Body.String(), `"status":"submitted"`) {
+		t.Fatalf("proxy answer status=%d body=%s", send.Code, send.Body.String())
+	}
+	read := local.request(t, http.MethodGet, "/api/v1/session-metadata?id="+url.QueryEscape(qualified), nil)
+	if read.Code != http.StatusServiceUnavailable || !strings.Contains(read.Body.String(), "host_unreachable") || !strings.Contains(read.Body.String(), "no Agenthail daemon answered") {
+		t.Fatalf("read status=%d body=%s", read.Code, read.Body.String())
+	}
+	if got := remote.fake.delivered(); len(got) != 0 {
+		t.Fatalf("remote delivered while down: %v", got)
+	}
+	host, _ := local.daemon.pairedHost(record.ID)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	queue, err := local.reg.ListQueue(true)
+	if err != nil || len(queue) != 1 || queue[0].Status != "inflight" {
+		t.Fatalf("held while down queue=%+v err=%v", queue, err)
+	}
+	remote.gate.proxyDown.Store(false)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	local.daemon.drainHostDeliveries(context.Background(), host)
+	if got := remote.fake.delivered(); len(got) != 1 || got[0] != "behind the proxy" {
+		t.Fatalf("remote delivered=%v", got)
+	}
+	queue, err = local.reg.ListQueue(true)
 	if err != nil || len(queue) != 1 || queue[0].Status != "delivered" {
 		t.Fatalf("queue=%+v err=%v", queue, err)
 	}
@@ -492,6 +655,44 @@ func TestFederationRemoveHostDropsRowsAndRevokesDevice(t *testing.T) {
 	devices, err := remote.reg.ListDevices(false)
 	if err != nil || len(devices) != 0 {
 		t.Fatalf("remote devices after remove=%+v err=%v", devices, err)
+	}
+}
+
+func TestFederationRemoveWaitsForInFlightReconcile(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	hold := &snapshotHold{release: make(chan struct{})}
+	remote.gate.snapshots.Store(hold)
+	if err := local.daemon.attachHost(record); err != nil {
+		t.Fatal(err)
+	}
+	awaitFederation(t, "reconcile fetching a snapshot", func() bool { return hold.waiting.Load() > 0 })
+	local.daemon.catalog.mu.Lock()
+	remote.gate.snapshots.Store(nil)
+	close(hold.release)
+	time.Sleep(100 * time.Millisecond)
+	removed := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		removed <- local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	local.daemon.catalog.mu.Unlock()
+	select {
+	case response := <-removed:
+		if response.Code != http.StatusOK {
+			t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("remove did not return")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if rows, err := local.reg.HostCatalogRows(record.ID); err != nil || len(rows) != 0 {
+		t.Fatalf("rows after remove=%+v err=%v", rows, err)
+	}
+	if _, err := local.reg.Host(record.ID); err == nil {
+		t.Fatal("host still paired after remove")
+	}
+	if rows := sessionsOf(local.snapshot(t), record.ID); len(rows) != 0 {
+		t.Fatalf("snapshot rows after remove=%+v", rows)
 	}
 }
 
@@ -561,5 +762,81 @@ func TestFederationRelaysRemoteSessionStream(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+func TestFederationLocalQualifierNeverReachesARemoteOwnedSession(t *testing.T) {
+	local, _, record := pairedFederation(t)
+	identity := local.daemon.hostIdentity()
+	for _, ref := range []string{identity.ID + "::remote-a", identity.Name + "::remote-a"} {
+		read := local.request(t, http.MethodGet, "/api/v1/session-metadata?id="+url.QueryEscape(ref), nil)
+		if read.Code != http.StatusConflict || !strings.Contains(read.Body.String(), "session_owned") {
+			t.Fatalf("%s read status=%d body=%s", ref, read.Code, read.Body.String())
+		}
+		send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": ref, "message": "wrong transport"})
+		if send.Code != http.StatusConflict || !strings.Contains(send.Body.String(), "session_owned") {
+			t.Fatalf("%s send status=%d body=%s", ref, send.Code, send.Body.String())
+		}
+	}
+	scoped := local.request(t, http.MethodGet, "/api/v1/session-metadata?id=remote-a&host="+url.QueryEscape(identity.Name), nil)
+	if scoped.Code != http.StatusConflict || !strings.Contains(scoped.Body.String(), "host_mismatch") {
+		t.Fatalf("local host field status=%d body=%s", scoped.Code, scoped.Body.String())
+	}
+	if got := local.fake.delivered(); len(got) != 0 {
+		t.Fatalf("local adapter reached: %v", got)
+	}
+	if owner, err := local.reg.SessionHost("remote-a"); err != nil || owner != record.ID {
+		t.Fatalf("owner=%q err=%v", owner, err)
+	}
+}
+
+func TestFederationRenameRacesReadsAndLocalRouting(t *testing.T) {
+	local, _, _ := pairedFederation(t)
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for _, target := range []string{"/api/v1/version", "/api/v1/snapshot", "/api/v1/host"} {
+		wg.Add(1)
+		go func(target string) {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if response := local.request(t, http.MethodGet, target, nil); response.Code != http.StatusOK {
+					t.Errorf("%s status=%d", target, response.Code)
+					return
+				}
+			}
+		}(target)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			identity := local.daemon.hostIdentity()
+			response := local.request(t, http.MethodGet, "/api/v1/session-metadata?id="+url.QueryEscape(identity.ID+"::local-a"), nil)
+			if response.Code != http.StatusOK {
+				t.Errorf("local-qualified read status=%d body=%s", response.Code, response.Body.String())
+				return
+			}
+		}
+	}()
+	for index := 0; index < 20; index++ {
+		response := local.request(t, http.MethodPut, "/api/v1/host", map[string]string{"name": fmt.Sprintf("mac-%d", index)})
+		if response.Code != http.StatusOK {
+			t.Fatalf("rename status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	close(stop)
+	wg.Wait()
+	if name := local.daemon.hostIdentity().Name; name != "mac-19" {
+		t.Fatalf("name=%q", name)
 	}
 }
