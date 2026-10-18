@@ -36,6 +36,7 @@ final class AgenthailIOSModel: ObservableObject {
     private var searchQuery = ""
     private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:]
+    private var rekeys = SessionRekeys()
     private struct PendingSendRequest {
         let message: String
         let turnSettings: TurnSettings
@@ -393,6 +394,7 @@ final class AgenthailIOSModel: ObservableObject {
         do {
             let loaded = try await api.snapshot(fresh: fresh)
             snapshot = loaded
+            followRekeys(loaded.rekeyed ?? [:])
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
@@ -410,6 +412,7 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func loadSession(_ id: String) async {
+        let id = rekeys.resolve(id)
         if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
@@ -566,7 +569,19 @@ final class AgenthailIOSModel: ObservableObject {
     }
 
     func openSession(_ sessionID: String) {
-        requestedSessionID = sessionID
+        requestedSessionID = rekeys.resolve(sessionID)
+    }
+
+    private func followRekeys(_ retired: [String: String]) {
+        rekeys.record(retired)
+        guard !rekeys.isEmpty else { return }
+        _ = rekeys.carry(&drafts)
+        _ = rekeys.carry(&pendingSendRequests)
+        var settings = turnSettingsDrafts
+        if rekeys.carry(&settings) { turnSettingsDrafts = settings }
+        if let selected = selectedSessionID, rekeys.resolve(selected) != selected {
+            requestedSessionID = rekeys.resolve(selected)
+        }
     }
 
     func send(to session: SessionState) {
@@ -843,6 +858,7 @@ final class AgenthailIOSModel: ObservableObject {
             current.sessions.removeAll { $0.id == id }
             current.totalSessions = current.sessions.count
             snapshot = current
+            if let next = event.data.rekeyedTo { followRekeys([id: next]) }
         case "surface.health":
             guard let name = event.data.surface, let health = event.data.health,
                   let index = current.surfaces.firstIndex(where: { $0.name == name }) else {

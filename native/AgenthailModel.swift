@@ -60,6 +60,7 @@ final class AgenthailModel: ObservableObject {
     private var detailCache: [String: SessionDetail] = [:]
     private var detailCacheOrder: [String] = []
     private var drafts: [String: ComposerDraft] = [:]
+    private var rekeys = SessionRekeys()
     private var pendingSessionReference: String?
     private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
@@ -173,6 +174,7 @@ final class AgenthailModel: ObservableObject {
                 startCatalogStream()
             }
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
+            rekeys.record(loaded.rekeyed ?? [:])
             clearConnectionError()
             reconcilePanes()
         } catch {
@@ -354,6 +356,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     func openSession(reference: String) {
+        let reference = rekeys.resolve(reference)
         guard snapshot != nil else {
             pendingSessionReference = reference
             return
@@ -514,6 +517,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     func reply(_ message: String, to sessionID: String, connectionTimeout: Duration = .seconds(20)) async -> Bool {
+        let sessionID = rekeys.resolve(sessionID)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return true }
         guard await awaitConnection(timeout: connectionTimeout) else {
@@ -749,6 +753,7 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
             let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
@@ -850,7 +855,19 @@ final class AgenthailModel: ObservableObject {
         clearConnectionError()
     }
 
+    func resolveSessionID(_ id: String) -> String {
+        rekeys.resolve(id)
+    }
+
     private func reconcilePanes() {
+        if !rekeys.isEmpty {
+            _ = rekeys.carry(&drafts)
+            _ = rekeys.carry(&pendingSendRequests)
+            var sends = localSends
+            if rekeys.carry(&sends) { localSends = sends }
+            var settings = turnSettingsDrafts
+            if rekeys.carry(&settings) { turnSettingsDrafts = settings }
+        }
         panes.forEach { $0.reconcile() }
     }
 
