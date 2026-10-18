@@ -140,6 +140,29 @@ func TestClaudeResumeThatStartsACopyStopsItAndIsUnknown(t *testing.T) {
 	}
 }
 
+func TestClaudeResumeThatClaudeRefusesFailsWithItsMessage(t *testing.T) {
+	refusal := "Workspace not trusted. Run `claude` in /fixture once and accept the trust prompt, then retry."
+	fixture := claudetest.New(t)
+	fixture.ResumeRefused(refusal)
+	posts := &claudePosts{}
+	session := exitedSession(fixture)
+	_, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
+	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryHeld(err) || surface.IsDeliveryOutcomeUnknown(err) || !strings.Contains(err.Error(), refusal) || posts.count("hello") != 0 {
+		t.Fatalf("err=%v posts=%d", err, posts.count("hello"))
+	}
+}
+
+func TestClaudeResumeThatFailsAfterBackgroundingIsUnknown(t *testing.T) {
+	fixture := claudetest.New(t)
+	fixture.ResumeExitAfterBackground()
+	posts := &claudePosts{}
+	session := exitedSession(fixture)
+	_, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
+	if !surface.IsDeliveryOutcomeUnknown(err) || posts.count("hello") != 0 {
+		t.Fatalf("err=%v posts=%d", err, posts.count("hello"))
+	}
+}
+
 func TestClaudeResumeThatNeverBecomesReachableIsUnknown(t *testing.T) {
 	shortResumeSettle(t)
 	fixture := claudetest.New(t)

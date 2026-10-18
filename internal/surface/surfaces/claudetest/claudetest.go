@@ -27,6 +27,10 @@ stop)
 --bg)
  [ "$2" = --resume ] || exit 2
  id=$(printf '%s' "$3" | cut -c1-8)
+ if [ -f "$HOME/resume-refused" ]; then
+  cat "$HOME/resume-refused" >&2
+  exit 1
+ fi
  if [ -f "$HOME/resume-copy" ]; then
   printf 'backgrounded · %s (idle - send a prompt to start)\n' "$(cat "$HOME/resume-copy")"
   exit 0
@@ -37,6 +41,7 @@ stop)
   (sleep "$(cat "$HOME/resume-delay" 2>/dev/null || printf 0)"; printf '%s' "$record" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json") >/dev/null 2>&1 &
  fi
  printf 'backgrounded · %s (idle - send a prompt to start)\n' "$id"
+ [ ! -f "$HOME/resume-exit-after-background" ] || exit 1
  ;;
 esac
 `
@@ -169,6 +174,13 @@ func (f *Fixture) ResumeDelay(delay time.Duration) {
 
 // ResumeCopy makes claude report a copy under id instead of resuming.
 func (f *Fixture) ResumeCopy(id string) { f.write("resume-copy", id) }
+
+// ResumeRefused makes claude print message and exit 1 without backgrounding.
+func (f *Fixture) ResumeRefused(message string) { f.write("resume-refused", message) }
+
+// ResumeExitAfterBackground makes claude exit 1 after printing its
+// backgrounded line.
+func (f *Fixture) ResumeExitAfterBackground() { f.write("resume-exit-after-background", "") }
 
 // ResumeNeverReady makes a resumed process never write its record.
 func (f *Fixture) ResumeNeverReady() { f.write("resume-never-ready", "") }

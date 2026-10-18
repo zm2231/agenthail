@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -189,16 +191,22 @@ func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.S
 // resume continues a conversation in the background without a prompt, so the
 // message is sent only once the resumed process is reachable. Claude starts a
 // copy under a new id instead when it finds the conversation running; a copy
-// is stopped and the outcome is unknown.
+// is stopped and the outcome is unknown. Claude exiting with an error before
+// it printed a backgrounded line started nothing, such as a workspace it does
+// not trust, so the resume failed with Claude's message.
 func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *claudeBackground, bridged bool) (*surface.Session, error) {
 	started := time.Now()
 	output, err := c.backgroundCommand(ctx, cwd, "--bg", "--resume", conversation)
+	id, idErr := claudeBackgroundID(string(output))
+	var exit *exec.ExitError
+	if err != nil && idErr != nil && ctx.Err() == nil && errors.As(err, &exit) && exit.Exited() {
+		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude refused to resume %s: %s", conversation, strings.TrimSpace(claudeANSI.ReplaceAllString(string(output), ""))))
+	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume: %w: %s", err, string(output)))
 	}
-	id, err := claudeBackgroundID(string(output))
-	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(err)
+	if idErr != nil {
+		return nil, surface.DeliveryOutcomeUnknown(idErr)
 	}
 	if (job != nil && id != job.ID) || (job == nil && !strings.HasPrefix(conversation, id)) {
 		return nil, surface.DeliveryOutcomeUnknown(c.stopCopy(conversation, id))
