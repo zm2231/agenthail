@@ -17,20 +17,25 @@ trap cleanup EXIT
 
 binary="$source_app/Contents/MacOS/Agenthail"
 sdk="$(otool -l "$binary" | awk '/LC_BUILD_VERSION/ {found=1} found && $1 == "sdk" {print $2; exit}')"
-if [ "${sdk%%.*}" -lt 26 ]; then
-	echo "error: $binary is linked against the macOS $sdk SDK; the split view layout under test only applies from SDK 26" >&2
+if ! [[ "$sdk" =~ ^[0-9]+(\.[0-9]+)*$ ]] || [ "${sdk%%.*}" -lt 26 ]; then
+	echo "error: $binary is linked against macOS SDK '${sdk:-unknown}'; the split view layout under test only applies from SDK 26" >&2
 	exit 1
 fi
 
 app="$work/Agenthail.app"
 ditto "$source_app" "$app"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.agenthail.layouttest" "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.agenthail.layouttest" -c "Delete :CFBundleURLTypes" -c "Delete :NSServices" "$app/Contents/Info.plist"
 codesign --force --deep --sign - "$app" >/dev/null 2>&1
 
 python3 "$ROOT/scripts/fixtures/layout-daemon.py" >"$work/port" &
 daemon_pid=$!
 for _ in $(seq 1 50); do [ -s "$work/port" ] && break; sleep 0.1; done
 port="$(cat "$work/port")"
+if [ -z "$port" ] || ! kill -0 "$daemon_pid" 2>/dev/null ||
+	! curl -fsS "http://127.0.0.1:$port/api/v1/version" >/dev/null || ! curl -fsS "http://127.0.0.1:$port/api/v1/snapshot" >/dev/null; then
+	echo "error: the synthetic daemon did not start" >&2
+	exit 1
+fi
 
 for width in $WIDTHS; do
 	home="$work/home-$width"
