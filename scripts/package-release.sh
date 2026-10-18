@@ -21,14 +21,19 @@ if [ "$WORKTREE_DIRTY" -eq 1 ]; then
 	VERSION="$VERSION-dirty"
 fi
 COMMIT_EPOCH="$(git show -s --format=%ct HEAD)"
-BUILT_AT="$(date -u -r "$COMMIT_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')"
-STAMP="$(date -u -r "$COMMIT_EPOCH" '+%Y%m%d%H%M.%S')"
+if date -u -d "@0" >/dev/null 2>&1; then
+	BUILT_AT="$(date -u -d "@$COMMIT_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')"
+	STAMP="$(date -u -d "@$COMMIT_EPOCH" '+%Y%m%d%H%M.%S')"
+else
+	BUILT_AT="$(date -u -r "$COMMIT_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')"
+	STAMP="$(date -u -r "$COMMIT_EPOCH" '+%Y%m%d%H%M.%S')"
+fi
 NAME="agenthail-${VERSION}-${GOOS_VALUE}-${GOARCH_VALUE}"
 DIST="$ROOT/dist"
 STAGE="$DIST/.release-stage/$NAME"
 
 rm -rf "$DIST/.release-stage"
-mkdir -p "$STAGE/sidecar"
+mkdir -p "$STAGE"
 
 LDFLAGS="-s -w -X main.version=$VERSION -X main.revision=$REVISION -X main.builtAt=$BUILT_AT"
 if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
@@ -59,8 +64,12 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 	AGENTHAIL_CLI_SOURCE="$STAGE/agenthail" AGENTHAIL_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" AGENTHAIL_APP_VERSION="$VERSION" AGENTHAIL_APP_BUILD="$(git rev-list --count HEAD)" "$ROOT/scripts/build-macos-app.sh" "$STAGE/Agenthail.app" "$GOARCH_VALUE" >/dev/null
 fi
 
-cp README.md LICENSE COMMERCIAL.md install.sh "$STAGE/"
-cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
+cp README.md LICENSE COMMERCIAL.md "$STAGE/"
+if [ "$GOOS_VALUE" = "darwin" ]; then
+	mkdir -p "$STAGE/sidecar"
+	cp install.sh "$STAGE/"
+	cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
+fi
 cp -R skills "$STAGE/"
 find "$STAGE/skills" -name .DS_Store -delete
 test -f "$STAGE/skills/agenthail-operations/SKILL.md"
@@ -78,7 +87,11 @@ find "$DIST/.release-stage" -exec touch -t "$STAMP" {} +
 
 ARCHIVE="$DIST/$NAME.tar.gz"
 COPYFILE_DISABLE=1 tar -C "$DIST/.release-stage" -cf - "$NAME" | gzip -n > "$ARCHIVE"
-(cd "$DIST" && shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
+if command -v shasum >/dev/null 2>&1; then
+	(cd "$DIST" && shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
+else
+	(cd "$DIST" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
+fi
 
 if [ "$(go env GOHOSTOS)" = "$GOOS_VALUE" ] && [ "$(go env GOHOSTARCH)" = "$GOARCH_VALUE" ]; then
 	"$STAGE/agenthail" version --json

@@ -149,6 +149,60 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  linux-archive:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test source on Linux
+        if: matrix.arch == 'amd64'
+        run: |
+          go test ./... -race -count=1
+          go vet ./...
+      - name: Build Linux archive
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
+          AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
+          scripts/package-release.sh
+      - name: Verify Linux archive
+        env:
+          ARCH: ${{ matrix.arch }}
+          AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          name="agenthail-${AGENTHAIL_VERSION}-linux-${ARCH}"
+          (cd dist && sha256sum -c "$name.tar.gz.sha256")
+          mkdir -p "$RUNNER_TEMP/inspect"
+          tar -xzf "dist/$name.tar.gz" -C "$RUNNER_TEMP/inspect"
+          test -x "$RUNNER_TEMP/inspect/$name/agenthail"
+          test -f "$RUNNER_TEMP/inspect/$name/skills/agenthail-operations/SKILL.md"
+          file "$RUNNER_TEMP/inspect/$name/agenthail" | grep -q "ELF 64-bit"
+          if [ "$ARCH" = "amd64" ]; then
+            "$RUNNER_TEMP/inspect/$name/agenthail" version --json | jq -e --arg version "$AGENTHAIL_VERSION" '.version == $version'
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agenthail-linux-${{ matrix.arch }}
+          path: |
+            dist/agenthail-*-linux-*.tar.gz
+            dist/agenthail-*-linux-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   ios-archive:
     needs: guard
     if: needs.guard.outputs.run == 'true'
@@ -312,7 +366,7 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [push-relay-check, macos-package, ios-archive]
+    needs: [push-relay-check, macos-package, linux-archive, ios-archive]
     runs-on: macos-15
     timeout-minutes: 55
     env:
@@ -325,6 +379,11 @@ jobs:
         with:
           name: agenthail-macos-release
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agenthail-linux-*
+          path: dist
+          merge-multiple: true
       - uses: actions/download-artifact@v4
         with:
           name: agenthail-ios-release

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -55,6 +56,13 @@ func (s *systemdService) managerProblem() *serviceProblem {
 	output, err := s.systemctl("show", "--property=Version")
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return &serviceProblem{
+			Problem: "systemd-missing",
+			Detail:  "systemctl is not installed, so no service manager can supervise the daemon",
+			Fix:     "run the daemon unsupervised with 'agenthail daemon start'",
+		}
 	}
 	if output == "" {
 		output = err.Error()
