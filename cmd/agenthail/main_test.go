@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestNotionAvailableNeedsASidecarOffMacOS(t *testing.T) {
+func TestSidecarAvailableNeedsAnOverrideOffMacOS(t *testing.T) {
 	for _, tc := range []struct {
 		goos, sidecar string
 		want          bool
@@ -11,8 +11,8 @@ func TestNotionAvailableNeedsASidecarOffMacOS(t *testing.T) {
 		{"linux", "", false},
 		{"linux", "/opt/agenthail/sidecar.py", true},
 	} {
-		if got := notionAvailable(tc.goos, tc.sidecar); got != tc.want {
-			t.Fatalf("notionAvailable(%q, %q)=%v, want %v", tc.goos, tc.sidecar, got, tc.want)
+		if got := sidecarAvailable(tc.goos, tc.sidecar); got != tc.want {
+			t.Fatalf("sidecarAvailable(%q, %q)=%v, want %v", tc.goos, tc.sidecar, got, tc.want)
 		}
 	}
 }

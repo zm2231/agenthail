@@ -38,6 +38,7 @@ type Claude struct {
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
 	request      ClaudeRequest
+	localOnly    bool
 }
 
 type ClaudeRequest func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error)
@@ -81,13 +82,23 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	}
 }
 
+// DisableRemoteControl limits the surface to local Claude Code sessions on an
+// install that ships no sidecar, so health no longer probes claude.ai.
+func (c *Claude) DisableRemoteControl() {
+	c.localOnly = true
+}
+
 func (c *Claude) Health(ctx context.Context) error {
-	if sessions, err := c.List(ctx); err == nil {
+	sessions, err := c.List(ctx)
+	if err == nil {
 		for _, session := range sessions {
 			if session.Transport == "uds" {
 				return nil
 			}
 		}
+	}
+	if c.localOnly {
+		return err
 	}
 	if _, err := sidecarPath(); err != nil {
 		return err
