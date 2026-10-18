@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,13 @@ import (
 
 	"github.com/zm2231/agenthail/internal/surface"
 )
+
+func installDaemonPackageCodex(t *testing.T, codexHome, script string) string {
+	t.Helper()
+	path := filepath.Join(codexHome, "packages", "app-server-daemon", "current", "bin", "codex")
+	writeExecutable(t, path, script)
+	return path
+}
 
 func installStandaloneCodex(t *testing.T, codexHome, script string) string {
 	t.Helper()
@@ -27,61 +35,42 @@ func writeExecutable(t *testing.T, path, script string) {
 	}
 }
 
-func isolateCodexInstalls(t *testing.T, desktop bool) (bundled string) {
+func isolateCodexInstalls(t *testing.T, desktop bool) {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("PATH", filepath.Join(root, "empty-path"))
-	bundled = filepath.Join(root, "ChatGPT.app", "Contents", "Resources", "codex")
-	previousBundled := codexBundledCLIs
-	codexBundledCLIs = func() []string { return []string{bundled} }
 	previousDesktop := CodexDesktopExecutables
 	CodexDesktopExecutables = []string{filepath.Join(root, "Codex.app", "Contents", "MacOS", "Codex")}
 	if desktop {
 		writeExecutable(t, CodexDesktopExecutables[0], "#!/bin/sh\n")
 	}
-	t.Cleanup(func() {
-		codexBundledCLIs = previousBundled
-		CodexDesktopExecutables = previousDesktop
-	})
-	return bundled
+	t.Cleanup(func() { CodexDesktopExecutables = previousDesktop })
 }
 
-func TestDetectCodexInstallationFindsEveryCodexOnce(t *testing.T) {
+func TestCodexDaemonCLIPrefersTheDaemonPackageThenPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	bundled := isolateCodexInstalls(t, true)
-	standalone := installStandaloneCodex(t, home, "#!/bin/sh\n")
-	linkDir, npmDir := t.TempDir(), t.TempDir()
-	if err := os.Symlink(standalone, filepath.Join(linkDir, "codex")); err != nil {
-		t.Fatal(err)
+	isolateCodexInstalls(t, true)
+	if _, err := CodexDaemonCLI(); !errors.Is(err, ErrCodexMissing) || !strings.Contains(err.Error(), CodexInstallCommand) {
+		t.Fatalf("err=%v, want the missing CLI with the install command", err)
 	}
+	bundleDir := filepath.Join(t.TempDir(), "ChatGPT.app", "Contents", "Resources")
+	writeExecutable(t, filepath.Join(bundleDir, "codex"), "#!/bin/sh\n")
+	npmDir := t.TempDir()
 	npm := filepath.Join(npmDir, "codex")
 	writeExecutable(t, npm, "#!/bin/sh\n")
-	writeExecutable(t, bundled, "#!/bin/sh\n")
-	t.Setenv("PATH", linkDir+string(os.PathListSeparator)+npmDir)
-
-	install := DetectCodexInstallation()
-	if install.Standalone != standalone || install.Desktop != CodexDesktopExecutables[0] {
-		t.Fatalf("install=%+v", install)
-	}
-	if len(install.Other) != 2 || install.Other[0] != npm || install.Other[1] != bundled {
-		t.Fatalf("other=%v, want the npm CLI and the ChatGPT.app CLI without the standalone symlink", install.Other)
-	}
-}
-
-func TestManagedCodexBinaryUsesOnlyTheStandaloneRuntime(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	isolateCodexInstalls(t, false)
-	npmDir := t.TempDir()
-	writeExecutable(t, filepath.Join(npmDir, "codex"), "#!/bin/sh\n")
-	t.Setenv("PATH", npmDir)
-	if _, err := ManagedCodexBinary(); err == nil || !strings.Contains(err.Error(), filepath.Join(npmDir, "codex")) || !strings.Contains(err.Error(), CodexStandaloneInstallCommand) {
-		t.Fatalf("err=%v, want the missing standalone runtime naming the npm CLI and the install command", err)
+	t.Setenv("PATH", bundleDir+string(os.PathListSeparator)+npmDir)
+	if path, err := CodexDaemonCLI(); err != nil || path != npm {
+		t.Fatalf("path=%q err=%v, want the PATH CLI and never the Desktop bundle", path, err)
 	}
 	standalone := installStandaloneCodex(t, home, "#!/bin/sh\n")
-	if path, err := ManagedCodexBinary(); err != nil || path != standalone {
-		t.Fatalf("path=%q err=%v", path, err)
+	if path, _ := CodexDaemonCLI(); path != standalone {
+		t.Fatalf("path=%q, want the legacy daemon package", path)
+	}
+	packaged := installDaemonPackageCodex(t, home, "#!/bin/sh\n")
+	install := DetectCodexInstallation()
+	if install.Daemon != packaged || install.Desktop != CodexDesktopExecutables[0] {
+		t.Fatalf("install=%+v", install)
 	}
 }
 
@@ -91,27 +80,26 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 		name        string
 		bridge      bool
 		desktop     bool
-		standalone  string
+		cli         string
 		problem     surface.RuntimeProblem
 		reachable   bool
 		remediation string
 		notes       []surface.RuntimeProblem
 	}{
-		{name: "bridge up without standalone", bridge: true, reachable: true, notes: []surface.RuntimeProblem{surface.RuntimeStandaloneMissing}},
-		{name: "npm only, no Desktop", problem: surface.RuntimeStandaloneMissing, remediation: CodexStandaloneInstallCommand},
-		{name: "Desktop closed, no standalone", desktop: true, problem: surface.RuntimeBridgeUnavailable, remediation: "agenthail launch codex", notes: []surface.RuntimeProblem{surface.RuntimeStandaloneMissing}},
-		{name: "standalone stopped, no Desktop", standalone: stoppedDaemon, problem: surface.RuntimeStopped, remediation: "agenthail codex"},
-		{name: "standalone stopped, Desktop closed", standalone: stoppedDaemon, desktop: true, problem: surface.RuntimeBridgeUnavailable, remediation: "agenthail launch codex", notes: []surface.RuntimeProblem{surface.RuntimeStopped}},
+		{name: "bridge up without a daemon CLI", bridge: true, reachable: true},
+		{name: "no Codex at all", problem: surface.RuntimeCodexMissing, remediation: CodexInstallCommand},
+		{name: "Desktop closed, no daemon CLI", desktop: true, problem: surface.RuntimeBridgeUnavailable, remediation: "agenthail launch codex"},
+		{name: "daemon stopped, no Desktop", cli: stoppedDaemon, problem: surface.RuntimeStopped, remediation: "starts it"},
+		{name: "daemon stopped, Desktop closed", cli: stoppedDaemon, desktop: true, problem: surface.RuntimeBridgeUnavailable, remediation: "agenthail launch codex", notes: []surface.RuntimeProblem{surface.RuntimeStopped}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("CODEX_HOME", home)
 			isolateCodexInstalls(t, test.desktop)
-			npmDir := t.TempDir()
-			writeExecutable(t, filepath.Join(npmDir, "codex"), "#!/bin/sh\nexit 1\n")
-			t.Setenv("PATH", npmDir)
-			if test.standalone != "" {
-				installStandaloneCodex(t, home, test.standalone)
+			if test.cli != "" {
+				npmDir := t.TempDir()
+				writeExecutable(t, filepath.Join(npmDir, "codex"), test.cli)
+				t.Setenv("PATH", npmDir)
 			}
 			codex := isolatedManagedRuntime(t)
 			if test.bridge {
@@ -129,12 +117,6 @@ func TestCodexRuntimeStatusNamesWhatEachInstallStateIsMissing(t *testing.T) {
 				if note.Problem != test.notes[index] || note.Remediation == "" {
 					t.Fatalf("note=%+v", note)
 				}
-				if note.Problem == surface.RuntimeStandaloneMissing && (!strings.Contains(note.Message, filepath.Join(npmDir, "codex")) || !strings.Contains(note.Remediation, CodexStandaloneInstallCommand)) {
-					t.Fatalf("standalone note does not name the npm CLI and install command: %+v", note)
-				}
-			}
-			if test.problem == surface.RuntimeStandaloneMissing && !strings.Contains(status.Detail, filepath.Join(npmDir, "codex")) {
-				t.Fatalf("detail=%q does not name the npm CLI", status.Detail)
 			}
 		})
 	}

@@ -23,12 +23,6 @@ func (d *Daemon) dashboardSessionOperation(w http.ResponseWriter, r *http.Reques
 			err = surface.ErrUnsupported
 			break
 		}
-		if forkOptions.Cwd != "" {
-			forkOptions.Cwd, err = dashboardStartCwd(forkOptions.Cwd)
-			if err != nil {
-				break
-			}
-		}
 		var fork *surface.Session
 		fork, err = forker.ForkSession(ctx, session, forkOptions)
 		if err == nil && fork == nil {

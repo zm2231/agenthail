@@ -63,7 +63,7 @@ func TestCodexSessionReadsSubagentIdentityFromThread(t *testing.T) {
 		"parentThreadId": "root",
 		"agentNickname":  "Ada",
 		"source":         map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": "root", "depth": float64(1), "agent_nickname": "Ada"}}},
-	}, false, true)
+	})
 	if want := (&surface.Subagent{ParentID: "root", RootID: "root", Depth: 1, Nickname: "Ada"}); !reflect.DeepEqual(child.Subagent, want) {
 		t.Fatalf("child subagent = %+v, want %+v", child.Subagent, want)
 	}
@@ -77,7 +77,7 @@ func TestCodexSessionReadsSubagentIdentityFromThread(t *testing.T) {
 		"agentRole":      "reviewer",
 		"path":           grandchildPath,
 		"source":         map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": "child", "depth": float64(2)}}},
-	}, false, true)
+	})
 	if want := (&surface.Subagent{ParentID: "child", RootID: "root", Depth: 2, Nickname: "Bo", Role: "reviewer"}); !reflect.DeepEqual(grandchild.Subagent, want) {
 		t.Fatalf("grandchild subagent = %+v, want %+v", grandchild.Subagent, want)
 	}
@@ -86,11 +86,11 @@ func TestCodexSessionReadsSubagentIdentityFromThread(t *testing.T) {
 		"parentThreadId": "child",
 		"path":           filepath.Join(dir, "missing.jsonl"),
 		"source":         map[string]any{"subAgent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": "child", "depth": float64(2)}}},
-	}, false, true)
+	})
 	if unreadable.Subagent == nil || unreadable.Subagent.RootID != "" || unreadable.Subagent.ParentID != "child" {
 		t.Fatalf("a nested subagent without a readable rollout keeps its parent and leaves the root unknown: %+v", unreadable.Subagent)
 	}
-	top := codexSession(map[string]any{"id": "root", "source": "vscode"}, false, true)
+	top := codexSession(map[string]any{"id": "root", "source": "vscode"})
 	if top.Subagent != nil {
 		t.Fatalf("top-level thread has subagent identity %+v", top.Subagent)
 	}

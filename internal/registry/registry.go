@@ -914,13 +914,23 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
 		return r.resolveSubagentPath(path)
 	}
-	if sid, err := r.ExactTarget(target); err == nil {
+	return r.resolveTarget(target, "")
+}
+
+// ResolveSurfaceTarget resolves a target like ResolveTarget, but matches and
+// judges ambiguity only among sessions of the given surface.
+func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string) (string, error) {
+	return r.resolveTarget(target, string(kind))
+}
+
+func (r *Registry) resolveTarget(target, kind string) (string, error) {
+	if sid, err := r.ExactTarget(surface.SurfaceKind(kind), target); err == nil {
 		return sid, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	prefix := escapeLike(target) + "%"
-	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' ORDER BY updated_at DESC, id LIMIT 2`, prefix); err != nil {
+	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, prefix, kind, kind); err != nil {
 		return "", err
 	} else if len(ids) == 1 {
 		return ids[0], nil
@@ -928,7 +938,7 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
 	}
 	contains := "%" + escapeLike(target) + "%"
-	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') ORDER BY updated_at DESC, id LIMIT 2`, contains, contains)
+	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, contains, contains, kind, kind)
 	if err != nil {
 		return "", err
 	}
@@ -941,15 +951,22 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 	return ids[0], nil
 }
 
-// ExactTarget resolves only targets that name one session exactly: an alias,
-// a session ID, or the conversation ID a Claude transcript is named after.
-func (r *Registry) ExactTarget(target string) (string, error) {
-	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
+func (r *Registry) sessionSurface(id string) string {
+	var kind string
+	_ = r.read.QueryRow(`SELECT surface FROM sessions WHERE id = ?`, id).Scan(&kind)
+	return kind
+}
+
+// ExactTarget resolves only targets that name one session of surface kind
+// exactly, any surface when kind is empty: an alias, a session ID, or the
+// conversation ID a Claude transcript is named after.
+func (r *Registry) ExactTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil && (kind == "" || r.sessionSurface(sid) == string(kind)) {
 		return sid, nil
 	}
 	var exact string
-	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact)
-	if err == nil || !errors.Is(err, sql.ErrNoRows) || target == "" {
+	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND (? = '' OR surface = ?)`, target, string(kind), string(kind)).Scan(&exact)
+	if err == nil || !errors.Is(err, sql.ErrNoRows) || target == "" || (kind != "" && kind != surface.KindClaude) {
 		return exact, err
 	}
 	err = r.read.QueryRow(`SELECT id FROM sessions WHERE surface=? AND transcript LIKE ? ESCAPE '\' ORDER BY updated_at DESC, rowid DESC LIMIT 1`, string(surface.KindClaude), "%/"+escapeLike(target)+".jsonl").Scan(&exact)

@@ -67,7 +67,7 @@ func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voi
 	if d.Registry == nil {
 		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
 	}
-	id, err := d.Registry.ExactTarget(requested)
+	id, err := d.Registry.ExactTarget("", requested)
 	if err != nil {
 		return nil, fmt.Errorf("resolve voice target %q by alias or exact session ID: %w", requested, err)
 	}
