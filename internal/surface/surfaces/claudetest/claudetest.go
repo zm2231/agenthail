@@ -6,6 +6,7 @@ package claudetest
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +32,7 @@ stop)
   exit 0
  fi
  if [ ! -f "$HOME/resume-never-ready" ]; then
-  record="{\"pid\":$AGENTHAIL_FIXTURE_PID,\"sessionId\":\"$3\",\"cwd\":\"$PWD\",\"bridgeSessionId\":\"$(cat "$HOME/resume-bridge")\",\"status\":\"idle\",\"peerFeatures\":[\"notify_idle\"],\"startedAt\":$(date +%s)000}"
+  record="{\"pid\":$AGENTHAIL_FIXTURE_PID,\"sessionId\":\"$3\",\"cwd\":\"$PWD\",\"bridgeSessionId\":\"$(cat "$HOME/resume-bridge")\",\"messagingSocketPath\":\"$(cat "$HOME/resume-socket" 2>/dev/null)\",\"status\":\"idle\",\"peerFeatures\":[\"notify_idle\"],\"startedAt\":$(date +%s)000}"
   mkdir -p "$HOME/.claude/sessions"
   (sleep "$(cat "$HOME/resume-delay" 2>/dev/null || printf 0)"; printf '%s' "$record" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json") >/dev/null 2>&1 &
  fi
@@ -44,9 +45,10 @@ esac
 // carry the PID of a child process that lives for the whole test, never the
 // test's own, which callers would take for their own ancestor.
 type Fixture struct {
-	Home string
-	PID  int
-	t    testing.TB
+	Home   string
+	PID    int
+	socket string
+	t      testing.TB
 }
 
 func New(t testing.TB) *Fixture {
@@ -113,6 +115,9 @@ func (f *Fixture) Record(conversation, cwd, bridge string) {
 	if bridge != "" {
 		record["bridgeSessionId"] = bridge
 	}
+	if f.socket != "" {
+		record["messagingSocketPath"] = f.socket
+	}
 	data, _ := json.Marshal(record)
 	f.write(filepath.Join(".claude", "sessions", fmt.Sprint(f.PID)+".json"), string(data))
 }
@@ -129,6 +134,23 @@ func (f *Fixture) RemoveRecord() {
 	if err := os.Remove(filepath.Join(f.Home, ".claude", "sessions", fmt.Sprint(f.PID)+".json")); err != nil && !os.IsNotExist(err) {
 		f.t.Fatal(err)
 	}
+}
+
+// Listen gives the live process a messaging socket, which its records and
+// resumed records then name.
+func (f *Fixture) Listen() {
+	f.t.Helper()
+	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
+		f.t.Fatal(err)
+	}
+	path := filepath.Join("/tmp/cc-socks", fmt.Sprint(f.PID)+".sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() { _ = listener.Close() })
+	f.socket = path
+	f.write("resume-socket", path)
 }
 
 // ResumeBridge sets the Remote Control id the resumed process registers.

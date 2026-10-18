@@ -112,7 +112,9 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	defer d.publishEvent("state.changed", session.ID, map[string]string{"source": "compact"})
 	operationCtx, cancel := context.WithTimeout(ctx, compactOperationTimeout)
 	defer cancel()
+	addressed := *session
 	err := adapter.Compact(operationCtx, session)
+	d.dispatcher().RegisterReached(&addressed, session)
 	if err != nil {
 		d.finishQueueFailure(item, session, err, time.Now())
 		return

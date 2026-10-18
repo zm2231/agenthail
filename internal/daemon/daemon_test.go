@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 type daemonSurface struct {
@@ -999,7 +1000,9 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"content":"ready"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, Status: surface.StatusIdle, Transcript: path}
+	fixture := claudetest.New(t)
+	fixture.Record("conversation-compact", fixture.Home, "session_compact")
+	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -1008,7 +1011,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		t.Fatal(err)
 	}
 	requestSent := make(chan string, 1)
-	claude := surfaces.NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest("", fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}

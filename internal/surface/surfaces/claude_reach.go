@@ -64,7 +64,7 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if cwd == "" {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
-	resumed, err := c.resume(ctx, conversation, cwd, state.job)
+	resumed, err := c.resume(ctx, conversation, cwd, state.job, claudeBridgeID(sess.ID))
 	if err != nil {
 		return false, err
 	}
@@ -98,7 +98,7 @@ func (c *Claude) conversationOf(sess *surface.Session) string {
 	if record, ok := c.peerRecord(sess.PID); ok && claudeProcessAlive(sess.PID) && (str(record, "sessionId") == sess.ID || str(record, "bridgeSessionId") == sess.ID) {
 		return str(record, "sessionId")
 	}
-	if !strings.HasPrefix(sess.ID, "session_") && !strings.HasPrefix(sess.ID, "cse_") {
+	if !claudeBridgeID(sess.ID) {
 		return sess.ID
 	}
 	bridge := toCse(sess.ID)
@@ -184,7 +184,7 @@ func (c *Claude) conversationProcess(ctx context.Context, id string) (*surface.S
 // message is sent only once the resumed process is reachable. Claude starts a
 // copy under a new id instead when it finds the conversation running; a copy
 // is stopped and the outcome is unknown.
-func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *claudeBackground) (*surface.Session, error) {
+func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *claudeBackground, bridged bool) (*surface.Session, error) {
 	started := time.Now()
 	output, err := c.backgroundCommand(ctx, cwd, "--bg", "--resume", conversation)
 	if err != nil {
@@ -197,7 +197,7 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *clau
 	if (job != nil && id != job.ID) || (job == nil && !strings.HasPrefix(conversation, id)) {
 		return nil, surface.DeliveryOutcomeUnknown(c.stopCopy(conversation, id))
 	}
-	return c.awaitReachable(ctx, conversation, id, started)
+	return c.awaitReachable(ctx, conversation, id, started, bridged)
 }
 
 func (c *Claude) stopCopy(conversation, id string) error {
@@ -213,17 +213,23 @@ func (c *Claude) stopCopy(conversation, id string) error {
 // prints its backgrounded line before the session initializes, and the job
 // state is not evidence: a resumed idle job keeps reporting done. A failure
 // counts only when this resume wrote it, since Claude records updatedAt to the
-// millisecond.
-func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, started time.Time) (*surface.Session, error) {
+// millisecond. A session addressed by its Remote Control ID is reached only
+// once the process registers Remote Control again, so its identity does not
+// pass through the socket-only ID; the socket is used if it never does.
+func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, started time.Time, bridged bool) (*surface.Session, error) {
 	started = started.Truncate(time.Millisecond)
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	var socketOnly *surface.Session
 	for {
 		process, alive, err := c.conversationProcess(ctx, conversation)
 		if err == nil && process != nil {
-			return process, nil
+			if !bridged || claudeBridgeID(process.ID) {
+				return process, nil
+			}
+			socketOnly = process
 		}
 		if job, ok := c.backgroundJob(id); ok && !alive && !job.UpdatedAt.Before(started) && (job.State == "failed" || job.State == "crashed") {
 			detail := job.Detail
@@ -236,16 +242,24 @@ func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, st
 		case <-ctx.Done():
 			return nil, surface.DeliveryOutcomeUnknown(ctx.Err())
 		case <-deadline.C:
+			if socketOnly != nil {
+				return socketOnly, nil
+			}
 			return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s did not become reachable after resume; inspect claude agents", id))
 		case <-ticker.C:
 		}
 	}
 }
 
+// adoptClaudeProcess points sess at process, keeping the Remote Control
+// transport a session was addressed through while the process still offers it,
+// so a send stays correlated with its transcript turn.
 func adoptClaudeProcess(sess, process *surface.Session) {
+	if sess.Transport != "" || !claudeBridgeID(process.ID) {
+		sess.Transport = process.Transport
+	}
 	sess.ID = process.ID
 	sess.PID = process.PID
-	sess.Transport = process.Transport
 	sess.Status = process.Status
 	sess.Cwd = process.Cwd
 	sess.Transcript = process.Transcript
@@ -294,6 +308,10 @@ func (c *Claude) atRest(ctx context.Context, sess *surface.Session) bool {
 	}
 	state, err := c.conversation(ctx, conversation)
 	return err == nil && !state.alive
+}
+
+func claudeBridgeID(id string) bool {
+	return strings.HasPrefix(id, "session_") || strings.HasPrefix(id, "cse_")
 }
 
 func claudeTranscriptCwd(path string) string {

@@ -1462,6 +1462,7 @@ func (a *App) cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	addressed := *sess
 	dispatcher := delivery.Dispatcher{Registry: a.Registry}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
@@ -1519,6 +1520,10 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
+	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || sess.Transport == "uds") {
+		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
+		wantStream, wantReply = false, false
+	}
 	if wantStream {
 		if useDaemonStream {
 			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
