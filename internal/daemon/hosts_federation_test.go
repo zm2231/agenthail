@@ -92,8 +92,23 @@ type federationNode struct {
 	gate    *actionGate
 }
 
+// actionGate drops the answers to the next N actions after applying them.
+// net/http replays a request carrying an Idempotency-Key once on a reused
+// connection, so losing an answer for certain takes two drops.
 type actionGate struct {
-	dropNext atomic.Bool
+	drops atomic.Int32
+}
+
+func (g *actionGate) take() bool {
+	for {
+		left := g.drops.Load()
+		if left <= 0 {
+			return false
+		}
+		if g.drops.CompareAndSwap(left, left-1) {
+			return true
+		}
+	}
 }
 
 func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
@@ -123,7 +138,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 func (n *federationNode) serve(t *testing.T, listener net.Listener) {
 	t.Helper()
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/actions" && n.gate.dropNext.CompareAndSwap(true, false) {
+		if r.URL.Path == "/api/v1/actions" && n.gate.take() {
 			n.handler.ServeHTTP(httptest.NewRecorder(), r)
 			hijacker, ok := w.(http.Hijacker)
 			if !ok {
@@ -325,8 +340,15 @@ func TestFederationMirrorsReadsAndDrivesRemoteSessions(t *testing.T) {
 	if err := json.Unmarshal(resolved.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].ID != qualified || answer.Matches[0].Host.Name != "forge" {
 		t.Fatalf("resolve status=%d body=%s", resolved.Code, resolved.Body.String())
 	}
+	onHost := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&host=forge&target=remote-b", nil)
+	if err := json.Unmarshal(onHost.Body.Bytes(), &answer); err != nil || len(answer.Matches) != 1 || answer.Matches[0].ID != hosts.Qualify(record.ID, "remote-b") {
+		t.Fatalf("host-scoped resolve status=%d body=%s", onHost.Code, onHost.Body.String())
+	}
+	if missing := local.request(t, http.MethodGet, "/api/v1/resolve?scope=remote&host=nowhere&target=remote-b", nil); missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown host resolve status=%d body=%s", missing.Code, missing.Body.String())
+	}
 
-	listing := local.request(t, http.MethodGet, "/api/v1/hosts", nil)
+	listing :=local.request(t, http.MethodGet, "/api/v1/hosts", nil)
 	if listing.Code != http.StatusOK || strings.Contains(listing.Body.String(), "ahd_") || !strings.Contains(listing.Body.String(), `"sessionCount":2`) {
 		t.Fatalf("hosts status=%d body=%s", listing.Code, listing.Body.String())
 	}
@@ -418,7 +440,7 @@ func TestFederationUnreachableHostKeepsRowsAndDeliversHeldSendOnce(t *testing.T)
 func TestFederationLostAnswerStaysUnknownAndReplaysByKey(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	qualified := hosts.Qualify(record.ID, "remote-a")
-	remote.gate.dropNext.Store(true)
+	remote.gate.drops.Store(2)
 	send := local.request(t, http.MethodPost, "/api/v1/actions", map[string]string{"action": "send", "sessionId": qualified, "message": "exactly once"})
 	if send.Code != http.StatusOK || !strings.Contains(send.Body.String(), `"evidence":"unknown"`) {
 		t.Fatalf("lost answer status=%d body=%s", send.Code, send.Body.String())

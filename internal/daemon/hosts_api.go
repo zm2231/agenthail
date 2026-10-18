@@ -292,7 +292,16 @@ func (d *Daemon) apiResolveHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	if r.URL.Query().Get("scope") == "remote" {
-		writeDashboardJSON(w, http.StatusOK, d.resolveRemote(ctx, target))
+		candidates := d.pairedHosts()
+		if hostRef := strings.TrimSpace(r.URL.Query().Get("host")); hostRef != "" {
+			host, ok := d.pairedHost(hostRef)
+			if !ok {
+				writeAPIError(w, http.StatusNotFound, "host_not_found", fmt.Sprintf("No paired host is named %q.", hostRef))
+				return
+			}
+			candidates = []*pairedHost{host}
+		}
+		writeDashboardJSON(w, http.StatusOK, d.resolveRemote(ctx, candidates, target))
 		return
 	}
 	matches, err := d.resolveLocal(ctx, target)
@@ -333,9 +342,9 @@ func (d *Daemon) resolveLocal(ctx context.Context, target string) ([]resolveMatc
 	return matches, nil
 }
 
-func (d *Daemon) resolveRemote(ctx context.Context, target string) resolveResponse {
+func (d *Daemon) resolveRemote(ctx context.Context, candidates []*pairedHost, target string) resolveResponse {
 	result := resolveResponse{Matches: []resolveMatch{}}
-	for _, host := range d.pairedHosts() {
+	for _, host := range candidates {
 		state, _ := host.status()
 		if state == hostStateConnected {
 			var answer resolveResponse
@@ -360,23 +369,14 @@ func (d *Daemon) resolveRemote(ctx context.Context, target string) resolveRespon
 	return result
 }
 
-// resolveMirrored matches an unreachable host's rows by exact alias or id
-// only; fuzzy name matching needs the host itself.
 func (d *Daemon) resolveMirrored(host *pairedHost, target string) []resolveMatch {
-	rows, err := d.Registry.HostCatalogRows(host.record.ID)
+	found, err := d.Registry.MatchHostSessions(host.record.ID, target)
 	if err != nil {
 		return nil
 	}
-	alias := strings.TrimPrefix(target, "@")
 	matches := []resolveMatch{}
-	for _, row := range rows {
-		var projection dashboardSession
-		if json.Unmarshal([]byte(row.ProjectionFingerprint), &projection) != nil {
-			continue
-		}
-		if row.Session.ID == target || (projection.Alias != "" && projection.Alias == alias) {
-			matches = append(matches, resolveMatch{ID: projection.ID, Surface: projection.Surface, Name: projection.Name, Alias: projection.Alias, Host: host.ref()})
-		}
+	for _, match := range found {
+		matches = append(matches, resolveMatch{ID: hosts.Qualify(host.record.ID, match.ID), Surface: match.Surface, Name: match.Name, Alias: match.Alias, Host: host.ref()})
 	}
 	return matches
 }

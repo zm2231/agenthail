@@ -409,6 +409,38 @@ func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error)
 	return result, rows.Err()
 }
 
+type HostSessionMatch struct {
+	HostID  string
+	ID      string
+	Surface surface.SurfaceKind
+	Name    string
+	Alias   string
+}
+
+// Exact id or alias only: fuzzy matching needs the host itself.
+func (r *Registry) MatchHostSessions(hostID, target string) ([]HostSessionMatch, error) {
+	alias := strings.TrimPrefix(target, "@")
+	rows, err := r.read.Query(`SELECT s.host_id,s.id,s.surface,s.name,coalesce(json_extract(cs.projection_fingerprint,'$.alias'),'')
+		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
+		WHERE s.host_id<>'' AND (?='' OR s.host_id=?) AND (s.id=? OR (?<>'' AND json_extract(cs.projection_fingerprint,'$.alias')=?))
+		ORDER BY s.host_id,s.id`, hostID, hostID, target, alias, alias)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	matches := []HostSessionMatch{}
+	for rows.Next() {
+		var match HostSessionMatch
+		var kind string
+		if err := rows.Scan(&match.HostID, &match.ID, &kind, &match.Name, &match.Alias); err != nil {
+			return nil, err
+		}
+		match.Surface = surface.SurfaceKind(kind)
+		matches = append(matches, match)
+	}
+	return matches, rows.Err()
+}
+
 // HostDelivery is a send to a paired host's session that this daemon holds:
 // pending was provably never sent, inflight was sent with an unknown outcome.
 // Request is the exact action body, replayed only with the same key so the

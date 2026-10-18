@@ -39,12 +39,13 @@ type threadCreateRequest struct {
 	jsonOut  bool
 }
 
-const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--timeout <duration>] [--json]
+const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--host <host>] [--timeout <duration>] [--json]
        agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
-Codex thread creation uses Codex Desktop. Use 'agenthail codex' for a managed terminal session.`
+Codex thread creation uses Codex Desktop. Use 'agenthail codex' for a managed terminal session.
+--host starts the thread on a paired host; --cwd is then a path on that host.`
 
 func (a *App) cmdThread(args []string) error {
 	if hasFlag(args, "--help") {
@@ -60,6 +61,19 @@ func (a *App) cmdThread(args []string) error {
 	}
 	if a.Registry == nil {
 		return fmt.Errorf("registry not available")
+	}
+	if hostText := strings.TrimSpace(flagVal(args, "--host")); hostText != "" {
+		local, err := a.isLocalHost(hostText)
+		if err != nil {
+			return err
+		}
+		if !local {
+			return a.createRemoteThread(hostText, request, args)
+		}
+		if request.cwd, err = resolveThreadCwd(request.cwd); err != nil {
+			return err
+		}
+		request.options.Cwd = request.cwd
 	}
 	adapter := a.surfaceByKind(request.surface)
 	if adapter == nil {
@@ -214,7 +228,7 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 			continue
 		}
 		switch arg {
-		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode":
+		case "--message", "--cwd", "--alias", "--model", "--approval", "--timeout", "--effort", "--mode", "--service-tier", "--output-schema", "--name", "--worktree", "--agent", "--permission-mode", "--host":
 			i++
 		case "--json":
 		default:
@@ -240,11 +254,14 @@ func parseThreadCreateRequest(args []string) (threadCreateRequest, error) {
 	if request.message == "" {
 		return threadCreateRequest{}, fmt.Errorf("message is required\n%s", threadUsage)
 	}
-	resolvedCwd, err := resolveThreadCwd(flagVal(args, "--cwd"))
-	if err != nil {
-		return threadCreateRequest{}, err
+	request.cwd = strings.TrimSpace(flagVal(args, "--cwd"))
+	if flagVal(args, "--host") == "" {
+		resolvedCwd, err := resolveThreadCwd(request.cwd)
+		if err != nil {
+			return threadCreateRequest{}, err
+		}
+		request.cwd = resolvedCwd
 	}
-	request.cwd = resolvedCwd
 	request.alias = strings.TrimPrefix(strings.TrimSpace(flagVal(args, "--alias")), "@")
 	request.model = strings.TrimSpace(flagVal(args, "--model"))
 	request.approval = strings.TrimSpace(flagVal(args, "--approval"))
