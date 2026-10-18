@@ -31,6 +31,9 @@ type updateDeps struct {
 	output          func(string, ...string) ([]byte, error)
 	goos            string
 	goarch          string
+	daemonExpected  func() bool
+	restartDaemon   func(string) error
+	daemonHealthy   func() error
 }
 
 type releaseAsset struct {
@@ -60,6 +63,9 @@ func defaultUpdateDeps() *updateDeps {
 		executable:      os.Executable,
 		goos:            runtime.GOOS,
 		goarch:          runtime.GOARCH,
+		daemonExpected:  defaultDaemonExpected,
+		restartDaemon:   defaultRestartDaemon,
+		daemonHealthy:   defaultDaemonHealthy,
 		run: func(name string, args ...string) error {
 			command := exec.Command(name, args...)
 			command.Stdin = os.Stdin
@@ -92,15 +98,21 @@ func (a *App) cmdUpdate(args []string) error {
 	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 		executable = resolved
 	}
-	method := updateInstallMethod(executable)
+	method := updateInstallMethod(executable, deps.goos, a.Version)
 	if method == "homebrew" {
 		return a.updateHomebrew(args, deps)
 	}
-	if method != "package" {
-		return fmt.Errorf("self-update is available for package and Homebrew installs; update this source install with git pull and ./install.sh")
-	}
-	if deps.goos != "darwin" || deps.goarch != "arm64" {
-		return fmt.Errorf("package updates require Apple silicon macOS")
+	switch method {
+	case "package":
+		if deps.goos != "darwin" || deps.goarch != "arm64" {
+			return fmt.Errorf("package updates require Apple silicon macOS")
+		}
+	case "archive":
+		if deps.goarch != "amd64" && deps.goarch != "arm64" {
+			return fmt.Errorf("Linux release archives are published for amd64 and arm64, not %s", deps.goarch)
+		}
+	default:
+		return fmt.Errorf("self-update is available for package, Homebrew and Linux release archive installs; update this source install with git pull and ./install.sh")
 	}
 	release, err := fetchLatestRelease(deps)
 	if err != nil {
@@ -116,7 +128,11 @@ func (a *App) cmdUpdate(args []string) error {
 	if hasFlag(args, "--check") || !status.Available {
 		return printUpdateStatus(status, hasFlag(args, "--json"))
 	}
-	if err := installPackageUpdate(deps, release); err != nil {
+	install := func() error { return installPackageUpdate(deps, release) }
+	if method == "archive" {
+		install = func() error { return installArchiveUpdate(deps, release, executable) }
+	}
+	if err := install(); err != nil {
 		return err
 	}
 	status.Current = status.Latest
@@ -159,13 +175,16 @@ func exitedWithCode(err error, code int) bool {
 	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
 }
 
-func updateInstallMethod(executable string) string {
+func updateInstallMethod(executable, goos, version string) string {
 	clean := filepath.Clean(executable)
 	if strings.Contains(clean, "/Cellar/agenthail/") || strings.Contains(clean, "/Homebrew/Cellar/agenthail/") {
 		return "homebrew"
 	}
 	if strings.HasPrefix(clean, "/Library/Application Support/Agenthail/") {
 		return "package"
+	}
+	if _, released := numericVersion(version); goos == "linux" && released {
+		return "archive"
 	}
 	return "source"
 }
