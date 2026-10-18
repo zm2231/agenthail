@@ -310,6 +310,11 @@ final class SessionPane: ObservableObject, Identifiable {
         return options.first { $0.id.caseInsensitiveCompare(query) == .orderedSame || $0.displayName.caseInsensitiveCompare(query) == .orderedSame }?.id ?? query
     }
 
+    func forkAgain(_ session: SessionState) {
+        model.actionKeys.abandon(.fork(session.id))
+        fork(session)
+    }
+
     func fork(_ session: SessionState) {
         guard !forking, removedSession == nil, SessionOperationAvailability.fork(session) else { return }
         forking = true
@@ -322,14 +327,14 @@ final class SessionPane: ObservableObject, Identifiable {
             model.operationError = "Agenthail isn't connected."
             return
         }
-        if model.pendingNotice?.sessionID == session.id { model.pendingNotice = nil }
+        model.pendingForks.remove(session.id)
         do {
             let forked = try await api.forkSession(id: session.id, keys: model.actionKeys)
             model.operationError = nil
             await model.openCreatedSession(forked.id, in: closed ? nil : self)
         } catch AgenthailAPIError.outcomeUnknown {
             model.operationError = nil
-            model.pendingNotice = (session.id, "Codex may still be creating this fork. It will appear in the sidebar when ready.")
+            model.pendingForks.insert(session.id)
         } catch {
             model.operationError = error.localizedDescription
         }

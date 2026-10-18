@@ -1308,11 +1308,17 @@ struct ComposerView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(DesktopPalette.red)
                     .padding(.top, 6)
-            } else if let notice = model.pendingNotice, notice.sessionID == session.id {
-                Text(notice.text)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(DesktopPalette.text2)
-                    .padding(.top, 6)
+            } else if model.pendingForks.contains(session.id) {
+                HStack(spacing: 8) {
+                    Text("Codex may still be creating a fork of this session. Check the sidebar before forking again.")
+                        .foregroundStyle(DesktopPalette.text2)
+                    Button("Fork again") { pane.forkAgain(session) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DesktopPalette.accentText)
+                        .help("Start another fork instead of waiting for this one")
+                }
+                .font(.system(size: 11.5))
+                .padding(.top, 6)
             }
         }
         .frame(maxWidth: 700)

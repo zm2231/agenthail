@@ -23,6 +23,17 @@ struct SessionOperationRequest: Encodable {
         default: return true
         }
     }
+
+    var scope: ActionScope {
+        ActionScope(sessionID: sessionId, family: action.hasPrefix("session-lifecycle-") ? "session-lifecycle" : action)
+    }
+}
+
+struct ActionScope: Hashable {
+    let sessionID: String
+    let family: String
+
+    static func fork(_ sessionID: String) -> ActionScope { ActionScope(sessionID: sessionID, family: "session-fork") }
 }
 
 private struct SessionOperationResponse<Result: Decodable>: Decodable {
@@ -32,44 +43,59 @@ private struct SessionOperationResponse<Result: Decodable>: Decodable {
 
 @MainActor
 final class ActionRetryKeys {
-    private var pending: [Data: String] = [:]
+    private struct Pending {
+        let key: String
+        let scope: ActionScope
+        var recorded = false
+    }
+
+    private var pending: [Data: Pending] = [:]
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         return encoder
     }()
+    private static let notSent: Set<URLError.Code> = [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .badURL, .unsupportedURL, .userAuthenticationRequired]
 
     func post<Result: Decodable>(_ request: SessionOperationRequest, api: AgenthailAPI) async throws -> Result {
-        guard request.mutates else { return try Self.unwrap(await api.postAction(request)) }
+        guard request.mutates else {
+            let response: SessionOperationResponse<Result> = try await api.postAction(request)
+            guard let result = response.result else { throw AgenthailAPIError.invalidResponse }
+            pending = pending.filter { $0.value.scope != request.scope || !$0.value.recorded }
+            return result
+        }
         var request = request
         let adding = request.nativeQueue?.queueAction == .add
         if adding { request.nativeQueue?.clientUserMessageId = nil }
         let identity = try encoder.encode(request)
-        let key = pending[identity] ?? UUID().uuidString
-        pending[identity] = key
+        let key = pending[identity]?.key ?? UUID().uuidString
+        pending[identity] = Pending(key: key, scope: request.scope)
         if adding { request.nativeQueue?.clientUserMessageId = key }
+        let response: SessionOperationResponse<Result>
         do {
-            let result: Result = try Self.unwrap(await api.postAction(request, idempotencyKey: key))
-            pending[identity] = nil
-            return result
+            response = try await api.postAction(request, idempotencyKey: key)
+        } catch AgenthailAPIError.outcomeUnknown(let message) {
+            pending[identity]?.recorded = true
+            throw AgenthailAPIError.outcomeUnknown(message)
+        } catch let error as URLError where !Self.notSent.contains(error.code) {
+            throw AgenthailAPIError.outcomeUnknown(error.localizedDescription)
         } catch {
-            let uncertain = Self.uncertain(error)
-            if uncertain == nil { pending[identity] = nil }
-            throw uncertain ?? error
+            abandon(request.scope)
+            throw error
         }
-    }
-
-    private static func unwrap<Result>(_ response: SessionOperationResponse<Result>) throws -> Result {
-        if let result = response.result { return result }
-        guard response.status == "submitted" else { throw AgenthailAPIError.invalidResponse }
+        if let result = response.result {
+            abandon(request.scope)
+            return result
+        }
+        guard response.status == "submitted" else {
+            abandon(request.scope)
+            throw AgenthailAPIError.invalidResponse
+        }
         throw AgenthailAPIError.outcomeUnknown("Agenthail is still finishing this request.")
     }
 
-    private static func uncertain(_ error: Error) -> AgenthailAPIError? {
-        if case AgenthailAPIError.outcomeUnknown = error { return error as? AgenthailAPIError }
-        guard let error = error as? URLError else { return nil }
-        let notSent: Set<URLError.Code> = [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .badURL, .unsupportedURL, .userAuthenticationRequired]
-        return notSent.contains(error.code) ? nil : .outcomeUnknown(error.localizedDescription)
+    func abandon(_ scope: ActionScope) {
+        pending = pending.filter { $0.value.scope != scope }
     }
 }
 

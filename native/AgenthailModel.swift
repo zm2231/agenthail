@@ -37,7 +37,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
     @Published var operationError: String?
-    @Published var pendingNotice: (sessionID: String, text: String)?
+    @Published var pendingForks: Set<String> = []
     @Published var loading = false
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent
