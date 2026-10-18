@@ -842,6 +842,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	}
 	identity := transcriptFileIdentity(state.fileInfo)
 	offset := state.offset
+	var closing surface.ClaudeClosingTurn
 	if uuid != "" {
 		// A targeted wait looks back so a turn submitted before the tail started is still found;
 		// events outside that turn are filtered below.
@@ -850,6 +851,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		// The session source resumes at its seed or previous window boundary, so records written
 		// in between are delivered once without replaying history the seed bounded away.
 		offset = sess.TranscriptOffset
+		closing = sess.ClaudeClosingTurn
 	}
 	if uuid != "" && offset > 0 {
 		file, openErr := os.Open(path)
@@ -880,9 +882,19 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 	}
 	terminalTurns := map[string]bool{}
+	completed := false
+	finish := func(turnID, key string) {
+		if terminalTurns[turnID] {
+			return
+		}
+		terminalTurns[turnID] = true
+		onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
+		if uuid != "" && turnID == uuid {
+			completed = true
+		}
+	}
 	for time.Now().Before(deadline) {
 		lineOffset := offset
-		completed := false
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
@@ -890,12 +902,17 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			if json.Unmarshal(line, &record) != nil {
 				return nil
 			}
+			messageID := strNested(record, "message", "id")
+			if closing.TurnID != "" && !claudeRecordContinuesMessage(str(record, "type"), messageID, closing.MessageID) {
+				finish(closing.TurnID, closing.Key)
+				closing = surface.ClaudeClosingTurn{}
+			}
 			turnID := currentTurnID
 			if claudeRecordStartsTurn(record) {
 				currentTurnID = str(record, "uuid")
 				turnID = currentTurnID
 			}
-			done, interrupted := claudeStreamTerminal(record)
+			done, ending, interrupted := claudeStreamTerminal(record)
 			if interrupted {
 				if uuid != "" && turnID == uuid {
 					return fmt.Errorf("Claude turn %s was interrupted", uuid)
@@ -926,13 +943,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
 				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: version, Operation: "upsert", Final: true, TurnID: turnID, Role: item.Role, Origin: item.Origin, Sender: item.Sender, Title: item.Title, CallID: item.CallID, Status: item.Status, Attachment: item.Attachment, Truncated: item.Truncated, TruncationReason: item.TruncationReason, Timestamp: at, Kind: item.Kind, Text: item.Text})
 			}
-			if done && turnID != "" && !terminalTurns[turnID] {
-				terminalTurns[turnID] = true
-				key := stableTimelineItemID(recordOffset, line, len(items))
-				onEvent(surface.StreamEvent{ID: key, ProviderKey: "timeline:" + key, Version: 1, Operation: "phase", TurnID: turnID, Kind: "done"})
-				if uuid != "" && turnID == uuid {
-					completed = true
-				}
+			if turnID == "" {
+				return nil
+			}
+			key := stableTimelineItemID(recordOffset, line, len(items))
+			if ending {
+				closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key}
+			} else if done {
+				finish(turnID, key)
 			}
 			return nil
 		})
@@ -944,6 +962,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			sess.TranscriptOffset = offset
 			sess.TranscriptOffsetSet = true
 			sess.TranscriptIdentity = identity
+			sess.ClaudeClosingTurn = closing
 		}
 		if completed {
 			return nil
@@ -1000,17 +1019,20 @@ func claudeRecordIsInterrupt(record map[string]any) bool {
 	return isClaudeInterruptMarker(strings.TrimSpace(transcriptText(message["content"])))
 }
 
-func claudeStreamTerminal(record map[string]any) (done, interrupted bool) {
+// claudeStreamTerminal classifies a record: turn_duration ends a turn, an
+// end_turn block starts closing it (see appendClaudeTurn), and an interruption
+// cancels it.
+func claudeStreamTerminal(record map[string]any) (done, ending, interrupted bool) {
 	switch str(record, "type") {
 	case "system":
-		return str(record, "subtype") == "turn_duration", false
+		return str(record, "subtype") == "turn_duration", false, false
 	case "assistant":
 		reason := strNested(record, "message", "stop_reason")
-		return reason == "end_turn", claudeTerminalInterruption(reason)
+		return false, reason == "end_turn", claudeTerminalInterruption(reason)
 	case "user":
-		return false, claudeRecordIsInterrupt(record)
+		return false, false, claudeRecordIsInterrupt(record)
 	default:
-		return false, false
+		return false, false, false
 	}
 }
 

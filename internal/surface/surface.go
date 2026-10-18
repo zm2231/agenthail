@@ -26,30 +26,40 @@ const (
 )
 
 type Session struct {
-	ID                    string          `json:"id"`
-	Surface               SurfaceKind     `json:"surface"`
-	Name                  string          `json:"name"`
-	Cwd                   string          `json:"cwd"`
-	PID                   int             `json:"pid"`
-	Status                SessionStatus   `json:"status"`
-	Transcript            string          `json:"transcript"`
-	HasLocal              bool            `json:"hasLocal"`
-	Source                string          `json:"source,omitempty"`
-	Transport             string          `json:"transport,omitempty"`
-	ConfiguredModel       string          `json:"configuredModel,omitempty"`
-	LastActive            time.Time       `json:"lastActive"`
-	StartedAt             time.Time       `json:"startedAt,omitzero"`
-	Runtime               *Runtime        `json:"runtime,omitempty"`
-	Subagent              *Subagent       `json:"subagent,omitempty"`
-	Subagents             *SubagentRollup `json:"subagents,omitempty"`
-	StreamCursor          uint64          `json:"-"`
-	StreamCursorSet       bool            `json:"-"`
-	TranscriptOffset      int64           `json:"-"`
-	TranscriptOffsetSet   bool            `json:"-"`
-	TranscriptIdentity    string          `json:"-"`
-	CodexPendingEventUser bool            `json:"-"`
-	CodexPendingEventTurn string          `json:"-"`
-	CodexCurrentTurnID    string          `json:"-"`
+	ID                    string            `json:"id"`
+	Surface               SurfaceKind       `json:"surface"`
+	Name                  string            `json:"name"`
+	Cwd                   string            `json:"cwd"`
+	PID                   int               `json:"pid"`
+	Status                SessionStatus     `json:"status"`
+	Transcript            string            `json:"transcript"`
+	HasLocal              bool              `json:"hasLocal"`
+	Source                string            `json:"source,omitempty"`
+	Transport             string            `json:"transport,omitempty"`
+	ConfiguredModel       string            `json:"configuredModel,omitempty"`
+	LastActive            time.Time         `json:"lastActive"`
+	StartedAt             time.Time         `json:"startedAt,omitzero"`
+	Runtime               *Runtime          `json:"runtime,omitempty"`
+	Subagent              *Subagent         `json:"subagent,omitempty"`
+	Subagents             *SubagentRollup   `json:"subagents,omitempty"`
+	StreamCursor          uint64            `json:"-"`
+	StreamCursorSet       bool              `json:"-"`
+	TranscriptOffset      int64             `json:"-"`
+	TranscriptOffsetSet   bool              `json:"-"`
+	TranscriptIdentity    string            `json:"-"`
+	CodexPendingEventUser bool              `json:"-"`
+	CodexPendingEventTurn string            `json:"-"`
+	CodexCurrentTurnID    string            `json:"-"`
+	ClaudeClosingTurn     ClaudeClosingTurn `json:"-"`
+}
+
+// ClaudeClosingTurn is a Claude turn whose end_turn message has been read but
+// may still have content blocks to write. A stream that resumes at
+// TranscriptOffset finishes it at the first record outside MessageID.
+type ClaudeClosingTurn struct {
+	TurnID    string
+	MessageID string
+	Key       string
 }
 
 // Subagent identifies a session spawned by another session. RootID is the
