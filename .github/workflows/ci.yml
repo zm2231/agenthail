@@ -34,7 +34,7 @@ jobs:
           fi
 
   verify:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -47,6 +47,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: push-relay/package-lock.json
+      - name: Race tests
+        run: go test ./... -race -count=1
       - name: Build
         run: go build ./...
       - name: Vet
@@ -60,8 +62,6 @@ jobs:
           node scripts/test-dashboard-relays.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
-      - name: Race tests
-        run: go test ./... -race -count=1
       - name: Push relay tests
         working-directory: push-relay
         run: |
