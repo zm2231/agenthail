@@ -172,7 +172,11 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	addressed := *session
 	result, err := route.Send(ctx, adapter, session, message, options)
-	d.RegisterReached(&addressed, session)
+	if ownedErr := d.RegisterReached(&addressed, session); ownedErr != nil {
+		*session = addressed
+		d.record(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, SourceSessionID: options.SourceSessionID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
+		return nil, ownedErr
+	}
 	if surface.IsDeliveryHeld(err) {
 		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent)
 	}
@@ -339,14 +343,27 @@ func (d Dispatcher) markSent(receipt *Receipt, intent *registry.DeliveryIntent, 
 
 // RegisterReached records the process a send reached when the surface moved
 // the session to another one, so registration carries the old row's alias,
-// queue and intents over to it.
-func (d Dispatcher) RegisterReached(addressed, reached *surface.Session) {
+// queue and intents over to it. When a paired host owns the reached id, the
+// provider already took the message but this daemon cannot track it: the
+// returned error is an unknown outcome naming that host, and the caller must
+// not record anything under the reached id.
+func (d Dispatcher) RegisterReached(addressed, reached *surface.Session) error {
 	if d.Registry == nil || (addressed.ID == reached.ID && addressed.PID == reached.PID && addressed.Transport == reached.Transport) {
-		return
+		return nil
 	}
-	if err := d.Registry.RegisterSession(*reached); err != nil {
+	err := d.Registry.RegisterSession(*reached)
+	var owned registry.SessionOwnedError
+	if errors.As(err, &owned) {
+		host := owned.HostID
+		if paired, hostErr := d.Registry.Host(owned.HostID); hostErr == nil {
+			host = paired.Name
+		}
+		return surface.DeliveryOutcomeUnknown(fmt.Errorf("%s resumed as session %s, which paired host %s owns; this daemon cannot follow it", addressed.ID, reached.ID, host))
+	}
+	if err != nil {
 		d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: reached.ID, Error: fmt.Sprintf("register reached session: %s", err)})
 	}
+	return nil
 }
 
 func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, error) {

@@ -142,6 +142,9 @@ Every place that treats `host_id = ''` as "this daemon's session":
   (`host_request <> ''`); only the host delivery loop touches them.
 - `registerSessionTx` (behind `RegisterSession` and
   `RegisterSessionAndDeletePending`) refuses a session another host owns.
+- `Dispatcher.RegisterReached`: a send, queued send or compact that resumes a
+  closed Claude session into an id a paired host owns ends as an unknown
+  outcome naming that host, recorded only under the addressed session.
 - `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
   their stored projection; `RefreshHostQueueCounts` keeps its queue count.
 - `registerRecentClaudePeers` never advertises a mirrored session as a local
