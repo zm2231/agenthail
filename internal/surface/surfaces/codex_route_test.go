@@ -87,6 +87,23 @@ func TestCodexEnsureRuntimeStartsMissingDaemonOnce(t *testing.T) {
 	}
 }
 
+func TestCodexConcurrentEnsureRuntimeStartsTheDaemonOnce(t *testing.T) {
+	lifecycle := codextest.InstallLifecycle(t, codextest.Home(t), nil)
+	codex := isolatedManagedRuntime(t)
+	errs := make(chan error, 8)
+	for range cap(errs) {
+		go func() { errs <- codex.EnsureRuntime(context.Background()) }()
+	}
+	for range cap(errs) {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if commands := lifecycle.Commands(); len(commands) != 1 {
+		t.Fatalf("lifecycle commands=%v, want exactly one start", commands)
+	}
+}
+
 func TestCodexDesktopCreatedThreadIsNeverLoadedIntoTheDaemon(t *testing.T) {
 	fake := startManagedCodex(t, nil)
 	fake.AddThread(codextest.Thread{ID: "desktop-thread", Originator: codexDesktopOriginator})
