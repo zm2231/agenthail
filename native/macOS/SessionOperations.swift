@@ -24,6 +24,8 @@ struct SessionOperationRequest: Encodable {
         }
     }
 
+    var observesState: Bool { nativeQueue?.queueAction == .list || action == "session-lifecycle-status" }
+
     var scope: ActionScope {
         ActionScope(sessionID: sessionId, family: action.hasPrefix("session-lifecycle-") ? "session-lifecycle" : action)
     }
@@ -61,7 +63,7 @@ final class ActionRetryKeys {
         guard request.mutates else {
             let response: SessionOperationResponse<Result> = try await api.postAction(request)
             guard let result = response.result else { throw AgenthailAPIError.invalidResponse }
-            pending = pending.filter { $0.value.scope != request.scope || !$0.value.recorded }
+            if request.observesState { pending = pending.filter { $0.value.scope != request.scope || !$0.value.recorded } }
             return result
         }
         var request = request

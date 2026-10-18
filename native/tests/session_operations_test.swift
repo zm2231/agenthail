@@ -334,11 +334,17 @@ struct SessionOperationsTest {
         _ = await background().run("stop", api: api)
         check(StubProtocol.keys[0] != StubProtocol.keys[3] && StubProtocol.executed == 4, "a confirmed Resume settles an earlier uncertain Stop")
 
-        reset([unknownReply, state("working"), (200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","action":"stop"}}"#), state("stopped")])
-        _ = await background().run("stop", api: api)
-        _ = await background().run("status", api: api)
-        _ = await background().run("stop", api: api)
-        check(StubProtocol.keys[0] != StubProtocol.keys[2] && StubProtocol.keys[1] != nil && StubProtocol.keys[1] != StubProtocol.keys[0], "Status settles a recorded unknown Stop and reads never reuse a key")
+        let logs = (200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","action":"logs","output":"line"}}"#)
+        for action in ["stop", "resume"] {
+            reset([unknownReply, logs, state("working"), (200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","action":"\#(action)"}}"#), state("stopped")])
+            _ = await background().run(action, api: api)
+            _ = await background().run("logs", api: api)
+            _ = await background().run(action, api: api)
+            check(StubProtocol.keys[2] == StubProtocol.keys[0] && StubProtocol.executed == 2, "Logs leaves a recorded unknown \(action) in place")
+            _ = await background().run("status", api: api)
+            _ = await background().run(action, api: api)
+            check(StubProtocol.keys[4] != StubProtocol.keys[0] && StubProtocol.keys[3] != StubProtocol.keys[0] && StubProtocol.keys[1] != StubProtocol.keys[0], "Status settles a recorded unknown \(action) and reads never reuse a key")
+        }
         check(!mismatch(), "no retry reuses a key with a different body")
     }
 
