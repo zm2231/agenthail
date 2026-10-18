@@ -596,6 +596,8 @@ var ErrUnsupported = errUnsupported{}
 
 var ErrStreamWindow = errors.New("stream window elapsed")
 
+var ErrSessionNotFound = errors.New("no session matched")
+
 type errUnsupported struct{}
 
 func (errUnsupported) Error() string { return "operation not supported by this surface" }

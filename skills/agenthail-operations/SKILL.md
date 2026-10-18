@@ -86,9 +86,11 @@ Continue the task without adding receipt/read-state hedges or investigation
 chores. Agenthail reports proven delivery problems separately; never resend
 automatically.
 
-The daemon registers each agent in the default Codex/Notion discovery page as
-an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
-senders register on first send to Claude. `--from` must resolve to a session
+The daemon registers the busiest and most recently active Codex/Notion agents
+(up to 112) as individual Claude `ListAgents` peers, refreshing every 30
+seconds. Other senders register on first send to Claude. A send never fails
+because the peer pool is full: it displaces the least recently used peer
+outside that set, or else the lowest ranked registered peer. `--from` must resolve to a session
 or alias; otherwise identity is resolved in this order: `AGENTHAIL_SESSION_ID`,
 `CLAUDE_SESSION_ID`, the verified native Claude caller discovered through the
 command's process ancestry, then `CODEX_THREAD_ID`. The verified native Claude
@@ -186,6 +188,11 @@ Desktop with a writable bridge but does not itself create a thread.
 Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
 Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
 launch outcomes; inspect `claude agents --json --all` before retrying.
+`thread resume` returns only after the job reports a running state; a job that
+fails to start returns Claude's failure detail. A send to a background session
+that is not running names its job state. If the job has ended (failed, crashed,
+stopped or done), resume it, then send again; if it reports "not reachable yet",
+it is still starting, so wait and send again without resuming.
 
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
@@ -257,7 +264,10 @@ self-routes and cycles, remember delivered completion IDs across restarts, and
 require the daemon. `relay list` derives per-route firing evidence from that
 delivery ledger, reporting each rule's fire count and last-fired timestamp in
 both text and `--json` output. `--once` deactivates the rule after its first
-matching completion while retaining that firing evidence.
+matching completion while retaining that firing evidence. A relay that cannot be
+delivered or expires is reported as a delivery problem to the human; the source
+agent is not sent a failure notice, because its reply to that notice would be
+relayed again.
 
 Human completion notifications:
 

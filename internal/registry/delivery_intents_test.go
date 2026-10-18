@@ -177,7 +177,7 @@ func TestDeliveryIntentFailureQueuesOneSenderNoticeAcrossReopen(t *testing.T) {
 	}
 }
 
-func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplayAndReopen(t *testing.T) {
+func TestQueuedRelayExpiryRecordsOneProblemWithoutNotifyingTheRelaySourceAcrossReplayAndReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	first, err := Open(path)
 	if err != nil {
@@ -210,7 +210,7 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 		t.Fatalf("payload=%+v err=%v", payload, err)
 	}
 	intent, err := first.DeliveryIntent(payload.DeliveryID)
-	if err != nil || intent.QueueID != queueID || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || intent.NotificationQueueID == 0 {
+	if err != nil || intent.QueueID != queueID || intent.Status != DeliveryIntentExpired || intent.SenderSessionID != "sender" || intent.TargetSessionID != "target" || !intent.Relayed || intent.NotificationQueueID != 0 {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
 	if err := first.Close(); err != nil {
@@ -227,7 +227,7 @@ func TestQueuedRelayExpiryCreatesOneBoundIntentNoticeAndCatalogEventAcrossReplay
 	if _, err := second.ExpireMessages(time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if count := second.QueueCount("sender"); count != 1 {
+	if count := second.QueueCount("sender"); count != 0 {
 		t.Fatalf("sender notices=%d", count)
 	}
 	window, err = second.CatalogEventsAfter(0, 10)
@@ -323,4 +323,46 @@ func catalogEventsOfType(window CatalogEventWindow, kind string) []CatalogEvent 
 		}
 	}
 	return events
+}
+
+func TestQueuedDirectSendExpiryStillNotifiesTheSender(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "direct body", "direct:1", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil || queueID == 0 || deliveryID == 0 {
+		t.Fatalf("queueID=%d deliveryID=%d err=%v", queueID, deliveryID, err)
+	}
+	if expired, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil || expired != 1 {
+		t.Fatalf("expired=%d err=%v", expired, err)
+	}
+	intent, err := r.DeliveryIntent(deliveryID)
+	if err != nil || intent.Relayed || intent.Status != DeliveryIntentExpired || intent.NotificationQueueID == 0 {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	if count := r.QueueCount("sender"); count != 1 {
+		t.Fatalf("sender notices=%d", count)
+	}
+}
+
+func TestDroppedRelayRecordsAProblemWithoutNotifyingTheRelaySource(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	recorded, err := r.RecordReplyForwardFailure("sender", "target", "relay:7:turn-1", "relay body", "target session is no longer active")
+	if err != nil || !recorded {
+		t.Fatalf("recorded=%v err=%v", recorded, err)
+	}
+	if again, err := r.RecordReplyForwardFailure("sender", "target", "relay:7:turn-1", "relay body", "target session is no longer active"); err != nil || again {
+		t.Fatalf("replay recorded=%v err=%v", again, err)
+	}
+	if count := r.QueueCount("sender"); count != 0 {
+		t.Fatalf("sender notices=%d", count)
+	}
+	window, err := r.CatalogEventsAfter(0, 10)
+	if err != nil || len(catalogEventsOfType(window, "delivery.problem")) != 1 {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil || len(problems) != 1 || problems[0].SessionID != "target" {
+		t.Fatalf("problems=%+v err=%v", problems, err)
+	}
 }
