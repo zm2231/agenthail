@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,8 +21,8 @@ if [ "$1" = agents ]; then
 elif [ "$1" = --bg ]; then
  if [ "$2" = --resume ]; then
   printf working > "$HOME/state"
-  mkdir -p "$HOME/.claude/jobs/ab12cd34"
-  printf '{"state":"working","updatedAt":"2999-01-01T00:00:00Z"}' > "$HOME/.claude/jobs/ab12cd34/state.json"
+  mkdir -p "$HOME/.claude/sessions"
+  printf '{"pid":%s,"sessionId":"real-session-id","cwd":"%s","bridgeSessionId":"session_builder","status":"idle"}' "$AGENTHAIL_FIXTURE_PID" "$PWD" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json"
  fi
  printf '\033[32mbackgrounded · ab12cd34\033[0m\n'
 else
@@ -32,6 +33,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	t.Setenv("AGENTHAIL_FIXTURE_PID", strconv.Itoa(os.Getpid()))
 	c := NewClaude("Default", home)
 	session, turn, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "--literal prompt", Cwd: home, Name: "builder", Worktree: "feature", TurnOptions: surface.TurnOptions{Effort: "high"}})
 	if err != nil || session == nil || session.ID != "real-session-id" || turn != nil {

@@ -59,30 +59,37 @@ func (p daemonVoiceStreamProvider) PrepareSessionStream(ctx context.Context, ses
 	return p.daemon.sources.prepareStream(ctx, session, adapter)
 }
 
+// resolveVoiceTarget selects a registered session by alias or exact ID and
+// refreshes it from its surface's live view of that exact ID. A surface whose
+// sends wake a closed session takes the registered row when the session is
+// not live, so the send wakes it.
 func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voice.Target, error) {
 	if d.Registry == nil {
 		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
 	}
-	id, err := d.Registry.ResolveTarget(requested)
+	id, err := d.Registry.ExactTarget("", requested)
 	if err != nil {
-		return nil, fmt.Errorf("resolve voice target: %w", err)
+		return nil, fmt.Errorf("resolve voice target %q by alias or exact session ID: %w", requested, err)
 	}
 	session, err := d.Registry.Session(id)
 	if err != nil {
 		return nil, fmt.Errorf("load voice target: %w", err)
 	}
-	adapter := d.surfaceForKind(session.Surface)
-	if adapter == nil {
-		return nil, fmt.Errorf("%s target has no configured adapter", session.Surface)
+	adapter, err := d.surfaceForSession(session)
+	if err != nil {
+		return nil, err
 	}
 	resolved, err := adapter.Resolve(ctx, session.ID)
-	if err != nil {
-		return nil, fmt.Errorf("verify voice target: %w", err)
+	if err == nil && resolved != nil && resolved.ID == session.ID {
+		return &voice.Target{Session: resolved, Adapter: adapter}, nil
 	}
-	if resolved == nil || resolved.ID != session.ID {
-		return nil, fmt.Errorf("verified voice target did not retain its exact identity")
+	if _, wakes := adapter.(surface.Waker); wakes {
+		return &voice.Target{Session: session, Adapter: adapter}, nil
 	}
-	return &voice.Target{Session: resolved, Adapter: adapter}, nil
+	if err == nil {
+		err = fmt.Errorf("live session did not retain exact identity %s", session.ID)
+	}
+	return nil, fmt.Errorf("verify voice target: %w", err)
 }
 
 func (d *Daemon) voiceBearerGuard(dashboard *dashboardServer, next http.HandlerFunc) http.HandlerFunc {
