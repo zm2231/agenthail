@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -336,5 +337,66 @@ func TestNativeClaudeRejectsControlsBeforeExternalIO(t *testing.T) {
 	}
 	if _, err := adapter.Model(ctx, session, "sonnet"); err != surface.ErrUnsupported {
 		t.Fatalf("model=%v", err)
+	}
+}
+
+func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
+	stat := "13446 (claude (bg) x) S 13433 13433 13433 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 11 0 1562374 1000 50\n"
+	if got, err := procStatStartTime(stat); err != nil || got != "1562374" {
+		t.Fatalf("start=%q err=%v", got, err)
+	}
+	if _, err := procStatStartTime("13446 claude S"); err == nil {
+		t.Fatal("malformed stat accepted")
+	}
+}
+
+func TestClaudeDiscoversLinuxSocketUnderXDGRuntimeDir(t *testing.T) {
+	runtimeDir, err := os.MkdirTemp("/tmp", "ah-xdg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(runtimeDir) })
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	home := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(runtimeDir, "cc-socks", strconv.Itoa(os.Getpid())+".sock")
+	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	record := map[string]any{"pid": os.Getpid(), "sessionId": "linux-id", "status": "idle", "version": "2.1.302", "messagingSocketPath": socket}
+	if runtime.GOOS == "linux" {
+		start, err := procStartTicks(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		record["procStart"] = start
+	}
+	data, _ := json.Marshal(record)
+	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewClaude("", home).List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "linux-id" || sessions[0].Transport != "uds" {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+	if runtime.GOOS != "linux" {
+		return
+	}
+	record["procStart"] = "1"
+	data, _ = json.Marshal(record)
+	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if sessions, err := NewClaude("", home).List(context.Background()); err != nil || len(sessions) != 0 {
+		t.Fatalf("reused PID with a different start was trusted: sessions=%+v err=%v", sessions, err)
 	}
 }
