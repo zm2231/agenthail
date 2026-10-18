@@ -20,9 +20,5 @@ jobs:
         run: |
           sw_vers; sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string; go version; go env GOCACHE
           echo "TMPDIR=$TMPDIR XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-} CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-}"
-      - name: Cold-ish build timing of cmd/agenthail
-        run: time go build -o "$RUNNER_TEMP/ah" ./cmd/agenthail
-      - name: peerbridge alone
-        run: go test -race -count=1 -v -run TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers ./internal/peerbridge 2>&1 | tail -30
-      - name: Full suite as release
-        run: go test ./... -race -count=1 2>&1 | grep -vE '^ok ' | tail -80
+      - name: Full suite as release, no prewarm
+        run: go test ./... -race -count=1 -v 2>&1 | grep -E 'DEBUG|^--- FAIL|^FAIL|after |^ok .*peerbridge|manager_test' | tail -80
