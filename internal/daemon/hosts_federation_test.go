@@ -918,6 +918,10 @@ func TestFederationRemovalCommitsAndRevokesDespiteCatalogGap(t *testing.T) {
 
 func TestFederationReconcileKeepsCommittedRowsDespiteCatalogGap(t *testing.T) {
 	local, remote, record := pairedFederation(t)
+	host, _ := local.daemon.pairedHost(record.ID)
+	local.daemon.federation.lifecycle.Lock()
+	local.daemon.detachHostLocked(record.ID)
+	local.daemon.federation.lifecycle.Unlock()
 	if err := remote.reg.RegisterSession(surface.Session{ID: "remote-c", Surface: surface.KindCodex, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -932,7 +936,6 @@ func TestFederationReconcileKeepsCommittedRowsDespiteCatalogGap(t *testing.T) {
 	local.daemon.catalog.mu.Lock()
 	local.daemon.catalog.publishedSeq = window.LatestSeq + 1<<40
 	local.daemon.catalog.mu.Unlock()
-	host, _ := local.daemon.pairedHost(record.ID)
 	if _, err := local.daemon.reconcileHost(context.Background(), host); err != nil {
 		t.Fatal(err)
 	}
