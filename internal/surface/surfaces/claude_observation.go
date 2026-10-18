@@ -26,6 +26,8 @@ type claudeObservationState struct {
 	completedWithoutTime int
 }
 
+// observeTranscript advances the shared observation of path and returns a copy,
+// so concurrent observers and streams read it without holding observeMu.
 func (c *Claude) observeTranscript(ctx context.Context, path string) (*claudeObservationState, error) {
 	c.observeMu.Lock()
 	defer c.observeMu.Unlock()
@@ -56,7 +58,8 @@ func (c *Claude) observeTranscript(ctx context.Context, path string) (*claudeObs
 	if err != nil {
 		return nil, err
 	}
-	return state, nil
+	snapshot := *state
+	return &snapshot, nil
 }
 
 func (s *claudeObservationState) apply(line []byte) error {
