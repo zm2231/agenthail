@@ -1777,7 +1777,11 @@ struct DeliveryTab: View {
             } else if !history.isEmpty {
                 SidebarCaption("Recent").padding(.horizontal, -8)
                 ForEach(history) { entry in
-                    deliveryCard(title: entry.sourceSessionId == session.id ? "To \(entry.target ?? "session")" : "From \(entry.source ?? "you")", status: entry.error == nil ? (entry.result ?? entry.kind).capitalized : "Not delivered", text: entry.message ?? "", problem: entry.error != nil)
+                    AuditEventRow(entry: entry)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line2))
                 }
             }
         }
