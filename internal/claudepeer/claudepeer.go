@@ -1117,14 +1117,19 @@ func classifyControlError(err error) *controlError {
 // /tmp/cc-socks, and on Linux $XDG_RUNTIME_DIR/cc-socks or the default
 // /run/user/<uid>/cc-socks, matching Claude Code's own default namespaces.
 func ClaudeSocketDirs() []string {
+	return claudeSocketDirsFor(runtime.GOOS, os.Getenv("XDG_RUNTIME_DIR"), os.Getuid())
+}
+
+func claudeSocketDirsFor(goos, runtimeDir string, uid int) []string {
 	dirs := []string{DefaultSocketDir}
-	if runtimeDir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); runtimeDir != "" {
+	if goos != "linux" {
+		return dirs
+	}
+	if runtimeDir = strings.TrimSpace(runtimeDir); runtimeDir != "" {
 		dirs = append(dirs, filepath.Join(runtimeDir, "cc-socks"))
 	}
-	if runtime.GOOS == "linux" {
-		if dir := filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "cc-socks"); !slices.Contains(dirs, dir) {
-			dirs = append(dirs, dir)
-		}
+	if dir := filepath.Join("/run/user", strconv.Itoa(uid), "cc-socks"); !slices.Contains(dirs, dir) {
+		dirs = append(dirs, dir)
 	}
 	return dirs
 }

@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -880,7 +882,22 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 	}
 }
 
+func TestClaudeSocketDirsAddRuntimeDirsOnlyOnLinux(t *testing.T) {
+	if got := claudeSocketDirsFor("darwin", "/run/user/501", 501); fmt.Sprint(got) != "[/tmp/cc-socks]" {
+		t.Fatalf("darwin dirs=%v", got)
+	}
+	if got := claudeSocketDirsFor("linux", "/xdg", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /xdg/cc-socks /run/user/1000/cc-socks]" {
+		t.Fatalf("linux dirs=%v", got)
+	}
+	if got := claudeSocketDirsFor("linux", "/run/user/1000", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /run/user/1000/cc-socks]" {
+		t.Fatalf("linux default runtime dirs=%v", got)
+	}
+}
+
 func TestValidateTargetSocketAcceptsClaudeRuntimeDirNamespace(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Claude Code binds peer sockets under XDG_RUNTIME_DIR only on Linux")
+	}
 	runtimeDir := shortTempDir(t, "cp-xdg-")
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	namespace := filepath.Join(runtimeDir, "cc-socks")

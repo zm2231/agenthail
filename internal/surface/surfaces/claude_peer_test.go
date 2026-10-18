@@ -351,6 +351,9 @@ func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
 }
 
 func TestClaudeDiscoversLinuxSocketUnderXDGRuntimeDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Claude Code binds peer sockets under XDG_RUNTIME_DIR only on Linux")
+	}
 	runtimeDir, err := os.MkdirTemp("/tmp", "ah-xdg-")
 	if err != nil {
 		t.Fatal(err)
