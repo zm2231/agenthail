@@ -30,7 +30,6 @@ type WaitingKind string
 
 const (
 	WaitingQuestion WaitingKind = "question"
-	WaitingPlan     WaitingKind = "plan"
 	WaitingApproval WaitingKind = "approval"
 	WaitingInput    WaitingKind = "input"
 )
