@@ -170,16 +170,22 @@ func (d *Daemon) addHostHandler(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = version.HostName
 	}
+	d.federation.lifecycle.Lock()
 	record, err := d.Registry.AddHost(registry.PairedHost{ID: version.HostID, Name: name, Endpoint: link.Endpoint, Address: address, Token: token})
 	if err != nil {
+		d.federation.lifecycle.Unlock()
 		d.revokeRemoteDevice(token, link.Endpoint, address)
 		writeAPIError(w, http.StatusConflict, "host_pairing_conflict", err.Error())
 		return
 	}
-	if err := d.attachHost(record); err != nil {
+	if err := d.attachHostLocked(record); err != nil {
+		_, _ = d.Registry.RemoveHost(record.ID)
+		d.federation.lifecycle.Unlock()
+		d.revokeRemoteDevice(token, link.Endpoint, address)
 		writeAPIError(w, http.StatusInternalServerError, "host_attach_failed", err.Error())
 		return
 	}
+	d.federation.lifecycle.Unlock()
 	d.publishEvent("host.paired", record.ID, map[string]any{"id": record.ID, "name": record.Name})
 	writeDashboardJSON(w, http.StatusCreated, map[string]any{"host": hostView{PairedHost: record}})
 }
@@ -204,13 +210,14 @@ func (d *Daemon) removeHostHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "A host name or id is required.")
 		return
 	}
+	d.federation.lifecycle.Lock()
 	record, err := d.Registry.Host(request.Host)
 	if err != nil {
+		d.federation.lifecycle.Unlock()
 		writeAPIError(w, http.StatusNotFound, "host_not_found", err.Error())
 		return
 	}
-	d.detachHost(record.ID)
-	d.revokeRemoteDevice(record.Token, record.Endpoint, record.Address)
+	d.detachHostLocked(record.ID)
 	d.catalog.mu.Lock()
 	_, err = d.Registry.RemoveHost(record.ID)
 	if err == nil {
@@ -218,9 +225,16 @@ func (d *Daemon) removeHostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	d.catalog.mu.Unlock()
 	if err != nil {
+		if attachErr := d.attachHostLocked(record); attachErr != nil {
+			err = errors.Join(err, attachErr)
+		}
+	}
+	d.federation.lifecycle.Unlock()
+	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "host_remove_failed", err.Error())
 		return
 	}
+	d.revokeRemoteDevice(record.Token, record.Endpoint, record.Address)
 	d.publishEvent("host.removed", record.ID, map[string]any{"id": record.ID, "name": record.Name})
 	writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

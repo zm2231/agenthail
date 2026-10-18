@@ -249,3 +249,12 @@ func TestHostsAddPassesAddressAndName(t *testing.T) {
 		t.Fatalf("requests=%v", actions)
 	}
 }
+
+func TestHostFlagsStayScopedToTheirCommands(t *testing.T) {
+	for _, flag := range []string{"--address", "--name", "--host"} {
+		err := (&App{}).Run([]string{"dashboard", "status", flag, "100.64.0.2"})
+		if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Fatalf("dashboard %s err=%v", flag, err)
+		}
+	}
+}

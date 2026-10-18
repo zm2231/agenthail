@@ -39,12 +39,16 @@ type dashboardHost struct {
 }
 
 type federation struct {
-	mu      sync.Mutex
-	hosts   map[string]*pairedHost
-	rootCAs *x509.CertPool
-	ctx     context.Context
-	wg      sync.WaitGroup
-	running bool
+	// lifecycle serializes pairing changes: attaching or detaching a host
+	// together with the registry write that pairs or removes it. Host loops
+	// never take it, so holding it while joining them cannot deadlock.
+	lifecycle sync.Mutex
+	mu        sync.Mutex
+	hosts     map[string]*pairedHost
+	rootCAs   *x509.CertPool
+	ctx       context.Context
+	wg        sync.WaitGroup
+	running   bool
 }
 
 type pairedHost struct {
@@ -124,11 +128,23 @@ func (d *Daemon) stopFederation() {
 }
 
 func (d *Daemon) attachHost(record registry.PairedHost) error {
+	d.federation.lifecycle.Lock()
+	defer d.federation.lifecycle.Unlock()
+	return d.attachHostLocked(record)
+}
+
+// attachHostLocked replaces any running loops for the host with a fresh pair.
+// The caller holds federation.lifecycle; a host no longer in the registry is
+// never attached.
+func (d *Daemon) attachHostLocked(record registry.PairedHost) error {
 	client, err := hosts.NewClient(record.Endpoint, record.Address, record.Token, hosts.ClientOptions{RootCAs: d.federation.rootCAs})
 	if err != nil {
 		return err
 	}
-	d.detachHost(record.ID)
+	if current, err := d.Registry.Host(record.ID); err != nil || current.ID != record.ID {
+		return fmt.Errorf("host %s is no longer paired", record.Name)
+	}
+	d.detachHostLocked(record.ID)
 	d.federation.mu.Lock()
 	defer d.federation.mu.Unlock()
 	parent := d.federation.ctx
@@ -155,9 +171,10 @@ func (d *Daemon) attachHost(record registry.PairedHost) error {
 	return nil
 }
 
-// detachHost returns once the host's mirror and delivery loops have exited,
-// so no write from them can land after the caller removes the host's rows.
-func (d *Daemon) detachHost(hostID string) {
+// detachHostLocked returns once the host's mirror and delivery loops have
+// exited, so no write from them can land after the caller removes the host's
+// rows. The caller holds federation.lifecycle.
+func (d *Daemon) detachHostLocked(hostID string) {
 	d.federation.mu.Lock()
 	host, found := d.federation.hosts[hostID]
 	delete(d.federation.hosts, hostID)
@@ -602,16 +619,22 @@ func (d *Daemon) drainHostDeliveries(ctx context.Context, host *pairedHost) {
 }
 
 func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item registry.HostDelivery) {
+	claimed, err := d.Registry.ClaimHostDelivery(item.ID)
+	if err != nil {
+		d.logRuntimeError("host "+host.record.Name+" delivery", err)
+		return
+	}
+	if !claimed {
+		return
+	}
 	response, err := host.client.Do(ctx, http.MethodPost, "/api/v1/actions", nil, item.Request, http.Header{actionIdempotencyHeader: []string{item.Key}})
 	if err != nil {
 		var notSent hosts.NotSentError
-		if !errors.As(err, &notSent) {
-			_ = d.Registry.MarkHostDeliverySent(item.ID)
+		if errors.As(err, &notSent) && item.Status == "pending" {
+			if releaseErr := d.Registry.ReleaseHostDelivery(item.ID, item.ExpiresAt); releaseErr != nil {
+				d.logRuntimeError("host "+host.record.Name+" delivery", releaseErr)
+			}
 		}
-		return
-	}
-	if err := d.Registry.MarkHostDeliverySent(item.ID); err != nil {
-		d.logRuntimeError("host "+host.record.Name+" delivery", err)
 		return
 	}
 	submitted := response.StatusCode == http.StatusAccepted

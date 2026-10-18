@@ -57,6 +57,9 @@ A mirrored row cannot take over a local row, and neither discovery nor any
 local registration can take over a mirrored one (`SessionOwnedError`). A
 mirror write for a host that is no longer paired is refused, and removing a
 host waits for its mirror and delivery loops to exit before deleting its rows.
+Pairing, attaching, detaching and removing a host are serialized by one
+lifecycle lock, so each host has at most one mirror and delivery loop pair and
+a host removed mid-pairing is never attached.
 
 A mirrored row's `queueCount` is the host's own count plus the sends this
 daemon holds for it. `catalog_sessions.host_queue_count` keeps the host's
@@ -96,6 +99,8 @@ clients send one; the daemon generates one otherwise):
   such as Tailscale Serve without the `Agenthail-Host` header), the row is
   inflight with evidence `unknown`, and the CLI reports `delivery submitted`.
 - While the host is connected the daemon replays held rows with the same key.
+  Each row is claimed inflight before it is sent, and a pending row past its
+  deadline is never claimed, so an expired message is not delivered late.
   The remote's action receipts make a replay return the first result instead
   of starting a second turn. A replay the remote still reports as in progress
   stays unknown, then becomes a dead letter marked unknown after 15 minutes.

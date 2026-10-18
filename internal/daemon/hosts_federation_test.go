@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -838,5 +839,59 @@ func TestFederationRenameRacesReadsAndLocalRouting(t *testing.T) {
 	wg.Wait()
 	if name := local.daemon.hostIdentity().Name; name != "mac-19" {
 		t.Fatalf("name=%q", name)
+	}
+}
+
+func hostLoopsRunning() int {
+	buffer := make([]byte, 1<<22)
+	stacks := string(buffer[:runtime.Stack(buffer, true)])
+	return strings.Count(stacks, "daemon.(*Daemon).runHostMirror(") + strings.Count(stacks, "daemon.(*Daemon).runHostDeliveries(")
+}
+
+func TestFederationOverlappingAttachesLeaveOneLoopPairAndRemoveStopsIt(t *testing.T) {
+	local, _, record := pairedFederation(t)
+	var wg sync.WaitGroup
+	for index := 0; index < 8; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := local.daemon.attachHost(record); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := hostLoopsRunning(); got != 2 {
+		t.Fatalf("host loops after overlapping attaches=%d", got)
+	}
+	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
+	}
+	if got := hostLoopsRunning(); got != 0 {
+		t.Fatalf("host loops after remove=%d", got)
+	}
+	if _, found := local.daemon.pairedHost(record.ID); found {
+		t.Fatal("removed host still routed")
+	}
+	if rows, err := local.reg.HostCatalogRows(record.ID); err != nil || len(rows) != 0 {
+		t.Fatalf("rows after remove=%+v err=%v", rows, err)
+	}
+}
+
+func TestFederationAttachAfterRemovalIsRefused(t *testing.T) {
+	local, _, record := pairedFederation(t)
+	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := local.daemon.attachHost(record); err == nil {
+		t.Fatal("attached a host that is no longer paired")
+	}
+	if _, found := local.daemon.pairedHost(record.ID); found {
+		t.Fatal("unpaired host routed")
+	}
+	if got := hostLoopsRunning(); got != 0 {
+		t.Fatalf("host loops for an unpaired host=%d", got)
 	}
 }
