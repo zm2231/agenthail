@@ -374,7 +374,9 @@ func probeSQLite(dir string) string {
 
 func systemdUnit(exe string, environment map[string]string, logPath string) (string, error) {
 	var b strings.Builder
-	b.WriteString("[Unit]\nDescription=Agenthail daemon\nDocumentation=https://github.com/zm2231/agenthail\n\n[Service]\nType=simple\n")
+	// StartLimitIntervalSec=0 keeps systemd restarting a crashing daemon instead
+	// of leaving the unit failed, which would also block an update rollback.
+	b.WriteString("[Unit]\nDescription=Agenthail daemon\nDocumentation=https://github.com/zm2231/agenthail\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\n")
 	quotedExe, err := systemdQuote(exe, true)
 	if err != nil {
 		return "", err

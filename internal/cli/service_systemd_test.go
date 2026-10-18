@@ -161,6 +161,7 @@ func TestSystemdUnitKeepsAgentsAcrossRestartAndEscapesValues(t *testing.T) {
 	for _, want := range []string{
 		`ExecStart="/opt/agent hail/$$bin/agenthail" daemon-run`,
 		"KillMode=process",
+		"StartLimitIntervalSec=0",
 		"Restart=always",
 		"StandardOutput=append:/home/agent/.agenthail/daemon.log",
 		"StandardError=append:/home/agent/.agenthail/daemon.log",
