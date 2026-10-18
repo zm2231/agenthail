@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -115,5 +116,26 @@ func TestSendWithReplyToSessionResumedUnderNewIDDoesNotWaitOnTheOldOne(t *testin
 	})
 	if err != nil || !strings.HasPrefix(output, "sent (turn ") || posts.count("hello") != 1 {
 		t.Fatalf("output=%q err=%v posts=%d", output, err, posts.count("hello"))
+	}
+}
+
+func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *testing.T) {
+	for name, resolveErr := range map[string]error{"not listed": surface.ErrSessionNotFound, "surface unavailable": surface.DeliveryUnavailable(errors.New("fixture surface is down"))} {
+		t.Run(name, func(t *testing.T) {
+			app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude, resolveErr: resolveErr})
+			if err := r.RegisterSession(surface.Session{ID: "session_closed", Surface: surface.KindClaude, Status: surface.StatusIdle}); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(1100 * time.Millisecond)
+			cutoff := time.Now()
+			for _, target := range []string{"session_closed", "claude:session_closed"} {
+				if _, _, err := app.resolveTarget(context.Background(), target); err != nil {
+					t.Fatalf("target=%s err=%v", target, err)
+				}
+			}
+			if before, err := r.SessionUpdatedBefore("session_closed", cutoff); err != nil || !before {
+				t.Fatalf("resolving refreshed the registered session: before=%v err=%v", before, err)
+			}
+		})
 	}
 }

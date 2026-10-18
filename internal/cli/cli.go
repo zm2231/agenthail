@@ -1015,34 +1015,37 @@ func relTime(t time.Time) string {
 // whose process exited, stands as registered only when the user's target names
 // it exactly, so a send can still reach it; a name or folder fragment never
 // resolves to a historical session. target is the user's text, which differs
-// from selector when the registry already resolved it to an ID.
-func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (*surface.Session, error) {
-	session, err := adapter.Resolve(ctx, selector)
+// from selector when the registry already resolved it to an ID. live reports
+// whether the surface gave the session; a registered row is not an
+// observation, so callers register only live sessions.
+func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (session *surface.Session, live bool, err error) {
+	session, err = adapter.Resolve(ctx, selector)
 	if err == nil || a.Registry == nil {
-		return session, err
+		return session, err == nil, err
 	}
 	if surface.IsDeliveryUnavailable(err) {
 		sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
 		if errors.Is(lookupErr, sql.ErrNoRows) {
-			return nil, err
+			return nil, false, err
 		}
 		if lookupErr != nil {
-			return nil, lookupErr
+			return nil, false, lookupErr
 		}
-		return a.Registry.Session(sid)
+		registered, lookupErr := a.Registry.Session(sid)
+		return registered, false, lookupErr
 	}
 	if !errors.Is(err, surface.ErrSessionNotFound) {
-		return nil, err
+		return nil, false, err
 	}
 	sid, exactErr := a.Registry.ExactTarget(kind, target)
 	if exactErr != nil || (selector != target && sid != selector) {
-		return nil, err
+		return nil, false, err
 	}
 	registered, lookupErr := a.Registry.Session(sid)
 	if lookupErr != nil || registered.Surface != kind {
-		return nil, err
+		return nil, false, err
 	}
-	return registered, nil
+	return registered, false, nil
 }
 
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
@@ -1052,12 +1055,12 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
-		session, err := a.resolveSession(ctx, kind, adapter, selector, selector)
+		session, live, err := a.resolveSession(ctx, kind, adapter, selector, selector)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
 		isSyntheticNotion := kind == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
-		if a.Registry != nil && !isSyntheticNotion {
+		if a.Registry != nil && live && !isSyntheticNotion {
 			if err := a.Registry.RegisterSession(*session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
@@ -1086,12 +1089,14 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				if adapter == nil {
 					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
 				}
-				session, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid, target)
+				session, live, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid, target)
 				if resolveErr != nil {
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
-				if err := a.Registry.RegisterSession(*session); err != nil {
-					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+				if live {
+					if err := a.Registry.RegisterSession(*session); err != nil {
+						return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+					}
 				}
 				if err := surface.ValidateRuntimeTransport(session); err != nil {
 					return nil, nil, err
