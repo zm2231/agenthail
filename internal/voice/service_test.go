@@ -630,11 +630,15 @@ func TestDirectDelegationFailsOnCancelledTerminal(t *testing.T) {
 	waitFor(t, "delegation failure", func() bool { return hasEvent(f.View(), "voice/delegation/failed") })
 }
 
-func TestDelegationBlocksUncorrelatedClaudePeer(t *testing.T) {
+func TestDelegationToClaudePeerDeliversAndSaysItCannotFollowTheReply(t *testing.T) {
 	target := &targetFixture{session: surface.Session{ID: "peer-a", Surface: surface.KindClaude, Name: "Peer", Transport: "uds"}}
 	f := targetSelected(t, target)
-	if _, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Do work"}); err == nil || len(target.sent) != 0 {
-		t.Fatalf("uncorrelated peer was dispatched: err=%v sends=%v", err, target.sent)
+	state, err := f.Apply(Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-request-a", Text: "Do work"})
+	if err != nil || !reflect.DeepEqual(target.sent, []string{"Do work"}) {
+		t.Fatalf("err=%v sends=%v", err, target.sent)
+	}
+	if !strings.Contains(state.Message, "cannot follow this session's reply") || !hasEvent(state, "voice/delegation/held") || hasEvent(state, "voice/delegation/dispatched") {
+		t.Fatalf("state=%+v", state)
 	}
 }
 

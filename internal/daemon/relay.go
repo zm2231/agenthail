@@ -19,9 +19,12 @@ const (
 )
 
 func relayTargetInactive(session *surface.Session) bool {
-	if session.Status == surface.StatusOffline {
-		return true
-	}
+	return session.Status == surface.StatusOffline
+}
+
+// claudeProcessExited reports a Claude session whose process is gone. It stays
+// a delivery target, since a send resumes it, but produces no turns to observe.
+func claudeProcessExited(session *surface.Session) bool {
 	if session.Surface != surface.KindClaude || session.PID <= 0 {
 		return false
 	}

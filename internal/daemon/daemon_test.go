@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 type daemonSurface struct {
@@ -750,33 +751,31 @@ func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
 	}
 }
 
-func TestActiveClaudeRouteSurvivesOfflineGracePeriod(t *testing.T) {
-	d, r, _, from, _ := daemonFixture(t)
+func TestClaudeRoutePruneRemovesOnlyInactiveRoutesFromAnExitedSource(t *testing.T) {
+	d, r, _, from, to := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
-	offlineCodex := surface.Session{ID: "offline-codex", Surface: surface.KindCodex, Status: surface.StatusOffline}
-	offlineNotion := surface.Session{ID: "offline-notion", Surface: surface.KindNotion, Status: surface.StatusOffline}
 	if err := r.RegisterSession(closed); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(offlineCodex); err != nil {
+	active, err := r.AddRoute(closed.ID, to.ID, ".*")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(offlineNotion); err != nil {
+	spent, err := r.AddRoute(closed.ID, to.ID, "spent")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AddRoute(from.ID, closed.ID, ".*"); err != nil {
+	if err := r.DeactivateRoute(spent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AddRoute(from.ID, offlineCodex.ID, ".*"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.AddRoute(from.ID, offlineNotion.ID, ".*"); err != nil {
+	inbound, err := r.AddRoute(from.ID, closed.ID, ".*")
+	if err != nil {
 		t.Fatal(err)
 	}
 	d.Surfaces = append(d.Surfaces, &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}})
 	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour), true)
 	routes, err := r.ListRoutes()
-	if err != nil || len(routes) != 3 || routes[0].ToSession != closed.ID {
+	if err != nil || len(routes) != 2 || routes[0].ID != active || routes[1].ID != inbound {
 		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
 }
@@ -1039,7 +1038,9 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"content":"ready"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, Status: surface.StatusIdle, Transcript: path}
+	fixture := claudetest.New(t)
+	fixture.Record("conversation-compact", fixture.Home, "session_compact")
+	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -1048,7 +1049,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		t.Fatal(err)
 	}
 	requestSent := make(chan string, 1)
-	claude := surfaces.NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest("", fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}

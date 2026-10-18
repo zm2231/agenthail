@@ -191,11 +191,17 @@ Desktop with a writable bridge but does not itself create a thread.
 Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
 Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
 launch outcomes; inspect `claude agents --json --all` before retrying.
-`thread resume` returns only after the job reports a running state; a job that
-fails to start returns Claude's failure detail. A send to a background session
-that is not running names its job state. If the job has ended (failed, crashed,
-stopped or done), resume it, then send again; if it reports "not reachable yet",
-it is still starting, so wait and send again without resuming.
+Send to a Claude session whose process has ended (a stopped or finished
+background job, or a closed terminal session) like any other session: the send
+resumes it in the background by its session ID and delivers the message once.
+This holds for every sender, voice delegation included. Do not run `thread resume` first. The alias and session ID keep working
+afterwards. If another process still holds the conversation but cannot take
+messages yet, the send is queued and goes out once it can, or once that process
+exits and the session is resumed. An `unknown` or `submitted` outcome means the
+resume or the delivery may have happened; inspect the session before sending
+again. `thread resume` remains for waking a background job without a message;
+it returns once the job can take messages, and a job that fails to start
+returns Claude's failure detail.
 
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
@@ -249,7 +255,7 @@ AgentHail has four distinct completion behaviors:
 
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
-3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. Active routes remain until removed; queued messages retain the one-hour expiry.
+3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages retain the one-hour expiry.
 4. Daemon notifications alert the human through the AgentHail Mac app and,
    when paired, the optional iPhone app.
 

@@ -960,14 +960,10 @@ func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string)
 }
 
 func (r *Registry) resolveTarget(target, kind string) (string, error) {
-	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
-		if kind == "" || r.sessionSurface(sid) == kind {
-			return sid, nil
-		}
-	}
-	var exact string
-	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND (? = '' OR surface = ?)`, target, kind, kind).Scan(&exact); err == nil {
-		return exact, nil
+	if sid, err := r.ExactTarget(surface.SurfaceKind(kind), target); err == nil {
+		return sid, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
 	}
 	prefix := escapeLike(target) + "%"
 	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, prefix, kind, kind); err != nil {
@@ -995,6 +991,22 @@ func (r *Registry) sessionSurface(id string) string {
 	var kind string
 	_ = r.read.QueryRow(`SELECT surface FROM sessions WHERE id = ?`, id).Scan(&kind)
 	return kind
+}
+
+// ExactTarget resolves only targets that name one session of surface kind
+// exactly, any surface when kind is empty: an alias, a session ID, or the
+// conversation ID a Claude transcript is named after.
+func (r *Registry) ExactTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil && (kind == "" || r.sessionSurface(sid) == string(kind)) {
+		return sid, nil
+	}
+	var exact string
+	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND (? = '' OR surface = ?)`, target, string(kind), string(kind)).Scan(&exact)
+	if err == nil || !errors.Is(err, sql.ErrNoRows) || target == "" || (kind != "" && kind != surface.KindClaude) {
+		return exact, err
+	}
+	err = r.read.QueryRow(`SELECT id FROM sessions WHERE surface=? AND transcript LIKE ? ESCAPE '\' ORDER BY updated_at DESC, rowid DESC LIMIT 1`, string(surface.KindClaude), "%/"+escapeLike(target)+".jsonl").Scan(&exact)
+	return exact, err
 }
 
 func (r *Registry) resolveSubagentPath(path string) (string, error) {

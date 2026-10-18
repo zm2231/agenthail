@@ -169,6 +169,14 @@ func IsDeliveryUnavailable(err error) bool {
 	return errors.As(err, &target)
 }
 
+// ErrDeliveryHeld marks an unavailable delivery whose target is running but
+// cannot accept a message yet; the message waits in the queue until it can.
+var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
+
+func IsDeliveryHeld(err error) bool {
+	return IsDeliveryUnavailable(err) && errors.Is(err, ErrDeliveryHeld)
+}
+
 type DeliveryTerminalKind string
 
 const (
@@ -287,6 +295,12 @@ type SessionStarter interface {
 
 type OptionSender interface {
 	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
+}
+
+// Waker is a surface whose sends first wake a session that cannot take a
+// message as it is, such as a closed Claude conversation they resume.
+type Waker interface {
+	NeedsWake(ctx context.Context, sess *Session) bool
 }
 
 type SessionAccessChecker interface {

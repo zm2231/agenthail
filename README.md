@@ -136,9 +136,11 @@ agenthail relay add @investigator @builder 'READY' --once
 agenthail relay add @investigator @builder --when goal_completed
 ```
 
+When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. A handoff to a closed Claude Code session resumes it and delivers once.
+
 `turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
 
-New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue, subject to the existing one-hour expiry. Active routes remain until explicitly removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
+New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue, subject to the existing one-hour expiry. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
 For a group that needs the same update:
 

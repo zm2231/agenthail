@@ -68,7 +68,7 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("transport for watched session %s unavailable: %s", d.resolveDisplay(session.ID), err)
 			continue
 		}
-		if relayTargetInactive(session) {
+		if relayTargetInactive(session) || (queueCounts[session.ID] == 0 && claudeProcessExited(session)) {
 			d.syncRelays(ctx, adapter, session)
 			continue
 		}
@@ -119,26 +119,18 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 		if route.Active {
 			continue
 		}
-		stale := ""
-		for _, sessionID := range []string{route.FromSession, route.ToSession} {
-			session, sessionErr := d.Registry.Session(sessionID)
-			if sessionErr != nil || session.Surface != surface.KindClaude || !relayTargetInactive(session) {
-				continue
-			}
-			old, ageErr := d.Registry.SessionUpdatedBefore(sessionID, cutoff)
-			if ageErr == nil && old {
-				stale = sessionID
-				break
-			}
+		source, sessionErr := d.Registry.Session(route.FromSession)
+		if sessionErr != nil || !claudeProcessExited(source) {
+			continue
 		}
-		if stale == "" {
+		if old, ageErr := d.Registry.SessionUpdatedBefore(route.FromSession, cutoff); ageErr != nil || !old {
 			continue
 		}
 		if err := d.Registry.RemoveRoute(route.ID); err != nil {
 			d.log.Printf("remove inactive relay %d: %s", route.ID, err)
 			continue
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-removed", SessionID: route.ToSession, SourceSessionID: route.FromSession, RouteID: route.ID, Error: "Claude Code session did not resume within 1 hour: " + stale})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-removed", SessionID: route.ToSession, SourceSessionID: route.FromSession, RouteID: route.ID, Error: "Claude Code source session did not resume within 1 hour: " + route.FromSession})
 		removed++
 	}
 	return removed, refreshed
