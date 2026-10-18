@@ -38,11 +38,10 @@ struct SessionOperationsTest {
     static func main() async {
         checkSlashCommands()
         checkQueueOrder()
-        checkOutputSchema()
         await checkRequests()
         await checkNativeQueueController()
         await checkBackgroundController()
-        await checkForkController()
+        await checkFork()
         print("session operations tests passed")
     }
 
@@ -81,24 +80,6 @@ struct SessionOperationsTest {
         check(NativeQueueOrder.moving(["a", "b"], id: "z", by: 1) == nil, "an unknown item cannot move")
     }
 
-    static func checkOutputSchema() {
-        check((try? TurnSettings.outputSchema(from: "  ")) == .some(nil), "an empty schema clears the setting")
-        check((try? TurnSettings.outputSchema(from: #"{"type":"object"}"#)) == .object(["type": .string("object")]), "an object schema parses")
-        do {
-            _ = try TurnSettings.outputSchema(from: "[1]")
-            check(false, "an array schema is rejected")
-        } catch {
-            check(error as? TurnSettings.SchemaError == .notObject, "an array schema is rejected as not an object")
-        }
-        do {
-            _ = try TurnSettings.outputSchema(from: "{" + String(repeating: " ", count: 70_000) + "}")
-            check(false, "an oversized schema is rejected")
-        } catch {
-            check(error as? TurnSettings.SchemaError == .tooLarge, "an oversized schema is rejected as too large")
-        }
-        check(!TurnSettings(serviceTier: .fast).isEmpty && !TurnSettings(outputSchema: .object([:])).isEmpty, "tier and schema count as settings")
-    }
-
     static func api() -> AgenthailAPI {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubProtocol.self]
@@ -114,11 +95,10 @@ struct SessionOperationsTest {
     static func checkRequests() async {
         let api = api()
         reset([(200, #"{"ok":true,"result":{"session":{"id":"fork-1","surface":"codex"}}}"#)])
-        let fork = try? await api.forkSession(id: "S", cwd: "/work")
-        guard case .forked(let forked)? = fork else { return check(false, "fork returns the new session") }
-        check(forked.id == "fork-1", "fork returns the new session")
+        let forked = try? await api.forkSession(id: "S")
+        check(forked?.id == "fork-1", "fork returns the new session")
         check(StubProtocol.bodies.first?["action"] as? String == "session-fork" && StubProtocol.bodies.first?["sessionId"] as? String == "S", "fork names the action and source")
-        check((StubProtocol.bodies.first?["fork"] as? [String: Any])?["cwd"] as? String == "/work", "fork sends the folder")
+        check(StubProtocol.bodies.first?.keys.sorted() == ["action", "sessionId"], "fork sends only the action and source: \(String(describing: StubProtocol.bodies.first))")
 
         reset([(200, #"{"ok":true,"result":{"data":[{"id":"q1","clientUserMessageId":"c1","input":[{"type":"text","text":"first","text_elements":[]},{"type":"localImage","path":"/x.png"}]}],"nextCursor":"next"}}"#)])
         let page: NativeQueuePage? = try? await api.nativeQueue(sessionID: "S", NativeQueueCommand(queueAction: .list))
@@ -141,14 +121,14 @@ struct SessionOperationsTest {
         }
         check(StubProtocol.bodies.last?["action"] as? String == "session-lifecycle-stop", "lifecycle actions use the session-lifecycle prefix")
 
-        let settings = TurnSettings(effort: "high", serviceTier: .flex, outputSchema: .object(["type": .string("object")]))
+        let settings = TurnSettings(effort: "high", mode: .plan)
         reset([(200, #"{"result":{"status":"delivered"}}"#), (200, #"{"result":{"status":"delivered"}}"#)])
         _ = try? await api.sendInstruction(action: "send", sessionID: "S", message: "hi", turnSettings: settings)
         _ = try? await api.sendInstruction(action: "steer", sessionID: "S", message: "hi", turnSettings: settings)
         let send = StubProtocol.bodies.first ?? [:]
-        check(send["serviceTier"] as? String == "flex" && (send["outputSchema"] as? [String: Any])?["type"] as? String == "object", "a send carries tier and schema")
+        check(send["effort"] as? String == "high" && send["mode"] as? String == "plan" && send["serviceTier"] == nil && send["outputSchema"] == nil, "a send carries effort and mode only: \(send)")
         let steer = StubProtocol.bodies.last ?? [:]
-        check(steer["serviceTier"] == nil && steer["outputSchema"] == nil && steer["effort"] == nil, "a steer keeps the running turn's settings")
+        check(steer["effort"] == nil && steer["mode"] == nil, "a steer keeps the running turn's settings")
     }
 
     @MainActor
@@ -213,45 +193,31 @@ struct SessionOperationsTest {
     }
 
     @MainActor
-    static func checkForkController() async {
-        let api = api()
-        let forked = #"{"ok":true,"result":{"session":{"id":"fork-1"}}}"#
-        let definite = #"{"ok":false,"unknown":false,"error":"thread not found"}"#
-        let unknown = #"{"ok":false,"unknown":true,"error":"timed out"}"#
-        let submitted = #"{"ok":true,"status":"submitted"}"#
+    static func checkFork() async {
+        let model = AgenthailModel(connecting: false, api: api())
+        guard let pane = model.mainPane else { return check(false, "the model has a main pane") }
+        let source = SessionState(id: "S", surface: "codex", name: "s", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        let forks: () -> [Int] = { StubProtocol.bodies.indices.filter { StubProtocol.bodies[$0]["action"] as? String == "session-fork" } }
 
-        var controller = ForkController()
-        reset([(502, definite), (200, forked), (200, forked)])
-        let failed = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(failed == nil && controller.error == "thread not found", "a definite failure shows its error")
-        let retried = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(retried?.id == "fork-1" && controller.error == nil, "a retry after a definite failure forks")
-        check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] != StubProtocol.keys[1], "a retry after a definite failure sends a new key")
-        _ = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(StubProtocol.keys[2] != StubProtocol.keys[1], "a fork after a success sends a new key")
+        reset([(502, #"{"ok":false,"unknown":false,"error":"thread not found"}"#)])
+        await pane.forkNow(source)
+        check(model.operationError == "thread not found" && !pane.forking, "a definite failure shows its error")
 
-        controller = ForkController()
-        reset([(502, unknown), (502, unknown)])
-        let uncertain = await controller.fork(sessionID: "S", cwd: "/work", api: api)
-        let pendingNote = "Codex may still be creating this fork. It will appear in the sidebar when ready."
-        check(uncertain == nil && controller.error == nil && controller.notice == pendingNote, "an unknown outcome says the fork may still appear")
-        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
-        check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] == StubProtocol.keys[1], "a retry after an unknown outcome reuses the key")
-        check(controller.error == nil && controller.notice == pendingNote, "a replayed unknown outcome keeps the note")
+        reset([(502, #"{"ok":false,"unknown":true,"error":"timed out"}"#)])
+        await pane.forkNow(source)
+        check(model.operationError?.hasPrefix("timed out") == true && model.operationError?.contains("outcome is unknown") == true, "an unknown outcome shows an error: \(String(describing: model.operationError))")
+        let unknownKey = StubProtocol.keys[forks()[0]]
 
-        controller = ForkController()
-        reset([(502, unknown), (200, forked)])
-        _ = await controller.fork(sessionID: "S", cwd: "/work", api: api)
-        _ = await controller.fork(sessionID: "S", cwd: "/other", api: api)
-        check(StubProtocol.keys[0] != StubProtocol.keys[1], "changing the folder sends a new key")
+        reset([(200, #"{"ok":true,"result":{"session":{"id":"fork-1"}}}"#)])
+        await pane.forkNow(source)
+        let retryKey = StubProtocol.keys[forks()[0]]
+        check(unknownKey != nil && retryKey != nil && unknownKey != retryKey, "every click sends a fresh key, even after an unknown outcome")
+        check(forks().count == 1 && StubProtocol.bodies[forks()[0]]["fork"] == nil, "one click sends one fork request with no options")
 
-        controller = ForkController()
-        reset([(202, submitted), (200, forked)])
-        let pending = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(pending == nil && controller.notice?.hasPrefix("Still forking") == true && controller.error == nil, "a submitted reply shows the fork is still running")
-        let finished = await controller.fork(sessionID: "S", cwd: nil, api: api)
-        check(finished?.id == "fork-1" && controller.notice == nil, "checking again opens the fork")
-        check(StubProtocol.keys[0] == StubProtocol.keys[1], "a submitted fork keeps its key")
+        let readOnly = SessionState(id: "R", surface: "codex", name: "r", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: true, readOnlyReason: nil)
+        reset([])
+        pane.fork(readOnly)
+        check(!pane.forking && StubProtocol.bodies.isEmpty, "a read-only session does not fork")
     }
 
     static func check(_ condition: Bool, _ message: String) {

@@ -557,7 +557,6 @@ struct ConversationPane: View {
             }
             .background(DesktopPalette.window)
             .environmentObject(pane)
-            .sheet(item: $pane.forkingSession) { ForkSessionSheet(pane: pane, session: $0) }
         } else {
             ContentUnavailableView {
                 if model.isConnected {

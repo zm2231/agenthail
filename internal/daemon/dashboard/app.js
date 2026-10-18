@@ -2025,7 +2025,7 @@ $("#session-operation-form").addEventListener("submit", async event => {
   button.disabled = true;
   try {
     const isQueue = values.operation.startsWith("native-");
-    const payload = isQueue ? {nativeQueue: {queueAction: values.operation.slice(7), message: values.message, queuedSubmissionId: values.id, clientUserMessageId: values.clientId, queuedSubmissionIds: values.ids ? values.ids.split(",").map(x => x.trim()) : [], cursor: values.cursor}} : {fork: {cwd: values.cwd}};
+    const payload = isQueue ? {nativeQueue: {queueAction: values.operation.slice(7), message: values.message, queuedSubmissionId: values.id, clientUserMessageId: values.clientId, queuedSubmissionIds: values.ids ? values.ids.split(",").map(x => x.trim()) : [], cursor: values.cursor}} : {};
     const result = await action(isQueue ? "native-queue" : values.operation, payload);
     $("#session-operation-result").textContent = JSON.stringify(result.result, null, 2);
     if (values.operation === "native-add") {
@@ -2050,7 +2050,7 @@ function syncSessionOperationFields() {
     form.elements.operation.value = [...form.elements.operation.options].find(option => !option.disabled)?.value || "";
   }
   const operation = form.elements.operation.value;
-  const allowed = operation === "session-fork" ? ["cwd"] : ({"native-list":["cursor"],"native-add":["message","clientId"],"native-update":["message","id"],"native-delete":["id"],"native-reorder":["ids"],"native-start":["id"]}[operation] || []);
+  const allowed = ({"native-list":["cursor"],"native-add":["message","clientId"],"native-update":["message","id"],"native-delete":["id"],"native-reorder":["ids"],"native-start":["id"]}[operation] || []);
   for (const field of form.querySelectorAll("input,textarea")) { field.closest("label").hidden = !allowed.includes(field.name); field.disabled = !allowed.includes(field.name); }
   if (operation === "native-add" && !form.elements.clientId.value) form.elements.clientId.value = crypto.randomUUID();
 }

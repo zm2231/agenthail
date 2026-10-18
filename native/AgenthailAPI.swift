@@ -462,7 +462,7 @@ private struct InstructionRequest: Encodable {
     let turnSettings: TurnSettings
     var busyDelivery: String? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case serviceTier; case outputSchema; case busyDelivery }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -473,8 +473,6 @@ private struct InstructionRequest: Encodable {
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
-            try container.encodeIfPresent(turnSettings.serviceTier, forKey: .serviceTier)
-            try container.encodeIfPresent(turnSettings.outputSchema, forKey: .outputSchema)
         }
     }
 }

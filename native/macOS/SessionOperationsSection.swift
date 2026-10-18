@@ -9,8 +9,9 @@ struct SessionOperationsSection: View {
     var body: some View {
         if pane.removedSession == nil {
             if SessionOperationAvailability.fork(session) {
-                Button("Fork session…") { pane.forkingSession = session }
+                Button(pane.forking ? "Forking…" : "Fork session") { pane.fork(session) }
                     .controlSize(.small)
+                    .disabled(pane.forking)
                     .help("Start a new Codex session from this conversation's history")
             }
             if SessionOperationAvailability.nativeQueue(session) {
@@ -273,68 +274,5 @@ struct BackgroundLogsSheet: View {
         }
         .padding(20)
         .frame(width: 560, height: 420)
-    }
-}
-
-struct ForkSessionSheet: View {
-    @ObservedObject var pane: SessionPane
-    let session: SessionState
-    @Environment(\.dismiss) private var dismiss
-    @State private var folder = ""
-    @StateObject private var controller = ForkController()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Fork \(session.title)")
-                .font(.headline)
-            Text("Codex starts a new session with this conversation's history. The original keeps running. Forking doesn't create a Git worktree.")
-                .font(.system(size: 12))
-                .foregroundStyle(DesktopPalette.text2)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                TextField("Folder (optional, defaults to the original's)", text: $folder)
-                    .textFieldStyle(.roundedBorder)
-                Button("Choose…", action: chooseFolder)
-            }
-            if let error = controller.error {
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DesktopPalette.red)
-                    .textSelection(.enabled)
-            } else if let notice = controller.notice {
-                Text(notice)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DesktopPalette.text2)
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button(controller.forking ? "Forking…" : "Fork", action: fork)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(controller.forking)
-            }
-        }
-        .padding(20)
-        .frame(width: 440)
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Choose"
-        if let cwd = session.cwd { panel.directoryURL = URL(fileURLWithPath: cwd) }
-        if panel.runModal() == .OK, let url = panel.url { folder = url.path }
-    }
-
-    private func fork() {
-        let trimmed = folder.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cwd = trimmed.isEmpty ? nil : (trimmed as NSString).expandingTildeInPath
-        Task {
-            guard let forked = await controller.fork(sessionID: session.id, cwd: cwd, api: pane.model.api) else { return }
-            await pane.openFork(forked)
-            dismiss()
-        }
     }
 }

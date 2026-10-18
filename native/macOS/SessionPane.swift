@@ -18,7 +18,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
     @Published var renamingSession: SessionState?
-    @Published var forkingSession: SessionState?
+    @Published private(set) var forking = false
     @Published private(set) var controlPending = false
     @Published private(set) var composerDraft = ComposerDraft() {
         didSet { observeDraft() }
@@ -310,8 +310,25 @@ final class SessionPane: ObservableObject, Identifiable {
         return options.first { $0.id.caseInsensitiveCompare(query) == .orderedSame || $0.displayName.caseInsensitiveCompare(query) == .orderedSame }?.id ?? query
     }
 
-    func openFork(_ forked: ForkedSession) async {
-        await model.openCreatedSession(forked.id, in: closed ? nil : self)
+    func fork(_ session: SessionState) {
+        guard !forking, removedSession == nil, SessionOperationAvailability.fork(session) else { return }
+        forking = true
+        Task { await forkNow(session) }
+    }
+
+    func forkNow(_ session: SessionState) async {
+        defer { forking = false }
+        guard let api = model.api else {
+            model.operationError = "Agenthail isn't connected."
+            return
+        }
+        do {
+            let forked = try await api.forkSession(id: session.id)
+            model.operationError = nil
+            await model.openCreatedSession(forked.id, in: closed ? nil : self)
+        } catch {
+            model.operationError = error.localizedDescription
+        }
     }
 
     static func stopAvailable(_ session: SessionState?, removed: Bool, draftEmpty: Bool) -> Bool {
