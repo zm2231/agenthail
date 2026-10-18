@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -336,5 +337,124 @@ func TestNativeClaudeRejectsControlsBeforeExternalIO(t *testing.T) {
 	}
 	if _, err := adapter.Model(ctx, session, "sonnet"); err != surface.ErrUnsupported {
 		t.Fatalf("model=%v", err)
+	}
+}
+
+func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
+	stat := "13446 (claude (bg) x) S 13433 13433 13433 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 11 0 1562374 1000 50\n"
+	if got, err := procStatStartTime(stat); err != nil || got != "1562374" {
+		t.Fatalf("start=%q err=%v", got, err)
+	}
+	if _, err := procStatStartTime("13446 claude S"); err == nil {
+		t.Fatal("malformed stat accepted")
+	}
+}
+
+func TestClaudeDiscoversLinuxSocketUnderXDGRuntimeDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Claude Code binds peer sockets under XDG_RUNTIME_DIR only on Linux")
+	}
+	runtimeDir, err := os.MkdirTemp("/tmp", "ah-xdg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(runtimeDir) })
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	home := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(runtimeDir, "cc-socks", strconv.Itoa(os.Getpid())+".sock")
+	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	record := map[string]any{"pid": os.Getpid(), "sessionId": "linux-id", "status": "idle", "version": "2.1.302", "messagingSocketPath": socket}
+	if runtime.GOOS == "linux" {
+		start, err := procStartTicks(os.Getpid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		record["procStart"] = start
+	}
+	data, _ := json.Marshal(record)
+	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewClaude("", home).List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "linux-id" || sessions[0].Transport != "uds" {
+		t.Fatalf("sessions=%+v err=%v", sessions, err)
+	}
+	if runtime.GOOS != "linux" {
+		return
+	}
+	record["procStart"] = "1"
+	data, _ = json.Marshal(record)
+	if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if sessions, err := NewClaude("", home).List(context.Background()); err != nil || len(sessions) != 0 {
+		t.Fatalf("reused PID with a different start was trusted: sessions=%+v err=%v", sessions, err)
+	}
+}
+
+func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
+	t.Setenv("TZ", "America/New_York")
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(os.Getpid())+".sock")
+	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(socket); !os.IsNotExist(err) {
+		t.Fatal("test PID socket already exists")
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(os.Getpid()))
+	command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	start, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := map[string]any{"pid": os.Getpid(), "sessionId": "local-id", "bridgeSessionId": "session_bridge", "cwd": "/fixture", "status": "idle", "version": "2.1.270", "procStart": string(start), "messagingSocketPath": socket}
+	write := func() {
+		t.Helper()
+		data, _ := json.Marshal(record)
+		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(os.Getpid())+".json"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	adapter := NewClaude("", home)
+	adapter.DisableRemoteControl()
+	sessions, err := adapter.List(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "local-id" || sessions[0].Transport != "uds" {
+		t.Fatalf("mixed record sessions=%+v err=%v", sessions, err)
+	}
+	if adapter.CanSendHumanTurn(&sessions[0]) {
+		t.Fatal("person-authored send routed to Remote Control")
+	}
+	if _, err := adapter.postMessage(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude}, "hello"); !surface.IsDeliveryUnavailable(err) {
+		t.Fatalf("remote control post err=%v", err)
+	}
+	record["messagingSocketPath"] = filepath.Join(home, "missing.sock")
+	write()
+	listener.Close()
+	sessions, err = adapter.List(context.Background())
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("bridge-only record listed=%+v err=%v", sessions, err)
 	}
 }

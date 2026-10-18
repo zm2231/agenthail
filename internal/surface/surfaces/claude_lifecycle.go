@@ -162,7 +162,7 @@ type claudeJob struct {
 // record holds.
 func (c *Claude) backgroundJob(id string) (claudeJob, bool) {
 	var job claudeJob
-	raw, err := os.ReadFile(filepath.Join(c.home, ".claude", "jobs", id, "state.json"))
+	raw, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs", id, "state.json"))
 	if err != nil || json.Unmarshal(raw, &job) != nil {
 		return job, false
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,7 +21,7 @@ import (
 func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	path := str(record, "messagingSocketPath")
 	pid, _ := record["pid"].(float64)
-	if pid <= 0 || path != filepath.Join("/tmp/cc-socks", strconv.Itoa(int(pid))+".sock") || !claudeProcessAlive(int(pid)) {
+	if pid <= 0 || !slices.Contains(claudeSocketPaths(int(pid)), path) || !claudeProcessAlive(int(pid)) {
 		return ""
 	}
 	info, err := os.Lstat(path)
@@ -31,7 +32,12 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	if !ok || stat.Uid != uint32(os.Getuid()) {
 		return ""
 	}
-	if started := str(record, "procStart"); started != "" {
+	if started := str(record, "procStart"); isClockTicks(started) {
+		actual, err := procStartTicks(int(pid))
+		if err != nil || actual != started {
+			return ""
+		}
+	} else if started != "" {
 		processCtx, cancel := context.WithTimeout(ctx, 500000000)
 		defer cancel()
 		command := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
@@ -45,6 +51,49 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 }
 
 const claudeProcessStartLayout = "Mon Jan 2 15:04:05 2006"
+
+func claudeSocketPaths(pid int) []string {
+	name := strconv.Itoa(pid) + ".sock"
+	var paths []string
+	for _, dir := range claudepeer.ClaudeSocketDirs() {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	return paths
+}
+
+// On Linux Claude Code records procStart as the starttime field of
+// /proc/<pid>/stat, in clock ticks since boot.
+func isClockTicks(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func procStartTicks(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	return procStatStartTime(string(data))
+}
+
+func procStatStartTime(stat string) (string, error) {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return "", fmt.Errorf("malformed /proc stat")
+	}
+	fields := strings.Fields(stat[end+1:])
+	if len(fields) < 20 {
+		return "", fmt.Errorf("malformed /proc stat")
+	}
+	return fields[19], nil
+}
 
 func sameClaudeProcessStart(version, recorded, actual string) bool {
 	return sameClaudeProcessStartInLocation(version, recorded, actual, time.Local)
@@ -65,7 +114,7 @@ func sameClaudeProcessStartInLocation(version, recorded, actual string, localLoc
 }
 
 func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(session.PID)+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(session.PID)+".json"))
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
@@ -153,7 +202,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 }
 
 func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(pid)+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(pid)+".json"))
 	if err != nil {
 		return nil, false
 	}

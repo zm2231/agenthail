@@ -57,6 +57,7 @@ jobs:
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-timeline.mjs
           node scripts/test-shared-conversation.mjs
+          node scripts/test-dashboard-relays.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
       - name: Race tests
@@ -103,6 +104,8 @@ jobs:
           "$RUNNER_TEMP/peer-envelope-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/macOS/SessionTree.swift native/macOS/SessionFacts.swift native/macOS/TranscriptBlock.swift native/tests/session_facts_test.swift -o "$RUNNER_TEMP/session-facts-test"
           "$RUNNER_TEMP/session-facts-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/QueueFacts.swift native/tests/queue_facts_test.swift -o "$RUNNER_TEMP/queue-facts-test"
+          "$RUNNER_TEMP/queue-facts-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/ToolRunSummary.swift native/tests/tool_run_summary_test.swift -o "$RUNNER_TEMP/tool-run-summary-test"
           "$RUNNER_TEMP/tool-run-summary-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/TranscriptBlock.swift native/tests/transcript_block_test.swift -o "$RUNNER_TEMP/transcript-block-test"
@@ -143,6 +146,28 @@ jobs:
           scripts/test-codesign-retry.sh
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
+
+  verify-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Race tests
+        run: go test ./... -race -count=1
+      - name: Build Linux archives
+        run: |
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch AGENTHAIL_VERSION=v0.0.0-ci scripts/package-release.sh
+          done
+          (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
 
   ios:
     needs: changes
@@ -223,5 +248,9 @@ jobs:
         env:
           AGENTHAIL_ALLOW_UNNOTARIZED: "1"
         run: scripts/test-pkg-artifact.sh dist/Agenthail-v0.0.0-ci-arm64.pkg
+      - name: Verify main window layout at narrow widths
+        run: |
+          pkgutil --expand-full dist/Agenthail-v0.0.0-ci-arm64.pkg "$RUNNER_TEMP/layout-pkg"
+          scripts/test-mac-window-layout.sh "$RUNNER_TEMP/layout-pkg/Agenthail-component.pkg/Payload/Applications/Agenthail.app"
       - name: Verify install, upgrade, and uninstall
         run: scripts/test-pkg-install.sh dist/Agenthail-v0.0.0-ci-arm64.pkg

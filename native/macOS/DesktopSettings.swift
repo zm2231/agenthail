@@ -247,6 +247,7 @@ struct DeliverySettings: View {
     @State private var relayTo = ""
     @State private var relayPattern = ".*"
     @State private var relayOnce = false
+    @State private var relayHandoff = "turn_finished"
     @State private var channelName = ""
     @State private var selectedChannel = ""
     @State private var channelTarget = ""
@@ -259,27 +260,9 @@ struct DeliverySettings: View {
         Form {
             Section("Waiting to go out · \(model.snapshot?.queue.count ?? 0)") {
                 if (model.snapshot?.queue ?? []).isEmpty {
-                    Text("No messages are waiting.").foregroundStyle(DesktopPalette.text2)
+                    Text("Nothing is waiting to be delivered.").foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(model.snapshot?.queue ?? []) { item in
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.target)
-                            Text(PeerEnvelope(item.message).summary)
-                                .font(.system(size: 12))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Text(item.status.capitalized)
-                            .font(.system(size: 11))
-                            .foregroundStyle(item.status == "dead" ? DesktopPalette.red : DesktopPalette.text2)
-                        if item.status == "dead" {
-                            Button("Retry") { model.perform(action: "queue-retry", queueID: item.id) }
-                        }
-                        Button("Cancel") { model.perform(action: "queue-cancel", queueID: item.id) }
-                    }
-                }
+                ForEach(model.snapshot?.queue ?? []) { QueueItemRow(model: model, item: $0) }
             }
             RecentOutcomesSection(history: model.snapshot?.history ?? [])
             Section {
@@ -297,6 +280,9 @@ struct DeliverySettings: View {
                             Text(relayState(relay))
                                 .font(.system(size: 11))
                                 .foregroundStyle(DesktopPalette.text2)
+                            if let error = relay.lastError, !error.isEmpty {
+                                Text(error).font(.system(size: 11)).foregroundStyle(DesktopPalette.text2)
+                            }
                         }
                         Spacer()
                         Button("Remove") { model.performOperation(action: "relay-remove", relayID: relay.id) }
@@ -306,6 +292,10 @@ struct DeliverySettings: View {
                     Text("Choose a session").tag("")
                     ForEach(sessions) { Text($0.displayName).tag($0.id) }
                 }
+                Picker("hand off when", selection: $relayHandoff) {
+                    Text("Turn finished").tag("turn_finished")
+                    Text("Goal completed").tag("goal_completed")
+                }
                 TextField("finishes with text matching", text: $relayPattern)
                 Picker("hand off to", selection: $relayTo) {
                     Text("Choose a session").tag("")
@@ -313,7 +303,7 @@ struct DeliverySettings: View {
                 }
                 Toggle("Run this handoff once", isOn: $relayOnce)
                 Button("Add Handoff") {
-                    model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, once: relayOnce)
+                    model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, once: relayOnce, handoff: relayHandoff)
                 }
                 .disabled(relayFrom.isEmpty || relayTo.isEmpty)
             } header: {
@@ -378,7 +368,7 @@ struct DeliverySettings: View {
     }
 
     private func relayState(_ relay: RelayState) -> String {
-        var parts = [relay.once ? "Once" : "Every time", relay.active ? "active" : "complete", relay.fireCount == 1 ? "fired once" : "fired \(relay.fireCount) times"]
+        var parts = [relay.handoff == "goal_completed" ? "Goal completed" : "Turn finished", relay.once ? "Once" : "Every time", "\(relay.pendingCount) pending", relay.active ? "active" : "complete", relay.fireCount == 1 ? "fired once" : "fired \(relay.fireCount) times"]
         if let last = relay.lastFiredAt, case let age = relativeAge(last), !age.isEmpty {
             parts.append(age == "now" ? "last just now" : "last \(age) ago")
         }

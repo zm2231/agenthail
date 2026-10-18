@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
@@ -48,21 +49,27 @@ func main() {
 	}
 	defer reg.Close()
 
+	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))
 	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
+	if !helpers {
+		claude.DisableRemoteControl()
+	}
 	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
 	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
-	notion := surfaces.NewNotion(
-		envOr("AGENTHAIL_NOTION_SPACE", ""),
-		envOr("AGENTHAIL_NOTION_USER", ""),
-	)
+	entries := []cli.SurfaceEntry{
+		{Name: "claude", Surface: claude},
+		{Name: "codex", Surface: codex},
+	}
+	if helpers {
+		entries = append(entries, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(
+			envOr("AGENTHAIL_NOTION_SPACE", ""),
+			envOr("AGENTHAIL_NOTION_USER", ""),
+		)})
+	}
 
 	app := cli.App{
-		Registry: reg,
-		Surfaces: []cli.SurfaceEntry{
-			{Name: "claude", Surface: claude},
-			{Name: "codex", Surface: codex},
-			{Name: "notion", Surface: notion},
-		},
+		Registry:       reg,
+		Surfaces:       entries,
 		DefaultTimeout: 2 * time.Minute,
 		Version:        version,
 		Revision:       revision,
@@ -73,6 +80,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// sidecarAvailable reports whether this install has the sidecar that Notion
+// and Claude Remote Control talk through. The Mac package ships it; the Linux
+// archive does not, so off macOS it is present only when AGENTHAIL_SIDECAR
+// names one.
+func sidecarAvailable(goos, sidecar string) bool {
+	return goos == "darwin" || sidecar != ""
 }
 
 func envOr(key, def string) string {

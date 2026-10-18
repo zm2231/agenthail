@@ -466,7 +466,7 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	if socketDir == "" {
 		socketDir = "/tmp/cc-socks"
 	}
-	recordPath := filepath.Join(m.home, ".claude", "sessions", fmt.Sprintf("%d.json", command.Process.Pid))
+	recordPath := filepath.Join(surface.ClaudeConfigDir(m.home), "sessions", fmt.Sprintf("%d.json", command.Process.Pid))
 	for _, path := range []string{filepath.Join(socketDir, fmt.Sprintf("%d.sock", command.Process.Pid)), controlPath, manifestPath, recordPath} {
 		if info, err := os.Lstat(path); err == nil {
 			entry.paths[path] = info
@@ -803,6 +803,9 @@ func (c *child) cleanup() {
 			continue
 		}
 		matches := os.SameFile(owned, current)
+		if matches && current.Mode()&os.ModeSocket != 0 {
+			matches = claudepeer.SocketRefusesConnections(path)
+		}
 		if path == c.recordPath && current.Mode().IsRegular() {
 			data, _ := os.ReadFile(path)
 			var record recordOwnership
