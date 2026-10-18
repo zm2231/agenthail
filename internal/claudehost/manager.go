@@ -45,7 +45,9 @@ func (m *Manager) stateDir() string { return filepath.Join(m.Home, ".agenthail",
 // Ensure returns a client for a running host of this build, starting one
 // only when none answers. The host lock decides who starts it: the daemon
 // takes it and hands it to the host, which holds it for its lifetime, so a
-// second daemon or a restarted one attaches to the running host.
+// second daemon or a restarted one attaches to the running host. A daemon
+// that finds the lock taken keeps trying it, so it starts the host itself if
+// the holder exits before its host answers.
 func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -54,25 +56,39 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		return Client{}, err
 	}
 	client := m.Client()
-	if hello, err := client.Hello(ctx); err == nil {
-		return client, m.current(ctx, client, hello, launch)
-	} else if !errors.Is(err, ErrNotRunning) {
-		return Client{}, err
-	}
 	if err := os.MkdirAll(m.stateDir(), 0700); err != nil {
 		return Client{}, err
 	}
-	lock, err := m.lock()
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		hello, err := m.awaitHello(ctx, client, nil)
-		if err != nil {
-			return Client{}, fmt.Errorf("the Claude host holds its lock but does not answer: %w", err)
+	ctx, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		attempt, stop := context.WithTimeout(ctx, time.Second)
+		hello, err := client.Hello(attempt)
+		stop()
+		if err == nil {
+			return client, m.current(ctx, client, hello, launch)
 		}
-		return client, m.current(ctx, client, hello, launch)
+		if !errors.Is(err, ErrNotRunning) {
+			return Client{}, err
+		}
+		lock, err := m.lock()
+		if err == nil {
+			return m.start(ctx, client, launch, lock)
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			return Client{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return Client{}, fmt.Errorf("the Claude host holds its lock but does not answer: %w", ctx.Err())
+		case <-ticker.C:
+		}
 	}
-	if err != nil {
-		return Client{}, err
-	}
+}
+
+func (m *Manager) start(ctx context.Context, client Client, launch Launch, lock *os.File) (Client, error) {
 	exited, err := m.spawn(launch, lock)
 	if err != nil {
 		return Client{}, err

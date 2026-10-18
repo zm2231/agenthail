@@ -153,24 +153,24 @@ async function open(params) {
   sessions.set(id, s);
   let exited;
   const exit = new Promise((resolve) => (exited = resolve));
-  s.query = query({
-    prompt: s.input(),
-    options: {
-      cwd,
-      env: process.env,
-      pathToClaudeCodeExecutable: args.claude,
-      ...(params.resume ? { resume: id } : { sessionId: id }),
-      ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
-      ...(params.model ? { model: params.model } : {}),
-      canUseTool: async (toolName, _input, { toolUseID }) => {
-        emit(id, 'permission_denied', { tool: toolName, toolUseId: toolUseID, reason: DENIED });
-        return { behavior: 'deny', message: DENIED };
-      },
-      spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
-    },
-  });
-  s.done = run(s, exit);
   try {
+    s.query = query({
+      prompt: s.input(),
+      options: {
+        cwd,
+        env: process.env,
+        pathToClaudeCodeExecutable: args.claude,
+        ...(params.resume ? { resume: id } : { sessionId: id }),
+        ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
+        ...(params.model ? { model: params.model } : {}),
+        canUseTool: async (toolName, _input, { toolUseID }) => {
+          emit(id, 'permission_denied', { tool: toolName, toolUseId: toolUseID, reason: DENIED });
+          return { behavior: 'deny', message: DENIED };
+        },
+        spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
+      },
+    });
+    s.done = run(s, exit);
     await Promise.race([
       s.query.initializationResult(),
       exit.then(() => Promise.reject(new Error(`Claude exited while starting: ${s.stderr.trim() || 'no output'}`))),
@@ -178,7 +178,8 @@ async function open(params) {
     ]);
   } catch (error) {
     s.end();
-    s.query.close();
+    s.query?.close();
+    if (!s.done) sessions.delete(id);
     throw new HostError('open_failed', error.message);
   }
   s.setState('idle');
@@ -238,6 +239,10 @@ function spawnDetached(s, options, exited) {
   });
   s.pid = child.pid ?? 0;
   s.started = processStart(s.pid);
+  if (!s.started) {
+    child.kill('SIGKILL');
+    throw new Error(`cannot read the start time of Claude process ${s.pid}, so a later host could not tell it from a reused pid`);
+  }
   child.stderr.on('data', (chunk) => {
     s.stderr = (s.stderr + chunk).slice(-4096);
   });
@@ -377,7 +382,7 @@ function runs(entry) {
 }
 
 function processStart(pid) {
-  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC0' } });
   return ps.status === 0 ? ps.stdout.trim() : '';
 }
 

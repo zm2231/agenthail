@@ -144,6 +144,40 @@ func TestEnsureStartsANewHostAfterOneCrashed(t *testing.T) {
 	}
 }
 
+func TestEnsureTakesTheLockWhenItsHolderExitsBeforeItsHostAnswers(t *testing.T) {
+	f := claudehosttest.New(t, "")
+	ctx := testContext(t)
+	dir := filepath.Join(f.Home, ".agenthail", "claude-host")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Manager(t, "test").Ensure(ctx)
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	holder.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Ensure did not take the released lock")
+	}
+	if starts := strings.Count(hostLog(t, f.Home), "listening"); starts != 1 {
+		t.Fatalf("host started %d times", starts)
+	}
+}
+
 func hostLog(t *testing.T, home string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(home, ".agenthail", "claude-host", "host.log"))

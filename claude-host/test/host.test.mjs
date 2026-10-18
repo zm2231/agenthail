@@ -28,10 +28,10 @@ function fixture() {
   return { root, state, claudeDir, cwd, socket: path.join(root, 'h.sock') };
 }
 
-async function startHost(f, { lock = true, version = 'test' } = {}) {
+async function startHost(f, { lock = true, version = 'test', env = {} } = {}) {
   const fd = lock ? fs.openSync(path.join(f.state, 'lock'), 'r') : null;
   const host = spawn(process.execPath, [hostScript, '--socket', f.socket, '--state', f.state, '--claude', fakeClaude, '--version', version], {
-    env: { ...process.env, FAKE_CLAUDE_DIR: f.claudeDir },
+    env: { ...process.env, FAKE_CLAUDE_DIR: f.claudeDir, ...env },
     stdio: lock ? ['ignore', 'ignore', 'pipe', fd] : ['ignore', 'ignore', 'pipe'],
   });
   if (lock) fs.closeSync(fd);
@@ -236,7 +236,7 @@ test('a host restart keeps the running turn and resumes the session afterwards',
   c.close();
   assert.ok(alive(pid), 'the CLI outlives the host');
 
-  await startHost(f);
+  await startHost(f, { env: { TZ: 'Pacific/Auckland' } });
   const d = new Client(f.socket);
   await d.call('subscribe');
   const listed = await d.call('list');
@@ -268,6 +268,18 @@ test('a recorded pid now used by another process is not an orphan', async () => 
   const c = new Client(f.socket);
   assert.deepEqual((await c.call('list')).orphans, []);
   await c.call('open', { resume: id, cwd: f.cwd });
+  c.close();
+});
+
+test('a session whose process start time cannot be read does not open', async () => {
+  const f = fixture();
+  const bin = path.join(f.root, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'ps'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  await startHost(f, { env: { PATH: `${bin}:${process.env.PATH}` } });
+  const c = new Client(f.socket);
+  await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'open_failed' });
+  assert.deepEqual((await c.call('list')).sessions, []);
   c.close();
 });
 
