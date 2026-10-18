@@ -16,8 +16,9 @@ import (
 // the conversation id Claude names the transcript after. Each such row moves
 // to its conversation id with everything that references it. When the
 // conversation already has a row, that row's alias wins. Rows without a
-// transcript name no conversation: they are deleted when nothing references
-// them and kept unchanged otherwise, so no alias or queued work is lost.
+// transcript name no conversation: they are deleted when their id appears
+// nowhere else and kept unchanged otherwise, so no alias, queued work or
+// history is left pointing at a missing session.
 // session_rekeys records each move so clients can follow ids they still hold.
 // An existing registry commits user_version 14 with the data.
 func (r *Registry) rekeyClaudeConversations(version int) error {
@@ -103,10 +104,11 @@ func (r *Registry) rekeyClaudeConversations(version int) error {
 	return tx.Commit()
 }
 
-// sessionReferencedTx reports whether any table with a foreign key to
-// sessions holds a row for id; deleting the session would cascade into it.
+// sessionReferencedTx reports whether id appears in any column that can hold
+// a session id, keyed or not: foreign keys, history and ancestry columns, and
+// serialized events and receipts.
 func sessionReferencedTx(tx *sql.Tx, id string) (bool, error) {
-	rows, err := tx.Query(`SELECT m.name,f."from" FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f."table"='sessions'`)
+	rows, err := tx.Query(`SELECT m.name,p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT IN ('session_rekeys','sqlite_sequence') AND NOT (m.name='sessions' AND p.name='id') AND (p.name LIKE '%session%' OR p.name IN ('entity_id','forked_from','dedupe_key','payload','receipt'))`)
 	if err != nil {
 		return false, err
 	}
@@ -125,7 +127,7 @@ func sessionReferencedTx(tx *sql.Tx, id string) (bool, error) {
 	}
 	for _, ref := range references {
 		var found bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM `+ref.table+` WHERE `+ref.column+`=?)`, id).Scan(&found); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM `+ref.table+` WHERE instr(CAST(`+ref.column+` AS TEXT),?)>0)`, id).Scan(&found); err != nil {
 			return false, err
 		}
 		if found {

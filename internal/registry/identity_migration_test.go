@@ -17,6 +17,7 @@ const (
 	orphanBridge   = "session_01Orphan"
 	launchedBridge = "session_01Launch"
 	keptOrphan     = "session_01Kept"
+	historyOrphan  = "session_01History"
 )
 
 var retiredIDs = []string{rekeyedBridge, collidedBridge, orphanBridge, launchedBridge}
@@ -48,6 +49,12 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	}
 	if owner, err := r.LookupAlias("kept"); err != nil || owner != keptOrphan || r.QueueCount(keptOrphan) != 1 {
 		t.Fatalf("a referenced row without a transcript lost its alias or queue: owner=%q err=%v queue=%d", owner, err, r.QueueCount(keptOrphan))
+	}
+	if _, err := r.Session(historyOrphan); err != nil {
+		t.Fatalf("a row named only by delivery history was deleted: %v", err)
+	}
+	if _, err := r.Session(orphanBridge); err == nil {
+		t.Fatal("a row named nowhere else survived")
 	}
 	launched, err := r.Session("conversation-launch")
 	if err != nil || launched.Transcript != "/claude/projects/-work/conversation-launch.jsonl" || !launched.HasLocal || launched.PID != 44 {
@@ -124,6 +131,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 		{ID: collidedBridge, Surface: surface.KindClaude, Name: "native again", Cwd: "/work", PID: 42, Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
 		{ID: orphanBridge, Surface: surface.KindClaude, Name: "no transcript", PID: 43},
 		{ID: keptOrphan, Surface: surface.KindClaude, Name: "no transcript, still addressed"},
+		{ID: historyOrphan, Surface: surface.KindClaude, Name: "no transcript, in history"},
 		{ID: "conversation-launch", Surface: surface.KindClaude, Name: "launched", PID: 44},
 		{ID: launchedBridge, Surface: surface.KindClaude, Name: "launched", Cwd: "/work", PID: 44, Transcript: "/claude/projects/-work/conversation-launch.jsonl", HasLocal: true},
 		{ID: "codex-peer", Surface: surface.KindCodex},
@@ -156,6 +164,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 	}
 	exec(`INSERT INTO attention_items(session_id,queue_id,reason,requested_action) VALUES(?,?,'held','retry')`, rekeyedBridge, queued)
 	exec(`INSERT INTO delivery_history(kind,session_id,source_session_id) VALUES('send',?,?)`, rekeyedBridge, collidedBridge)
+	exec(`INSERT INTO delivery_history(kind,session_id,error) VALUES('busy',?,'target is busy')`, historyOrphan)
 	if _, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: rekeyedBridge, TargetSessionID: collidedBridge, Message: "hello", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted}); err != nil {
 		t.Fatal(err)
 	}
