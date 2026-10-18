@@ -254,7 +254,7 @@ func (a *App) cmdCodex(args []string) error {
 		}, path)
 	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
-	return syscall.Exec(path, argv, os.Environ())
+	return syscall.Exec(path, argv, surface.AgentEnv(os.Environ()))
 }
 
 type managedCodexPreparer func(context.Context, string, string) (*surface.Session, error)
@@ -313,7 +313,7 @@ func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, re
 	if message != "" {
 		argv = append(argv, "--", message)
 	}
-	return execute(path, argv, os.Environ())
+	return execute(path, argv, surface.AgentEnv(os.Environ()))
 }
 
 func managedCodexLaunchArgs(args []string) (string, string, error) {
@@ -2474,6 +2474,7 @@ func launchCodex(codex surface.Surface) error {
 	}
 
 	cmd := exec.Command(exe, codexLaunchArgs()...)
+	cmd.Env = surface.AgentEnv(os.Environ())
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
