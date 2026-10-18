@@ -239,7 +239,7 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	session := surface.Session{ID: "session_question", Surface: surface.KindClaude, PID: process.PID, Transport: "uds", Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
+	session := surface.Session{ID: "conversation-question", Bridge: "session_question", Surface: surface.KindClaude, PID: process.PID, Transport: "uds", Status: surface.StatusBusy, HasLocal: true, Transcript: transcript}
 	if err := store.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}

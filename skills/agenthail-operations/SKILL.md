@@ -85,7 +85,7 @@ Claude's control capabilities depend on its transport. Native UDS messages
 cannot execute slash commands, steer a running turn, or correlate message IDs
 with transcript turns for `send --reply` / `--stream`. Use `last` to inspect
 the transcript or native `SendMessage` for an explicit reply. Compact, model,
-interrupt, and steer are typed controls that require a Remote Control identity.
+interrupt, and steer are typed controls that require a Remote Control attachment.
 A receipt with `evidence: "transport_accepted"` only proves socket acceptance;
 receiver policy can still hold or deny the message. Do not claim model delivery
 from it. Report the immediate send status and target as returned: Sent, Queued,
@@ -100,10 +100,8 @@ seconds. Other senders register on first send to Claude. A send never fails
 because the peer pool is full: it displaces the least recently used peer
 outside that set, or else the lowest ranked registered peer. `--from` must resolve to a session
 or alias; otherwise identity is resolved in this order: `AGENTHAIL_SESSION_ID`,
-`CLAUDE_SESSION_ID`, the verified native Claude caller discovered through the
-command's process ancestry, then `CODEX_THREAD_ID`. The verified native Claude
-caller is checked before `CODEX_THREAD_ID` so an inherited parent Codex thread
-cannot override a Claude-launched command's own identity. Without identity, an
+`CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, read when the command runs.
+Agents Agenthail starts never inherit these from their launcher. Without identity, an
 operator peer receives replies into history. Inbound messages to read-only/offline agents
 are denied rather than silently queued. Peer histories include received
 messages, rejection reasons, and asynchronous Claude receipts.
@@ -197,6 +195,13 @@ current directory unless `--cd` is provided. `agenthail launch codex` starts
 Desktop with a writable bridge but does not itself create a thread.
 
 Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
+A Claude session ID is the conversation ID (the transcript name). The process,
+messaging socket and Remote Control session are attachments; Remote Control is
+never the identity. `/branch` and `/clear` create a new session without an alias
+(a branch shows `forkedFrom`); the alias, queue and routes stay on the original.
+After `/branch`, `agenthail whoami` names the branch. Move an alias only with
+`agenthail identify <target> <name>`.
+
 Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
 launch outcomes; inspect `claude agents --json --all` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
@@ -244,9 +249,9 @@ agenthail goal @builder budget clear
 agenthail goal @builder clear
 ```
 
-`compact` is a typed control, never a queued message. Claude sessions with a Remote Control identity compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
+`compact` is a typed control, never a queued message. Claude sessions with a Remote Control attachment compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
 
-Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control identity as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket; bridge-only sessions receive every send through Remote Control. Do not set `author: person` on a message an agent wrote.
+Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control attachment as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket; bridge-only sessions receive every send through Remote Control. Do not set `author: person` on a message an agent wrote.
 
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is

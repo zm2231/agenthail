@@ -47,7 +47,7 @@ func (p *claudePosts) count(message string) int {
 }
 
 func exitedSession(fixture *claudetest.Fixture) surface.Session {
-	return surface.Session{ID: "session_fixture", Surface: surface.KindClaude, PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(fixtureConversation, fixture.Home)}
+	return surface.Session{ID: fixtureConversation, Bridge: "session_fixture", Surface: surface.KindClaude, PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(fixtureConversation, fixture.Home)}
 }
 
 func TestClaudeConcurrentSendsToExitedSessionResumeItOnce(t *testing.T) {
@@ -64,7 +64,7 @@ func TestClaudeConcurrentSendsToExitedSessionResumeItOnce(t *testing.T) {
 			defer wait.Done()
 			session := exitedSession(fixture)
 			result, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, message)
-			if err == nil && (!result.Accepted || session.PID != fixture.PID || session.ID != "session_fixture") {
+			if err == nil && (!result.Accepted || session.PID != fixture.PID || session.ID != fixtureConversation || session.Bridge != "session_fixture") {
 				t.Errorf("result=%+v session=%+v", result, session)
 			}
 			errs[index] = err
@@ -159,7 +159,7 @@ func TestClaudeSendResumesTerminalSessionInItsTranscriptCwd(t *testing.T) {
 	session := exitedSession(fixture)
 	session.Cwd = ""
 	result, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if err != nil || !result.Accepted || session.ID != "session_resumed" || !samePath(t, session.Cwd, fixture.Home) || posts.count("hello") != 1 {
+	if err != nil || !result.Accepted || session.ID != fixtureConversation || session.Bridge != "session_resumed" || !samePath(t, session.Cwd, fixture.Home) || posts.count("hello") != 1 {
 		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
 	}
 	if fixture.Invocations("--bg", "--resume", fixtureConversation) != 1 {
@@ -178,7 +178,7 @@ func TestClaudeResumeOfBridgedSessionWaitsForRemoteControl(t *testing.T) {
 		fixture.Record(fixtureConversation, fixture.Home, "session_fixture")
 	}()
 	result, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if err != nil || !result.Accepted || session.ID != "session_fixture" || session.Transport != "" || posts.count("hello") != 1 {
+	if err != nil || !result.Accepted || session.ID != fixtureConversation || session.Bridge != "session_fixture" || session.Transport != "" || posts.count("hello") != 1 {
 		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
 	}
 }
@@ -199,22 +199,6 @@ func samePath(t *testing.T, a, b string) bool {
 	ra, errA := filepath.EvalSymlinks(a)
 	rb, errB := filepath.EvalSymlinks(b)
 	return errA == nil && errB == nil && ra == rb
-}
-
-func TestClaudeConversationOfBridgeIDComesFromItsJob(t *testing.T) {
-	fixture := claudetest.New(t)
-	fixture.JobState("fe758937", "done", "", time.Now())
-	c := NewClaude("", fixture.Home)
-	if got := c.conversationOf(&surface.Session{ID: "session_fixture"}); got != "" {
-		t.Fatalf("conversation=%q without a job naming the bridge", got)
-	}
-	record := `{"state":"done","sessionId":"` + fixtureConversation + `","bridgeSessionId":"cse_fixture"}`
-	if err := os.WriteFile(filepath.Join(fixture.Home, ".claude", "jobs", "fe758937", "state.json"), []byte(record), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if got := c.conversationOf(&surface.Session{ID: "session_fixture"}); got != fixtureConversation {
-		t.Fatalf("conversation=%q", got)
-	}
 }
 
 func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {

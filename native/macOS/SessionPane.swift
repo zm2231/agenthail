@@ -70,6 +70,7 @@ final class SessionPane: ObservableObject, Identifiable {
     var timelineItems: [TimelineItem] { olderItems + (detail?.timeline?.items ?? []) }
 
     func select(_ id: String) {
+        let id = model.resolveSessionID(id)
         guard !closed, id != selectedSessionID || detail == nil else { return }
         removedSession = nil
         selectedSnapshot = model.knownSessions.first { $0.id == id }
@@ -191,6 +192,10 @@ final class SessionPane: ObservableObject, Identifiable {
     func reconcile() {
         guard !closed, model.snapshot != nil else { return }
         let sessions = model.knownSessions
+        if let selected = selectedSessionID, model.resolveSessionID(selected) != selected {
+            select(selected)
+            return
+        }
         if let selected = selectedSessionID {
             if let live = sessions.first(where: { $0.id == selected }) {
                 selectedSnapshot = live
@@ -209,7 +214,7 @@ final class SessionPane: ObservableObject, Identifiable {
             if removedSession != nil || sessions.contains(where: { $0.id == selected }) { return }
         }
         guard restoresSelection else { return }
-        let next = reconciledSelection(selected: selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID"), sessions: sessions)
+        let next = reconciledSelection(selected: (selectedSessionID ?? UserDefaults.standard.string(forKey: "lastSelectedSessionID")).map(model.resolveSessionID), sessions: sessions)
         guard next != selectedSessionID else { return }
         sessionStreamTask?.cancel()
         detailReloadTask?.cancel()

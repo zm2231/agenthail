@@ -61,7 +61,7 @@ func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 func TestWhoamiReportsUnregisteredBoundSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
 	app, _ := cliFixture(t, fake)
-	t.Setenv("CLAUDE_SESSION_ID", "missing")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "missing")
 
 	output, err := captureStdout(t, func() error { return app.Run([]string{"whoami", "--json"}) })
 	if err != nil {

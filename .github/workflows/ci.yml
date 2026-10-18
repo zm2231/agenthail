@@ -34,7 +34,7 @@ jobs:
           fi
 
   verify:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -47,6 +47,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: push-relay/package-lock.json
+      - name: Race tests
+        run: go test ./... -race -count=1
       - name: Build
         run: go build ./...
       - name: Vet
@@ -56,12 +58,10 @@ jobs:
           node scripts/test-session-journal.mjs
           node scripts/test-dashboard-idempotency.mjs
           node scripts/test-dashboard-timeline.mjs
-          node scripts/test-shared-conversation.mjs
           node scripts/test-dashboard-relays.mjs
+          node scripts/test-dashboard-rekeys.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
-      - name: Race tests
-        run: go test ./... -race -count=1
       - name: Push relay tests
         working-directory: push-relay
         run: |
@@ -86,6 +86,7 @@ jobs:
           done <<'EOF'
           DuplicateApplicationPolicy duplicate_application_policy_test
           SessionSelection session_selection_test
+          SessionSelection session_rekeys_test
           EventRetryBackoff event_retry_backoff_test
           OperationsRefreshPolicy operations_refresh_policy_test
           StatusRefreshPolicy status_refresh_policy_test
@@ -128,16 +129,18 @@ jobs:
           "$RUNNER_TEMP/context-breakdown-test"
           swiftc -parse-as-library native/macOS/ShortcutStore.swift native/tests/shortcut_store_test.swift -o "$RUNNER_TEMP/shortcut-store-test"
           "$RUNNER_TEMP/shortcut-store-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SessionLaunch.swift native/tests/session_launch_test.swift -o "$RUNNER_TEMP/session-launch-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/macOS/SessionLaunch.swift native/tests/session_launch_test.swift -o "$RUNNER_TEMP/session-launch-test"
           "$RUNNER_TEMP/session-launch-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/TurnSettings.swift native/macOS/SessionLaunch.swift native/tests/session_launch_form_test.swift -o "$RUNNER_TEMP/session-launch-form-test"
+          "$RUNNER_TEMP/session-launch-form-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/AgenthailAPI.swift native/AgenthailModel.swift native/TurnSettings.swift native/EventRetryBackoff.swift native/SessionSelection.swift native/OperationsRefreshPolicy.swift native/StatusRefreshPolicy.swift native/macOS/SessionPane.swift native/macOS/CatalogPosition.swift native/macOS/LocalSend.swift native/macOS/PeerEnvelope.swift native/macOS/SessionTree.swift native/macOS/AgenthailProcess.swift native/macOS/AgenthailLink.swift native/macOS/MetadataOverlay.swift native/macOS/SessionLaunch.swift native/macOS/ComposerDrop.swift native/macOS/SessionHandle.swift native/macOS/SlashCommand.swift native/macOS/SessionOperations.swift native/tests/session_launch_retry_test.swift -o "$RUNNER_TEMP/session-launch-retry-test"
+          "$RUNNER_TEMP/session-launch-retry-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/SpotlightIndex.swift native/tests/spotlight_index_test.swift -o "$RUNNER_TEMP/spotlight-index-test"
           "$RUNNER_TEMP/spotlight-index-test"
           swiftc -parse-as-library native/macOS/ComposerDrop.swift native/tests/composer_drop_test.swift -o "$RUNNER_TEMP/composer-drop-test"
           "$RUNNER_TEMP/composer-drop-test"
           swiftc -parse-as-library native/macOS/BoundedDock.swift native/tests/bounded_dock_test.swift -o "$RUNNER_TEMP/bounded-dock-test"
           "$RUNNER_TEMP/bounded-dock-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/TurnSettings.swift native/macOS/DesktopPalette.swift native/macOS/BoundedDock.swift native/macOS/SharedConversationBanner.swift native/tests/shared_conversation_banner_test.swift -o "$RUNNER_TEMP/shared-conversation-banner-test"
-          "$RUNNER_TEMP/shared-conversation-banner-test"
           swiftc -parse-as-library native/macOS/SessionHandle.swift native/tests/session_handle_test.swift -o "$RUNNER_TEMP/session-handle-test"
           "$RUNNER_TEMP/session-handle-test"
       - name: Mac app build

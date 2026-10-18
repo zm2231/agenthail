@@ -170,7 +170,7 @@ func (*cliSurface) EnsureWritable(_ context.Context, session *surface.Session) e
 
 func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 	t.Helper()
-	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID"} {
+	for _, key := range []string{"AGENTHAIL_SESSION_ID", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"} {
 		t.Setenv(key, "")
 	}
 	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
@@ -232,6 +232,36 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	intent, err := r.DeliveryIntent(1)
 	if err != nil || intent.SenderSessionID != "source" || intent.Status != registry.DeliveryIntentSent {
 		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+}
+
+func TestCmdSteerReadsMessageFromStdin(t *testing.T) {
+	fake := &cliSurface{
+		kind:     surface.KindCodex,
+		sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, Transport: "desktop", Status: surface.StatusBusy}},
+		caps:     surface.Capabilities{Steer: true},
+	}
+	app, r := cliFixture(t, fake)
+	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "steer.txt")
+	if err := os.WriteFile(path, []byte("focus on the parser\nthen report"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	input, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	oldStdin := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = oldStdin }()
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "target", "-"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.steered) != 1 || fake.steered[0] != "focus on the parser\nthen report" {
+		t.Fatalf("steered=%q", fake.steered)
 	}
 }
 

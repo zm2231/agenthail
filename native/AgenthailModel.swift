@@ -60,6 +60,7 @@ final class AgenthailModel: ObservableObject {
     private var detailCache: [String: SessionDetail] = [:]
     private var detailCacheOrder: [String] = []
     private var drafts: [String: ComposerDraft] = [:]
+    private var rekeys = SessionRekeys()
     private var pendingSessionReference: String?
     private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
@@ -74,7 +75,6 @@ final class AgenthailModel: ObservableObject {
         let idempotencyKey: String
     }
     private var pendingSendRequests: [String: PendingSendRequest] = [:]
-    private var pendingCreation: (identity: [String], key: String)?
 
     var isConnected: Bool { connectionError == nil && snapshot?.daemon.running == true }
     var currentSessions: [SessionState] { snapshot?.sessions.filter(\.current) ?? [] }
@@ -165,10 +165,7 @@ final class AgenthailModel: ObservableObject {
         setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            if snapshot?.hasSamePresentation(as: loaded) != true {
-                snapshot = loaded
-            }
-            snapshotLoadedAt = Date()
+            adopt(loaded)
             if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
                 startCatalogStream()
             }
@@ -182,6 +179,16 @@ final class AgenthailModel: ObservableObject {
         }
         setLoading(false)
         return true
+    }
+
+    // Rekeys are recorded before the snapshot is published, because publishing
+    // opens a pending notification target and wakes a waiting reply.
+    func adopt(_ loaded: DashboardSnapshot) {
+        rekeys.record(loaded.rekeyed ?? [:])
+        if snapshot?.hasSamePresentation(as: loaded) != true {
+            snapshot = loaded
+        }
+        snapshotLoadedAt = Date()
     }
 
     func refreshNow(_ pane: SessionPane? = nil) {
@@ -274,36 +281,53 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func launchSession(launcher: String?, agent: String, folder: String, message: String) async -> SessionLaunchOutcome {
+    func creationModels(for agent: String) async throws -> [ModelOption] {
+        guard let api else { throw AgenthailAPIError.unavailable("Agenthail isn't connected.") }
+        return try await api.creationModels(surface: agent)
+    }
+
+    func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
+        let outcome = await createSession(form)
+        if !outcome.keepsRetryKey { actionKeys.abandon(.creation) }
+        return outcome
+    }
+
+    func startNewLaunch() {
+        actionKeys.abandon(.creation)
+    }
+
+    private func createSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
         guard let api else { return .failed("Agenthail isn't connected.") }
-        let identity = [agent, folder, message, launcher ?? ""]
-        if pendingCreation?.identity != identity {
-            pendingCreation = (identity, UUID().uuidString)
-        }
-        let idempotencyKey = pendingCreation?.key
         do {
-            let receipt = try await api.createSession(surface: agent, message: message, cwd: folder, model: "", launcher: launcher, idempotencyKey: idempotencyKey, failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: launcher, agent: agent)
-            if decision.settlesRetry {
-                pendingCreation = nil
-                operationError = nil
-            }
+            let body = try form.creationBody()
+            let receipt = try await api.createSession(body: body, idempotencyKey: actionKeys.key(for: body, scope: .creation), failureReceipts: true)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
             switch decision {
             case .open(let id):
+                operationError = nil
                 await openCreatedSession(id)
                 return .opened
             case .submitted(let note):
+                operationError = nil
                 return .submitted(note)
+            case .starting:
+                return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
                 if let id { await openCreatedSession(id) }
-                return .failed("Agenthail couldn't confirm the session started. Check the sidebar before trying again.")
+                return .unconfirmed("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):
                 return .failed(message)
             }
-        } catch {
+        } catch AgenthailAPIError.request(_, let message) {
+            return .failed(message)
+        } catch AgenthailAPIError.unavailable(let message) {
+            return .failed(message)
+        } catch let error as URLError where ActionRetryKeys.notSent.contains(error.code) {
             return .failed(AgenthailAPIError.userMessage(error))
+        } catch {
+            return .uncertain(error.localizedDescription)
         }
     }
 
@@ -358,6 +382,7 @@ final class AgenthailModel: ObservableObject {
             pendingSessionReference = reference
             return
         }
+        let reference = rekeys.resolve(reference)
         if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: reference) }) {
             mainPane.select(session.id)
         } else {
@@ -517,9 +542,10 @@ final class AgenthailModel: ObservableObject {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return true }
         guard await awaitConnection(timeout: connectionTimeout) else {
-            restoreToComposer(text, sessionID: sessionID)
+            restoreToComposer(text, sessionID: rekeys.resolve(sessionID))
             return false
         }
+        let sessionID = rekeys.resolve(sessionID)
         return await withCheckedContinuation { continuation in
             send(text, to: sessionID) { continuation.resume(returning: $0) }
         }
@@ -749,6 +775,7 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
             let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
@@ -850,7 +877,19 @@ final class AgenthailModel: ObservableObject {
         clearConnectionError()
     }
 
+    func resolveSessionID(_ id: String) -> String {
+        rekeys.resolve(id)
+    }
+
     private func reconcilePanes() {
+        if !rekeys.isEmpty {
+            _ = rekeys.carry(&drafts)
+            _ = rekeys.carry(&pendingSendRequests)
+            var sends = localSends
+            if rekeys.carry(&sends) { localSends = sends }
+            var settings = turnSettingsDrafts
+            if rekeys.carry(&settings) { turnSettingsDrafts = settings }
+        }
         panes.forEach { $0.reconcile() }
     }
 

@@ -122,7 +122,7 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
-	if session.ID != str(record, "sessionId") && session.ID != str(record, "bridgeSessionId") {
+	if session.ID != str(record, "sessionId") {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("Claude PID no longer belongs to this session"), surface.DeliveryTargetMissing)
 	}
 	socket := c.peerSocket(ctx, record)
@@ -135,33 +135,6 @@ func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message
 		return claudepeer.SendNative(ctx, c.home, *sender, senderSocket, socket, message)
 	}
 	return peerbridge.Send(ctx, c.home, surface.SourceSessionID(ctx), socket, message)
-}
-
-// ResolveCaller checks every live process, so a later process sharing a
-// session id still resolves to that session.
-func (c *Claude) ResolveCaller(ctx context.Context, ancestorPIDs []int) (*surface.Session, bool, error) {
-	processes, err := c.processes(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	valid := make(map[int]surface.Session, len(processes))
-	for _, process := range processes {
-		if process.session.Transport == "uds" {
-			valid[process.session.PID] = process.session
-		}
-	}
-	for _, pid := range ancestorPIDs {
-		record, present := c.peerRecord(pid)
-		if !present || str(record, "agenthail") == "peer-worker" {
-			continue
-		}
-		session, ok := valid[pid]
-		if !ok {
-			return nil, false, fmt.Errorf("Claude ancestor PID %d has no validated messaging endpoint", pid)
-		}
-		return &session, true, nil
-	}
-	return nil, false, nil
 }
 
 // nativeCaller finds the sender's own messaging socket. The source carries
@@ -214,5 +187,5 @@ func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
 }
 
 func nativeClaudeOnly(session *surface.Session) bool {
-	return session.Transport == "uds" && !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_")
+	return session.Transport == "uds" && session.Bridge == ""
 }

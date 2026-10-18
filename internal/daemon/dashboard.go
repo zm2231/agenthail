@@ -98,6 +98,7 @@ type dashboardSession struct {
 	ReadOnlyReason    string                     `json:"readOnlyReason,omitempty"`
 	Source            string                     `json:"source,omitempty"`
 	Transport         string                     `json:"transport,omitempty"`
+	ForkedFrom        string                     `json:"forkedFrom,omitempty"`
 	HostProject       *catalogHostProject        `json:"hostProject,omitempty"`
 	Checkout          *catalogCheckout           `json:"checkout,omitempty"`
 	ObservedAt        time.Time                  `json:"observedAt,omitempty"`
@@ -106,7 +107,6 @@ type dashboardSession struct {
 	Freshness         *registry.CatalogFreshness `json:"freshness,omitempty"`
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
-	SharedWith        []dashboardSharedSession   `json:"sharedWith,omitempty"`
 }
 
 type dashboardState struct {
@@ -127,6 +127,7 @@ type dashboardState struct {
 	DeliveryProblems   []registry.DeliveryProblem `json:"deliveryProblems"`
 	CodexRecentHours   int                        `json:"codexRecentHours"`
 	BusyDelivery       string                     `json:"busyDelivery"`
+	Rekeyed            map[string]string          `json:"rekeyed,omitempty"`
 	catalogPageApplied bool
 	catalogPageFilter  string
 	catalogPageOffset  int
@@ -765,7 +766,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read delivery problems: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
+	rekeyed, err := d.Registry.SessionRekeys()
+	if err != nil {
+		return dashboardState{}, fmt.Errorf("read session rekeys: %w", err)
+	}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query
@@ -856,7 +861,6 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 			if json.Unmarshal([]byte(record.ProjectionFingerprint), &saved) == nil {
 				entry.Open = saved.Open
 				entry.Subagents = saved.Subagents
-				entry.SharedWith = saved.SharedWith
 			}
 		}
 		entry.QueueCount = counts[session.ID]
@@ -1272,7 +1276,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			kind = "unknown"
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: kind, Message: request.Message, Error: startErr.Error()})
-		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "error": func() string {
+		writeDashboardJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "status": "failed", "retryable": false, "unknown": unknown, "error": func() string {
 			if unknown {
 				return fmt.Sprintf("initial turn outcome is ambiguous, but no session identity was returned; inspect the provider before any explicit retry: %s", startErr)
 			}
@@ -1945,13 +1949,6 @@ func (d *Daemon) dashboardSessionHandlerWithTimeout(w http.ResponseWriter, r *ht
 	exchanges, transcript := truncateSessionExchanges(sessionRead.Exchanges)
 	response := map[string]any{"session": session, "alias": alias, "exchanges": exchanges, "capabilities": effective.Capabilities, "readOnly": effective.ReadOnly, "readOnlyReason": effective.ReadOnlyReason, "readSource": sessionRead.Source, "transcriptTruncated": transcript.Truncated || sessionRead.Truncated, "transcriptOriginalBytes": transcript.OriginalBytes, "transcriptReturnedBytes": transcript.ReturnedBytes, "transcriptOriginalExchanges": transcript.OriginalExchanges, "transcriptReturnedExchanges": len(exchanges)}
 	response["journalSeq"] = sessionRead.JournalSeq
-	if session.Surface == surface.KindClaude {
-		if shared, err := d.savedSharedSessions(session.ID); err != nil {
-			d.log.Printf("session %s shared processes: %s", d.resolveDisplay(session.ID), err)
-		} else if len(shared) > 0 {
-			response["sharedWith"] = shared
-		}
-	}
 	if sessionReadErr != nil {
 		response["readError"] = "Session journal could not be read."
 	} else if sessionRead.UnavailableReason != "" {

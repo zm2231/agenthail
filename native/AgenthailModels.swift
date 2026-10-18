@@ -121,7 +121,6 @@ struct SessionState: Codable, Identifiable, Hashable {
     var runtime: SessionRuntime? = nil
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
-    var sharedWith: [SharedProcess]? = nil
     var transport: String? = nil
     var waitingOn: WaitingState? = nil
 
@@ -153,59 +152,6 @@ struct SubagentIdentity: Codable, Hashable {
 struct SubagentRollup: Codable, Hashable {
     let count: Int
     let working: Int
-}
-
-struct SharedProcess: Codable, Hashable, Identifiable {
-    let id: String
-    var name: String? = nil
-    let pid: Int
-    let status: String
-    var startedAt: String? = nil
-}
-
-enum SharedConversation {
-    static func peers(_ session: SessionState) -> [SharedProcess] {
-        session.sharedWith ?? []
-    }
-
-    static func processCount(_ session: SessionState) -> Int {
-        peers(session).isEmpty ? 0 : peers(session).count + 1
-    }
-
-    static func badge(_ session: SessionState) -> String? {
-        let count = processCount(session)
-        return count > 1 ? "⧉\(count)" : nil
-    }
-
-    static func badgeLabel(_ session: SessionState) -> String {
-        "Open in \(processCount(session)) processes"
-    }
-
-    static func started(_ peer: SharedProcess) -> String {
-        guard let raw = peer.startedAt, let date = parse(raw) else { return "start time unknown" }
-        return "started \(date.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    static func note(_ session: SessionState) -> String? {
-        let peers = peers(session)
-        guard !peers.isEmpty else { return nil }
-        if peers.count == 1 {
-            return "Also open in pid \(peers[0].pid) (\(started(peers[0]))). Messages here go to this process."
-        }
-        return "Also open in \(peers.count) other processes. Messages here go to this process."
-    }
-
-    static func openLabel(_ peer: SharedProcess) -> String {
-        "Open other process, pid \(peer.pid)"
-    }
-
-    static func peerLabel(_ peer: SharedProcess) -> String {
-        "pid \(peer.pid) (\(started(peer)))"
-    }
-
-    private static func parse(_ raw: String) -> Date? {
-        (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(raw)) ?? (try? Date.ISO8601FormatStyle().parse(raw))
-    }
 }
 
 struct SessionFamily: Identifiable, Equatable {
@@ -348,6 +294,17 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+
+    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        agents = try container.decodeIfPresent([String].self, forKey: .agents) ?? []
+        available = try container.decode(Bool.self, forKey: .available)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
 }
 
 struct HostProjectIdentity: Codable, Hashable {
@@ -543,6 +500,7 @@ struct DashboardSnapshot: Decodable {
     var deliveryProblems: [DeliveryProblem]?
     let codexRecentHours: Int
     let busyDelivery: String?
+    var rekeyed: [String: String]? = nil
 
     func hasSamePresentation(as other: DashboardSnapshot) -> Bool {
         daemon == other.daemon &&
@@ -874,6 +832,7 @@ struct CatalogStreamData: Decodable {
     let reason: String?
     let status: String?
     let at: String?
+    let rekeyedTo: String?
 }
 
 struct TimelineItem: Decodable, Identifiable, Equatable {

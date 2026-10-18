@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -24,38 +23,27 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-var (
-	buildOnce sync.Once
-	buildDir  string
-	binary    string
-	buildErr  error
-)
+var binary string
 
+// The worker binary is built before any test starts so the build never runs
+// inside a test's deadline; under a cold cache and a parallel race suite it
+// takes longer than those deadlines allow.
 func TestMain(m *testing.M) {
 	os.Unsetenv("CLAUDE_CONFIG_DIR")
-	code := m.Run()
-	if buildDir != "" {
+	buildDir, err := os.MkdirTemp("", "ah-bin-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	binary = filepath.Join(buildDir, "agenthail")
+	if output, err := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "build: %v\n%s", err, output)
 		_ = os.RemoveAll(buildDir)
+		os.Exit(1)
 	}
+	code := m.Run()
+	_ = os.RemoveAll(buildDir)
 	os.Exit(code)
-}
-
-func agenthailBinary(t *testing.T) string {
-	t.Helper()
-	buildOnce.Do(func() {
-		buildDir, buildErr = os.MkdirTemp("", "ah-bin-")
-		if buildErr != nil {
-			return
-		}
-		binary = filepath.Join(buildDir, "agenthail")
-		if output, err := exec.Command("go", "build", "-o", binary, "../../cmd/agenthail").CombinedOutput(); err != nil {
-			buildErr = fmt.Errorf("build: %v\n%s", err, output)
-		}
-	})
-	if buildErr != nil {
-		t.Fatal(buildErr)
-	}
-	return binary
 }
 
 type peerFixture struct {
@@ -94,7 +82,7 @@ func newPeerFixture(t *testing.T, sessionIDs ...string) *peerFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	socketDir := filepath.Join(home, "socks")
-	manager, err := start(ctx, home, reg, agenthailBinary(t), socketDir)
+	manager, err := start(ctx, home, reg, binary, socketDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +555,6 @@ func TestManagerRestartReconcilesCrashArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(home)
-	binary := agenthailBinary(t)
 	reg, err := registry.Open(filepath.Join(home, ".agenthail", "registry.db"))
 	if err != nil {
 		t.Fatal(err)

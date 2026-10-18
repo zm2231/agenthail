@@ -19,8 +19,8 @@ const (
 var relayEnvelope = regexp.MustCompile(`(?m)^\[agenthail relay hops=\d+ id=(\d+) turn=([^\]\s]+) source=`)
 
 // relaySourceKey names the conversation a session row reads completions from.
-// Several rows can share one Claude transcript, so its log and reader cursor
-// belong to the transcript; a Claude row without one has no readable source.
+// A Claude row reads its transcript; a Claude row without one has no readable
+// source.
 const relaySourceKey = `CASE WHEN s.surface='claude' THEN CASE WHEN s.transcript='' THEN NULL ELSE 'claude:'||s.transcript END ELSE s.id END`
 
 var errNoRelayTranscript = errors.New("relay source has no transcript yet")

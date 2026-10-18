@@ -79,7 +79,7 @@ func TestClaudeLocalStatusRereadsPeerRecord(t *testing.T) {
 	updated := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "bridgeSessionId": "session_synthetic", "status": "busy", "updatedAt": float64(updated.UnixMilli()), "peerFeatures": []any{"notify_idle"}}
 	writePeerRecord(t, home, pid, record)
-	session := surface.Session{ID: "session_synthetic", Surface: surface.KindClaude, PID: pid, Status: surface.StatusIdle}
+	session := surface.Session{ID: "conversation-1", Bridge: "session_synthetic", Surface: surface.KindClaude, PID: pid, Status: surface.StatusIdle}
 	if files := claude.LocalStatusFiles(session); len(files) != 1 || files[0] != filepath.Join(home, ".claude", "sessions", strconv.Itoa(pid)+".json") {
 		t.Fatalf("files=%v", files)
 	}

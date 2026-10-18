@@ -51,14 +51,14 @@ func exitedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixtur
 	posts := &claudePosts{}
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
 	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest("", fixture.Home, posts.request)
-	exited := surface.Session{ID: "session_terminal", Surface: surface.KindClaude, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
+	exited := surface.Session{ID: terminalConversation, Bridge: "session_terminal", Surface: surface.KindClaude, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
 	if err := r.RegisterSession(exited); err != nil {
 		t.Fatal(err)
 	}
 	return app, r, fixture, posts, exited
 }
 
-func TestSendResumesExitedTerminalSessionAndTheAliasFollowsIt(t *testing.T) {
+func TestSendResumesExitedTerminalSessionAndTheAliasStaysOnTheConversation(t *testing.T) {
 	app, r, fixture, posts, exited := exitedClaudeApp(t)
 	fixture.ResumeBridge("session_resumed")
 	if err := r.SetAlias("worker", exited.ID); err != nil {
@@ -68,11 +68,11 @@ func TestSendResumesExitedTerminalSessionAndTheAliasFollowsIt(t *testing.T) {
 	if err != nil || !strings.HasPrefix(output, "sent (turn ") || posts.count("hello") != 1 {
 		t.Fatalf("output=%q err=%v posts=%d", output, err, posts.count("hello"))
 	}
-	if sid, err := r.LookupAlias("worker"); err != nil || sid != "session_resumed" {
+	if sid, err := r.LookupAlias("worker"); err != nil || sid != terminalConversation {
 		t.Fatalf("alias=%q err=%v", sid, err)
 	}
-	if _, err := r.Session(exited.ID); err == nil {
-		t.Fatal("the exited row was not merged into the resumed session")
+	if resumed, err := r.Session(exited.ID); err != nil || resumed.Bridge != "session_resumed" || resumed.PID != fixture.PID {
+		t.Fatalf("resumed=%+v err=%v", resumed, err)
 	}
 	for _, target := range []string{"@worker", terminalConversation, "claude:" + terminalConversation} {
 		if _, err := captureStdout(t, func() error { return app.Run([]string{"send", target, "again"}) }); err != nil {
@@ -85,7 +85,7 @@ func TestSendResumesExitedTerminalSessionAndTheAliasFollowsIt(t *testing.T) {
 }
 
 func TestSendToExitedSessionByExactRegisteredID(t *testing.T) {
-	for _, target := range []string{"session_terminal", "claude:session_terminal"} {
+	for _, target := range []string{terminalConversation, "claude:" + terminalConversation} {
 		t.Run(target, func(t *testing.T) {
 			app, _, fixture, posts, _ := exitedClaudeApp(t)
 			fixture.ResumeBridge("session_terminal")
@@ -105,17 +105,6 @@ func TestFragmentDoesNotResolveAnExitedHistoricalSession(t *testing.T) {
 	}
 	if fixture.Invocations("--bg", "--resume", terminalConversation) != 0 || posts.count("hello") != 0 {
 		t.Fatal("a fragment resumed or delivered to an exited historical session")
-	}
-}
-
-func TestSendWithReplyToSessionResumedUnderNewIDDoesNotWaitOnTheOldOne(t *testing.T) {
-	app, _, fixture, posts, _ := exitedClaudeApp(t)
-	fixture.ResumeBridge("session_resumed")
-	output, err := captureStdout(t, func() error {
-		return app.Run([]string{"send", "session_terminal", "hello", "--reply", "--timeout", "2s"})
-	})
-	if err != nil || !strings.HasPrefix(output, "sent (turn ") || posts.count("hello") != 1 {
-		t.Fatalf("output=%q err=%v posts=%d", output, err, posts.count("hello"))
 	}
 }
 

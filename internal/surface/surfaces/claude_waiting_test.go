@@ -56,7 +56,7 @@ func TestClaudeObserveReadsWaitingFromTheProcessRecord(t *testing.T) {
 			home := t.TempDir()
 			writeClaudeRecord(t, home, test.fields)
 			claude := NewClaude("", home)
-			session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: transcript}
+			session := &surface.Session{ID: "conversation", Bridge: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: transcript}
 			observation, err := claude.Observe(context.Background(), session)
 			if err != nil {
 				t.Fatal(err)
@@ -77,9 +77,9 @@ func TestClaudeObserveReadsWaitingFromTheProcessRecord(t *testing.T) {
 func TestClaudeObserveIgnoresARecordOfAnotherSession(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
-	writeClaudeRecord(t, home, map[string]any{"sessionId": "other", "bridgeSessionId": "other-bridge", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": 1})
+	writeClaudeRecord(t, home, map[string]any{"sessionId": "other", "bridgeSessionId": "bridge", "status": "waiting", "waitingFor": "input needed", "statusUpdatedAt": 1})
 	claude := NewClaude("", home)
-	session := &surface.Session{ID: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: writeTranscript(t, `{"type":"user","uuid":"prompt","message":{"content":"Plan it"}}`)}
+	session := &surface.Session{ID: "conversation", Bridge: "bridge", Surface: surface.KindClaude, PID: os.Getpid(), Status: surface.StatusBusy, Transcript: writeTranscript(t, `{"type":"user","uuid":"prompt","message":{"content":"Plan it"}}`)}
 	observation, err := claude.Observe(context.Background(), session)
 	if err != nil || observation.WaitingOn != nil {
 		t.Fatalf("observation=%+v err=%v", observation, err)

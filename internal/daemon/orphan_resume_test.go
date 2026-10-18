@@ -82,7 +82,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	}
 	t.Cleanup(func() { _ = r.Close() })
 	fixture.r = r
-	fixture.session = surface.Session{ID: "session_orphan", Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
+	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
 	if err := r.RegisterSession(fixture.session); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 		t.Fatal(err)
 	}
 	fixture.claude.Job("fe758937", orphanConversation, fixture.claude.Home, "done", 0)
-	fixture.claude.ResumeBridge(fixture.session.ID)
+	fixture.claude.ResumeBridge("session_orphan")
 	fixture.daemon = New(r, []surface.Surface{surfaces.NewClaudeWithRequest("", fixture.claude.Home, fixture.posts.request)})
 	fixture.handler = dashboardRouter(fixture.daemon)
 	fixture.token = pairedControlToken(t, r)
