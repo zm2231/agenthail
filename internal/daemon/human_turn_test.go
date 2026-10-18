@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ type humanTurnFixture struct {
 	r       *registry.Registry
 	claude  *nativeRecordingClaude
 	posts   []string
+	postErr error
 	bridged surface.Session
 	native  surface.Session
 }
@@ -55,6 +57,9 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 			t.Fatalf("method=%s", method)
 		}
 		f.posts = append(f.posts, url+" "+body)
+		if f.postErr != nil {
+			return 0, "", f.postErr
+		}
 		return http.StatusOK, `{}`, nil
 	})}
 	dir := t.TempDir()
@@ -191,4 +196,35 @@ func TestNativeAppComposerSendToBridgedClaudeIsHumanTurn(t *testing.T) {
 		t.Fatalf("status=%d body=%s native=%q posts=%q", response.Code, response.Body, f.claude.native, f.posts)
 	}
 	assertHumanTurnPost(t, f.posts[0], "from the app")
+}
+
+func TestUncertainHumanTurnPostIsNeverRetried(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	f.postErr = errors.New("connection reset after write")
+	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","message":"maybe delivered"}`)
+	if receipt["evidence"] != string(surface.EvidenceSubmitted) || len(f.posts) != 1 || len(f.claude.native) != 0 {
+		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
+	}
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	if len(f.posts) != 1 || len(f.claude.native) != 0 {
+		t.Fatalf("uncertain human turn was resent: native=%q posts=%q", f.claude.native, f.posts)
+	}
+}
+
+func TestUncertainQueuedHumanTurnDeadLettersWithoutRetry(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	f.transcript(t, f.bridged, idleClaudeTranscript+busyClaudeTranscript)
+	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","busyDelivery":"queue","message":"queued maybe"}`)
+	queueID := int64(receipt["queueId"].(float64))
+	f.transcript(t, f.bridged, idleClaudeTranscript)
+	f.postErr = errors.New("connection reset after write")
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	if len(f.posts) != 1 || len(f.claude.native) != 0 {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+	item, err := f.r.QueueItem(queueID)
+	if err != nil || item.Status != "dead" || item.Evidence != surface.EvidenceUnknown {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
 }
