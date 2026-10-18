@@ -1474,7 +1474,7 @@ async function send(requestedAction = "send") {
     const commandAction = commandActions[command.toLowerCase()];
     if (commandAction && ["/steer", "/model", "/goal", "/name"].includes(command.toLowerCase()) && !argument)
       throw Error(`${command} needs a value`);
-    const sendPayload = { message, ...selectedTurnOptions() };
+    const sendPayload = { message, author: "person", ...selectedTurnOptions() };
     const result = composerAction === "steer"
       ? await action("steer", { message })
       : commandAction

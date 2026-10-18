@@ -1063,6 +1063,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Cwd             string                     `json:"cwd"`
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
+		Author          surface.Author             `json:"author"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1615,13 +1616,21 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
+		if request.Author != "" && request.Author != surface.AuthorPerson {
+			http.Error(w, "author must be \"person\" when set", http.StatusBadRequest)
+			return
+		}
+		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+			http.Error(w, "a person's message cannot also name a source session", http.StatusBadRequest)
+			return
+		}
 		if request.SourceSessionID != "" {
 			if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
 				http.Error(w, "source session not found", http.StatusBadRequest)
 				return
 			}
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, HumanTurn: request.SourceSessionID == ""})
+		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

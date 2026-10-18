@@ -111,10 +111,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
-	humanSender, humanTurn := adapter.(surface.HumanTurnSender)
-	humanTurn = humanTurn && options.HumanTurn && options.Model == "" && options.TurnOptions.Empty() && humanSender.CanSendHumanTurn(session)
-	options.HumanTurn = humanTurn
-	claudePeer := session.Surface == surface.KindClaude && session.Transport == "uds" && !humanTurn
+	route := RouteFor(adapter, session, options.Author)
 	syntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
@@ -134,7 +131,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if modeErr != nil {
 		return nil, modeErr
 	}
-	if claudePeer {
+	if route == RoutePeer {
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
 			return nil, observeErr
@@ -162,13 +159,8 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			baselineCompletionID = observation.CompletedTurnID
 		}
 	}
-	var optionSender surface.OptionSender
-	if options.Model != "" || !options.TurnOptions.Empty() {
-		var ok bool
-		optionSender, ok = adapter.(surface.OptionSender)
-		if !ok {
-			return nil, fmt.Errorf("%s does not support per-message model selection", adapter.Name())
-		}
+	if err := route.Validate(adapter, options); err != nil {
+		return nil, err
 	}
 	var intent *registry.DeliveryIntent
 	if d.Registry != nil && !syntheticNotion {
@@ -178,15 +170,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, intentErr
 		}
 	}
-	var result *surface.SendResult
-	var err error
-	if humanTurn {
-		result, err = humanSender.SendHumanTurn(ctx, session, message)
-	} else if optionSender != nil {
-		result, err = optionSender.SendWithOptions(ctx, session, message, options)
-	} else {
-		result, err = adapter.Send(ctx, session, message)
-	}
+	result, err := route.Send(ctx, adapter, session, message, options)
 	if err != nil {
 		if surface.IsDeliveryOutcomeUnknown(err) {
 			if intent == nil {
@@ -213,7 +197,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if result.Accepted {
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
-		peerTransport := claudePeer
+		peerTransport := route.TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}

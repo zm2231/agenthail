@@ -124,9 +124,9 @@ func assertHumanTurnPost(t *testing.T, post, message string) {
 	}
 }
 
-func TestComposerSendToBridgedClaudeIsHumanTurn(t *testing.T) {
+func TestPersonSendToBridgedClaudeIsHumanTurn(t *testing.T) {
 	f := newHumanTurnFixture(t)
-	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","message":"Please inspect the failure."}`)
+	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"session_bridge","message":"Please inspect the failure."}`)
 	if len(f.claude.native) != 0 || len(f.posts) != 1 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -147,9 +147,9 @@ func TestAgentSendToBridgedClaudeStaysNative(t *testing.T) {
 	}
 }
 
-func TestComposerSendWithoutBridgeUsesNativeTransport(t *testing.T) {
+func TestPersonSendWithoutBridgeUsesNativeTransport(t *testing.T) {
 	f := newHumanTurnFixture(t)
-	receipt := f.send(t, `{"action":"send","sessionId":"native-only","message":"hello"}`)
+	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"native-only","message":"hello"}`)
 	if len(f.posts) != 0 || len(f.claude.native) != 1 || f.claude.native[0] != "hello" {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
@@ -158,10 +158,10 @@ func TestComposerSendWithoutBridgeUsesNativeTransport(t *testing.T) {
 	}
 }
 
-func TestComposerSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
+func TestPersonSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
 	f := newHumanTurnFixture(t)
 	f.transcript(t, f.bridged, idleClaudeTranscript+busyClaudeTranscript)
-	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","busyDelivery":"queue","message":"after this turn"}`)
+	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"session_bridge","busyDelivery":"queue","message":"after this turn"}`)
 	if receipt["evidence"] != string(surface.EvidenceQueued) || len(f.posts) != 0 || len(f.claude.native) != 0 {
 		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
 	}
@@ -189,9 +189,9 @@ func TestQueuedAgentMessageToBridgedClaudeStaysNative(t *testing.T) {
 	}
 }
 
-func TestNativeAppComposerSendToBridgedClaudeIsHumanTurn(t *testing.T) {
+func TestNativeAppPersonSendToBridgedClaudeIsHumanTurn(t *testing.T) {
 	f := newHumanTurnFixture(t)
-	response := serveV1Action(dashboardRouter(f.d), `{"action":"send","sessionId":"session_bridge","message":"from the app"}`, "app-send", pairedControlToken(t, f.r))
+	response := serveV1Action(dashboardRouter(f.d), `{"action":"send","author":"person","sessionId":"session_bridge","message":"from the app"}`, "app-send", pairedControlToken(t, f.r))
 	if response.Code != http.StatusOK || len(f.claude.native) != 0 || len(f.posts) != 1 {
 		t.Fatalf("status=%d body=%s native=%q posts=%q", response.Code, response.Body, f.claude.native, f.posts)
 	}
@@ -201,7 +201,7 @@ func TestNativeAppComposerSendToBridgedClaudeIsHumanTurn(t *testing.T) {
 func TestUncertainHumanTurnPostIsNeverRetried(t *testing.T) {
 	f := newHumanTurnFixture(t)
 	f.postErr = errors.New("connection reset after write")
-	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","message":"maybe delivered"}`)
+	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"session_bridge","message":"maybe delivered"}`)
 	if receipt["evidence"] != string(surface.EvidenceSubmitted) || len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
 	}
@@ -214,7 +214,7 @@ func TestUncertainHumanTurnPostIsNeverRetried(t *testing.T) {
 func TestUncertainQueuedHumanTurnDeadLettersWithoutRetry(t *testing.T) {
 	f := newHumanTurnFixture(t)
 	f.transcript(t, f.bridged, idleClaudeTranscript+busyClaudeTranscript)
-	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","busyDelivery":"queue","message":"queued maybe"}`)
+	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"session_bridge","busyDelivery":"queue","message":"queued maybe"}`)
 	queueID := int64(receipt["queueId"].(float64))
 	f.transcript(t, f.bridged, idleClaudeTranscript)
 	f.postErr = errors.New("connection reset after write")
@@ -225,6 +225,60 @@ func TestUncertainQueuedHumanTurnDeadLettersWithoutRetry(t *testing.T) {
 	}
 	item, err := f.r.QueueItem(queueID)
 	if err != nil || item.Status != "dead" || item.Evidence != surface.EvidenceUnknown {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+func TestUnmarkedSendToBridgedClaudeStaysNative(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","message":"no author declared"}`)
+	if len(f.posts) != 0 || len(f.claude.native) != 1 || receipt["evidence"] != string(surface.EvidenceTransportAccepted) {
+		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
+	}
+	response := serveV1Action(dashboardRouter(f.d), `{"action":"send","sessionId":"session_bridge","message":"script"}`, "unmarked", pairedControlToken(t, f.r))
+	if response.Code != http.StatusOK || len(f.posts) != 0 || len(f.claude.native) != 2 {
+		t.Fatalf("status=%d native=%q posts=%q", response.Code, f.claude.native, f.posts)
+	}
+}
+
+func TestSendRejectsContradictoryOrUnknownAuthor(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	for _, body := range []string{
+		`{"action":"send","author":"person","sourceSessionId":"agent","sessionId":"session_bridge","message":"both"}`,
+		`{"action":"send","author":"robot","sessionId":"session_bridge","message":"unknown"}`,
+	} {
+		response := serveDashboardRequest(dashboardRouter(f.d), http.MethodPost, "/api/action", body)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d response=%s", body, response.Code, response.Body)
+		}
+	}
+	if len(f.posts) != 0 || len(f.claude.native) != 0 {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+}
+
+func TestPersonSendWithOptionsIsRejectedNotDowngraded(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	response := serveDashboardRequest(dashboardRouter(f.d), http.MethodPost, "/api/action", `{"action":"send","author":"person","sessionId":"session_bridge","model":"claude-haiku-5-5","message":"with model"}`)
+	if response.Code == http.StatusOK || len(f.posts) != 0 || len(f.claude.native) != 0 {
+		t.Fatalf("status=%d body=%s native=%q posts=%q", response.Code, response.Body, f.claude.native, f.posts)
+	}
+	if !strings.Contains(response.Body.String(), "not supported for a person's Claude turn") {
+		t.Fatalf("body=%s", response.Body)
+	}
+}
+
+func TestQueuedPersonMessageWithOptionsIsRejectedAtDrain(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	queueID, err := f.r.QueueMessageWithOptions(f.bridged.ID, "queued with effort", "", surface.SendOptions{Author: surface.AuthorPerson, TurnOptions: surface.TurnOptions{Effort: "high"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	if len(f.posts) != 0 || len(f.claude.native) != 0 {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+	if item, err := f.r.QueueItem(queueID); err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }

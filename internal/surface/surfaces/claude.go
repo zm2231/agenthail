@@ -631,6 +631,10 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		}
 		return c.sendPeer(ctx, sess, message)
 	}
+	return c.postWhenIdle(ctx, sess, message)
+}
+
+func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
 		return nil, err
@@ -656,14 +660,7 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if !c.CanSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
 	}
-	observation, err := c.Observe(ctx, sess)
-	if err != nil {
-		return nil, err
-	}
-	if observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
-		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
-	}
-	return c.postMessage(ctx, sess, message)
+	return c.postWhenIdle(ctx, sess, message)
 }
 
 func claudeProcessAlive(pid int) bool {

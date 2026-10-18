@@ -36,6 +36,7 @@ final class TurnSettingsFlowTests: XCTestCase {
 
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, "send")
         XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["message"] as? String, "Queue this instruction")
+        XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["author"] as? String, "person")
     }
 
     func testExplicitSteerAPIPathOmitsTurnOptions() async throws {

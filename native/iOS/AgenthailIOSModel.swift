@@ -592,7 +592,7 @@ final class AgenthailIOSModel: ObservableObject {
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", idempotencyKey: idempotencyKey)
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {

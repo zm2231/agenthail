@@ -245,10 +245,14 @@ type SendOptions struct {
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 	BusyDelivery    string `json:"busyDelivery,omitempty"`
-	// HumanTurn is set by the daemon for a person's own composer message and
-	// is never decoded from a request body.
-	HumanTurn bool `json:"-"`
+	Author          Author `json:"-"`
 }
+
+// Author records who wrote a message. A composer declares AuthorPerson when a
+// person typed it; any send that does not declare it is unattributed.
+type Author string
+
+const AuthorPerson Author = "person"
 
 // HumanTurnSender delivers a person's message as that session's own user
 // turn, separate from the peer transport agents use to message each other.

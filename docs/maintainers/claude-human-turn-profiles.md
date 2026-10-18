@@ -16,39 +16,58 @@ reports whether that identity exists, matching the controls that already use it
 (`EffectiveCapabilities`). Busy sessions return an unaccepted result without
 posting. `Claude.Send` stays native-peer-first for UDS sessions.
 
-Provenance is set at the entry point. The web dashboard (`/api/action`) and the
-Mac and iPhone apps (`/api/v1/actions`) post composer messages as action `send`
-to [`dashboardActionHandler`](../../internal/daemon/dashboard.go). A request
-without `sourceSessionId` is a person's message, and the handler sets
-`SendOptions.HumanTurn`. The field has no JSON name, so a request body cannot
-set it. Channel broadcasts, the CLI, relays, voice and agent-attributed sends
-never set it.
+Authorship is declared by the composer, not inferred. The web dashboard
+(`/api/action`) and the Mac and iPhone apps (`/api/v1/actions`, including the
+Mac notification Reply) post composer messages as action `send` with
+`"author": "person"` to
+[`dashboardActionHandler`](../../internal/daemon/dashboard.go). The handler
+rejects any other author value, and rejects `author: person` combined with
+`sourceSessionId`. It carries the value as `SendOptions.Author`
+(`surface.AuthorPerson`). A send that does not declare an author is
+unattributed and stays native, whatever its caller: scripts and other
+`/api/v1/actions` clients, channel broadcasts, the CLI, relays and voice.
 
-[`Dispatcher.deliver`](../../internal/delivery/delivery.go) routes a human turn
-to `SendHumanTurn` when the adapter implements `surface.HumanTurnSender`, the
-send has no per-message model or turn options, and the target has a Remote
-Control identity. Otherwise it keeps today's path. A target without that
-identity gets the native socket send. The choice is made before sending and is
-never revised after a failure. A human turn records `delivered` evidence and
-arms completion tracking. A native send records `transport_accepted`. The
-path is visible in the API receipt's `evidence` and in history. The dashboard and
-app composers show both as "Sent", and this layer adds no UI for the difference.
+[`delivery.RouteFor`](../../internal/delivery/route.go) is the one place that
+picks a message's transport. A person's message to an adapter that implements
+`surface.HumanTurnSender` and has a Remote Control identity
+(`CanSendHumanTurn`) takes `RouteHumanTurn`. A Claude UDS session otherwise
+takes `RoutePeer`. Everything else takes `RouteSend`. `Dispatcher.deliver` and
+[`drainClaimedMessage`](../../internal/daemon/outbox.go) both call it, and so do
+the CLI and voice checks that reject reply correlation on a peer route. The
+route is derived each time a message is sent and never stored, so a queued
+message follows the target's bridge state at drain time. The choice is made
+before sending and is never revised after a failure.
 
-A busy target follows the existing busy-delivery policy. With `steer`,
-`Claude.Steer` already posts through the Remote Control identity. With `queue`,
-the intent is queued with `message_queue.human_turn`.
-[`drainClaimedMessage`](../../internal/daemon/outbox.go) replays that item
-through `SendHumanTurn` when the session is idle. Outcome semantics are
+Options never change authorship. On `RouteHumanTurn`, a per-message model or
+turn option is rejected as an invalid request: the bridge user event has no
+per-message model or effort field. The native route already rejects these
+options for Claude, which has no per-message option sender.
+
+A human turn records `delivered` evidence and arms completion tracking. A native
+send records `transport_accepted`. The path is visible in the API receipt's
+`evidence` and in history. The dashboard and app composers show both as "Sent",
+and this layer adds no UI for the difference.
+
+A busy target follows the existing busy-delivery policy. A steer from a
+composer, whether chosen directly or by the `steer` policy, goes through
+`Claude.Steer`, which posts through the Remote Control identity, so it is also
+the person's turn. With `queue`, the author persists as `message_queue.author`,
+and the drain replays a person's message through `SendHumanTurn` once the
+session is idle. `Claude.Send`'s bridge branch and `SendHumanTurn` share
+`postWhenIdle`, so both apply the same busy check. Outcome semantics are
 unchanged. An uncertain POST is `unknown` and becomes a submitted intent or a
 dead letter, and it is never retried.
 
 The primitive does not authenticate the person behind a composer. The trust
 boundary is the dashboard's control authority (the dashboard token or a paired
-device with `control` scope). Tests cover the routing through both HTTP routes
-with the real Claude adapter and a fixture web request: human to bridge, agent
-to native, no bridge to native, busy queue replayed as a human turn, and queued
-agent messages staying native. A live authenticated POST through the composer
-path has not been run for this layer.
+device with `control` scope), where a client declares authorship. Tests cover
+the routing through both HTTP routes with the real Claude adapter and a fixture
+web request: person to bridge, unmarked and agent sends to native, no bridge to
+native, contradictory or unknown authors rejected, person with options
+rejected, a busy queue replayed as a human turn, and uncertain POSTs never
+retried. The native helper tests check that the Mac composer and notification
+Reply declare the author and that an unmarked API send does not. A live
+authenticated POST through the composer path has not been run for this layer.
 
 ## Planned account model
 

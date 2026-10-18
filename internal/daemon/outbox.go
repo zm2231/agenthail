@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -52,25 +53,17 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var result *surface.SendResult
 	var sendErr error
 	steered := false
-	humanSender, humanTurn := adapter.(surface.HumanTurnSender)
-	humanTurn = humanTurn && item.HumanTurn && item.Model == "" && item.TurnOptions.Empty() && humanSender.CanSendHumanTurn(session)
-	peerTransport := session.Surface == surface.KindClaude && session.Transport == "uds" && !humanTurn
+	route := delivery.RouteFor(adapter, session, item.Author)
+	peerTransport := route.TransportOnly()
+	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
 	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}
 			steered = true
 		}
-	} else if item.Model != "" || !item.TurnOptions.Empty() {
-		if sender, ok := adapter.(surface.OptionSender); ok {
-			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions})
-		} else {
-			sendErr = fmt.Errorf("%s does not support per-message model selection", adapter.Name())
-		}
-	} else if humanTurn {
-		result, sendErr = humanSender.SendHumanTurn(operationCtx, session, item.Message)
-	} else {
-		result, sendErr = adapter.Send(operationCtx, session, item.Message)
+	} else if sendErr = route.Validate(adapter, options); sendErr == nil {
+		result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
 	}
 	cancel()
 	if sendErr != nil {
