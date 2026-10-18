@@ -3,6 +3,8 @@ package surfaces
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -251,4 +253,38 @@ func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	unlock()
+}
+
+func TestClaudeCompactOfExitedSessionResumesItFirst(t *testing.T) {
+	fixture := claudetest.New(t)
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
+	fixture.ResumeBridge("session_fixture")
+	session := exitedSession(fixture)
+	compacts := 0
+	c := NewClaudeWithRequest("", fixture.Home, func(_ context.Context, _, _ string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+		var envelope struct {
+			Events []struct {
+				Payload struct {
+					UUID string `json:"uuid"`
+				} `json:"payload"`
+			} `json:"events"`
+		}
+		if err := json.Unmarshal([]byte(body), &envelope); err != nil || len(envelope.Events) != 1 {
+			t.Fatalf("body=%s err=%v", body, err)
+		}
+		compacts++
+		f, err := os.OpenFile(session.Transcript, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		fmt.Fprintf(f, "{\"type\":\"user\",\"uuid\":%q,\"message\":{\"content\":\"/compact\"}}\n{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"content\":\"done\"}\n", envelope.Events[0].Payload.UUID)
+		return 200, `{}`, nil
+	})
+	if err := c.Compact(context.Background(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.Invocations("--bg", "--resume", fixtureConversation) != 1 || compacts != 1 || session.PID != fixture.PID {
+		t.Fatalf("resumes=%d compacts=%d session=%+v", fixture.Invocations("--bg", "--resume", fixtureConversation), compacts, session)
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 const (
@@ -52,7 +53,10 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	}
 	t.Cleanup(func() { r.Close() })
 	f := &humanTurnFixture{r: r}
-	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+	process := claudetest.New(t)
+	process.Listen()
+	process.Record("conversation-bridge", process.Home, "session_bridge")
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest("Default", process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}
@@ -63,7 +67,7 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		return http.StatusOK, `{}`, nil
 	})}
 	dir := t.TempDir()
-	f.bridged = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
+	f.bridged = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
 	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
 	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle}
 	for _, session := range []surface.Session{f.bridged, f.native, agent} {
