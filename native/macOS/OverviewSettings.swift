@@ -127,7 +127,7 @@ struct RecentOutcomesSection: View {
                     Text(outcome.isError ? outcome.detail : PeerEnvelope(outcome.detail).summary)
                         .font(.system(size: 12))
                         .foregroundStyle(outcome.isError ? DesktopPalette.red : DesktopPalette.text2)
-                        .lineLimit(2)
+                        .textSelection(.enabled)
                 }
             }
         }
