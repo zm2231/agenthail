@@ -21,9 +21,9 @@ struct AuditFactsTest {
         expect(AuditFacts.content(sessionOnly) == "relay fired" && !AuditFacts.isError(sessionOnly), "result when there is no message")
         expect(AuditFacts.content(bare) == "No message content recorded" && !AuditFacts.isError(bare), "empty content says so")
 
-        let peer = "<cross-session-message from=\"uds:/x.sock\" from-name=\"builder\">Synthetic: ping</cross-session-message>"
-        let wrapped = HistoryState(id: 5, createdAt: "", kind: "peer_send", sessionId: nil, sourceSessionId: nil, target: nil, source: nil, queueId: nil, message: peer, result: nil, error: nil)
-        expect(AuditFacts.content(wrapped) == "From builder: Synthetic: ping", "peer envelopes keep sender and body")
+        let peer = "<cross-session-message from=\"uds:/x.sock\" from-session=\"synthetic-session\" from-name=\"builder\" from-mode=\"auto\">Synthetic: ping</cross-session-message>"
+        let wrapped = HistoryState(id: 5, createdAt: "", kind: "peer_received", sessionId: nil, sourceSessionId: nil, target: nil, source: nil, queueId: nil, message: peer, result: nil, error: nil)
+        expect(AuditFacts.content(wrapped) == peer, "peer envelopes keep every recorded attribute, as the web shows them")
 
         expect(AuditFacts.kindLabel("peer_send") == "Peer Send" && AuditFacts.kindLabel("") == "Event", "kind labels match the web")
         print("audit facts tests passed")

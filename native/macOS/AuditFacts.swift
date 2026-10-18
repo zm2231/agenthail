@@ -19,7 +19,7 @@ enum AuditFacts {
 
     static func content(_ entry: HistoryState) -> String {
         if let error = nonEmpty(entry.error) { return error }
-        if let message = nonEmpty(entry.message) { return PeerEnvelope(message).summary }
+        if let message = nonEmpty(entry.message) { return message }
         return nonEmpty(entry.result) ?? "No message content recorded"
     }
 

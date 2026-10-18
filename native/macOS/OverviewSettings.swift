@@ -117,14 +117,14 @@ struct RecentOutcomesSection: View {
                     HStack {
                         Text("\(outcome.label) · \(outcome.target)")
                             .foregroundStyle(outcome.tone == .problem ? DesktopPalette.red : DesktopPalette.text)
-                            .lineLimit(1)
+                            .textSelection(.enabled)
                         Spacer()
                         Text(relativeAge(outcome.createdAt))
                             .font(.system(size: 11))
                             .foregroundStyle(DesktopPalette.text2)
                             .help(outcome.createdAt)
                     }
-                    Text(outcome.isError ? outcome.detail : PeerEnvelope(outcome.detail).summary)
+                    Text(outcome.detail)
                         .font(.system(size: 12))
                         .foregroundStyle(outcome.isError ? DesktopPalette.red : DesktopPalette.text2)
                         .textSelection(.enabled)

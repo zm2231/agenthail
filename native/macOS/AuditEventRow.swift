@@ -30,7 +30,7 @@ struct AuditEventRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(DesktopPalette.accentText)
-            .accessibilityValue(expanded ? "expanded" : "collapsed")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
                 StructuredText(markdown: AuditFacts.content(entry))
                     .font(.system(size: 12))

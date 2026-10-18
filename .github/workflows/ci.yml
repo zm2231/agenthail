@@ -101,7 +101,7 @@ jobs:
           "$RUNNER_TEMP/catalog-position-test"
           swiftc -parse-as-library native/macOS/PeerEnvelope.swift native/tests/peer_envelope_test.swift -o "$RUNNER_TEMP/peer-envelope-test"
           "$RUNNER_TEMP/peer-envelope-test"
-          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/PeerEnvelope.swift native/macOS/AuditFacts.swift native/tests/audit_facts_test.swift -o "$RUNNER_TEMP/audit-facts-test"
+          swiftc -parse-as-library native/AgenthailModels.swift native/macOS/AuditFacts.swift native/tests/audit_facts_test.swift -o "$RUNNER_TEMP/audit-facts-test"
           "$RUNNER_TEMP/audit-facts-test"
           swiftc -parse-as-library native/AgenthailModels.swift native/macOS/ToolRunSummary.swift native/tests/tool_run_summary_test.swift -o "$RUNNER_TEMP/tool-run-summary-test"
           "$RUNNER_TEMP/tool-run-summary-test"
