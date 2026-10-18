@@ -1401,6 +1401,7 @@ const (
 	QueueHeldUnknown  QueueHold = "unknown"
 	QueueHeldRetrying QueueHold = "retrying"
 	QueueHeldBehind   QueueHold = "behind"
+	QueueHeldUnloaded QueueHold = "notLoaded"
 )
 
 // SteerSurfaces says which surfaces can steer a message into a running turn,
@@ -1418,7 +1419,8 @@ const queueSteerRow = `%[1]s.busy_delivery='steer' AND %[1]s.model='' AND (%[1]s
 // daemon drains by. A drain claims only the earliest open message of a
 // session, or of its steerable messages while a turn runs, so a message
 // behind an earlier one is held by it. A busy turn holds a message but not a
-// steer into it when the target can steer. Its first argument is the current
+// steer into it when the target can steer. An unloaded conversation is
+// drained only when Codex Desktop can load it. Its first argument is the current
 // time.
 func queueHoldCase(canSteer bool) string {
 	earliest := `(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=q.session_id AND m.status IN ('pending','inflight')%s)`
@@ -1432,6 +1434,7 @@ func queueHoldCase(canSteer bool) string {
 		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
 		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'
 		WHEN ` + queueTargetStatus + ` NOT IN ('idle','notLoaded') THEN 'unknown'
+		WHEN ` + queueTargetStatus + `='notLoaded' AND NOT (COALESCE(s.surface,'')='codex' AND COALESCE(s.transport,'')='desktop') THEN 'notLoaded'
 		WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind'
 		WHEN q.available_at_ms>?1 THEN 'retrying'
 		ELSE '' END`

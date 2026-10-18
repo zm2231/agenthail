@@ -38,6 +38,9 @@ type Daemon struct {
 	announceMu        sync.Mutex
 	announcing        map[string]string
 	catalogNudge      chan struct{}
+	// catalogSelected, when set, runs after a catalog publication has chosen
+	// what a session waits on and before its row commits.
+	catalogSelected   func(sessionID string)
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub

@@ -1350,4 +1350,23 @@ func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 	if item, err := r.ClaimNextMessage("target", time.Now()); err != nil || item != nil {
 		t.Fatalf("a message behind a deferred one was claimable: %+v err=%v", item, err)
 	}
+	for _, unloaded := range []struct {
+		transport string
+		want      QueueHold
+	}{{"desktop", ""}, {"managed", QueueHeldUnloaded}} {
+		id := "unloaded-" + unloaded.transport
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, Transport: unloaded.transport}); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SaveRuntimeState(id, surface.TurnObservation{Status: surface.SessionStatus("notLoaded")}); err != nil {
+			t.Fatal(err)
+		}
+		queueID, err := r.QueueMessageWithOptions(id, "when it loads", "", surface.SendOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := held(queueID, steers); got != unloaded.want {
+			t.Fatalf("unloaded %s conversation held=%q, want %q: the daemon loads only a Codex Desktop conversation to deliver", unloaded.transport, got, unloaded.want)
+		}
+	}
 }

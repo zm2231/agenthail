@@ -635,6 +635,7 @@ function queueReason(item) {
       unknown: "Held: this agent's state is unknown",
       retrying: "Held: waiting to retry",
       behind: "Held: behind an earlier message",
+      notLoaded: "Held: this conversation is not loaded",
     }[item.heldBy] || "Delivers on the next scan"
   );
 }

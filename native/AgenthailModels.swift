@@ -374,6 +374,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         case "unknown": return "Held: this agent's state is unknown"
         case "retrying": return "Held: waiting to retry"
         case "behind": return "Held: behind an earlier message"
+        case "notLoaded": return "Held: this conversation is not loaded"
         default: return "Delivers on the next scan"
         }
     }

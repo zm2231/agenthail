@@ -52,15 +52,16 @@ the existing dashboard settings write path. Read-only targets fail before
 dispatch. An unknown delivery outcome must be inspected before an explicit retry;
 it is never resent automatically.
 
-A busy target can be waiting on its user. `surface.Waiting` on the session and on
-its turn observation carries the kind (`question`, `approval`, `input`), a
+A busy target can be waiting on its user. `surface.Waiting` on the session and
+on its turn observation carries the kind (`question`, `approval`, `input`), a
 stable id and when it was first seen. Claude reads it from the live process's
 record, `sessions/<pid>.json`: `"status":"waiting"` with `waitingFor` set to
-`input needed` for `AskUserQuestion` (kind `question`) or `permission prompt` for
-a plan approval or a tool permission (kind `approval`), and `statusUpdatedAt` as
-when it started. The id is `<conversation>:<kind>:<statusUpdatedAt>`. Claude 2.1.303
-writes a pending tool call to the transcript only once it resolves, so the
-transcript cannot show an open question. Codex reads it from the thread status, `active` with
+`input needed` for `AskUserQuestion` (kind `question`) or `permission prompt`
+for a plan approval or a tool permission (kind `approval`), and
+`statusUpdatedAt` as when it started. The id is
+`<conversation>:<kind>:<statusUpdatedAt>`. Claude 2.1.303 writes a pending tool
+call to the transcript only once it resolves, so the transcript cannot show an
+open question. Codex reads it from the thread status, `active` with
 `waitingOnApproval` or `waitingOnUserInput` in `activeFlags`, and names it
 `<thread>:<kind>` in both listings and observations. The registry keeps the
 current question in `session_runtime`. Each read of a turn and the write of what
@@ -72,16 +73,17 @@ observing the turn before anything changes. Each new question is announced on
 the desktop and to paired devices (`session.waiting`) and marked announced once
 both were attempted; a question recorded but not yet announced when the daemon
 stops is announced after it restarts. Both notifications carry a key derived
-from the session and question: the desktop notification identifier and the
-APNs `apns-collapse-id`, so an announcement repeated after a stop replaces the
-one already shown rather than adding a second. While a target waits, nothing is steered
-into it: `send` under the `steer` policy and `steer` both queue a steer, with a
-receipt that names the wait. The daemon steers queued steers once the question is answered and
-delivers other messages when the turn ends. Queue rows report `heldBy`: `waiting`,
-`busy`, `offline`, `unknown`, `retrying`, or `behind` when an earlier message to
-the same session is still open. Empty means the next scan claims that message: a
-drain takes only a session's earliest open message, or its earliest steer while
-a turn runs and the target can steer.
+from the session and question: the desktop notification identifier and the APNs
+`apns-collapse-id`, so an announcement repeated after a stop replaces the one
+already shown rather than adding a second. While a target waits, nothing is
+steered into it: `send` under the `steer` policy and `steer` both queue a steer,
+with a receipt that names the wait. The daemon steers queued steers once the
+question is answered and delivers other messages when the turn ends. Queue rows
+report `heldBy`: `waiting`, `busy`, `offline`, `unknown`, `retrying`,
+`notLoaded` (an unloaded conversation that only Codex Desktop can load), or
+`behind` when an earlier message to the same session is still open. Empty means
+the next scan claims that message: a drain takes only a session's earliest open
+message, or its earliest steer while a turn runs and the target can steer.
 
 ## Claude background sessions
 

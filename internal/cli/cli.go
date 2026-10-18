@@ -1027,6 +1027,8 @@ func queueHoldLabel(hold registry.QueueHold) string {
 		return "held: waiting to retry"
 	case registry.QueueHeldBehind:
 		return "held: behind an earlier message"
+	case registry.QueueHeldUnloaded:
+		return "held: conversation is not loaded"
 	}
 	return "delivers on the next daemon scan"
 }

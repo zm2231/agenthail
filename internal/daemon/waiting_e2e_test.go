@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,8 +143,15 @@ func (p *pushRecorder) first(eventType string) map[string]string {
 // is called or the test ends.
 func runDaemon(t *testing.T, store *registry.Registry, adapters ...surface.Surface) (*runningDaemon, func()) {
 	t.Helper()
+	return runDaemonWith(t, store, func(*Daemon) {}, adapters...)
+}
+
+// runDaemonWith is runDaemon with setup applied to the daemon before it runs.
+func runDaemonWith(t *testing.T, store *registry.Registry, setup func(*Daemon), adapters ...surface.Surface) (*runningDaemon, func()) {
+	t.Helper()
 	d := New(store, adapters)
 	d.pollInterval = 10 * time.Millisecond
+	setup(d)
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: e2eToken}))
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
@@ -437,31 +445,56 @@ func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.
 
 func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) {
 	q := newClaudeQuestion(t)
-	h, _ := runDaemon(t, q.store, q.claude)
+	var armed atomic.Bool
+	selected, release := make(chan *surface.Waiting, 1), make(chan struct{})
+	h, _ := runDaemonWith(t, q.store, func(d *Daemon) {
+		d.catalogSelected = func(id string) {
+			if id == q.session.ID && armed.CompareAndSwap(true, false) {
+				waiting, _, _ := q.store.WaitingState(id)
+				selected <- waiting
+				<-release
+			}
+		}
+	}, q.claude)
 	eventually(t, "the session to show it is waiting on the user", func() bool { return h.sessionWaiting(q.session.ID) != nil })
 	eventually(t, "the question to be announced", func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)
 		return err == nil && announced
 	})
-	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	q.claude.awaitObservations(t, 1)
-	// A catalog publication that has selected the question holds the
-	// session's waiting lock until its row commits.
-	unlock := h.daemon.lockWaiting(q.session.ID)
-	if waiting := h.daemon.catalogWaiting(context.Background(), q.claude, q.session); waiting == nil || waiting.ID != questionID {
-		unlock()
-		t.Fatalf("selected=%+v", waiting)
+	armed.Store(true)
+	h.daemon.catalogNudge <- struct{}{}
+	select {
+	case waiting := <-selected:
+		if waiting == nil || waiting.ID != questionID {
+			close(release)
+			t.Fatalf("the paused publication selected %+v", waiting)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no catalog publication reached the session")
 	}
 	q.answer(t)
-	before := q.claude.observations()
-	time.Sleep(50 * time.Millisecond)
-	if after := q.claude.observations(); after != before {
-		unlock()
-		t.Fatalf("the turn was observed %d times while a catalog row was being published", after-before)
+	answered := q.session
+	observed := make(chan error, 1)
+	go func() {
+		observation, err := h.daemon.observeTurn(context.Background(), q.claude, &answered)
+		if err == nil && observation.WaitingOn != nil {
+			err = fmt.Errorf("observation after the answer still waits: %+v", observation.WaitingOn)
+		}
+		observed <- err
+	}()
+	// The answer must not be recorded while a row carrying the question is
+	// still to be written. The bound only limits how long a broken lock takes
+	// to show; a correct one blocks the observation until release.
+	select {
+	case <-observed:
+		close(release)
+		t.Fatal("the answer was recorded while a catalog row with the question was still to be written")
+	case <-time.After(200 * time.Millisecond):
 	}
-	unlock()
+	close(release)
+	if err := <-observed; err != nil {
+		t.Fatal(err)
+	}
 	cleared := func() bool {
 		recorded, _, err := q.store.WaitingState(q.session.ID)
 		if err != nil || recorded != nil || h.sessionWaiting(q.session.ID) != nil {
@@ -479,10 +512,17 @@ func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) 
 		return false
 	}
 	eventually(t, "the answer to clear the record, the catalog and the API", cleared)
-	q.claude.awaitObservations(t, 3)
-	if !cleared() {
-		t.Fatal("a later pass brought the answered question back")
+	armed.Store(true)
+	h.daemon.catalogNudge <- struct{}{}
+	select {
+	case waiting := <-selected:
+		if waiting != nil {
+			t.Fatalf("a later publication selected the answered question: %+v", waiting)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no later catalog publication reached the session")
 	}
+	eventually(t, "the later publication to keep the session clear", cleared)
 	if got := q.pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}

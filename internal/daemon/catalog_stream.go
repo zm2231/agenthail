@@ -455,6 +455,9 @@ func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surf
 	}
 	defer d.lockWaiting(session.ID)()
 	session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
+	if d.catalogSelected != nil {
+		d.catalogSelected(session.ID)
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
 		payload, err := json.Marshal(map[string]any{"session": row})

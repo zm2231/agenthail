@@ -336,18 +336,17 @@ The daemon delivers queued work when a target becomes idle. Queue delivery is
 ordered per session. Known pre-dispatch failures retry with bounded backoff.
 Repeated failures become dead letters. Uncertain external effects remain in
 audit history and are never automatically resent. Proven problems are reported
-by the daemon. Pending
-messages never expire; they leave the queue only when delivered, canceled, or
-failed. Each pending row reports `heldBy` (`waiting`, `busy`, `offline`,
-`unknown`, `retrying`, `behind` an earlier message) and its age in text output. A target whose turn is waiting
-on its user (a Claude question, plan approval or permission prompt, a Codex approval or input
-request) carries `waitingOn` and lists as `wait`; messages to it, including
-steers, are queued until the user answers. Do not interrupt it to get a message
-through. Finished items appear in history and remain available through
-`queue list --all`. `--target` filters by
-destination, `--mine` includes messages sent by or addressed to the caller
-session, and `--cwd` includes target sessions in that normalized workspace and
-its descendants.
+by the daemon. Pending messages never expire; they leave the queue only when
+delivered, canceled, or failed. Each pending row reports `heldBy` (`waiting`,
+`busy`, `offline`, `unknown`, `retrying`, `notLoaded`, `behind` an earlier
+message) and its age in text output. A target whose turn is waiting on its user
+(a Claude question, plan approval or permission prompt, a Codex approval or
+input request) carries `waitingOn` and lists as `wait`; messages to it,
+including steers, are queued until the user answers. Do not interrupt it to get
+a message through. Finished items appear in history and remain available through
+`queue list --all`. `--target` filters by destination, `--mine` includes
+messages sent by or addressed to the caller session, and `--cwd` includes target
+sessions in that normalized workspace and its descendants.
 
 ## Channels
 
