@@ -56,18 +56,14 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil || len(sessions) != 1 || sessions[0].ID != "local-id" || sessions[0].Transport != "uds" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
-	caller, found, err := adapter.ResolveCaller(context.Background(), []int{os.Getpid()})
-	if err != nil || !found || caller.ID != "local-id" {
-		t.Fatalf("caller=%+v found=%v err=%v", caller, found, err)
-	}
 	if sessions[0].Transcript != transcript {
 		t.Fatal("transcript escaped adapter home")
 	}
 	record["bridgeSessionId"] = "session_bridge"
 	write(record)
 	resolved, err := adapter.Resolve(context.Background(), "local-id")
-	if err != nil || resolved.ID != "session_bridge" {
-		t.Fatalf("local sender id resolve=%+v err=%v", resolved, err)
+	if err != nil || resolved.ID != "local-id" || resolved.Bridge != "session_bridge" {
+		t.Fatalf("conversation with a Remote Control attachment=%+v err=%v", resolved, err)
 	}
 	record["agenthail"] = "peer-worker"
 	write(record)
@@ -83,73 +79,9 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil || len(sessions) != 0 {
 		t.Fatalf("stale PID admitted=%+v err=%v", sessions, err)
 	}
-	if _, _, err := adapter.ResolveCaller(context.Background(), []int{os.Getpid()}); err == nil {
-		t.Fatal("stale caller endpoint was allowed to fall back")
-	}
 }
 
-func TestResolveCallerPicksInnermostNestedClaude(t *testing.T) {
-	home := t.TempDir()
-	sessionsDir := filepath.Join(home, ".claude", "sessions")
-	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
-		t.Fatal(err)
-	}
-	outer := exec.Command("/bin/sh", "-c", "sleep 10")
-	if err := outer.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = outer.Process.Kill()
-		_ = outer.Wait()
-	}()
-	start := func(pid int) string {
-		command := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
-		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-		output, err := command.Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(output)
-	}
-	listen := func(pid int) string {
-		socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock")
-		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
-			t.Fatalf("test socket already exists %s: %v", socket, err)
-		}
-		listener, err := net.Listen("unix", socket)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { listener.Close() })
-		return socket
-	}
-	write := func(pid int, id, socket string) {
-		record := map[string]any{"pid": pid, "sessionId": id, "name": id, "cwd": "/fixture", "status": "idle", "version": "2.1.270", "procStart": start(pid), "messagingSocketPath": socket}
-		data, _ := json.Marshal(record)
-		if err := os.WriteFile(filepath.Join(sessionsDir, strconv.Itoa(pid)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	innerPID := os.Getpid()
-	outerPID := outer.Process.Pid
-	write(innerPID, "inner-session", listen(innerPID))
-	write(outerPID, "outer-session", listen(outerPID))
-
-	adapter := NewClaude("", home)
-	caller, found, err := adapter.ResolveCaller(context.Background(), []int{innerPID, outerPID})
-	if err != nil || !found || caller.ID != "inner-session" {
-		t.Fatalf("innermost caller=%+v found=%v err=%v", caller, found, err)
-	}
-	caller, found, err = adapter.ResolveCaller(context.Background(), []int{outerPID, innerPID})
-	if err != nil || !found || caller.ID != "outer-session" {
-		t.Fatalf("reversed caller=%+v found=%v err=%v", caller, found, err)
-	}
-}
-
-func TestLaterProcessSharingASessionIDResolvesAsItself(t *testing.T) {
+func TestLaterProcessSharingAConversationLeavesTheFirstAttached(t *testing.T) {
 	home := t.TempDir()
 	sessionsDir := filepath.Join(home, ".claude", "sessions")
 	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
@@ -197,10 +129,6 @@ func TestLaterProcessSharingASessionIDResolvesAsItself(t *testing.T) {
 	sessions, err := adapter.List(context.Background())
 	if err != nil || len(sessions) != 1 || sessions[0].PID != firstPID {
 		t.Fatalf("listed=%+v err=%v", sessions, err)
-	}
-	caller, found, err := adapter.ResolveCaller(context.Background(), []int{laterPID})
-	if err != nil || !found || caller.ID != "shared" || caller.PID != laterPID {
-		t.Fatalf("later caller=%+v found=%v err=%v", caller, found, err)
 	}
 	if _, _, found, err := adapter.nativeCaller(context.Background(), "shared"); err != nil || found {
 		t.Fatalf("a shared session id picked one process's socket: found=%v err=%v", found, err)
@@ -447,7 +375,7 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 	if adapter.CanSendHumanTurn(&sessions[0]) {
 		t.Fatal("person-authored send routed to Remote Control")
 	}
-	if _, err := adapter.postMessage(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude}, "hello"); !surface.IsDeliveryUnavailable(err) {
+	if _, err := adapter.postMessage(context.Background(), &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude}, "hello"); !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("remote control post err=%v", err)
 	}
 	record["messagingSocketPath"] = filepath.Join(home, "missing.sock")

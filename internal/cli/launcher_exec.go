@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 type launcherIntent struct {
@@ -45,6 +47,7 @@ func (a *App) cmdLauncherExec(args []string) error {
 	}
 	cmd := exec.CommandContext(context.Background(), intent.Argv[0], intent.Argv[1:]...)
 	cmd.Dir = intent.Cwd
+	cmd.Env = surface.AgentEnv(os.Environ())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

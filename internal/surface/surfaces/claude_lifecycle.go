@@ -41,7 +41,7 @@ func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...stri
 // the file is gone. Without CMUX_ variables the wrapper passes through.
 func claudeCommandEnv(home string) []string {
 	var env []string
-	for _, entry := range os.Environ() {
+	for _, entry := range surface.AgentEnv(os.Environ()) {
 		if !strings.HasPrefix(entry, "CMUX_") {
 			env = append(env, entry)
 		}
@@ -124,9 +124,8 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if err != nil {
 		return nil, err
 	}
-	localID := c.conversationOf(session)
 	for _, record := range records {
-		if record.Kind != "background" || (record.SessionID != session.ID && record.SessionID != localID) {
+		if record.Kind != "background" || record.SessionID != session.ID {
 			continue
 		}
 		if action == "status" {

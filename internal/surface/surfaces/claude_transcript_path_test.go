@@ -149,7 +149,7 @@ func TestClaudeBridgeSessionFindsItsTranscriptCreatedAfterDiscovery(t *testing.T
 	}
 	adapter := NewClaude("", home)
 	sessions, err := adapter.List(context.Background())
-	if err != nil || len(sessions) != 1 || sessions[0].ID != "bridge" || sessions[0].Transcript != "" {
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "local" || sessions[0].Bridge != "bridge" || sessions[0].Transcript != "" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
 	session := sessions[0]

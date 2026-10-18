@@ -159,28 +159,7 @@ func toCse(bridgeID string) string {
 }
 
 func (c *Claude) transcriptPath(s *surface.Session) string {
-	return c.resolveTranscript(c.conversationID(s))
-}
-
-// conversationID is the id Claude Code names a session's transcript after.
-// A bridge session's public id differs from it, so it is read from the
-// session record of the process that still owns the session.
-func (c *Claude) conversationID(s *surface.Session) string {
-	if s.PID <= 0 {
-		return s.ID
-	}
-	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(s.PID)+".json"))
-	if err != nil {
-		return s.ID
-	}
-	var record map[string]any
-	if json.Unmarshal(data, &record) != nil || s.ID != str(record, "bridgeSessionId") {
-		return s.ID
-	}
-	if local := str(record, "sessionId"); local != "" {
-		return local
-	}
-	return s.ID
+	return c.resolveTranscript(s.ID)
 }
 
 // resolveTranscript returns the transcript Claude Code wrote for a
@@ -373,9 +352,8 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 }
 
 type claudeProcess struct {
-	session      surface.Session
-	conversation string
-	startedAt    float64
+	session   surface.Session
+	startedAt float64
 }
 
 // processes returns a session for every live Claude process, including
@@ -428,22 +406,21 @@ func (c *Claude) records() ([]map[string]any, error) {
 }
 
 // process builds the session for a record Agenthail can deliver to: one with
-// a Remote Control bridge or a validated messaging socket. Without Remote
-// Control only the socket counts, under the record's native session id.
+// a Remote Control bridge or a validated messaging socket. The session is the
+// record's conversation; the bridge and socket belong to the process.
 func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(string) string) (claudeProcess, bool) {
+	conversation := str(m, "sessionId")
 	bridge := ""
 	if !c.localOnly {
 		bridge = str(m, "bridgeSessionId")
 	}
 	socket := c.peerSocket(ctx, m)
-	if bridge == "" && socket != "" {
-		bridge = str(m, "sessionId")
-	}
-	if bridge == "" {
+	if conversation == "" || (bridge == "" && socket == "") {
 		return claudeProcess{}, false
 	}
 	sess := surface.Session{
-		ID:      bridge,
+		ID:      conversation,
+		Bridge:  bridge,
 		Surface: surface.KindClaude,
 		Cwd:     str(m, "cwd"),
 		Status:  surface.SessionStatus(str(m, "status")),
@@ -457,8 +434,11 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 	if n, ok := m["name"].(string); ok {
 		sess.Name = n
 	}
-	sess.Transcript = transcript(str(m, "sessionId"))
+	sess.Transcript = transcript(conversation)
 	sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
+	if sess.HasLocal {
+		sess.ForkedFrom = claudeForkedFrom(sess.Transcript)
+	}
 	if sess.Name == "" {
 		sess.Name = c.firstUserMessage(sess.Transcript)
 	}
@@ -474,7 +454,7 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 	} else {
 		startedAt = math.MaxFloat64
 	}
-	return claudeProcess{session: sess, conversation: str(m, "sessionId"), startedAt: startedAt}, true
+	return claudeProcess{session: sess, startedAt: startedAt}, true
 }
 
 // applyRecordStatus derives status and last activity from the peer record,
@@ -518,7 +498,7 @@ func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surf
 	if err := json.Unmarshal(raw, &record); err != nil {
 		return session, err
 	}
-	if str(record, "bridgeSessionId") != session.ID && str(record, "sessionId") != session.ID {
+	if str(record, "sessionId") != session.ID {
 		return session, fmt.Errorf("claude peer record for pid %d belongs to another session", session.PID)
 	}
 	c.applyRecordStatus(ctx, &session, record)
@@ -762,19 +742,22 @@ func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message
 		return nil, ctx.Err()
 	default:
 	}
+	if sess.Bridge == "" {
+		return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude conversation %s has no Remote Control attachment", sess.ID))
+	}
 	uuid := newUUID()
-	cse := toCse(sess.ID)
+	cse := toCse(sess.Bridge)
 	body := map[string]any{
 		"events": []map[string]any{{
 			"payload": map[string]any{
-				"type": "user", "uuid": uuid, "session_id": sess.ID,
+				"type": "user", "uuid": uuid, "session_id": sess.Bridge,
 				"parent_tool_use_id": nil,
 				"message":            map[string]any{"role": "user", "content": message},
 			},
 		}},
 	}
 	bodyBytes, _ := json.Marshal(body)
-	headers := c.headerMap("", sess.ID)
+	headers := c.headerMap("", sess.Bridge)
 	headers["content-type"] = "application/json"
 	request := c.request
 	if request == nil {
@@ -1147,7 +1130,10 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 		return fmt.Errorf("session idle; nothing to interrupt")
 	}
 	sess = current
-	cse := toCse(sess.ID)
+	if sess.Bridge == "" {
+		return surface.ErrUnsupported
+	}
+	cse := toCse(sess.Bridge)
 	reqID := "interrupt-" + strconv.FormatInt(time.Now().UnixMilli(), 10) + "-" + randSeq(6)
 	body := map[string]any{
 		"events": []map[string]any{{
@@ -1160,7 +1146,7 @@ func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
 		}},
 	}
 	bodyBytes, _ := json.Marshal(body)
-	headers := c.headerMap("", sess.ID)
+	headers := c.headerMap("", sess.Bridge)
 	headers["content-type"] = "application/json"
 	status, respBody, err := sidecarRequestWithCookies(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",

@@ -114,118 +114,57 @@ func TestRecordCatalogDiscoveryStampsOnlySeenFreshRows(t *testing.T) {
 	}
 }
 
-func TestDiscoveredClaudeAgentAbsorbsItsLaunchRecord(t *testing.T) {
+func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testing.T) {
 	r := openTestRegistry(t)
-	transcript := "/home/test/.claude/projects/-work/conversation-1.jsonl"
-	launch := surface.Session{ID: "conversation-1", Surface: surface.KindClaude, Name: "builder", Cwd: "/work", Status: surface.StatusUnknown, HasLocal: true, Source: "agenthail"}
-	if err := r.RegisterSession(launch); err != nil {
+	original, originalEvent := unchangedCatalogState("conversation-a", time.Now())
+	original.Session = surface.Session{ID: "conversation-a", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Bridge: "session_bridge", Transcript: "/home/test/.claude/projects/-work/conversation-a.jsonl", HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	if _, _, err := r.RecordCatalogSession(original, originalEvent); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetAlias("builder", launch.ID); err != nil {
+	if err := r.SetAlias("lead", original.Session.ID); err != nil {
 		t.Fatal(err)
 	}
-	state, event := unchangedCatalogState("session_bridge", time.Now())
-	state.Session = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Name: "builder", Cwd: "/work", PID: 4242, Status: surface.StatusBusy, Transcript: transcript, HasLocal: true, Transport: "uds", Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
-	if _, _, err := r.RecordCatalogSession(state, event); err != nil {
+	if err := r.QueueMessage(original.Session.ID, "for the original"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Session(launch.ID); err == nil {
-		t.Fatal("launch record survived discovery of the same agent")
+	if unchanged, err := r.catalogSessionUnchanged(original, originalEvent); err != nil || !unchanged {
+		t.Fatalf("unchanged=%v err=%v", unchanged, err)
 	}
-	if owner, err := r.LookupAlias("builder"); err != nil || owner != "session_bridge" {
+	branch, branchEvent := unchangedCatalogState("conversation-b", time.Now())
+	branch.Session = surface.Session{ID: "conversation-b", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Bridge: "session_bridge", ForkedFrom: "conversation-a", Transcript: "/home/test/.claude/projects/-work/conversation-b.jsonl", HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	if _, _, err := r.RecordCatalogSession(branch, branchEvent); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := r.Session("conversation-a")
+	if err != nil || kept.PID != 0 || kept.Bridge != "" {
+		t.Fatalf("original=%+v err=%v", kept, err)
+	}
+	forked, err := r.Session("conversation-b")
+	if err != nil || forked.PID != 77 || forked.Bridge != "session_bridge" || forked.ForkedFrom != "conversation-a" {
+		t.Fatalf("branch=%+v err=%v", forked, err)
+	}
+	if owner, err := r.LookupAlias("lead"); err != nil || owner != "conversation-a" {
 		t.Fatalf("alias owner=%q err=%v", owner, err)
 	}
-}
-
-func TestDiscoveredClaudeAgentKeepsUnrelatedConversationRows(t *testing.T) {
-	r := openTestRegistry(t)
-	live := surface.Session{ID: "conversation-2", Surface: surface.KindClaude, Name: "other", Cwd: "/work", PID: 99, Status: surface.StatusIdle}
-	if err := r.RegisterSession(live); err != nil {
-		t.Fatal(err)
+	if r.QueueCount("conversation-a") != 1 || r.QueueCount("conversation-b") != 0 {
+		t.Fatalf("queue a=%d b=%d", r.QueueCount("conversation-a"), r.QueueCount("conversation-b"))
 	}
-	discovered := surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Cwd: "/work", PID: 4242, Transcript: "/home/test/.claude/projects/-work/conversation-2.jsonl", HasLocal: true}
-	if err := r.RegisterSession(discovered); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.Session(live.ID); err != nil {
-		t.Fatalf("row with a live process was merged: %v", err)
+	if unchanged, err := r.catalogSessionUnchanged(original, originalEvent); err != nil || unchanged {
+		t.Fatalf("original still holding the branch's process counted as unchanged: %v %v", unchanged, err)
 	}
 }
 
-func TestDiscoveredClaudeAgentAbsorbsLaunchRegisteredAfterIt(t *testing.T) {
+func TestForkedFromIsSetOnce(t *testing.T) {
 	r := openTestRegistry(t)
-	transcript := "/home/test/.claude/projects/-work/conversation-3.jsonl"
-	state, event := unchangedCatalogState("session_bridge", time.Now())
-	state.Session = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Cwd: "/work", PID: 4242, Status: surface.StatusBusy, Transcript: transcript, HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
-	if _, _, err := r.RecordCatalogSession(state, event); err != nil {
+	session := surface.Session{ID: "conversation-b", Surface: surface.KindClaude, ForkedFrom: "conversation-a"}
+	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(surface.Session{ID: "conversation-3", Surface: surface.KindClaude, Cwd: "/work", Status: surface.StatusUnknown, Source: "agenthail"}); err != nil {
+	session.ForkedFrom = ""
+	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetAlias("late", "conversation-3"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := r.RecordCatalogSession(state, event); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.Session("conversation-3"); err == nil {
-		t.Fatal("next discovery pass kept the launch record")
-	}
-	if owner, err := r.LookupAlias("late"); err != nil || owner != "session_bridge" {
-		t.Fatalf("alias owner=%q err=%v", owner, err)
-	}
-}
-
-func TestMergedSessionKeepsDeliveryIntentsAndLeavesTheCatalog(t *testing.T) {
-	stubLiveProcesses(t, 77)
-	r := openTestRegistry(t)
-	transcript := "/home/test/.claude/projects/-work/conversation-4.jsonl"
-	legacy, legacyEvent := unchangedCatalogState("conversation-4", time.Now())
-	legacy.Session = surface.Session{ID: "conversation-4", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Transcript: transcript, HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
-	if _, _, err := r.RecordCatalogSession(legacy, legacyEvent); err != nil {
-		t.Fatal(err)
-	}
-	other := surface.Session{ID: "other", Surface: surface.KindCodex}
-	if err := r.RegisterSession(other); err != nil {
-		t.Fatal(err)
-	}
-	inbound, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: other.ID, TargetSessionID: legacy.Session.ID, Message: "to the agent", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
-	if err != nil {
-		t.Fatal(err)
-	}
-	outbound, err := r.RecordDeliveryIntent(DeliveryIntentInput{SenderSessionID: legacy.Session.ID, TargetSessionID: other.ID, Message: "from the agent", Status: DeliveryIntentSubmitted, Evidence: surface.EvidenceSubmitted})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, latest, err := r.CatalogState()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bridge, bridgeEvent := unchangedCatalogState("session_bridge", time.Now())
-	bridge.Session = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Transcript: transcript, HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
-	if _, _, err := r.RecordCatalogSession(bridge, bridgeEvent); err != nil {
-		t.Fatal(err)
-	}
-	if moved, err := r.DeliveryIntent(inbound.ID); err != nil || moved.TargetSessionID != "session_bridge" {
-		t.Fatalf("inbound=%+v err=%v", moved, err)
-	}
-	if moved, err := r.DeliveryIntent(outbound.ID); err != nil || moved.SenderSessionID != "session_bridge" {
-		t.Fatalf("outbound=%+v err=%v", moved, err)
-	}
-	snapshot, err := r.CatalogSnapshot()
-	if err != nil || len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Session.ID != "session_bridge" {
-		t.Fatalf("snapshot=%+v err=%v", snapshot.Sessions, err)
-	}
-	window, err := r.CatalogEventsAfter(latest, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	removed := false
-	for _, event := range window.Events {
-		removed = removed || (event.Type == "session.removed" && event.EntityID == "conversation-4")
-	}
-	if !removed {
-		t.Fatalf("events=%+v", window.Events)
+	if stored, err := r.Session(session.ID); err != nil || stored.ForkedFrom != "conversation-a" {
+		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
 }

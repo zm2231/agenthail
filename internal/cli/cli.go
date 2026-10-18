@@ -207,7 +207,7 @@ Other:
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
 Sender: --from resolves a session; otherwise identity comes from AGENTHAIL_SESSION_ID,
-        CLAUDE_SESSION_ID, the verified native Claude caller, then CODEX_THREAD_ID.
+        CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID.
         Native Claude peers require the daemon and register automatically before sending.
 `)
 }
@@ -254,7 +254,7 @@ func (a *App) cmdCodex(args []string) error {
 		}, path)
 	}
 	argv := append([]string{"codex", "--remote", "unix://"}, codexRemoteArgs(args, cwd)...)
-	return syscall.Exec(path, argv, os.Environ())
+	return syscall.Exec(path, argv, surface.AgentEnv(os.Environ()))
 }
 
 type managedCodexPreparer func(context.Context, string, string) (*surface.Session, error)
@@ -313,7 +313,7 @@ func runManagedCodexLaunch(ctx context.Context, args []string, cwd, launchID, re
 	if message != "" {
 		argv = append(argv, "--", message)
 	}
-	return execute(path, argv, os.Environ())
+	return execute(path, argv, surface.AgentEnv(os.Environ()))
 }
 
 func managedCodexLaunchArgs(args []string) (string, string, error) {
@@ -377,7 +377,7 @@ func (a *App) cmdVersion(args []string) error {
 	if len(stripFlags(args)) != 0 {
 		return fmt.Errorf("usage: agenthail version [--json]")
 	}
-	result := map[string]any{"version": "dev", "revision": "unknown", "modified": false}
+	result := map[string]any{"version": "dev", "revision": "unknown", "modified": false, "schemaVersion": registry.SchemaVersion()}
 	if a.Version != "" {
 		result["version"] = a.Version
 	}
@@ -2155,7 +2155,7 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 			return nil, err
 		}
 		if mineID == "" {
-			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_SESSION_ID")
+			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_CODE_SESSION_ID")
 		}
 	}
 	root := ""
@@ -2475,6 +2475,7 @@ func launchCodex(codex surface.Surface) error {
 	}
 
 	cmd := exec.Command(exe, codexLaunchArgs()...)
+	cmd.Env = surface.AgentEnv(os.Environ())
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -29,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 13
+	schemaVersion   = 14
 	queueMessageTTL = time.Hour
 	readConnections = 4
 )
@@ -44,6 +43,9 @@ func queueMessageTTLLabel() string {
 	}
 	return queueMessageTTL.String()
 }
+
+// SchemaVersion is the user_version a registry has once this build opens it.
+func SchemaVersion() int { return schemaVersion }
 
 func Open(path string) (*Registry, error) {
 	private := path == ""
@@ -134,6 +136,8 @@ func (r *Registry) migrate() error {
 		{"source", `TEXT NOT NULL DEFAULT ''`},
 		{"transport", `TEXT NOT NULL DEFAULT ''`},
 		{"configured_model", `TEXT NOT NULL DEFAULT ''`},
+		{"bridge", `TEXT NOT NULL DEFAULT ''`},
+		{"forked_from", `TEXT NOT NULL DEFAULT ''`},
 		{"last_active_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"parent_session_id", `TEXT NOT NULL DEFAULT ''`},
 		{"root_session_id", `TEXT NOT NULL DEFAULT ''`},
@@ -231,6 +235,11 @@ func (r *Registry) migrate() error {
 	if _, err := r.db.Exec(`UPDATE message_queue SET evidence='delivered' WHERE status='delivered' AND evidence=''`); err != nil {
 		return err
 	}
+	if version < 14 {
+		if err := r.rekeyClaudeConversations(version); err != nil {
+			return err
+		}
+	}
 	if version >= schemaVersion {
 		return nil
 	}
@@ -248,9 +257,6 @@ func (r *Registry) migrate() error {
 		ON message_queue(delivery_key) WHERE delivery_key!='';
 		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`, queueMessageTTL.Milliseconds()))
 	if err != nil {
-		return err
-	}
-	if err := r.mergeDuplicateClaudeSessions(); err != nil {
 		return err
 	}
 	_, err = r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
@@ -298,9 +304,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 	has_local INTEGER NOT NULL DEFAULT 0,
 	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
 	configured_model TEXT NOT NULL DEFAULT '',
+	bridge TEXT NOT NULL DEFAULT '', forked_from TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
 	registered_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS session_rekeys (
+	old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL,
+	rekeyed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS aliases (
 	name TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -601,8 +612,8 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	}
 	parentID, rootID, depth, nickname, role := subagentValues(s)
 	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,bridge,forked_from,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
@@ -619,6 +630,8 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		     ELSE sessions.transport
 			   END,
 			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
+			   bridge=excluded.bridge,
+			   forked_from=CASE WHEN sessions.forked_from<>'' THEN sessions.forked_from ELSE excluded.forked_from END,
 			   last_active_ms=excluded.last_active_ms,
 		   parent_session_id=CASE WHEN excluded.parent_session_id<>'' THEN excluded.parent_session_id ELSE sessions.parent_session_id END,
 		   root_session_id=CASE WHEN excluded.root_session_id<>'' THEN excluded.root_session_id ELSE sessions.root_session_id END,
@@ -626,7 +639,7 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		   agent_nickname=CASE WHEN excluded.agent_nickname<>'' THEN excluded.agent_nickname ELSE sessions.agent_nickname END,
 		   agent_role=CASE WHEN excluded.agent_role<>'' THEN excluded.agent_role ELSE sessions.agent_role END,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, lastActiveMS, parentID, rootID, depth, nickname, role)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, s.Bridge, s.ForkedFrom, lastActiveMS, parentID, rootID, depth, nickname, role)
 	if err != nil {
 		return err
 	}
@@ -639,223 +652,12 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 			return err
 		}
 	}
-	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		duplicates, err := claudeExitedDuplicates(tx, s)
-		if err != nil {
-			return err
-		}
-		for _, duplicate := range duplicates {
-			if err := mergeSessionTx(tx, duplicate, s.ID); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// claudeDuplicateQuery finds other rows for the same Claude conversation: rows
-// sharing the transcript, and the launch record a background start registered
-// under the conversation ID before its process and transcript were known. Only
-// rows whose process has exited, or that belong to the registering process
-// under an earlier id, are absorbed: Claude Code lets one conversation stay
-// open in several processes, and each live one keeps its own row, alias, and
-// queue.
-const claudeDuplicateQuery = `SELECT id,pid FROM sessions WHERE surface=? AND id<>? AND (transcript=? OR (id=? AND transcript='' AND pid=0))`
-
-// claudeExitedDuplicates returns the rows registration absorbs into s: rows of
-// the same conversation whose process has exited, and rows of s's own process
-// left under an earlier id.
-func claudeExitedDuplicates(q catalogQuerier, s surface.Session) ([]string, error) {
-	rows, err := q.Query(claudeDuplicateQuery, string(surface.KindClaude), s.ID, s.Transcript, claudeConversationID(s.Transcript))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var exited []string
-	for rows.Next() {
-		var id string
-		var pid int
-		if err := rows.Scan(&id, &pid); err != nil {
-			return nil, err
-		}
-		if !processAlive(pid) || (s.PID > 0 && pid == s.PID) {
-			exited = append(exited, id)
-		}
-	}
-	return exited, rows.Err()
-}
-
-func claudeConversationID(transcript string) string {
-	return strings.TrimSuffix(filepath.Base(transcript), ".jsonl")
-}
-
-func (r *Registry) mergeDuplicateClaudeSessions() error {
-	rows, err := r.db.Query(`SELECT transcript FROM sessions WHERE surface=? AND transcript<>'' GROUP BY transcript HAVING COUNT(*)>1`, string(surface.KindClaude))
-	if err != nil {
-		return err
-	}
-	var transcripts []string
-	for rows.Next() {
-		var transcript string
-		if err := rows.Scan(&transcript); err != nil {
-			rows.Close()
-			return err
-		}
-		transcripts = append(transcripts, transcript)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, transcript := range transcripts {
-		survivor, exited, err := r.claudeTranscriptRows(transcript)
-		if err != nil {
-			return err
-		}
-		if len(exited) == 0 {
-			continue
-		}
-		tx, err := r.db.Begin()
-		if err != nil {
-			return err
-		}
-		for _, duplicate := range exited {
-			if err := mergeSessionTx(tx, duplicate, survivor); err != nil {
-				tx.Rollback()
-				return err
-			}
-		}
-		if err := tx.Commit(); err != nil {
+	if s.Surface == surface.KindClaude && s.PID > 0 {
+		if _, err := tx.Exec(`UPDATE sessions SET pid=0,bridge='',updated_at=datetime('now') WHERE surface=? AND pid=? AND id<>?`, string(surface.KindClaude), s.PID, s.ID); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// claudeTranscriptRows picks the row that absorbs the other rows sharing a
-// transcript: the most recent live row, or the most recent row when none is
-// live. It absorbs exited rows and rows of the survivor's own process; rows
-// of other live processes are left alone.
-func (r *Registry) claudeTranscriptRows(transcript string) (string, []string, error) {
-	rows, err := r.db.Query(`SELECT id,pid FROM sessions WHERE surface=? AND transcript=? ORDER BY updated_at DESC,registered_at DESC,rowid DESC`, string(surface.KindClaude), transcript)
-	if err != nil {
-		return "", nil, err
-	}
-	defer rows.Close()
-	var survivor string
-	var survivorPID int
-	var exited []string
-	var live []struct {
-		id  string
-		pid int
-	}
-	for rows.Next() {
-		var id string
-		var pid int
-		if err := rows.Scan(&id, &pid); err != nil {
-			return "", nil, err
-		}
-		switch {
-		case !processAlive(pid):
-			exited = append(exited, id)
-		case survivor == "":
-			survivor, survivorPID = id, pid
-		default:
-			live = append(live, struct {
-				id  string
-				pid int
-			}{id, pid})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return "", nil, err
-	}
-	for _, row := range live {
-		if row.pid == survivorPID {
-			exited = append(exited, row.id)
-		}
-	}
-	if survivor == "" && len(exited) > 0 {
-		survivor, exited = exited[0], exited[1:]
-	}
-	return survivor, exited, nil
-}
-
-// processAlive reports whether pid names a running process. A process owned by
-// another user still counts.
-var processAlive = func(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
-func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
-	if oldID == currentID {
-		return nil
-	}
-	var alias string
-	_ = tx.QueryRow(`SELECT name FROM aliases WHERE session_id IN (?,?) ORDER BY rowid DESC LIMIT 1`, oldID, currentID).Scan(&alias)
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,? FROM channel_members WHERE session_id=?`, currentID, oldID); err != nil {
-		return err
-	}
-	statements := []struct {
-		query string
-		args  []any
-	}{
-		{`DELETE FROM channel_members WHERE session_id=?`, []any{oldID}},
-		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
-		{`UPDATE routes SET to_session=? WHERE to_session=?`, []any{currentID, oldID}},
-		{`DELETE FROM routes WHERE from_session=to_session`, nil},
-		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern,handoff,once_only,active,event_cursor,last_goal_key) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
-		{`UPDATE message_queue SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
-		{`UPDATE message_queue SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
-		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
-		{`UPDATE delivery_history SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
-		{`UPDATE delivery_history SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
-		{`UPDATE delivery_intents SET sender_session_id=? WHERE sender_session_id=?`, []any{currentID, oldID}},
-		{`UPDATE OR IGNORE delivery_intents SET target_session_id=? WHERE target_session_id=?`, []any{currentID, oldID}},
-		{`DELETE FROM session_runtime WHERE session_id=?`, []any{oldID}},
-		{`DELETE FROM aliases WHERE session_id IN (?,?)`, []any{oldID, currentID}},
-	}
-	for _, statement := range statements {
-		if _, err := tx.Exec(statement.query, statement.args...); err != nil {
-			return err
-		}
-	}
-	if alias != "" {
-		if _, err := tx.Exec(`INSERT INTO aliases(name,session_id) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET session_id=excluded.session_id`, alias, currentID); err != nil {
-			return err
-		}
-	}
-	if err := removeMergedCatalogRowTx(tx, oldID, currentID); err != nil {
-		return err
-	}
-	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID)
-	return err
-}
-
-// removeMergedCatalogRowTx tells catalog subscribers that a merged session's
-// row is gone; deleting the session would otherwise drop it silently.
-func removeMergedCatalogRowTx(tx *sql.Tx, oldID, currentID string) error {
-	var cataloged bool
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog_sessions')`).Scan(&cataloged); err != nil || !cataloged {
-		return err
-	}
-	var kind string
-	err := tx.QueryRow(`SELECT s.surface FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE cs.session_id=?`, oldID).Scan(&kind)
-	if err == sql.ErrNoRows {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(map[string]string{"sessionId": oldID, "surface": kind, "reason": "merged", "mergedInto": currentID})
-	if err != nil {
-		return err
-	}
-	_, _, err = appendCatalogEventTx(tx, CatalogEvent{DedupeKey: "session.removed:" + oldID + ":merged:" + currentID, Type: "session.removed", EntityID: oldID, Payload: payload})
-	return err
 }
 
 func (r *Registry) LookupAlias(name string) (string, error) {
@@ -2396,8 +2198,8 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var location []byte
 	var focusable int
 	var subagent subagentColumns
-	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable,
+	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable,
 	}, subagent.targets()...)...)
 	if err != nil {
 		return nil, err
@@ -2426,7 +2228,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
+	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
@@ -2444,7 +2246,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
 		subagent.apply(&session)
@@ -2471,7 +2273,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -2492,7 +2294,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
 		subagent.apply(&session)
