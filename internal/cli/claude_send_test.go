@@ -97,7 +97,7 @@ func TestSendToExitedSessionByExactRegisteredID(t *testing.T) {
 
 func TestFragmentDoesNotResolveAnExitedHistoricalSession(t *testing.T) {
 	app, _, fixture, posts, _ := exitedClaudeApp(t)
-	for _, target := range []string{"fixture terminal", "session_term"} {
+	for _, target := range []string{"fixture terminal", "session_term", "claude:fixture terminal", "claude:session_term"} {
 		if err := app.Run([]string{"send", target, "hello"}); err == nil {
 			t.Fatalf("fragment %q resolved an exited historical session", target)
 		}
