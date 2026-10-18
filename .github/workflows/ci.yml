@@ -142,6 +142,28 @@ jobs:
           bash -n packaging/scripts/preinstall packaging/scripts/postinstall
           python3 -m py_compile sidecar/sidecar.py
 
+  verify-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Race tests
+        run: go test ./... -race -count=1
+      - name: Build Linux archives
+        run: |
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch AGENTHAIL_VERSION=v0.0.0-ci scripts/package-release.sh
+          done
+          (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
+
   ios:
     needs: changes
     if: needs.changes.outputs.ios == 'true'
