@@ -96,6 +96,9 @@ func (r *Registry) migrate() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := r.ensureHostIdentity(); err != nil {
+		return err
+	}
 	if err := r.ensureColumn("routes", "once_only", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}

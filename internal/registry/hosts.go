@@ -68,21 +68,22 @@ func ValidHostID(id string) bool {
 func (r *Registry) HostIdentity() (HostIdentity, error) {
 	var identity HostIdentity
 	err := r.read.QueryRow(`SELECT host_id,name FROM host_identity WHERE id=1`).Scan(&identity.ID, &identity.Name)
-	if err == nil {
-		return identity, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return HostIdentity{}, err
+	return identity, err
+}
+
+// ensureHostIdentity creates this daemon's host id once, when the registry is
+// opened, so reading the identity never writes.
+func (r *Registry) ensureHostIdentity() error {
+	var exists bool
+	if err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM host_identity WHERE id=1)`).Scan(&exists); err != nil || exists {
+		return err
 	}
 	raw := make([]byte, 6)
 	if _, err := rand.Read(raw); err != nil {
-		return HostIdentity{}, fmt.Errorf("generate host id: %w", err)
+		return fmt.Errorf("generate host id: %w", err)
 	}
-	if _, err := r.db.Exec(`INSERT OR IGNORE INTO host_identity(id,host_id,name) VALUES(1,?,?)`, "h"+hex.EncodeToString(raw), defaultHostName()); err != nil {
-		return HostIdentity{}, err
-	}
-	err = r.db.QueryRow(`SELECT host_id,name FROM host_identity WHERE id=1`).Scan(&identity.ID, &identity.Name)
-	return identity, err
+	_, err := r.db.Exec(`INSERT OR IGNORE INTO host_identity(id,host_id,name) VALUES(1,?,?)`, "h"+hex.EncodeToString(raw), defaultHostName())
+	return err
 }
 
 func defaultHostName() string {
