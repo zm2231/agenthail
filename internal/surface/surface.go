@@ -169,6 +169,14 @@ func IsDeliveryUnavailable(err error) bool {
 	return errors.As(err, &target)
 }
 
+// ErrDeliveryHeld marks an unavailable delivery whose target is running but
+// cannot accept a message yet; the message waits in the queue until it can.
+var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
+
+func IsDeliveryHeld(err error) bool {
+	return IsDeliveryUnavailable(err) && errors.Is(err, ErrDeliveryHeld)
+}
+
 type DeliveryTerminalKind string
 
 const (

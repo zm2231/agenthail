@@ -170,7 +170,12 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, intentErr
 		}
 	}
+	addressed := *session
 	result, err := route.Send(ctx, adapter, session, message, options)
+	d.RegisterReached(&addressed, session)
+	if surface.IsDeliveryHeld(err) {
+		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent)
+	}
 	if err != nil {
 		if surface.IsDeliveryOutcomeUnknown(err) {
 			if intent == nil {
@@ -197,7 +202,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if result.Accepted {
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
-		peerTransport := route.TransportOnly()
+		peerTransport := RouteFor(adapter, session, options.Author).TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
@@ -330,6 +335,18 @@ func (d Dispatcher) markSent(receipt *Receipt, intent *registry.DeliveryIntent, 
 	receipt.Evidence = surface.EvidenceSubmitted
 	receipt.Status = string(registry.DeliveryIntentSubmitted)
 	receipt.Detail = fmt.Sprintf("Submitted to %s.", target)
+}
+
+// RegisterReached records the process a send reached when the surface moved
+// the session to another one, so registration carries the old row's alias,
+// queue and intents over to it.
+func (d Dispatcher) RegisterReached(addressed, reached *surface.Session) {
+	if d.Registry == nil || (addressed.ID == reached.ID && addressed.PID == reached.PID && addressed.Transport == reached.Transport) {
+		return
+	}
+	if err := d.Registry.RegisterSession(*reached); err != nil {
+		d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: reached.ID, Error: fmt.Sprintf("register reached session: %s", err)})
+	}
 }
 
 func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, error) {
