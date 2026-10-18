@@ -377,7 +377,7 @@ func (a *App) cmdVersion(args []string) error {
 	if len(stripFlags(args)) != 0 {
 		return fmt.Errorf("usage: agenthail version [--json]")
 	}
-	result := map[string]any{"version": "dev", "revision": "unknown", "modified": false}
+	result := map[string]any{"version": "dev", "revision": "unknown", "modified": false, "schemaVersion": registry.SchemaVersion()}
 	if a.Version != "" {
 		result["version"] = a.Version
 	}

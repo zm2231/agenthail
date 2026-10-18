@@ -170,3 +170,14 @@ func TestALaunchedSessionAndItsDiscoveredProcessAreOneRow(t *testing.T) {
 		t.Fatalf("alias owner=%q err=%v", owner, err)
 	}
 }
+
+func TestVersionReportsTheRegistrySchema(t *testing.T) {
+	app, _ := cliFixture(t, &cliSurface{kind: surface.KindClaude})
+	output, err := captureStdout(t, func() error { return app.Run([]string{"version", "--json"}) })
+	var version struct {
+		SchemaVersion int `json:"schemaVersion"`
+	}
+	if err != nil || json.Unmarshal([]byte(output), &version) != nil || version.SchemaVersion != registry.SchemaVersion() || version.SchemaVersion == 0 {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+}

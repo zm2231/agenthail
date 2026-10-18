@@ -44,6 +44,9 @@ func queueMessageTTLLabel() string {
 	return queueMessageTTL.String()
 }
 
+// SchemaVersion is the user_version a registry has once this build opens it.
+func SchemaVersion() int { return schemaVersion }
+
 func Open(path string) (*Registry, error) {
 	private := path == ""
 	if private {
