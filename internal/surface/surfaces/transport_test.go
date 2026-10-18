@@ -245,7 +245,10 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	home, pid := liveBridgeProcess(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	claude := NewClaudeWithRequest("", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		defer cancel()
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -259,8 +262,6 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 		}
 		return 200, `{}`, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
 	err := claude.Compact(ctx, &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
@@ -270,11 +271,12 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	home, pid := liveBridgeProcess(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	claude := NewClaudeWithRequest("", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		cancel()
 		return 200, `{}`, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
 	err := claude.Compact(ctx, &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
