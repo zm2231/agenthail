@@ -260,27 +260,9 @@ struct DeliverySettings: View {
         Form {
             Section("Waiting to go out") {
                 if (model.snapshot?.queue ?? []).isEmpty {
-                    Text("No messages are waiting.").foregroundStyle(DesktopPalette.text2)
+                    Text("Nothing is waiting to be delivered.").foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(model.snapshot?.queue ?? []) { item in
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.target)
-                            Text(PeerEnvelope(item.message).summary)
-                                .font(.system(size: 12))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Text(item.status.capitalized)
-                            .font(.system(size: 11))
-                            .foregroundStyle(item.status == "dead" ? DesktopPalette.red : DesktopPalette.text2)
-                        if item.status == "dead" {
-                            Button("Retry") { model.perform(action: "queue-retry", queueID: item.id) }
-                        }
-                        Button("Cancel") { model.perform(action: "queue-cancel", queueID: item.id) }
-                    }
-                }
+                ForEach(model.snapshot?.queue ?? []) { QueueItemRow(model: model, item: $0) }
             }
             RecentOutcomesSection(history: model.snapshot?.history ?? [])
             Section {
