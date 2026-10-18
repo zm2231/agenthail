@@ -61,7 +61,13 @@ func New(t testing.TB) *Fixture {
 		_ = process.Process.Kill()
 		_ = process.Wait()
 	})
-	f := &Fixture{Home: t.TempDir(), PID: process.Process.Pid, t: t}
+	// A short home keeps sockets under it within the 104-byte path limit.
+	home, err := os.MkdirTemp("", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	f := &Fixture{Home: home, PID: process.Process.Pid, t: t}
 	binary := filepath.Join(f.Home, "claude")
 	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
 		t.Fatal(err)

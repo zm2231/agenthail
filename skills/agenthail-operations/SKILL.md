@@ -191,7 +191,7 @@ launch outcomes; inspect `claude agents --json --all` before retrying.
 Send to a Claude session whose process has ended (a stopped or finished
 background job, or a closed terminal session) like any other session: the send
 resumes it in the background by its session ID and delivers the message once.
-Do not run `thread resume` first. The alias and session ID keep working
+This holds for every sender, voice delegation included. Do not run `thread resume` first. The alias and session ID keep working
 afterwards. If another process still holds the conversation but cannot take
 messages yet, the send is queued and goes out once it can, or once that process
 exits and the session is resumed. An `unknown` or `submitted` outcome means the

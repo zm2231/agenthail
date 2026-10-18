@@ -304,6 +304,12 @@ type OptionSender interface {
 	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
 }
 
+// Waker is a surface whose sends first wake a session that cannot take a
+// message as it is, such as a closed Claude conversation they resume.
+type Waker interface {
+	NeedsWake(ctx context.Context, sess *Session) bool
+}
+
 type SessionAccessChecker interface {
 	EnsureWritable(ctx context.Context, sess *Session) error
 }
