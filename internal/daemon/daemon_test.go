@@ -19,6 +19,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 type daemonSurface struct {
@@ -709,25 +710,6 @@ func TestRelayBoundsVerboseCompletionText(t *testing.T) {
 	}
 }
 
-func TestRelayDoesNotQueueForClosedClaudeSession(t *testing.T) {
-	d, r, _, from, _ := daemonFixture(t)
-	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647}
-	if err := r.RegisterSession(closed); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.AddRoute(from.ID, closed.ID, ".*"); err != nil {
-		t.Fatal(err)
-	}
-	d.fireRelays(&from, "done", 0, "finished")
-	if count := r.QueueCount(closed.ID); count != 0 {
-		t.Fatalf("closed target queued=%d", count)
-	}
-	history, err := r.ListHistory(10, closed.ID)
-	if err != nil || len(history) == 0 || history[0].Kind != "relay-dropped" || !strings.Contains(history[0].Error, "no longer active") {
-		t.Fatalf("history=%+v err=%v", history, err)
-	}
-}
-
 func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
 	d, r, _, from, _ := daemonFixture(t)
 	old := surface.Session{ID: "old", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/shared.jsonl"}
@@ -747,33 +729,22 @@ func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
 	}
 }
 
-func TestInactiveClaudeRouteIsRemovedAfterGracePeriod(t *testing.T) {
-	d, r, _, from, _ := daemonFixture(t)
+func TestRouteFromExitedClaudeSourceIsRemovedAfterGracePeriod(t *testing.T) {
+	d, r, _, from, to := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
-	offlineCodex := surface.Session{ID: "offline-codex", Surface: surface.KindCodex, Status: surface.StatusOffline}
-	offlineNotion := surface.Session{ID: "offline-notion", Surface: surface.KindNotion, Status: surface.StatusOffline}
 	if err := r.RegisterSession(closed); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RegisterSession(offlineCodex); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.RegisterSession(offlineNotion); err != nil {
+	if _, err := r.AddRoute(closed.ID, to.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.AddRoute(from.ID, closed.ID, ".*"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.AddRoute(from.ID, offlineCodex.ID, ".*"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.AddRoute(from.ID, offlineNotion.ID, ".*"); err != nil {
-		t.Fatal(err)
-	}
 	d.Surfaces = append(d.Surfaces, &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}})
 	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour), true)
 	routes, err := r.ListRoutes()
-	if err != nil || len(routes) != 2 || routes[0].ToSession == closed.ID || routes[1].ToSession == closed.ID {
+	if err != nil || len(routes) != 1 || routes[0].FromSession != from.ID || routes[0].ToSession != closed.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
 }
@@ -1029,7 +1000,9 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	if err := os.WriteFile(path, []byte(`{"type":"user","message":{"content":"ready"}}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, Status: surface.StatusIdle, Transcript: path}
+	fixture := claudetest.New(t)
+	fixture.Record("conversation-compact", fixture.Home, "session_compact")
+	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -1038,7 +1011,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 		t.Fatal(err)
 	}
 	requestSent := make(chan string, 1)
-	claude := surfaces.NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+	claude := surfaces.NewClaudeWithRequest("", fixture.Home, func(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}

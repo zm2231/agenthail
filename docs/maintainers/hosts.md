@@ -126,7 +126,9 @@ marks an unreachable host's rows `down`.
 
 Every place that treats `host_id = ''` as "this daemon's session":
 
-- `Registry.ResolveTarget`: exact id, id prefix and name or cwd queries.
+- `Registry.ResolveTarget`, `Registry.ResolveSurfaceTarget` and
+  `Registry.ExactTarget`: alias, exact id, Claude transcript, id prefix and
+  name or cwd queries.
 - `Registry.ListSessions`, `Registry.SearchSessions` and
   `Registry.WatchedSessions`.
 - `Registry.RecordCatalogDiscovery` and `Registry.MarkCatalogDiscoveryFailure`:

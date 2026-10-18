@@ -236,16 +236,14 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := surfaces.ManagedCodexBinary()
+	path, err := surfaces.CodexDaemonCLI()
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
-	start := exec.Command(path, "app-server", "daemon", "start")
-	start.Stdin = os.Stdin
-	start.Stdout = io.Discard
-	start.Stderr = os.Stderr
-	if err := start.Run(); err != nil {
-		return fmt.Errorf("start Codex app-server: %w", err)
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancelStart()
+	if err := surfaces.NewCodex("").EnsureRuntime(startCtx); err != nil {
+		return err
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -374,7 +372,7 @@ func repairManagedCodexRuntime(ctx context.Context) error {
 	if err := surfaces.RestartManagedCodexRuntime(ctx); err != nil {
 		return fmt.Errorf("restart managed Codex runtime: %w", err)
 	}
-	fmt.Println("managed Codex runtime restarted; retry the affected Desktop conversation")
+	fmt.Println("Codex's app-server daemon restarted; retry the affected conversation")
 	return nil
 }
 
@@ -1085,28 +1083,45 @@ func relTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
-// registeredSessionUnavailable explains a registered session with no live
-// process: when its surface still knows the session as a job, the caller needs
-// that state, and the resume command when the job has ended, not a match error.
-func (a *App) registeredSessionUnavailable(ctx context.Context, sid, target string, adapter surface.Surface, resolveErr error) error {
-	err := fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
-	lifecycle, ok := adapter.(surface.SessionLifecycle)
-	if !ok || !errors.Is(resolveErr, surface.ErrSessionNotFound) {
-		return err
+// resolveSession refreshes a session through its surface, resolving selector
+// there. It is the one place a target falls back to the registry. An
+// unreachable runtime is not a missing session: a session the registry already
+// knows stands as registered, and each operation decides whether it can
+// proceed. A session the surface no longer lists, such as a Claude session
+// whose process exited, stands as registered only when the user's target names
+// it exactly, so a send can still reach it; a name or folder fragment never
+// resolves to a historical session. target is the user's text, which differs
+// from selector when the registry already resolved it to an ID. live reports
+// whether the surface gave the session; a registered row is not an
+// observation, so callers register only live sessions.
+func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (session *surface.Session, live bool, err error) {
+	session, err = adapter.Resolve(ctx, selector)
+	if err == nil || a.Registry == nil {
+		return session, err == nil, err
+	}
+	if surface.IsDeliveryUnavailable(err) {
+		sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, false, err
+		}
+		if lookupErr != nil {
+			return nil, false, lookupErr
+		}
+		registered, lookupErr := a.Registry.Session(sid)
+		return registered, false, lookupErr
+	}
+	if !errors.Is(err, surface.ErrSessionNotFound) {
+		return nil, false, err
+	}
+	sid, exactErr := a.Registry.ExactTarget(kind, target)
+	if exactErr != nil || (selector != target && sid != selector) {
+		return nil, false, err
 	}
 	registered, lookupErr := a.Registry.Session(sid)
-	if lookupErr != nil {
-		return err
+	if lookupErr != nil || registered.Surface != kind {
+		return nil, false, err
 	}
-	status, statusErr := lifecycle.SessionAction(ctx, registered, "status")
-	if statusErr != nil {
-		return err
-	}
-	switch status["state"] {
-	case "failed", "crashed", "stopped", "done":
-		return fmt.Errorf("%s session %s is not running: background job %v is %v; resume it with: agenthail thread resume %s", adapter.Name(), sid, status["id"], status["state"], target)
-	}
-	return fmt.Errorf("%s session %s is not reachable yet: background job %v is %v", adapter.Name(), sid, status["id"], status["state"])
+	return registered, false, nil
 }
 
 func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
@@ -1116,12 +1131,12 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
-		session, err := adapter.Resolve(ctx, selector)
+		session, live, err := a.resolveSession(ctx, kind, adapter, selector, selector)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
 		isSyntheticNotion := kind == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
-		if a.Registry != nil && !isSyntheticNotion {
+		if a.Registry != nil && live && !isSyntheticNotion {
 			if err := a.Registry.RegisterSession(*session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
@@ -1150,12 +1165,14 @@ func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.S
 				if adapter == nil {
 					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
 				}
-				session, resolveErr := adapter.Resolve(ctx, sid)
+				session, live, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid, target)
 				if resolveErr != nil {
-					return nil, nil, a.registeredSessionUnavailable(ctx, sid, target, adapter, resolveErr)
+					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
-				if err := a.Registry.RegisterSession(*session); err != nil {
-					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+				if live {
+					if err := a.Registry.RegisterSession(*session); err != nil {
+						return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+					}
 				}
 				if err := surface.ValidateRuntimeTransport(session); err != nil {
 					return nil, nil, err
@@ -1516,6 +1533,7 @@ func (a *App) cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	addressed := *sess
 	dispatcher := delivery.Dispatcher{Registry: a.Registry}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
@@ -1573,6 +1591,10 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
+	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || delivery.RouteFor(surf, sess, options.Author).TransportOnly()) {
+		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
+		wantStream, wantReply = false, false
+	}
 	if wantStream {
 		if useDaemonStream {
 			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
@@ -2538,8 +2560,8 @@ func launchCodex(codex surface.Surface) error {
 	exe := install.Desktop
 	if exe == "" {
 		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(surfaces.CodexDesktopExecutables, ", "))
-		if install.Standalone != "" {
-			message += "; use 'agenthail codex' for a managed terminal session"
+		if install.Daemon != "" {
+			message += "; Agenthail creates and drives Codex conversations on Codex's app-server daemon without it"
 		}
 		return errors.New(message)
 	}

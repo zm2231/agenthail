@@ -44,7 +44,7 @@ const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
-Codex thread creation uses Codex Desktop. Use 'agenthail codex' for a managed terminal session.
+Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.
 --host starts the thread on a paired host; --cwd is then a path on that host.`
 
 func (a *App) cmdThread(args []string) error {

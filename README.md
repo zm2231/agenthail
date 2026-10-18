@@ -75,17 +75,20 @@ A message you type in the web dashboard or the Mac or iPhone app goes to a Claud
 
 ### Codex
 
-Start a writable Codex terminal conversation from any project folder:
+Agenthail drives Codex conversations through Codex Desktop when it is open and through Codex's own app-server daemon when it is not, so the same commands work on a machine without Codex Desktop:
 
 ```bash
-agenthail codex
+agenthail thread create codex "Draft the release notes" --alias notes --json
+agenthail send @notes "Make it shorter"
 ```
 
-This is the only managed terminal creation path. It uses Codex remote control and remains separate from Codex Desktop's writer. Managed terminals need the standalone Codex runtime, which Codex itself requires for its app-server daemon; install it with `curl -fsSL https://chatgpt.com/codex/install.sh | sh`. An npm, Homebrew or ChatGPT.app `codex` cannot run that daemon. Agenthail finds every Codex on the Mac automatically, and `agenthail doctor` names which ones it found and what is missing.
+The dashboard and the Mac app create conversations the same way. When a conversation needs the daemon and it is not running, Agenthail starts it with `codex app-server daemon start`. Codex 0.163 and later install what the daemon needs on first start; older versions ask for the standalone runtime (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`), which Agenthail reports and never installs itself. Turns run inside Codex, so they keep going when Agenthail restarts.
 
-For Codex Desktop, start it with `agenthail launch codex`. Agenthail then uses a loopback-only Desktop bridge to communicate with the app-server that already owns your conversations. Desktop conversations load through that owner before a message is sent; Agenthail does not acquire them through its managed runtime. If Codex is already open, quit it and run that command before using Desktop message controls. Agenthail never restarts Codex while conversations are attached.
+A conversation created in Codex Desktop stays with Desktop. Start Desktop with `agenthail launch codex`; Agenthail then uses a loopback-only bridge to the app-server that already owns those conversations. If Codex is already open, quit it and run that command before using Desktop message controls. While Desktop is closed, its conversations are read only in Agenthail, and Agenthail never loads them into the daemon, because a loaded thread locks Desktop out for up to 30 minutes.
 
-If a prior managed terminal leaves a writer lease after it exits, Agenthail reports an ownership conflict instead of retrying indefinitely. After confirming no managed `agenthail codex` terminal is active, run `agenthail codex --repair-managed-runtime`, then retry the Desktop conversation. That command restarts only the managed remote-control runtime; it does not restart Codex Desktop.
+For an interactive terminal on the daemon, run `agenthail codex` in a project folder.
+
+If a writer lock outlives the process that held it, Agenthail reports an ownership conflict instead of retrying. After confirming no `agenthail codex` terminal is active, run `agenthail codex --repair-managed-runtime`. That restarts only Codex's app-server daemon; it never restarts Codex Desktop.
 
 ### Notion
 
@@ -132,7 +135,7 @@ agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 agenthail relay add @investigator @builder 'READY' --once
 ```
 
-When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
+When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. A handoff to a closed Claude Code session resumes it and delivers once; a rule whose Claude Code source stays closed for an hour is removed.
 
 For a group that needs the same update:
 

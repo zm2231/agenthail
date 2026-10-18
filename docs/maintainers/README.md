@@ -7,6 +7,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 - [Codex Voice orchestrator: setup, flow, limits, and verification](codex-voice.md)
 - [Push notification service](push-relay.md)
 - [Mobile session fidelity audit](mobile-session-ux.md)
+- [Desktop parity: web dashboard vs Mac app](desktop-parity.md)
 - [Subagents: identity, families, targets, and cost](subagents.md)
 - [Paired hosts: pairing, ownership, routing, and unreachable delivery](hosts.md)
 - [Dashboard design reference](../../design.md)

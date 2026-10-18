@@ -21,6 +21,7 @@ type claudeBackground struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	State     string `json:"state"`
+	PID       int    `json:"pid"`
 }
 
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
@@ -123,7 +124,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if err != nil {
 		return nil, err
 	}
-	localID := strings.TrimSuffix(filepath.Base(session.Transcript), ".jsonl")
+	localID := c.conversationOf(session)
 	for _, record := range records {
 		if record.Kind != "background" || (record.SessionID != session.ID && record.SessionID != localID) {
 			continue
@@ -131,73 +132,24 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		if action == "status" {
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}
-		if action == "resume" && (record.State == "working" || record.State == "running" || record.State == "blocked" || record.State == "starting") {
-			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": true, "state": record.State}, nil
-		}
-		args := []string{action, record.ID}
 		if action == "resume" {
-			args = []string{"--bg", "--resume", record.SessionID}
+			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Cwd: record.Cwd}
+			resumed, err := c.reach(ctx, &target)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
 		}
-		started := time.Now()
-		output, err := c.backgroundCommand(ctx, record.Cwd, args...)
+		output, err := c.backgroundCommand(ctx, record.Cwd, action, record.ID)
 		if err != nil {
 			if action != "logs" {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s: %w: %s", action, err, string(output)))
 			}
 			return nil, err
 		}
-		if action == "resume" {
-			resumedID, parseErr := claudeBackgroundID(string(output))
-			if parseErr != nil || resumedID != record.ID {
-				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume identity was not confirmed; inspect claude agents: %s", string(output)))
-			}
-			state, settleErr := c.awaitResumed(ctx, record.ID, started)
-			if settleErr != nil {
-				return nil, settleErr
-			}
-			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "state": state, "output": string(output)}, nil
-		}
 		return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "output": string(output)}, nil
 	}
 	return nil, fmt.Errorf("session is not a Claude background agent")
-}
-
-var claudeResumeSettleTimeout = 10 * time.Second
-
-// claude --bg --resume prints its backgrounded line and exits 0 before the
-// session initializes, so only the job state shows whether it started. The job
-// record holds the state, its updatedAt and the failure detail in one write; a
-// state counts only once that record was written by this resume, not left over
-// from before it. Claude records updatedAt to the millisecond.
-func (c *Claude) awaitResumed(ctx context.Context, id string, started time.Time) (string, error) {
-	started = started.Truncate(time.Millisecond)
-	deadline := time.NewTimer(claudeResumeSettleTimeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	state := ""
-	for {
-		if job, ok := c.backgroundJob(id); ok && !job.UpdatedAt.Before(started) {
-			state = job.State
-			switch state {
-			case "working", "blocked", "running", "idle", "shell", "waiting", "busy":
-				return state, nil
-			case "failed", "crashed", "stopped", "done":
-				detail := job.Detail
-				if strings.TrimSpace(detail) == "" {
-					detail = "no job detail recorded"
-				}
-				return "", fmt.Errorf("Claude background job %s is %s after resume: %s", id, state, detail)
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return "", surface.DeliveryOutcomeUnknown(ctx.Err())
-		case <-deadline.C:
-			return "", surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude background job %s did not reach a running state after resume (last state %q); inspect claude agents", id, state))
-		case <-ticker.C:
-		}
-	}
 }
 
 type claudeJob struct {

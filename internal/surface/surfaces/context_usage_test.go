@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -283,7 +284,7 @@ type liveNotification struct {
 func newLiveContext(t *testing.T, records ...string) *liveContext {
 	t.Helper()
 	live := &liveContext{}
-	var fake *managedCodex
+	var fake *codextest.Daemon
 	fake = startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
 		if method != "thread/read" {
 			return nil

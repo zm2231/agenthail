@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const CodexStandaloneInstallCommand = "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+const CodexInstallCommand = "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
 
 var CodexDesktopExecutables = codexDesktopExecutables()
 
@@ -23,20 +23,12 @@ func codexDesktopExecutables() []string {
 	return paths
 }
 
-var codexBundledCLIs = func() []string {
-	userHome, _ := os.UserHomeDir()
-	return []string{
-		"/Applications/ChatGPT.app/Contents/Resources/codex",
-		filepath.Join(userHome, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-	}
-}
-
-// Only Standalone can run the managed app-server daemon; Codex refuses to
-// start it from any other copy.
+// CodexInstallation names the Codex CLI that runs `codex app-server daemon`
+// lifecycle commands and the Codex Desktop app, when present. Codex decides
+// whether that CLI can start its daemon; Agenthail only picks which CLI asks.
 type CodexInstallation struct {
-	Standalone string   `json:"standalone,omitempty"`
-	Desktop    string   `json:"desktop,omitempty"`
-	Other      []string `json:"other,omitempty"`
+	Daemon  string `json:"daemon,omitempty"`
+	Desktop string `json:"desktop,omitempty"`
 }
 
 func codexHome() string {
@@ -47,8 +39,14 @@ func codexHome() string {
 	return filepath.Join(userHome, ".codex")
 }
 
-func codexStandalonePath() string {
-	return filepath.Join(codexHome(), "packages", "standalone", "current", "codex")
+// codexDaemonPackageBinaries are the binaries Codex's daemon installs for
+// itself, current layout first; they match the daemon that is running.
+func codexDaemonPackageBinaries() []string {
+	packages := filepath.Join(codexHome(), "packages")
+	return []string{
+		filepath.Join(packages, "app-server-daemon", "current", "bin", "codex"),
+		filepath.Join(packages, "standalone", "current", "codex"),
+	}
 }
 
 func isExecutableFile(path string) bool {
@@ -56,51 +54,33 @@ func isExecutableFile(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode()&0111 != 0
 }
 
+func isCodexDesktopBundle(path string) bool {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		resolved = path
+	}
+	return strings.Contains(resolved, ".app/Contents/")
+}
+
 func DetectCodexInstallation() CodexInstallation {
 	var install CodexInstallation
-	if standalone := codexStandalonePath(); isExecutableFile(standalone) {
-		install.Standalone = standalone
-	}
 	for _, path := range CodexDesktopExecutables {
 		if isExecutableFile(path) {
 			install.Desktop = path
 			break
 		}
 	}
-	seen := map[string]bool{}
-	if install.Standalone != "" {
-		if resolved, err := filepath.EvalSymlinks(install.Standalone); err == nil {
-			seen[resolved] = true
-		}
-	}
-	candidates := []string{}
+	candidates := codexDaemonPackageBinaries()
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir != "" {
 			candidates = append(candidates, filepath.Join(dir, "codex"))
 		}
 	}
-	candidates = append(candidates, codexBundledCLIs()...)
 	for _, path := range candidates {
-		if !isExecutableFile(path) {
-			continue
+		if isExecutableFile(path) && !isCodexDesktopBundle(path) {
+			install.Daemon = path
+			break
 		}
-		resolved, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			resolved = path
-		}
-		if seen[resolved] {
-			continue
-		}
-		seen[resolved] = true
-		install.Other = append(install.Other, path)
 	}
 	return install
-}
-
-func (install CodexInstallation) standaloneMissingNote() string {
-	message := "managed Codex terminals ('agenthail codex') need the standalone Codex runtime at " + codexStandalonePath()
-	if len(install.Other) > 0 {
-		message += "; found " + strings.Join(install.Other, ", ") + ", which cannot run the managed app-server"
-	}
-	return message
 }

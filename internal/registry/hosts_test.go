@@ -375,3 +375,31 @@ func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
 		t.Fatalf("written delivery window at=%v claimed=%v err=%v", inflightAt, claimed, err)
 	}
 }
+
+func TestSurfaceAndExactResolutionNeverReachHostOwnedSessions(t *testing.T) {
+	r := openTestRegistry(t)
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindClaude, Name: "remote work", Cwd: "/srv/remote"}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetAlias("builder", "remote-thread"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"remote-thread", "@builder", "builder"} {
+		if id, err := r.ExactTarget("", target); err == nil {
+			t.Fatalf("ExactTarget(%q) reached a host-owned row: %s", target, id)
+		}
+		if id, err := r.ExactTarget(surface.KindClaude, target); err == nil {
+			t.Fatalf("ExactTarget(claude, %q) reached a host-owned row: %s", target, id)
+		}
+	}
+	for _, target := range []string{"remote-thread", "remote-th", "remote work", "/srv/remote"} {
+		if id, err := r.ResolveSurfaceTarget(surface.KindClaude, target); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("ResolveSurfaceTarget(%q)=%q err=%v", target, id, err)
+		}
+	}
+}

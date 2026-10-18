@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 // sendToReadyClaude delivers one message through the public Send to a session
@@ -21,9 +22,19 @@ func sendToReadyClaude(t *testing.T, respond ClaudeRequest) error {
 	path := writeTranscript(t, `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
 {"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
-	claude := NewClaudeWithRequest("Default", t.TempDir(), respond)
-	_, err := claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusIdle, Transcript: path}, "message")
+	home, pid := liveBridgeProcess(t)
+	claude := NewClaudeWithRequest("Default", home, respond)
+	_, err := claude.Send(context.Background(), &surface.Session{ID: "session_test", PID: pid, Status: surface.StatusIdle, Transcript: path}, "message")
 	return err
+}
+
+// liveBridgeProcess records a live process that owns session_test through
+// Remote Control.
+func liveBridgeProcess(t *testing.T) (string, int) {
+	t.Helper()
+	fixture := claudetest.New(t)
+	fixture.Record("conversation-test", fixture.Home, "session_test")
+	return fixture.Home, fixture.PID
 }
 
 func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
@@ -62,7 +73,8 @@ func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
 
 func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 	calls := 0
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	home, pid := liveBridgeProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		calls++
 		return 200, `{}`, nil
 	})
@@ -70,7 +82,7 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 {"type":"user","uuid":"u0","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a0","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"previous answer"}]}}`)
 	newActivity := time.Date(2026, 7, 19, 1, 5, 0, 0, time.UTC)
-	result, err := claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusBusy, Transcript: recent, LastActive: newActivity}, "racing")
+	result, err := claude.Send(context.Background(), &surface.Session{ID: "session_test", PID: pid, Status: surface.StatusBusy, Transcript: recent, LastActive: newActivity}, "racing")
 	if err != nil || result.Accepted || calls != 0 {
 		t.Fatalf("recent result=%+v calls=%d err=%v", result, calls, err)
 	}
@@ -79,18 +91,18 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
 	writeJitter := time.Date(2026, 7, 19, 1, 0, 1, 9_000_000, time.UTC)
-	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusBusy, Transcript: completed, LastActive: writeJitter}, "next")
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", PID: pid, Status: surface.StatusBusy, Transcript: completed, LastActive: writeJitter}, "next")
 	if err != nil || !result.Accepted || calls != 1 {
 		t.Fatalf("completed result=%+v calls=%d err=%v", result, calls, err)
 	}
 
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
-	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusIdle, Transcript: active}, "too soon")
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", PID: pid, Status: surface.StatusIdle, Transcript: active}, "too soon")
 	if err != nil || result.Accepted || calls != 1 {
 		t.Fatalf("active result=%+v calls=%d err=%v", result, calls, err)
 	}
 
-	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", Status: surface.StatusIdle}, "unproven")
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "session_test", PID: pid, Status: surface.StatusIdle}, "unproven")
 	if err != nil || result.Accepted || calls != 1 {
 		t.Fatalf("missing transcript result=%+v calls=%d err=%v", result, calls, err)
 	}
@@ -101,14 +113,15 @@ func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
 	var requestBody, requestURL string
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+	home, pid := liveHumanTurnProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}
 		requestURL, requestBody = url, body
 		return http.StatusOK, `{}`, nil
 	})
-	session := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
+	session := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
 	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
@@ -152,11 +165,12 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
 	var requestURL string
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
+	home, pid := liveHumanTurnProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
 		requestURL = url
 		return http.StatusOK, `{}`, nil
 	})
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -166,21 +180,33 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 }
 
 func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	home, pid := liveHumanTurnProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		t.Fatal("human turn bypassed the active-turn gate")
 		return 0, "", nil
 	})
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
 	if err != nil || result == nil || result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
+// liveHumanTurnProcess records a live process that owns session_bridge through
+// Remote Control and a messaging socket.
+func liveHumanTurnProcess(t *testing.T) (string, int) {
+	t.Helper()
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.Record("conversation-bridge", fixture.Home, "session_bridge")
+	return fixture.Home, fixture.PID
+}
+
 func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
-	claude := NewClaudeWithRequest("", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
+	home, pid := liveBridgeProcess(t)
+	claude := NewClaudeWithRequest("", home, func(_ context.Context, method, url string, _ map[string]string, requestBody, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -208,7 +234,7 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 		}
 		return 200, `{}`, nil
 	})
-	if err := claude.Compact(context.Background(), &surface.Session{ID: "session_test", Transcript: path}); err != nil {
+	if err := claude.Compact(context.Background(), &surface.Session{ID: "session_test", PID: pid, Transcript: path}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(body, `"content":"/compact"`) {
@@ -218,7 +244,8 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 
 func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
-	claude := NewClaudeWithRequest("", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	home, pid := liveBridgeProcess(t)
+	claude := NewClaudeWithRequest("", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -234,7 +261,7 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	err := claude.Compact(ctx, &surface.Session{ID: "session_test", Transcript: path})
+	err := claude.Compact(ctx, &surface.Session{ID: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}
@@ -242,12 +269,13 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 
 func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
-	claude := NewClaudeWithRequest("", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	home, pid := liveBridgeProcess(t)
+	claude := NewClaudeWithRequest("", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		return 200, `{}`, nil
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	err := claude.Compact(ctx, &surface.Session{ID: "session_test", Transcript: path})
+	err := claude.Compact(ctx, &surface.Session{ID: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}
