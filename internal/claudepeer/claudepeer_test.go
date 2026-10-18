@@ -665,6 +665,60 @@ func TestReconcilePreservesListeningSocketThatReusedTheStaleInode(t *testing.T) 
 	}
 }
 
+func TestReconcileKeepsStaleSocketWhenLivenessIsAmbiguous(t *testing.T) {
+	home := shortTempDir(t, "cp-ambiguous-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999997
+	generation := "stale"
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	peerPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: peerPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	device, inode, err := socketIdentity(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-relay", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", SocketPath: peerPath, SocketDevice: device, SocketInode: inode}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	original := dialSocket
+	dialSocket = func(string) (net.Conn, error) { return nil, os.ErrDeadlineExceeded }
+	defer func() { dialSocket = original }()
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(peerPath); err != nil {
+		t.Fatalf("socket removed on an ambiguous liveness probe: %v", err)
+	}
+}
+
+func TestSocketRefusesConnectionsOnlyWhenNothingListens(t *testing.T) {
+	path := filepath.Join(shortTempDir(t, "cp-refuse-"), "s.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if SocketRefusesConnections(path) {
+		t.Fatal("listening socket reported as refusing")
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	if !SocketRefusesConnections(path) {
+		t.Fatal("closed socket not reported as refusing")
+	}
+}
+
 func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 	home := shortTempDir(t, "cp-token-")
 	socketDir := filepath.Join(home, "socks")

@@ -863,3 +863,39 @@ func TestAdvertisedSessionDisplacesSenderPeersInAFullPool(t *testing.T) {
 	}
 	f.expectWorkers("a", "s1", "s3")
 }
+
+func TestChildCleanupKeepsAListenerThatReusedItsSocketInode(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "ah-cleanup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	live := filepath.Join(dir, "live.sock")
+	listener, err := net.Listen("unix", live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	liveInfo, err := os.Lstat(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "stale.sock")
+	staleListener, err := net.ListenUnix("unix", &net.UnixAddr{Name: stale, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleListener.SetUnlinkOnClose(false)
+	staleListener.Close()
+	staleInfo, err := os.Lstat(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&child{paths: map[string]os.FileInfo{live: liveInfo, stale: staleInfo}}).cleanup()
+	if _, err := os.Lstat(live); err != nil {
+		t.Fatalf("listening socket removed: %v", err)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("refused socket kept: %v", err)
+	}
+}

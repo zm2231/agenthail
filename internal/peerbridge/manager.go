@@ -803,6 +803,9 @@ func (c *child) cleanup() {
 			continue
 		}
 		matches := os.SameFile(owned, current)
+		if matches && current.Mode()&os.ModeSocket != 0 {
+			matches = claudepeer.SocketRefusesConnections(path)
+		}
 		if path == c.recordPath && current.Mode().IsRegular() {
 			data, _ := os.ReadFile(path)
 			var record recordOwnership

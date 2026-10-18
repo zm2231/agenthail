@@ -797,22 +797,28 @@ func removeManifestSocket(path string, device, inode uint64) bool {
 	if !ok || info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || uint64(stat.Dev) != device || uint64(stat.Ino) != inode {
 		return false
 	}
-	// A filesystem can hand a freed inode to the next socket made at the same
-	// path, so a matching identity alone does not prove the socket is stale.
-	if socketAccepting(path) {
+	if !SocketRefusesConnections(path) {
 		return false
 	}
 	removeErr := os.Remove(path)
 	return removeErr == nil || os.IsNotExist(removeErr)
 }
 
-func socketAccepting(path string) bool {
-	connection, err := net.DialTimeout("unix", path, 200*time.Millisecond)
-	if err != nil {
+var dialSocket = func(path string) (net.Conn, error) {
+	return net.DialTimeout("unix", path, 200*time.Millisecond)
+}
+
+// SocketRefusesConnections reports whether nothing listens at path. A
+// filesystem can hand a freed inode to the next socket made at the same path,
+// so a matching device and inode do not prove a socket is stale; only a
+// refused connection does, and any other dial result keeps the socket.
+func SocketRefusesConnections(path string) bool {
+	connection, err := dialSocket(path)
+	if err == nil {
+		connection.Close()
 		return false
 	}
-	connection.Close()
-	return true
+	return errors.Is(err, syscall.ECONNREFUSED)
 }
 
 func removeOwnedRecord(path string, manifest OwnershipManifest) {
