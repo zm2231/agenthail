@@ -1087,7 +1087,7 @@ function renderChat() {
   const controls = [];
   if (session.runtime?.focusable)
     controls.push('<button data-action="session-focus" type="button">Open session</button>');
-  if (session.status === "busy" && capabilities.steer)
+  if (session.status === "busy" && !session.waitingOn && capabilities.steer)
     controls.push('<button data-action="steer" type="button">Steer</button>');
   if (session.status === "busy" && capabilities.interrupt)
     controls.push(
@@ -1104,7 +1104,7 @@ function renderChat() {
     ["/name", "Name this conversation"],
     capabilities.compact && ["/compact", "Compact this conversation"],
     session.status === "busy" && capabilities.interrupt && ["/stop", "Stop the current turn"],
-    session.status === "busy" && capabilities.steer && ["/steer", "Redirect the current turn"],
+    session.status === "busy" && !session.waitingOn && capabilities.steer && ["/steer", "Redirect the current turn"],
     capabilities.model && ["/model", "Choose the active model"],
     capabilities.goal && ["/goal", "Set the session goal"],
   ].filter(Boolean);
@@ -1495,7 +1495,9 @@ async function send(requestedAction = "send") {
     const status = deliveryStatusLabel(result);
     const target = sessionTarget(app.selected);
     toast(
-      composerAction === "steer"
+      result?.result?.waitingOn
+        ? result.result.detail
+        : composerAction === "steer"
         ? "Current turn redirected."
         : commandAction
         ? `${command} requested.`

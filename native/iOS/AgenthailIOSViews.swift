@@ -633,7 +633,7 @@ struct IOSComposer: View {
     @State private var showingTurnSettings = false
     @State private var loadedModels: [ModelOption]?
 
-    private var steering: Bool { detail.session.status == "busy" && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
+    private var steering: Bool { detail.session.status == "busy" && detail.session.waitingOn == nil && detail.capabilities.steer && model.snapshot?.busyDelivery == "steer" }
     private var sending: Bool { model.sendingSessionIDs.contains(session.id) }
 
     private var canSend: Bool {
@@ -1015,7 +1015,7 @@ struct SessionInspector: View {
             List {
                 Section {
                     LabeledContent("Agent", value: detail.session.surface.capitalized)
-                    LabeledContent("Status", value: detail.session.status.capitalized)
+                    LabeledContent("Status", value: detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status.capitalized)
                     if let value = detail.model { LabeledContent("Model", value: value) }
                     if let value = detail.session.cwd, !value.isEmpty { LabeledContent("Workspace", value: value).textSelection(.enabled) }
                     if let value = detail.session.source { LabeledContent("Source", value: value) }
