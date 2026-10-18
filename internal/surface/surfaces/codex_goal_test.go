@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -30,6 +31,7 @@ func TestCodexUpdateGoalSendsTypedNullableProtocolFields(t *testing.T) {
 		}
 		return nil
 	})
+	fake.AddThread(codextest.Thread{ID: "thread", Originator: "agenthail"})
 	codex := isolatedManagedRuntime(t)
 	objective := "verify release"
 	status := surface.GoalStatusPaused

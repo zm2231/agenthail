@@ -51,21 +51,15 @@ func applyCodexTurnOptions(ctx context.Context, client codexClient, session *sur
 }
 
 func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
-	if options.BeforeTurnID != "" && options.LastTurnID != "" {
-		return nil, fmt.Errorf("before-turn and last-turn are mutually exclusive")
-	}
 	params := map[string]any{"threadId": session.ID, "deferGoalContinuation": true, "excludeTurns": true, "threadSource": "agenthail"}
-	for k, v := range map[string]string{"cwd": options.Cwd, "model": options.Model, "beforeTurnId": options.BeforeTurnID, "lastTurnId": options.LastTurnID} {
+	for k, v := range map[string]string{"model": options.Model, "lastTurnId": options.LastTurnID} {
 		if v != "" {
 			params[k] = v
 		}
 	}
 	response, err := c.requestSession(ctx, session, true, "thread/fork", params, 15*time.Second)
 	if err != nil {
-		if surface.IsDeliveryUnavailable(err) {
-			return nil, err
-		}
-		return nil, surface.DeliveryOutcomeUnknown(err)
+		return nil, codexOperationOutcome(err)
 	}
 	result, _ := response["result"].(map[string]any)
 	thread, _ := result["thread"].(map[string]any)
@@ -86,9 +80,6 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	}
 	if fork.Cwd == "" {
 		fork.Cwd = str(thread, "cwd")
-	}
-	if fork.Cwd == "" {
-		fork.Cwd = options.Cwd
 	}
 	fork.LastActive = time.Now()
 	if fork.Cwd == "" {
@@ -149,10 +140,7 @@ func (c *Codex) NativeQueue(ctx context.Context, session *surface.Session, reque
 	response, err := c.requestSession(ctx, session, request.Action != "list", method, params, 10*time.Second)
 	if err != nil {
 		if request.Action != "list" {
-			if surface.IsDeliveryUnavailable(err) {
-				return nil, err
-			}
-			return nil, surface.DeliveryOutcomeUnknown(err)
+			return nil, codexOperationOutcome(err)
 		}
 		return nil, err
 	}

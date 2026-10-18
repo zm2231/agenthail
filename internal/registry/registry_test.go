@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +23,27 @@ func openTestRegistry(t *testing.T) *Registry {
 	}
 	t.Cleanup(func() { r.Close() })
 	return r
+}
+
+func TestOpenRestrictsDefaultStateDirectoryCreatedByAnotherWriter(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := filepath.Join(home, ".agenthail")
+	if err := os.Mkdir(state, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	info, err := os.Stat(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0700 {
+		t.Fatalf("state directory mode=%o, want 700", mode)
+	}
 }
 
 func TestOpenUsesWALAndAllowsReadsDuringAWrite(t *testing.T) {
@@ -306,6 +328,38 @@ func TestResolveTargetRejectsAmbiguityAndEscapesWildcards(t *testing.T) {
 	got, err := r.ResolveTarget("literal%")
 	if err != nil || got != "literal%id" {
 		t.Fatalf("got=%q err=%v", got, err)
+	}
+}
+
+func TestResolveSurfaceTargetMatchesOnlyThatSurface(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, session := range []surface.Session{
+		{ID: "019f-codex", Surface: surface.KindCodex, Name: "release notes"},
+		{ID: "019f-claude", Surface: surface.KindClaude, Name: "release notes"},
+	} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetAlias("writer", "019f-claude"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"019f", "019f-codex", "release"} {
+		if got, err := r.ResolveSurfaceTarget(surface.KindCodex, target); err != nil || got != "019f-codex" {
+			t.Fatalf("%s: got=%q err=%v", target, got, err)
+		}
+	}
+	if _, err := r.ResolveSurfaceTarget(surface.KindCodex, "writer"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("a Claude alias resolved for Codex: %v", err)
+	}
+	if _, err := r.ResolveTarget("019f"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("unscoped resolution must stay ambiguous across surfaces: %v", err)
+	}
+	if err := r.RegisterSession(surface.Session{ID: "019f-codex-2", Surface: surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ResolveSurfaceTarget(surface.KindCodex, "019f"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity among Codex sessions, got %v", err)
 	}
 }
 

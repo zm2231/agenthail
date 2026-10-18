@@ -43,10 +43,8 @@ func (o TurnOptions) Validate(kind SurfaceKind) error {
 }
 
 type ForkOptions struct {
-	Cwd          string `json:"cwd,omitempty"`
-	Model        string `json:"model,omitempty"`
-	BeforeTurnID string `json:"beforeTurnId,omitempty"`
-	LastTurnID   string `json:"lastTurnId,omitempty"`
+	Model      string `json:"model,omitempty"`
+	LastTurnID string `json:"lastTurnId,omitempty"`
 }
 type SessionForker interface {
 	ForkSession(context.Context, *Session, ForkOptions) (*Session, error)

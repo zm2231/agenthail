@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -41,7 +40,7 @@ type App struct {
 	Revision                  string
 	BuiltAt                   string
 	catalogDaemonRunning      func() bool
-	daemonServiceLoaded       func() bool
+	daemonService             daemonService
 	update                    *updateDeps
 	daemonSessionPageReader   func() (sessionPageReader, error)
 	daemonSessionStreamReader func() (sessionStreamReader, error)
@@ -174,7 +173,7 @@ Channels:
   channel send <name> "msg"     Broadcast to all members (--from <name>)
 
 Automatic handoffs:
-  relay add <from> <to> [regex] [--once]  Send-to-on-completion rule
+  relay add <from> <to> [regex] [--once] [--when turn_finished|goal_completed]
   relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
@@ -222,16 +221,14 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := surfaces.ManagedCodexBinary()
+	path, err := surfaces.CodexDaemonCLI()
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
-	start := exec.Command(path, "app-server", "daemon", "start")
-	start.Stdin = os.Stdin
-	start.Stdout = io.Discard
-	start.Stderr = os.Stderr
-	if err := start.Run(); err != nil {
-		return fmt.Errorf("start Codex app-server: %w", err)
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancelStart()
+	if err := surfaces.NewCodex("").EnsureRuntime(startCtx); err != nil {
+		return err
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -360,7 +357,7 @@ func repairManagedCodexRuntime(ctx context.Context) error {
 	if err := surfaces.RestartManagedCodexRuntime(ctx); err != nil {
 		return fmt.Errorf("restart managed Codex runtime: %w", err)
 	}
-	fmt.Println("managed Codex runtime restarted; retry the affected Desktop conversation")
+	fmt.Println("Codex's app-server daemon restarted; retry the affected conversation")
 	return nil
 }
 
@@ -462,7 +459,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -496,7 +493,7 @@ func validateCommandFlags(command string, args []string) error {
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--before-turn": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
@@ -511,6 +508,7 @@ func validateCommandFlags(command string, args []string) error {
 		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
+		spec.values = map[string]bool{"--when": true}
 		spec.bools = map[string]bool{"--once": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "list" {
@@ -1009,6 +1007,47 @@ func relTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
+// resolveSession refreshes a session through its surface, resolving selector
+// there. It is the one place a target falls back to the registry. An
+// unreachable runtime is not a missing session: a session the registry already
+// knows stands as registered, and each operation decides whether it can
+// proceed. A session the surface no longer lists, such as a Claude session
+// whose process exited, stands as registered only when the user's target names
+// it exactly, so a send can still reach it; a name or folder fragment never
+// resolves to a historical session. target is the user's text, which differs
+// from selector when the registry already resolved it to an ID. live reports
+// whether the surface gave the session; a registered row is not an
+// observation, so callers register only live sessions.
+func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (session *surface.Session, live bool, err error) {
+	session, err = adapter.Resolve(ctx, selector)
+	if err == nil || a.Registry == nil {
+		return session, err == nil, err
+	}
+	if surface.IsDeliveryUnavailable(err) {
+		sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, false, err
+		}
+		if lookupErr != nil {
+			return nil, false, lookupErr
+		}
+		registered, lookupErr := a.Registry.Session(sid)
+		return registered, false, lookupErr
+	}
+	if !errors.Is(err, surface.ErrSessionNotFound) {
+		return nil, false, err
+	}
+	sid, exactErr := a.Registry.ExactTarget(kind, target)
+	if exactErr != nil || (selector != target && sid != selector) {
+		return nil, false, err
+	}
+	registered, lookupErr := a.Registry.Session(sid)
+	if lookupErr != nil || registered.Surface != kind {
+		return nil, false, err
+	}
+	return registered, false, nil
+}
+
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
 	if kindText, selector, ok := strings.Cut(target, ":"); ok {
 		kind := surface.SurfaceKind(strings.ToLower(kindText))
@@ -1016,12 +1055,12 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
-		session, err := adapter.Resolve(ctx, selector)
+		session, live, err := a.resolveSession(ctx, kind, adapter, selector, selector)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
 		isSyntheticNotion := kind == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
-		if a.Registry != nil && !isSyntheticNotion {
+		if a.Registry != nil && live && !isSyntheticNotion {
 			if err := a.Registry.RegisterSession(*session); err != nil {
 				return nil, nil, fmt.Errorf("register %s session: %w", kind, err)
 			}
@@ -1050,12 +1089,14 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				if adapter == nil {
 					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
 				}
-				session, resolveErr := adapter.Resolve(ctx, sid)
+				session, live, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid, target)
 				if resolveErr != nil {
 					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
-				if err := a.Registry.RegisterSession(*session); err != nil {
-					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+				if live {
+					if err := a.Registry.RegisterSession(*session); err != nil {
+						return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
+					}
 				}
 				if err := surface.ValidateRuntimeTransport(session); err != nil {
 					return nil, nil, err
@@ -1377,7 +1418,7 @@ func (a *App) cmdSend(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	if surf.Name() == surface.KindClaude && sess.Transport == "uds" && (wantStream || wantReply) {
+	if delivery.RouteFor(surf, sess, "") == delivery.RoutePeer && (wantStream || wantReply) {
 		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
 	}
 
@@ -1413,6 +1454,7 @@ func (a *App) cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	addressed := *sess
 	dispatcher := delivery.Dispatcher{Registry: a.Registry}
 	var receipt *delivery.Receipt
 	syntheticNotion := surf.Name() == surface.KindNotion && (sess.ID == "new" || strings.HasPrefix(sess.ID, "new:"))
@@ -1470,6 +1512,10 @@ func (a *App) cmdSend(args []string) error {
 		}
 	}
 
+	if (wantStream || wantReply) && sess.Surface == surface.KindClaude && (sess.ID != addressed.ID || delivery.RouteFor(surf, sess, options.Author).TransportOnly()) {
+		fmt.Fprintf(os.Stderr, "the closed session was resumed as %s, whose turns this send cannot follow; read the reply with 'agenthail last %s'\n", sess.ID, target)
+		wantStream, wantReply = false, false
+	}
 	if wantStream {
 		if useDaemonStream {
 			return consumeDaemonStreamOutput(ctx, daemonStream, receipt.TurnID, timeout)
@@ -2314,11 +2360,27 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		results = append(results, result)
 	}
+	home, _ := os.UserHomeDir()
+	claudeConfigDir := surface.ClaudeConfigDir(home)
+	service := a.service()
+	serviceProblems := service.Problems()
+	if serviceProblems == nil {
+		serviceProblems = []serviceProblem{}
+	}
 	if hasFlag(args, "--json") {
-		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": failures == 0, "surfaces": results}); err != nil {
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDir": claudeConfigDir}
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 			return err
 		}
 	} else {
+		fmt.Printf("claude config: %s\n", claudeConfigDir)
+		if len(serviceProblems) > 0 {
+			fmt.Printf("[daemon] supervisor: %s\n", service.Name())
+			for _, problem := range serviceProblems {
+				fmt.Printf("  problem: %s\n", problem.Detail)
+				fmt.Printf("  fix: %s\n", problem.Fix)
+			}
+		}
 		for _, result := range results {
 			fmt.Printf("[%s] capabilities: %s\n", result.Surface, strings.Join(result.Capabilities, ", "))
 			if result.Runtime != nil {
@@ -2354,6 +2416,9 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 		}
 	}
+	if len(serviceProblems) > 0 {
+		return fmt.Errorf("doctor found %d unhealthy surface(s) and %d daemon problem(s)", failures, len(serviceProblems))
+	}
 	if failures > 0 {
 		return fmt.Errorf("doctor found %d unhealthy surface(s)", failures)
 	}
@@ -2361,33 +2426,7 @@ func (a *App) cmdDoctor(args []string) error {
 }
 
 func (a *App) isDaemonServiceLoaded() bool {
-	if a.daemonServiceLoaded != nil {
-		return a.daemonServiceLoaded()
-	}
-	return daemonServiceLoaded() || homebrewDaemonServiceLoaded()
-}
-
-func homebrewDaemonServiceLoaded() bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), homebrewDaemonLaunchdLabel)
-	return exec.Command("launchctl", "print", target).Run() == nil
-}
-
-func homebrewDaemonManaged() bool {
-	if homebrewDaemonServiceLoaded() {
-		return true
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	return homebrewManagedExecutable(exe)
-}
-
-func homebrewManagedExecutable(exe string) bool {
-	return strings.Contains(filepath.Clean(exe), string(filepath.Separator)+"Cellar"+string(filepath.Separator)+"agenthail"+string(filepath.Separator))
+	return a.service().Loaded()
 }
 
 func (a *App) cmdLaunch(args []string) error {
@@ -2419,8 +2458,8 @@ func launchCodex(codex surface.Surface) error {
 	exe := install.Desktop
 	if exe == "" {
 		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(surfaces.CodexDesktopExecutables, ", "))
-		if install.Standalone != "" {
-			message += "; use 'agenthail codex' for a managed terminal session"
+		if install.Daemon != "" {
+			message += "; Agenthail creates and drives Codex conversations on Codex's app-server daemon without it"
 		}
 		return errors.New(message)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -51,23 +52,22 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	var result *surface.SendResult
 	var sendErr error
+	addressed := *session
 	steered := false
+	route := delivery.RouteFor(adapter, session, item.Author)
+	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
 	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}
 			steered = true
 		}
-	} else if item.Model != "" || !item.TurnOptions.Empty() {
-		if sender, ok := adapter.(surface.OptionSender); ok {
-			result, sendErr = sender.SendWithOptions(operationCtx, session, item.Message, surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions})
-		} else {
-			sendErr = fmt.Errorf("%s does not support per-message model selection", adapter.Name())
-		}
-	} else {
-		result, sendErr = adapter.Send(operationCtx, session, item.Message)
+	} else if sendErr = route.Validate(adapter, options); sendErr == nil {
+		result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
 	}
 	cancel()
+	d.dispatcher().RegisterReached(&addressed, session)
+	peerTransport := delivery.RouteFor(adapter, session, item.Author).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
 		return
@@ -88,14 +88,14 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if !steered && (session.Surface != surface.KindClaude || session.Transport != "uds") {
+	if !steered && !peerTransport {
 		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}
 	}
 	evidence := surface.EvidenceDelivered
 	historyKind := "delivered"
-	if session.Surface == surface.KindClaude && session.Transport == "uds" {
+	if peerTransport {
 		evidence = surface.EvidenceTransportAccepted
 		historyKind = "transport-accepted"
 	}
@@ -112,7 +112,9 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	defer d.publishEvent("state.changed", session.ID, map[string]string{"source": "compact"})
 	operationCtx, cancel := context.WithTimeout(ctx, compactOperationTimeout)
 	defer cancel()
+	addressed := *session
 	err := adapter.Compact(operationCtx, session)
+	d.dispatcher().RegisterReached(&addressed, session)
 	if err != nil {
 		d.finishQueueFailure(item, session, err, time.Now())
 		return

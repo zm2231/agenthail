@@ -102,13 +102,7 @@ func ReadOnlySessionReason(session *Session) string {
 	if !IsReadOnlySession(session) {
 		return ""
 	}
-	if session.Source == "vscode" {
-		return "Codex Desktop is not available through Agenthail's Desktop bridge; quit Codex and run 'agenthail launch codex'"
-	}
-	if session.Source == "cli" || session.Transport == "readOnly" {
-		return "Codex terminal session is read only; start a writable session with 'agenthail codex'"
-	}
-	return "Codex session ownership is unknown; open it in Codex Desktop to make it writable"
+	return "Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'"
 }
 
 type SendResult struct {
@@ -173,6 +167,14 @@ func DeliveryUnavailable(err error) error {
 func IsDeliveryUnavailable(err error) bool {
 	var target DeliveryUnavailableError
 	return errors.As(err, &target)
+}
+
+// ErrDeliveryHeld marks an unavailable delivery whose target is running but
+// cannot accept a message yet; the message waits in the queue until it can.
+var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
+
+func IsDeliveryHeld(err error) bool {
+	return IsDeliveryUnavailable(err) && errors.Is(err, ErrDeliveryHeld)
 }
 
 type DeliveryTerminalKind string
@@ -245,6 +247,20 @@ type SendOptions struct {
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 	BusyDelivery    string `json:"busyDelivery,omitempty"`
+	Author          Author `json:"-"`
+}
+
+// Author records who wrote a message. A composer declares AuthorPerson when a
+// person typed it; any send that does not declare it is unattributed.
+type Author string
+
+const AuthorPerson Author = "person"
+
+// HumanTurnSender delivers a person's message as that session's own user
+// turn, separate from the peer transport agents use to message each other.
+type HumanTurnSender interface {
+	CanSendHumanTurn(sess *Session) bool
+	SendHumanTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
 }
 
 type sourceSessionIDContextKey struct{}
@@ -271,7 +287,6 @@ type SessionStartOptions struct {
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
-	Owner          string `json:"owner,omitempty"`
 }
 
 type SessionStarter interface {
@@ -280,6 +295,12 @@ type SessionStarter interface {
 
 type OptionSender interface {
 	SendWithOptions(ctx context.Context, sess *Session, message string, options SendOptions) (*SendResult, error)
+}
+
+// Waker is a surface whose sends first wake a session that cannot take a
+// message as it is, such as a closed Claude conversation they resume.
+type Waker interface {
+	NeedsWake(ctx context.Context, sess *Session) bool
 }
 
 type SessionAccessChecker interface {
@@ -324,7 +345,7 @@ type RuntimeProblem string
 
 const (
 	RuntimeBridgeUnavailable RuntimeProblem = "bridge-unavailable"
-	RuntimeStandaloneMissing RuntimeProblem = "standalone-missing"
+	RuntimeCodexMissing      RuntimeProblem = "codex-missing"
 	RuntimeStopped           RuntimeProblem = "runtime-stopped"
 	RuntimeUnsupervised      RuntimeProblem = "unsupervised"
 )
@@ -595,6 +616,8 @@ func TruncateString(s string, n int) string { return truncate(s, n) }
 var ErrUnsupported = errUnsupported{}
 
 var ErrStreamWindow = errors.New("stream window elapsed")
+
+var ErrSessionNotFound = errors.New("no session matched")
 
 type errUnsupported struct{}
 

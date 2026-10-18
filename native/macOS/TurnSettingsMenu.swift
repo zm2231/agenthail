@@ -46,7 +46,10 @@ struct TurnSettingsMenu: View {
     }
 
     private var summary: String? {
-        let parts = [settings.effort?.capitalized, settings.mode.map { $0 == .plan ? "Plan" : "Work" }].compactMap { $0 }
+        let parts = [
+            settings.effort?.capitalized,
+            settings.mode.map { $0 == .plan ? "Plan" : "Work" },
+        ].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 

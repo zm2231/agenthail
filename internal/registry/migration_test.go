@@ -176,6 +176,65 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if err != nil || !found || state.RelayHops != 0 || state.NotificationArmed {
 		t.Fatalf("runtime=%+v found=%v err=%v", state, found, err)
 	}
+	relayID, err := r.QueueRelayMessageWithOptions("target", "relay after upgrade", "relay:upgrade", 1, surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil || expired == 0 {
+		t.Fatalf("expired=%d err=%v", expired, err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var relayed *DeliveryIntent
+	for _, problem := range problems {
+		intent, err := r.DeliveryIntent(problem.DeliveryID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if intent.QueueID == relayID {
+			relayed = intent
+		}
+	}
+	if relayed == nil || !relayed.Relayed || relayed.NotificationQueueID != 0 {
+		t.Fatalf("relayed intent=%+v problems=%+v", relayed, problems)
+	}
+	assertMigratedRouteRelaysDurably(t, r)
+}
+
+func assertMigratedRouteRelaysDurably(t *testing.T, r *Registry) {
+	t.Helper()
+	routes, err := r.ListRoutes()
+	if err != nil || len(routes) != 1 || routes[0].Handoff != HandoffTurnFinished || routes[0].EventCursor != 0 || routes[0].PendingCount != 0 || routes[0].LastError != "" {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	if err := r.CaptureRelayCompletions("sender", "", surface.CompletionBatch{Cursor: "after-upgrade", Events: []surface.Completion{{ID: "upgraded-turn", Text: "upgraded result"}}}); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = r.ListRoutes()
+	if err != nil || routes[0].PendingCount != 1 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	events, err := r.PendingRelayEvents(routes[0])
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	queueID, err := r.ConsumeRelay(routes[0], events[0], "[agenthail relay hops=1] upgraded result", "queue", "")
+	if err != nil || queueID == 0 {
+		t.Fatalf("queueID=%d err=%v", queueID, err)
+	}
+	before := r.QueueCount("sender")
+	if _, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if after := r.QueueCount("sender"); after != before {
+		t.Fatalf("relay source notices before=%d after=%d", before, after)
+	}
+	routes, err = r.ListRoutes()
+	if err != nil || routes[0].EventCursor != events[0].ID || routes[0].FireCount != 1 || routes[0].PendingCount != 0 {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
 }
 
 func assertLegacyStatusNotNormalized(t *testing.T, r *Registry) {

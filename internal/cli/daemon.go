@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"html"
 	"net/http"
 	"os"
 	"os/exec"
@@ -10,107 +9,41 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
-const (
-	daemonLaunchdLabel         = "com.agenthail.daemon"
-	homebrewDaemonLaunchdLabel = "homebrew.mxcl.agenthail"
-	daemonLogMaxBytes          = 1024 * 1024
-)
+const daemonLogMaxBytes = 1024 * 1024
 
 func (a *App) daemonStart() error {
-	if homebrewDaemonManaged() {
-		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services start agenthail'")
-	}
-	if pid, ok := daemon.IsRunning(); ok {
-		return fmt.Errorf("daemon already running (pid %d)", pid)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate agenthail binary: %w", err)
-	}
-	logPath := daemon.LogFilePath()
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("open log: %w", err)
-	}
-	cmd := exec.Command(exe, "daemon-run")
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		return fmt.Errorf("spawn daemon: %w", err)
-	}
-	pid := cmd.Process.Pid
-	cmd.Process.Release()
-	logFile.Close()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if runningPID, ok := daemon.IsRunning(); ok && runningPID == pid {
-			fmt.Printf("daemon started (pid %d)\n", pid)
-			fmt.Printf("log: %s\n", logPath)
-			fmt.Printf("stop: agenthail daemon stop\n")
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	data, _ := os.ReadFile(logPath)
-	return fmt.Errorf("daemon failed readiness check: %s", string(data))
+	return a.service().Start()
 }
 
 func (a *App) daemonStop() error {
-	if homebrewDaemonManaged() {
-		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
-	}
-	pid, ok := daemon.IsRunning()
-	if !ok {
-		fmt.Println("daemon not running")
-		return nil
-	}
-	if servicePID, loaded := daemonServicePID(); loaded && servicePID == pid {
-		return fmt.Errorf("daemon is supervised by launchd; use 'agenthail daemon uninstall' to stop and remove the service")
-	}
-	if err := daemon.Stop(); err != nil {
-		return err
-	}
-	fmt.Printf("daemon stopped (was pid %d)\n", pid)
-	return nil
+	return a.service().Stop()
 }
 
 func (a *App) daemonRestart() error {
-	if homebrewDaemonServiceLoaded() {
-		return restartLaunchdDaemon(homebrewDaemonLaunchdLabel)
-	}
-	if homebrewDaemonManaged() {
-		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services start agenthail'")
-	}
-	if daemonServiceLoaded() {
-		return restartLaunchdDaemon(daemonLaunchdLabel)
-	}
-	if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
-			return err
-		}
-	}
-	return a.daemonStart()
+	return a.service().Restart()
 }
 
 func (a *App) daemonStatus() error {
 	pid, ok := daemon.IsRunning()
 	if !ok {
+		for _, line := range a.service().StatusLines() {
+			fmt.Println(line)
+		}
 		return fmt.Errorf("daemon is not running (start it with 'agenthail daemon start')")
 	}
 	fmt.Printf("daemon: running (pid %d)\n", pid)
 	logPath := daemonStatusLogPath()
 	if info, err := os.Stat(logPath); err == nil {
 		fmt.Printf("log: %s (%s)\n", logPath, humanSize(info.Size()))
+	}
+	for _, line := range a.service().StatusLines() {
+		fmt.Println(line)
 	}
 	return nil
 }
@@ -239,6 +172,10 @@ func (a *App) openDashboard() error {
 	if err != nil {
 		return err
 	}
+	if runtime.GOOS != "darwin" {
+		fmt.Printf("dashboard: %s\n", url)
+		return nil
+	}
 	if err := exec.Command("open", url).Run(); err != nil {
 		return fmt.Errorf("open dashboard: %w", err)
 	}
@@ -247,18 +184,7 @@ func (a *App) openDashboard() error {
 }
 
 func (a *App) restartDaemonForDashboard() error {
-	if homebrewDaemonServiceLoaded() {
-		return restartLaunchdDaemon(homebrewDaemonLaunchdLabel)
-	}
-	if daemonServiceLoaded() {
-		return restartLaunchdDaemon(daemonLaunchdLabel)
-	}
-	if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
-			return err
-		}
-	}
-	return a.daemonStart()
+	return a.service().Restart()
 }
 
 func waitForDashboard(listen string, timeout time.Duration) error {
@@ -277,195 +203,12 @@ func waitForDashboard(listen string, timeout time.Duration) error {
 	return fmt.Errorf("dashboard did not become ready on http://%s; inspect %s", listen, daemonStatusLogPath())
 }
 
-// daemonServicePlist runs the daemon at the Standard launchd process type.
-// Background makes macOS throttle the API server whenever the Mac is busy.
-func daemonServicePlist(exe, envXML, logPath string) string {
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>%s</string>
-  <key>ProgramArguments</key><array><string>%s</string><string>daemon-run</string></array>
-  <key>EnvironmentVariables</key><dict>
-%s  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>ProcessType</key><string>Standard</string>
-  <key>StandardOutPath</key><string>%s</string>
-  <key>StandardErrorPath</key><string>%s</string>
-</dict></plist>
-`, daemonLaunchdLabel, html.EscapeString(exe), envXML, html.EscapeString(logPath), html.EscapeString(logPath))
-}
-
-func daemonServicePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", daemonLaunchdLabel+".plist")
-}
-
 func (a *App) daemonInstallService() error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("daemon service installation currently supports macOS launchd only")
-	}
-	if homebrewDaemonManaged() {
-		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services restart agenthail'")
-	}
-	domain := fmt.Sprintf("gui/%d", os.Getuid())
-	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
-	// bootout returning does not mean launchd has released the label yet. Wait
-	// for that state before replacing the plist; otherwise an upgrade can race
-	// bootstrap and fail with a transient EIO.
-	for deadline := time.Now().Add(3 * time.Second); daemonServiceLoaded() && time.Now().Before(deadline); {
-		time.Sleep(100 * time.Millisecond)
-	}
-	if _, running := daemon.IsRunning(); running {
-		if err := daemon.Stop(); err != nil {
-			return fmt.Errorf("stop existing daemon: %w", err)
-		}
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate agenthail binary: %w", err)
-	}
-	logPath := daemon.LogFilePath()
-	if err := rotateLogFile(logPath, daemonLogMaxBytes); err != nil {
-		return fmt.Errorf("rotate daemon log: %w", err)
-	}
-	environment := map[string]string{
-		"AGENTHAIL_SIDECAR":                     os.Getenv("AGENTHAIL_SIDECAR"),
-		"AGENTHAIL_COOKIE_BRIDGE":               os.Getenv("AGENTHAIL_COOKIE_BRIDGE"),
-		"AGENTHAIL_PYTHON":                      os.Getenv("AGENTHAIL_PYTHON"),
-		"CODEX_HOME":                            os.Getenv("CODEX_HOME"),
-		"AGENTHAIL_CLAUDE_BIN":                  os.Getenv("AGENTHAIL_CLAUDE_BIN"),
-		"AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT": codexconfig.RemoteDebuggingPort(),
-		"AGENTHAIL_CHROME_PROFILE":              envOr("AGENTHAIL_CHROME_PROFILE", "Default"),
-		"AGENTHAIL_NOTION_SPACE":                os.Getenv("AGENTHAIL_NOTION_SPACE"),
-		"AGENTHAIL_NOTION_USER":                 os.Getenv("AGENTHAIL_NOTION_USER"),
-		"AGENTHAIL_NOTION_TZ":                   os.Getenv("AGENTHAIL_NOTION_TZ"),
-		"AGENTHAIL_MAX_RESPONSE_BYTES":          os.Getenv("AGENTHAIL_MAX_RESPONSE_BYTES"),
-		"AGENTHAIL_DEBUG":                       os.Getenv("AGENTHAIL_DEBUG"),
-		"PYTHONPATH":                            os.Getenv("PYTHONPATH"),
-		"PATH":                                  envOr("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"),
-	}
-	var envXML strings.Builder
-	for _, key := range []string{"AGENTHAIL_SIDECAR", "AGENTHAIL_COOKIE_BRIDGE", "AGENTHAIL_PYTHON", "CODEX_HOME", "AGENTHAIL_CLAUDE_BIN", "AGENTHAIL_CODEX_REMOTE_DEBUGGING_PORT", "AGENTHAIL_CHROME_PROFILE", "AGENTHAIL_NOTION_SPACE", "AGENTHAIL_NOTION_USER", "AGENTHAIL_NOTION_TZ", "AGENTHAIL_MAX_RESPONSE_BYTES", "AGENTHAIL_DEBUG", "PYTHONPATH", "PATH"} {
-		if environment[key] != "" {
-			fmt.Fprintf(&envXML, "    <key>%s</key><string>%s</string>\n", key, html.EscapeString(environment[key]))
-		}
-	}
-	plist := daemonServicePlist(exe, envXML.String(), logPath)
-	path := daemonServicePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, []byte(plist), 0600); err != nil {
-		return fmt.Errorf("write launchd service: %w", err)
-	}
-	// launchd can transiently report EIO immediately after a matching service is
-	// booted out. Retry after a real release window so an upgrade cannot fail
-	// after its new payload has already been staged.
-	if output, err := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput(); err != nil {
-		time.Sleep(time.Second)
-		if retryOutput, retryErr := exec.Command("launchctl", "bootstrap", domain, path).CombinedOutput(); retryErr != nil {
-			return fmt.Errorf("bootstrap launchd service: %w (%s; retry: %s)", retryErr, strings.TrimSpace(string(output)), strings.TrimSpace(string(retryOutput)))
-		}
-	}
-	if output, err := exec.Command("launchctl", "kickstart", "-k", domain+"/"+daemonLaunchdLabel).CombinedOutput(); err != nil {
-		return fmt.Errorf("start launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
-	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if pid, running := daemon.IsRunning(); running {
-			fmt.Printf("installed and started launchd service %s (pid %d)\n", daemonLaunchdLabel, pid)
-			printCodexSetupNote()
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return fmt.Errorf("launchd service loaded but daemon did not become ready; inspect %s", logPath)
-}
-
-func rotateLogFile(path string, maxBytes int64) error {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if info.Size() <= maxBytes {
-		return nil
-	}
-	backup := path + ".1"
-	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return os.Rename(path, backup)
+	return a.service().Install()
 }
 
 func (a *App) daemonUninstallService() error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("daemon service installation currently supports macOS launchd only")
-	}
-	if homebrewDaemonManaged() {
-		return fmt.Errorf("daemon is managed by Homebrew; use 'brew services stop agenthail'")
-	}
-	domain := fmt.Sprintf("gui/%d", os.Getuid())
-	_ = exec.Command("launchctl", "bootout", domain+"/"+daemonLaunchdLabel).Run()
-	if err := os.Remove(daemonServicePath()); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	fmt.Printf("uninstalled launchd service %s\n", daemonLaunchdLabel)
-	return nil
-}
-
-func restartLaunchdDaemon(label string) error {
-	before, _ := daemon.IsRunning()
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), label)
-	if output, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
-		return fmt.Errorf("restart launchd service: %w (%s)", err, strings.TrimSpace(string(output)))
-	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if pid, running := daemon.IsRunning(); running && pid != before {
-			fmt.Printf("daemon restarted (pid %d)\n", pid)
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return fmt.Errorf("launchd restarted the service but the daemon did not become ready")
-}
-
-func daemonServiceLoaded() bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonLaunchdLabel)
-	return exec.Command("launchctl", "print", target).Run() == nil
-}
-
-func daemonServicePID() (int, bool) {
-	if runtime.GOOS != "darwin" {
-		return 0, false
-	}
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonLaunchdLabel)
-	output, err := exec.Command("launchctl", "print", target).Output()
-	if err != nil {
-		return 0, false
-	}
-	return parseDaemonServicePID(string(output)), true
-}
-
-func parseDaemonServicePID(output string) int {
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "pid = ") {
-			continue
-		}
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pid = ")))
-		if parseErr == nil && pid > 0 {
-			return pid
-		}
-	}
-	return 0
+	return a.service().Uninstall()
 }
 
 func humanSize(n int64) string {
@@ -480,7 +223,7 @@ func humanSize(n int64) string {
 }
 
 func printCodexSetupNote() {
-	if _, err := surfaces.ManagedCodexBinary(); err != nil {
+	if _, err := surfaces.CodexDaemonCLI(); err != nil {
 		fmt.Printf("Codex: %s\n", err)
 	}
 }

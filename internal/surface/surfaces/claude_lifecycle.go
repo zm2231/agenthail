@@ -21,6 +21,7 @@ type claudeBackground struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	State     string `json:"state"`
+	PID       int    `json:"pid"`
 }
 
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
@@ -31,8 +32,21 @@ func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...stri
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), "HOME="+c.home)
+	cmd.Env = claudeCommandEnv(c.home)
 	return cmd.CombinedOutput()
+}
+
+// cmux's claude wrapper keys on CMUX_SURFACE_ID to inject a temporary
+// --settings file that background jobs persist and replay on resume, after
+// the file is gone. Without CMUX_ variables the wrapper passes through.
+func claudeCommandEnv(home string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "CMUX_") {
+			env = append(env, entry)
+		}
+	}
+	return append(env, "HOME="+home)
 }
 func (c *Claude) backgroundSessions(ctx context.Context) ([]claudeBackground, error) {
 	data, err := c.backgroundCommand(ctx, "", "agents", "--json", "--all")
@@ -110,7 +124,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if err != nil {
 		return nil, err
 	}
-	localID := strings.TrimSuffix(filepath.Base(session.Transcript), ".jsonl")
+	localID := c.conversationOf(session)
 	for _, record := range records {
 		if record.Kind != "background" || (record.SessionID != session.ID && record.SessionID != localID) {
 			continue
@@ -118,29 +132,41 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		if action == "status" {
 			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "state": record.State}, nil
 		}
-		if action == "resume" && (record.State == "working" || record.State == "running" || record.State == "blocked" || record.State == "starting") {
-			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": true, "state": record.State}, nil
-		}
-		args := []string{action, record.ID}
 		if action == "resume" {
-			args = []string{"--bg", "--resume", record.SessionID}
+			target := surface.Session{ID: record.SessionID, Surface: surface.KindClaude, Cwd: record.Cwd}
+			resumed, err := c.reach(ctx, &target)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(target.Status)}, nil
 		}
-		output, err := c.backgroundCommand(ctx, record.Cwd, args...)
+		output, err := c.backgroundCommand(ctx, record.Cwd, action, record.ID)
 		if err != nil {
 			if action != "logs" {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s: %w: %s", action, err, string(output)))
 			}
 			return nil, err
 		}
-		if action == "resume" {
-			resumedID, parseErr := claudeBackgroundID(string(output))
-			if parseErr != nil || resumedID != record.ID {
-				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume identity was not confirmed; inspect claude agents: %s", string(output)))
-			}
-		}
 		return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "output": string(output)}, nil
 	}
 	return nil, fmt.Errorf("session is not a Claude background agent")
+}
+
+type claudeJob struct {
+	State     string    `json:"state"`
+	Detail    string    `json:"detail"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// claude agents --json omits the failure detail and update time that the job
+// record holds.
+func (c *Claude) backgroundJob(id string) (claudeJob, bool) {
+	var job claudeJob
+	raw, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs", id, "state.json"))
+	if err != nil || json.Unmarshal(raw, &job) != nil {
+		return job, false
+	}
+	return job, true
 }
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)

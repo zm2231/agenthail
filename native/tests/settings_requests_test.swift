@@ -36,6 +36,19 @@ struct SettingsRequestsTest {
         let relay = await waitFor { $0.path == "/api/v1/actions" }
         check(relay?.body["once"] as? Bool == true && relay?.body["fromId"] as? String == "@research" && relay?.body["pattern"] as? String == "READY", "a one-time handoff sends once: \(String(describing: relay?.body))")
 
+        RecordingProtocol.reset()
+        model.send("typed by a person", to: "claude-target")
+        let composed = await waitFor { $0.path == "/api/v1/actions" && $0.body["action"] as? String == "send" }
+        check(composed?.body["author"] as? String == "person" && composed?.body["message"] as? String == "typed by a person", "the composer declares a person's message: \(String(describing: composed?.body))")
+        RecordingProtocol.reset()
+        _ = await model.reply("notification reply", to: "claude-target", connectionTimeout: .seconds(1))
+        let replied = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "notification reply" }
+        check(replied?.body["author"] as? String == "person", "a notification reply is a person's message: \(String(describing: replied?.body))")
+        RecordingProtocol.reset()
+        _ = try? await api.sendInstruction(action: "send", sessionID: "claude-target", message: "unmarked")
+        let unmarked = await waitFor { $0.path == "/api/v1/actions" && $0.body["message"] as? String == "unmarked" }
+        check(unmarked != nil && unmarked?.body["author"] == nil, "an unmarked API send declares no author: \(String(describing: unmarked?.body))")
+
         let catalog = AgenthailModel(connecting: false)
         catalog.snapshot = model.snapshot.map { snapshot in
             var copy = snapshot

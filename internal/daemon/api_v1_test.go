@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -604,6 +605,9 @@ func TestAPIV1DeviceCanRevokeItself(t *testing.T) {
 }
 
 func TestAPIV1ManagesDesktopNotifications(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("desktop notifications use the macOS app helper")
+	}
 	t.Setenv("HOME", t.TempDir())
 	helper := filepath.Join(t.TempDir(), "Agenthail")
 	script := `#!/bin/sh

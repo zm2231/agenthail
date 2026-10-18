@@ -58,14 +58,7 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 		if !ok {
 			return surface.ErrUnsupported
 		}
-		cwd := ""
-		if flagVal(args, "--cwd") != "" {
-			cwd, err = resolveThreadCwd(flagVal(args, "--cwd"))
-			if err != nil {
-				return err
-			}
-		}
-		fork, err := forker.ForkSession(ctx, session, surface.ForkOptions{Cwd: cwd, Model: flagVal(args, "--model"), BeforeTurnID: flagVal(args, "--before-turn"), LastTurnID: flagVal(args, "--last-turn")})
+		fork, err := forker.ForkSession(ctx, session, surface.ForkOptions{Model: flagVal(args, "--model"), LastTurnID: flagVal(args, "--last-turn")})
 		if err != nil {
 			return err
 		}
@@ -121,7 +114,7 @@ func validateThreadOperationArgs(args []string) error {
 	allowed := map[string]bool{"--timeout": true, "--json": true}
 	switch args[0] {
 	case "fork":
-		for _, flag := range []string{"--cwd", "--model", "--before-turn", "--last-turn", "--alias"} {
+		for _, flag := range []string{"--model", "--last-turn", "--alias"} {
 			allowed[flag] = true
 		}
 	case "queue":

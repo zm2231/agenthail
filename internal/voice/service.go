@@ -558,9 +558,6 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	if target == nil || target.Session == nil || target.Adapter == nil {
 		return errors.New("selected target is no longer available")
 	}
-	if target.Session.Surface == surface.KindClaude && target.Session.Transport == "uds" {
-		return errors.New("selected Claude peer cannot correlate a voice request to a target turn; use a Claude session with a correlated transcript transport")
-	}
 	if !target.Adapter.Capabilities().Stream {
 		return errors.New("selected target cannot return correlated voice updates")
 	}
@@ -572,12 +569,35 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 		}
 	}
 	s.state.Messages = append(s.state.Messages, a.MessageID)
+	waker, ok := target.Adapter.(surface.Waker)
+	woke := ok && waker.NeedsWake(ctx, target.Session)
+	if woke {
+		v.Message = "Waking up " + target.Session.Name + "."
+		s.published.Store(s.capture())
+	}
+	addressed := *target.Session
 	receipt, err := s.dispatcher.DeliverWithoutQueue(ctx, target.Adapter, target.Session, a.Text, "voice:"+v.AttemptID+":"+a.MessageID, surface.SendOptions{SourceSessionID: v.Session.ID})
+	if target.Session.ID != addressed.ID {
+		v.Target = target.Session
+	}
 	if err != nil {
 		if streamSubscription.Cancel != nil {
 			streamSubscription.Cancel()
 		}
 		return err
+	}
+	// The stream was prepared for the session as addressed, so voice follows a
+	// reply only when the send kept that identity and transport and the route
+	// carries turns.
+	if receipt.Evidence == surface.EvidenceDelivered || receipt.Evidence == surface.EvidenceTransportAccepted {
+		if target.Session.ID != addressed.ID || target.Session.Transport != addressed.Transport || delivery.RouteFor(target.Adapter, target.Session, "").TransportOnly() {
+			if streamSubscription.Cancel != nil {
+				streamSubscription.Cancel()
+			}
+			s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
+			v.Message = "Sent to " + addressed.Name + ". Voice cannot follow this session's reply; read it in the session transcript."
+			return s.save()
+		}
 	}
 	if receipt.Evidence != surface.EvidenceDelivered {
 		if streamSubscription.Cancel != nil {
@@ -594,6 +614,9 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 		s.appendDelegationEvent(a.MessageID, target.Session, receipt, "held")
 		v.Message = "Target did not provide an authoritative turn ID; no uncorrelated reply will be spoken."
 		return s.save()
+	}
+	if woke {
+		v.Message = "Woke " + addressed.Name + " and sent the request."
 	}
 	s.appendDelegationEvent(a.MessageID, target.Session, receipt, "dispatched")
 	attemptID, targetID, turnID := v.AttemptID, target.Session.ID, receipt.TurnID

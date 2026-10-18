@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	code := m.Run()
 	if buildDir != "" {
 		_ = os.RemoveAll(buildDir)
@@ -785,5 +787,115 @@ func TestSendResponseLossHasUnknownOutcome(t *testing.T) {
 	}
 	if err := <-read; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func (f *peerFixture) workerNames() []string {
+	f.t.Helper()
+	var names []string
+	for _, record := range f.records() {
+		names = append(names, strings.TrimPrefix(record.Name, "agenthail/notion: "))
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (f *peerFixture) expectWorkers(want ...string) {
+	f.t.Helper()
+	sort.Strings(want)
+	if got := f.workerNames(); strings.Join(got, ",") != strings.Join(want, ",") {
+		f.t.Fatalf("peer workers=%v want=%v", got, want)
+	}
+}
+
+func TestFullPeerPoolAdmitsSendersAndAdvertisingNeverExtendsLife(t *testing.T) {
+	f := newPeerFixture(t, "a", "b", "c", "s1", "s2")
+	f.manager.peerLimit, f.manager.reserve = 3, 1
+	now := time.Now()
+	a := surface.Session{ID: "a", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now}
+	b := surface.Session{ID: "b", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now.Add(-time.Hour)}
+	c := surface.Session{ID: "c", Surface: surface.KindNotion, Status: surface.StatusIdle, LastActive: now.Add(-2 * time.Hour)}
+
+	for range 3 {
+		if failures := f.manager.Advertise(f.ctx, []surface.Session{c, b, a}); len(failures) != 0 {
+			t.Fatalf("advertise failures=%v", failures)
+		}
+	}
+	f.expectWorkers("a", "b")
+
+	if err := f.manager.Ensure(f.ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.Ensure(f.ctx, "s2"); err != nil {
+		t.Fatalf("sender refused by a full pool: %v", err)
+	}
+	f.expectWorkers("a", "b", "s2")
+
+	c.Status = surface.StatusBusy
+	f.manager.Advertise(f.ctx, []surface.Session{a, b, c})
+	f.expectWorkers("a", "c", "s2")
+	f.manager.RetireInactive(now, 24*time.Hour)
+	f.expectWorkers("a", "c", "s2")
+	f.manager.RetireInactive(now.Add(25*time.Hour), 24*time.Hour)
+	f.expectWorkers("a", "c")
+
+	f.manager.Advertise(f.ctx, []surface.Session{c})
+	f.manager.RetireInactive(now, 24*time.Hour)
+	f.expectWorkers("c")
+}
+
+func TestAdvertisedSessionDisplacesSenderPeersInAFullPool(t *testing.T) {
+	f := newPeerFixture(t, "a", "s1", "s2", "s3")
+	f.manager.peerLimit, f.manager.reserve = 3, 1
+	for _, sender := range []string{"s1", "s2", "s3"} {
+		if err := f.manager.Ensure(f.ctx, sender); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.expectWorkers("s1", "s2", "s3")
+	busy := surface.Session{ID: "a", Surface: surface.KindNotion, Status: surface.StatusBusy, LastActive: time.Now()}
+	if failures := f.manager.Advertise(f.ctx, []surface.Session{busy}); len(failures) != 0 {
+		t.Fatalf("advertise failures=%v", failures)
+	}
+	f.expectWorkers("a", "s2", "s3")
+	if err := f.manager.Ensure(f.ctx, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	f.expectWorkers("a", "s1", "s3")
+}
+
+func TestChildCleanupKeepsAListenerThatReusedItsSocketInode(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "ah-cleanup-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	live := filepath.Join(dir, "live.sock")
+	listener, err := net.Listen("unix", live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	liveInfo, err := os.Lstat(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "stale.sock")
+	staleListener, err := net.ListenUnix("unix", &net.UnixAddr{Name: stale, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleListener.SetUnlinkOnClose(false)
+	staleListener.Close()
+	staleInfo, err := os.Lstat(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&child{paths: map[string]os.FileInfo{live: liveInfo, stale: staleInfo}}).cleanup()
+	if _, err := os.Lstat(live); err != nil {
+		t.Fatalf("listening socket removed: %v", err)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("refused socket kept: %v", err)
 	}
 }

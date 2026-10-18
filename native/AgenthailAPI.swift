@@ -5,6 +5,7 @@ enum AgenthailAPIError: LocalizedError {
     case incompatible(Int)
     case invalidResponse
     case request(Int, String)
+    case outcomeUnknown(String)
     case historyGap(String)
     case streamGap
     case streamUnsupported
@@ -16,6 +17,7 @@ enum AgenthailAPIError: LocalizedError {
         case .incompatible: return "Agenthail needs an update before this app can reconnect."
         case .invalidResponse: return "Agenthail returned an invalid response."
         case .request(_, let message): return message
+        case .outcomeUnknown(let message): return "\(message) The outcome is unknown; check the session before retrying."
         case .historyGap(let message): return message
         case .streamGap: return "The live activity history changed. Reloading the current activity."
         case .streamUnsupported: return "This session has no live stream. It refreshes when it changes."
@@ -118,8 +120,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
-        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery)
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
@@ -250,7 +252,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
@@ -263,8 +265,13 @@ final class AgenthailAPI: @unchecked Sendable {
         if let toID { body["toId"] = toID }
         if let pattern { body["pattern"] = pattern }
         if let once { body["once"] = once }
+        if let handoff { body["handoff"] = handoff }
         if let relayID { body["relayId"] = relayID }
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
+    }
+
+    func postAction<Body: Encodable, Response: Decodable>(_ body: Body, idempotencyKey: String? = nil) async throws -> Response {
+        try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
     func streamEvents(after: UInt64, onConnected: @escaping @Sendable () async -> Void, onEvent: @escaping @Sendable (AgenthailEvent) async -> Void) async throws {
@@ -427,6 +434,10 @@ final class AgenthailAPI: @unchecked Sendable {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }
+                if let detail = object["error"] as? String, !detail.isEmpty {
+                    if object["unknown"] as? Bool == true { throw AgenthailAPIError.outcomeUnknown(detail) }
+                    message = detail
+                }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "history_gap" {
                     throw AgenthailAPIError.historyGap("The oldest activity is no longer retained. Current activity is still available here; no new session is needed.")
                 }
@@ -458,8 +469,9 @@ private struct InstructionRequest: Encodable {
     let message: String
     let turnSettings: TurnSettings
     var busyDelivery: String? = nil
+    var author: String? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery; case author }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -467,6 +479,7 @@ private struct InstructionRequest: Encodable {
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
+        try container.encodeIfPresent(author, forKey: .author)
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)

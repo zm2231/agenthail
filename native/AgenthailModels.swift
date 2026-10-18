@@ -122,6 +122,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var subagent: SubagentIdentity? = nil
     var subagents: SubagentRollup? = nil
     var sharedWith: [SharedProcess]? = nil
+    var transport: String? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -461,6 +462,9 @@ struct ChannelMemberState: Decodable, Identifiable, Equatable {
 }
 
 struct RelayState: Decodable, Identifiable, Equatable {
+    let handoff: String
+    let pendingCount: Int64
+    let lastError: String?
     let id: Int64
     let from: String
     let to: String

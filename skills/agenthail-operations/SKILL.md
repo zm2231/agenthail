@@ -5,7 +5,7 @@ description: "Operate AgentHail across Claude, Codex, and Notion: discover sessi
 
 # AgentHail Operations
 
-AgentHail connects to agents that already exist on the local Mac. Its CLI owns
+AgentHail connects to agents that already exist on the local Mac or Linux machine. Its CLI owns
 target resolution, surface capability checks, durable delivery, and ambiguity
 errors. Do not build a second target picker or choose between ambiguous matches.
 
@@ -30,6 +30,12 @@ Update a package or Homebrew installation with `agenthail update`. Use
 `agenthail upgrade` is an alias. Source checkouts update with `git pull` and
 `./install.sh`.
 
+On Linux (amd64 or arm64) the release ships `agenthail-<tag>-linux-<arch>.tar.gz`
+with a `.sha256`. Unpack it to `~/.local/share/agenthail`, link
+`~/.local/bin/agenthail` to the binary, then run `agenthail daemon install`.
+`agenthail update` replaces that directory in place, restarts the daemon and
+rolls back when the restarted daemon does not answer on its API.
+
 For a source checkout:
 
 ```bash
@@ -38,13 +44,13 @@ agenthail daemon install
 agenthail doctor --json
 ```
 
-AgentHail targets macOS. Native Claude messages use local sockets and require
+AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
 the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
-Managed terminals (`agenthail codex`) need the standalone Codex runtime; an
-npm, Homebrew or ChatGPT.app `codex` cannot run its app-server daemon. AgentHail
-finds every Codex automatically, and `doctor --json` reports a typed runtime
-`problem` plus non-failing `notes` with the exact install step
+Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
+conversation needs it. Codex 0.151 and older can only start that daemon from the
+standalone runtime; `doctor --json` reports a typed runtime `problem` plus
+non-failing `notes` with the exact install step
 (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`). Never run that
 installer on the user's behalf. Relevant overrides are
 `AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
@@ -54,9 +60,11 @@ credentials.
 
 AgentHail reads these overrides from the environment of each CLI or daemon
 process and stores shared session, alias, queue, relay, and delivery state in
-`~/.agenthail/registry.db`. A launchd service does not inherit variables that
-exist only in an interactive shell. Put required `AGENTHAIL_*` overrides in the
-service environment as well as the shell that runs the operator.
+`~/.agenthail/registry.db`. A launchd or systemd service does not inherit
+variables that exist only in an interactive shell. `daemon install` records the
+installing shell's `PATH`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `AGENTHAIL_*`
+overrides in the service; rerun it after changing them. Claude Code state is
+read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
@@ -86,9 +94,11 @@ Continue the task without adding receipt/read-state hedges or investigation
 chores. Agenthail reports proven delivery problems separately; never resend
 automatically.
 
-The daemon registers each agent in the default Codex/Notion discovery page as
-an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
-senders register on first send to Claude. `--from` must resolve to a session
+The daemon registers the busiest and most recently active Codex/Notion agents
+(up to 112) as individual Claude `ListAgents` peers, refreshing every 30
+seconds. Other senders register on first send to Claude. A send never fails
+because the peer pool is full: it displaces the least recently used peer
+outside that set, or else the lowest ranked registered peer. `--from` must resolve to a session
 or alias; otherwise identity is resolved in this order: `AGENTHAIL_SESSION_ID`,
 `CLAUDE_SESSION_ID`, the verified native Claude caller discovered through the
 command's process ancestry, then `CODEX_THREAD_ID`. The verified native Claude
@@ -104,11 +114,12 @@ interruption, compaction, persistent model changes, or goals on Notion.
 
 Codex sessions have separate read and write boundaries:
 
-| Codex launch path | Read | Send |
+| Codex conversation | Read | Send |
 |---|:---:|:---:|
-| `agenthail codex` | yes | yes |
-| Codex Desktop session Codex reports writable | yes | yes |
-| Plain `codex` terminal | yes | no |
+| Created by AgentHail, `agenthail codex` or another non-Desktop client | yes | yes, through Codex's daemon |
+| Created in Codex Desktop, Desktop bridge reachable | yes | yes, through Desktop |
+| Created in Codex Desktop, Desktop closed | yes | no |
+| Loaded by a plain `codex` terminal that is still running | yes | no (writer conflict) |
 
 Let AgentHail report read-only sessions. Do not claim a send succeeded when the
 target has no writable transport.
@@ -178,14 +189,27 @@ real persisted thread UUID. `notion:new:<name>` also stores `<name>` as a durabl
 AgentHail alias. Keep the UUID or alias for replies and future sends. Notion
 chooses the visible title from the first message.
 
-Start an interactive writable Codex thread with `agenthail codex` in a human
-TTY. It uses the caller's current directory unless `--cd` is provided. The
-enabled AgentHail dashboard can also create one. `agenthail launch codex` starts
+Create a Codex thread with `agenthail thread create codex`; it runs on Codex
+Desktop when its bridge is reachable and on Codex's app-server daemon
+otherwise, so it works on machines without Desktop. Start an interactive
+terminal thread with `agenthail codex` in a human TTY. It uses the caller's
+current directory unless `--cd` is provided. `agenthail launch codex` starts
 Desktop with a writable bridge but does not itself create a thread.
 
 Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
 Use `thread status`, `logs`, `stop` or `resume` with the alias. Preserve unknown
 launch outcomes; inspect `claude agents --json --all` before retrying.
+Send to a Claude session whose process has ended (a stopped or finished
+background job, or a closed terminal session) like any other session: the send
+resumes it in the background by its session ID and delivers the message once.
+This holds for every sender, voice delegation included. Do not run `thread resume` first. The alias and session ID keep working
+afterwards. If another process still holds the conversation but cannot take
+messages yet, the send is queued and goes out once it can, or once that process
+exits and the session is resumed. An `unknown` or `submitted` outcome means the
+resume or the delivery may have happened; inspect the session before sending
+again. `thread resume` remains for waking a background job without a message;
+it returns once the job can take messages, and a job that fails to start
+returns Claude's failure detail.
 
 Codex supports `thread fork <target>` and `thread queue <target> <list|add|update|delete|reorder|start>`.
 Native queue adds require `--client-id <stable-id>`; reuse it only for retries
@@ -222,6 +246,8 @@ agenthail goal @builder clear
 
 `compact` is a typed control, never a queued message. Claude sessions with a Remote Control identity compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
 
+Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control identity as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket; bridge-only sessions receive every send through Remote Control. Do not set `author: person` on a message an agent wrote.
+
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`
@@ -237,7 +263,7 @@ AgentHail has four distinct completion behaviors:
 
 1. `send --reply` waits for one completed turn.
 2. `stream` or `send --stream` watches one live Claude or Codex turn.
-3. A relay is an agent-to-agent subscription to completed turns. Closed Claude Code targets do not receive work, rebind when the same conversation resumes, and remove the rule after one hour without a resume.
+3. A relay durably subscribes to successful completions. Choose `--when turn_finished` (default) for each matching turn, or `--when goal_completed` for the latest pending result after an explicit completed goal and finished final turn. Goal handoffs require source goal support. A handoff to a closed Claude Code target resumes it. Active routes remain until removed; queued messages retain the one-hour expiry.
 4. Daemon notifications alert the human through the AgentHail Mac app and,
    when paired, the optional iPhone app.
 
@@ -247,17 +273,21 @@ Persistent agent-to-agent subscription:
 agenthail relay add @researcher @builder
 agenthail relay add @researcher @builder 'FAIL|NO-SHIP|root cause'
 agenthail relay add @researcher @builder 'READY' --once
+agenthail relay add @researcher @builder --when goal_completed
 agenthail relay list [--json]
 agenthail relay rm <id>
 ```
 
 The first target is the completion source. The second receives each matching
 completed reply. The optional filter is a regular expression. Relays reject
-self-routes and cycles, remember delivered completion IDs across restarts, and
+self-routes and cycles, remember queued completion IDs across restarts, and
 require the daemon. `relay list` derives per-route firing evidence from that
-delivery ledger, reporting each rule's fire count and last-fired timestamp in
+enqueue ledger, reporting each rule's fire count and last-fired timestamp in
 both text and `--json` output. `--once` deactivates the rule after its first
-matching completion while retaining that firing evidence.
+matching completion while retaining that firing evidence. A relay that cannot be
+delivered or expires is reported as a delivery problem to the human; the source
+agent is not sent a failure notice, because its reply to that notice would be
+relayed again.
 
 Human completion notifications:
 
@@ -335,9 +365,20 @@ agenthail daemon uninstall
 ```
 
 Homebrew manages its service with `brew services start|stop|restart agenthail`.
-For a source install, `daemon install` creates a supervised launchd service.
-Remove that service with `daemon uninstall`, not `daemon stop`. Check daemon
-status before relying on queues, relays, or background observation.
+On macOS, `daemon install` creates a supervised launchd service; remove it with
+`daemon uninstall`, not `daemon stop`. On Linux, `daemon install` creates the
+systemd user service `agenthail.service` with `KillMode=process`, so stop,
+restart and update leave the agents the daemon started running, and enables
+lingering so the daemon survives logout. When logind refuses lingering without
+root, install prints `linger: off` and the exact `sudo loginctl enable-linger
+<user>` command; do not run sudo on the user's behalf. `daemon start|stop|restart`
+drive the unit through `systemctl --user`. `doctor --json` reports Linux daemon
+problems under `daemon.problems`, each with a `fix`: unreachable systemd user
+manager, linger off, service not installed or inactive, Claude missing from the
+daemon `PATH`, a `CODEX_HOME` or state directory that cannot run programs or
+hold SQLite, and a service whose `CODEX_HOME` or `CLAUDE_CONFIG_DIR` differs
+from the calling shell. Check daemon status before relying on queues, relays,
+or background observation.
 
 ## Dashboard
 
@@ -367,7 +408,8 @@ agenthail launch codex
 agenthail codex
 ```
 
-`thread create codex` starts a managed thread without a TTY. `launch codex`
+`thread create codex` starts a thread without a TTY, on Desktop when its bridge
+is reachable and on Codex's app-server daemon otherwise. `launch codex`
 opens Codex if needed and verifies its local connection. `agenthail codex` starts
 an interactive writable terminal session and requires a human TTY.
 Claude background sessions start with `thread create claude`; Claude authentication
@@ -397,3 +439,9 @@ Sending, queueing, steering, interruption, compaction, model or goal changes,
 aliases, channels, relays, notification changes, dashboard changes, and daemon
 lifecycle operations mutate local state or active sessions. Run them only when
 the user's request calls for them, then verify the resulting status or receipt.
+
+Relay completion capture and per-route consumption use durable SQLite cursors.
+Check `pendingCount`, `eventCursor`, and `lastError` in `relay list --json` when a handoff waits.
+Capture/enqueue failures retain retry state. Delivery failure/expiry records a human-visible
+problem without sending a failure notice into the relay source. Do not equate a queued
+receipt with destination consumption. See `docs/maintainers/durable-relays.md` for recovery.

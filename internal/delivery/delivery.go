@@ -111,7 +111,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
-	claudePeer := session.Surface == surface.KindClaude && session.Transport == "uds"
+	route := RouteFor(adapter, session, options.Author)
 	syntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
@@ -131,7 +131,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if modeErr != nil {
 		return nil, modeErr
 	}
-	if claudePeer {
+	if route == RoutePeer {
 		observation, observeErr := adapter.Observe(ctx, session)
 		if observeErr != nil {
 			return nil, observeErr
@@ -159,13 +159,8 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			baselineCompletionID = observation.CompletedTurnID
 		}
 	}
-	var optionSender surface.OptionSender
-	if options.Model != "" || !options.TurnOptions.Empty() {
-		var ok bool
-		optionSender, ok = adapter.(surface.OptionSender)
-		if !ok {
-			return nil, fmt.Errorf("%s does not support per-message model selection", adapter.Name())
-		}
+	if err := route.Validate(adapter, options); err != nil {
+		return nil, err
 	}
 	var intent *registry.DeliveryIntent
 	if d.Registry != nil && !syntheticNotion {
@@ -175,12 +170,11 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 			return nil, intentErr
 		}
 	}
-	var result *surface.SendResult
-	var err error
-	if optionSender != nil {
-		result, err = optionSender.SendWithOptions(ctx, session, message, options)
-	} else {
-		result, err = adapter.Send(ctx, session, message)
+	addressed := *session
+	result, err := route.Send(ctx, adapter, session, message, options)
+	d.RegisterReached(&addressed, session)
+	if surface.IsDeliveryHeld(err) {
+		return d.handleBusy(ctx, adapter, session, message, deliveryKey, options, allowQueue, deliverypolicy.Queue, "", intent)
 	}
 	if err != nil {
 		if surface.IsDeliveryOutcomeUnknown(err) {
@@ -208,7 +202,7 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	if result.Accepted {
 		receipt := &Receipt{Evidence: surface.EvidenceDelivered, Status: string(registry.DeliveryIntentSent), SessionID: session.ID, TurnID: result.UUID}
-		peerTransport := claudePeer
+		peerTransport := RouteFor(adapter, session, options.Author).TransportOnly()
 		if peerTransport {
 			receipt.Evidence = surface.EvidenceTransportAccepted
 		}
@@ -341,6 +335,18 @@ func (d Dispatcher) markSent(receipt *Receipt, intent *registry.DeliveryIntent, 
 	receipt.Evidence = surface.EvidenceSubmitted
 	receipt.Status = string(registry.DeliveryIntentSubmitted)
 	receipt.Detail = fmt.Sprintf("Submitted to %s.", target)
+}
+
+// RegisterReached records the process a send reached when the surface moved
+// the session to another one, so registration carries the old row's alias,
+// queue and intents over to it.
+func (d Dispatcher) RegisterReached(addressed, reached *surface.Session) {
+	if d.Registry == nil || (addressed.ID == reached.ID && addressed.PID == reached.PID && addressed.Transport == reached.Transport) {
+		return
+	}
+	if err := d.Registry.RegisterSession(*reached); err != nil {
+		d.record(registry.HistoryEntry{Kind: "runtime-error", SessionID: reached.ID, Error: fmt.Sprintf("register reached session: %s", err)})
+	}
 }
 
 func (d Dispatcher) busyMode(options surface.SendOptions) (deliverypolicy.Mode, error) {

@@ -191,6 +191,29 @@ func TestRecordCatalogSurfacePublishesEveryHealthTransition(t *testing.T) {
 	}
 }
 
+func TestRetainCatalogSurfacesDropsUnregisteredSurfaces(t *testing.T) {
+	r := openTestRegistry(t)
+	for _, kind := range []surface.SurfaceKind{surface.KindClaude, surface.KindCodex, surface.KindNotion} {
+		if _, _, err := r.RecordCatalogSurface(CatalogSurfaceState{Surface: kind, Health: "unavailable"}, CatalogEvent{DedupeKey: "surface.health:" + string(kind), Type: "surface.health", EntityID: string(kind), Payload: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.RetainCatalogSurfaces([]surface.SurfaceKind{surface.KindClaude, surface.KindCodex}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := r.CatalogSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, record := range snapshot.Surfaces {
+		got = append(got, string(record.Surface))
+	}
+	if fmt.Sprint(got) != "[claude codex]" {
+		t.Fatalf("surfaces=%v", got)
+	}
+}
+
 func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	r := openTestRegistry(t)
 	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, Name: "Queued", Status: surface.StatusIdle}

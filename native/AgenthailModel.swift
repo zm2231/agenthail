@@ -37,6 +37,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
     @Published var operationError: String?
+    @Published var pendingForks: Set<String> = []
     @Published var loading = false
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent
@@ -46,6 +47,7 @@ final class AgenthailModel: ObservableObject {
 
     private(set) var api: AgenthailAPI?
     private var creationKey = SessionLaunchKey()
+    let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
     private var visibleWindows = 0
@@ -308,12 +310,12 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    private func openCreatedSession(_ id: String) async {
+    func openCreatedSession(_ id: String, in pane: SessionPane? = nil) async {
         await refresh(fresh: true)
         if !knownSessions.contains(where: { AgenthailLink.matches($0, reference: id) }), let api, let detail = try? await api.sessionDetail(id: id) {
-            pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
+            pin(SessionState(id: detail.session.id, surface: detail.session.surface, name: detail.session.name, alias: detail.alias.flatMap { $0.isEmpty ? nil : $0 }, status: detail.session.status, lastActive: detail.session.lastActive, queueCount: 0, open: true, current: false, currentReason: nil, capabilities: detail.capabilities, readOnly: detail.readOnly, readOnlyReason: detail.readOnlyReason, cwd: detail.session.cwd))
         }
-        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { mainPane.select(session.id) }
+        if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: id) }) { (pane ?? mainPane).select(session.id) }
     }
 
     func attachmentData(sessionID: String, attachment: SessionAttachment) async throws -> Data {
@@ -430,11 +432,11 @@ final class AgenthailModel: ObservableObject {
         }
     }
 
-    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, relayID: Int64? = nil) {
+    func performOperation(action: String, message: String? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil) {
         guard let api else { return }
         Task {
             do {
-                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, relayID: relayID)
+                try await api.action(action, message: message, channel: channel, targetID: targetID, fromID: fromID, toID: toID, pattern: pattern, once: once, handoff: handoff, relayID: relayID)
                 operationError = nil
                 _ = await refresh(fresh: true)
                 await loadAudit(reset: true)
@@ -567,7 +569,7 @@ final class AgenthailModel: ObservableObject {
         localSends[sessionID, default: []].append(pending)
         Task {
             do {
-                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, idempotencyKey: idempotencyKey)
+                let receipt = try await api.sendInstruction(action: "send", sessionID: sessionID, message: text, turnSettings: turnSettings, busyDelivery: busyDelivery, author: "person", idempotencyKey: idempotencyKey)
                 if pendingSendRequests[sessionID]?.idempotencyKey == idempotencyKey { pendingSendRequests.removeValue(forKey: sessionID) }
                 if !turnSettings.isEmpty, turnSettingsDrafts[sessionID] == turnSettings { turnSettingsDrafts.removeValue(forKey: sessionID) }
                 updateLocalSend(pending.id, in: sessionID, status: LocalSend.label(for: receipt.result?.status))

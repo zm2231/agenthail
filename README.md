@@ -24,7 +24,7 @@ Agenthail connects those pieces. It gives you one view of what is running, a way
 
 ## Install
 
-Agenthail supports Apple silicon Macs. Download the latest `Agenthail-*-arm64.pkg` from [GitHub Releases](https://github.com/zm2231/agenthail/releases), open it, then run:
+Agenthail supports Apple silicon Macs and, as a headless daemon, [Linux](#linux). Download the latest `Agenthail-*-arm64.pkg` from [GitHub Releases](https://github.com/zm2231/agenthail/releases), open it, then run:
 
 ```bash
 agenthail doctor
@@ -48,6 +48,20 @@ agenthail update
 
 To remove a package installation, run `sudo agenthail-uninstall`. Your local conversations, queue, and history are preserved unless you add `--purge-data`.
 
+### Linux
+
+Agenthail runs on Linux (amd64 and arm64) as a headless daemon for Claude Code and Codex on remote machines. It needs systemd and installs in your home directory without root:
+
+```bash
+tag=$(curl -fsSL https://api.github.com/repos/zm2231/agenthail/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') && arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && name=agenthail-$tag-linux-$arch && cd "$(mktemp -d)" && curl -fsSLO "https://github.com/zm2231/agenthail/releases/download/$tag/$name.tar.gz" -O "https://github.com/zm2231/agenthail/releases/download/$tag/$name.tar.gz.sha256" && sha256sum -c "$name.tar.gz.sha256" && tar -xzf "$name.tar.gz" && test ! -e ~/.local/share/agenthail && mkdir -p ~/.local/share ~/.local/bin && mv "$name" ~/.local/share/agenthail && ln -sfn ~/.local/share/agenthail/agenthail ~/.local/bin/agenthail
+agenthail daemon install
+agenthail doctor
+```
+
+`daemon install` starts a systemd user service, `agenthail.service`, and turns on lingering so the daemon keeps running after you log out. If it prints `linger: off`, run `sudo loginctl enable-linger $USER`; until then systemd stops the daemon at logout and `agenthail doctor` reports it as unhealthy. Restarting or updating the daemon leaves the agents it started running. `agenthail update` installs new releases in place and restores the previous version if the new daemon does not answer.
+
+Run `daemon install` from the shell your agents use: the service records that shell's `PATH`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. `CODEX_HOME` must be on a filesystem that can run programs, because Codex's app-server daemon installs and runs its own binary there; `agenthail doctor` flags one that cannot. Claude Remote Control and Notion need a signed-in desktop browser and helper components that the standard Linux download does not include, so a standard Linux install leaves them out; an install that supplies those components can turn Notion on.
+
 Developing Agenthail itself? See the [maintainer documentation](docs/maintainers/).
 
 ## Connect your apps
@@ -58,7 +72,7 @@ Each app connects independently. If you do not use Notion, it simply stays out o
 
 Agenthail discovers open Claude Code sessions through their local messaging sockets. Native messages require the Agenthail daemon and do not need browser cookies or Remote Control. Sessions that expose only a Remote Control bridge use that transport; enable it with `/rc` in Claude when needed.
 
-The daemon automatically registers busy agents and agents active within the last 24 hours as individual Claude peers, refreshing discovery every 30 seconds. They appear in Claude's `ListAgents` as `agenthail/<surface>: <name>`. Claude can reply to them using native `SendMessage`; Agenthail puts those messages in its durable queue. Older agents register automatically on their next outbound send, and idle peer helpers are retired after 24 hours. Read-only agents can be discoverable, but inbound messages to them are denied and recorded in history.
+The daemon automatically registers up to 112 agents as individual Claude peers, busy agents first and then those most recently active within the last 24 hours, refreshing every 30 seconds. They appear in Claude's `ListAgents` as `agenthail/<surface>: <name>`. Claude can reply to them using native `SendMessage`; Agenthail puts those messages in its durable queue. Any other agent registers automatically on its next outbound send; a send never waits for a free peer slot. Peers outside the registered set retire 24 hours after their last send. Read-only agents can be discoverable, but inbound messages to them are denied and recorded in history.
 
 Use `--from @alias` or `--from surface:session-id` to identify the sender. Without an explicit `--from`, Agenthail resolves the sender in this order: `AGENTHAIL_SESSION_ID`, `CLAUDE_SESSION_ID`, the verified native Claude caller discovered through the command's process ancestry, then `CODEX_THREAD_ID`. A verified native Claude caller takes precedence over an inherited `CODEX_THREAD_ID` so a Claude-launched command keeps its own identity. Without any of these, messages use an operator peer whose replies are kept in history.
 
@@ -71,19 +85,24 @@ agenthail history @builder 25
 
 A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to advertise a separate Remote Control identity and are never placed in the ordinary message queue.
 
+A message you type in the web dashboard or the Mac or iPhone app goes to a Claude session's Remote Control identity, so Claude records it as your own turn rather than a peer message. The apps mark it with `"author": "person"` on the `send` action. Sessions without Remote Control receive it over the native socket. A send that does not declare an author, including any script calling the API, and all agent, relay, channel, CLI and voice sends, use the native socket whenever the session has one. Sessions that expose only Remote Control receive every send through it, as before. A steer you send from the composer is also your own turn. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
+
 ### Codex
 
-Start a writable Codex terminal conversation from any project folder:
+Agenthail drives Codex conversations through Codex Desktop when it is open and through Codex's own app-server daemon when it is not, so the same commands work on a machine without Codex Desktop:
 
 ```bash
-agenthail codex
+agenthail thread create codex "Draft the release notes" --alias notes --json
+agenthail send @notes "Make it shorter"
 ```
 
-This is the only managed terminal creation path. It uses Codex remote control and remains separate from Codex Desktop's writer. Managed terminals need the standalone Codex runtime, which Codex itself requires for its app-server daemon; install it with `curl -fsSL https://chatgpt.com/codex/install.sh | sh`. An npm, Homebrew or ChatGPT.app `codex` cannot run that daemon. Agenthail finds every Codex on the Mac automatically, and `agenthail doctor` names which ones it found and what is missing.
+The dashboard and the Mac app create conversations the same way. When a conversation needs the daemon and it is not running, Agenthail starts it with `codex app-server daemon start`. Codex 0.163 and later install what the daemon needs on first start; older versions ask for the standalone runtime (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`), which Agenthail reports and never installs itself. Turns run inside Codex, so they keep going when Agenthail restarts.
 
-For Codex Desktop, start it with `agenthail launch codex`. Agenthail then uses a loopback-only Desktop bridge to communicate with the app-server that already owns your conversations. Desktop conversations load through that owner before a message is sent; Agenthail does not acquire them through its managed runtime. If Codex is already open, quit it and run that command before using Desktop message controls. Agenthail never restarts Codex while conversations are attached.
+A conversation created in Codex Desktop stays with Desktop. Start Desktop with `agenthail launch codex`; Agenthail then uses a loopback-only bridge to the app-server that already owns those conversations. If Codex is already open, quit it and run that command before using Desktop message controls. While Desktop is closed, its conversations are read only in Agenthail, and Agenthail never loads them into the daemon, because a loaded thread locks Desktop out for up to 30 minutes.
 
-If a prior managed terminal leaves a writer lease after it exits, Agenthail reports an ownership conflict instead of retrying indefinitely. After confirming no managed `agenthail codex` terminal is active, run `agenthail codex --repair-managed-runtime`, then retry the Desktop conversation. That command restarts only the managed remote-control runtime; it does not restart Codex Desktop.
+For an interactive terminal on the daemon, run `agenthail codex` in a project folder.
+
+If a writer lock outlives the process that held it, Agenthail reports an ownership conflict instead of retrying. After confirming no `agenthail codex` terminal is active, run `agenthail codex --repair-managed-runtime`. That restarts only Codex's app-server daemon; it never restarts Codex Desktop.
 
 ### Notion
 
@@ -128,9 +147,14 @@ Then connect them:
 ```bash
 agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 agenthail relay add @investigator @builder 'READY' --once
+agenthail relay add @investigator @builder --when goal_completed
 ```
 
-When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
+When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. A handoff to a closed Claude Code session resumes it and delivers once.
+
+`turn_finished` (the default) forwards each successful matching completion. `goal_completed` requires a source with goal support, waits for an explicit completed goal and its final turn, and forwards the latest pending completion once per goal. Active, paused, blocked, missing, or unreadable goals keep the route waiting. The regex filters the selected result; it does not determine whether a goal is complete.
+
+New routes begin after existing provider history. Completion events and provider cursors survive daemon restarts; each route advances only when its queue item and receipt commit together. A busy or offline destination keeps its handoff in the delivery queue, subject to the existing one-hour expiry. Active routes remain until explicitly removed; an inactive route whose Claude Code source stays closed for an hour is removed. `relay list --json`, the dashboard, and native handoff controls show the condition, pending event count, and capture/consumption error. Queued means persisted for delivery, not received by the destination. See [relay recovery](docs/maintainers/durable-relays.md).
 
 For a group that needs the same update:
 
@@ -150,7 +174,7 @@ agenthail thread create codex "Implement the verified fix" --alias builder --jso
 agenthail thread create claude "Investigate the build failure" --alias investigator --json
 ```
 
-The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
+The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
 Notion threads can start the same way:
 
@@ -189,7 +213,7 @@ Your full transcripts remain in the apps that created them. Agenthail keeps only
 
 There is no Agenthail account and no telemetry.
 
-Your conversations and history stay on your Mac. Phone access is private to your Tailscale network. If you enable iPhone notifications, Agenthail sends only the connected app name and a completion or failure status through Apple. It never puts an agent name, conversation title, reply text, or browser sign-in data in a notification.
+Your conversations and history stay on the machine that runs Agenthail. Phone access is private to your Tailscale network. If you enable iPhone notifications, Agenthail sends only the connected app name and a completion or failure status through Apple. It never puts an agent name, conversation title, reply text, or browser sign-in data in a notification.
 
 Read the full [security and privacy model](SECURITY.md).
 

@@ -29,7 +29,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 12
+	schemaVersion   = 13
 	queueMessageTTL = time.Hour
 	readConnections = 4
 )
@@ -46,12 +46,18 @@ func queueMessageTTLLabel() string {
 }
 
 func Open(path string) (*Registry, error) {
-	if path == "" {
+	private := path == ""
+	if private {
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".agenthail", "registry.db")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create registry directory: %w", err)
+	}
+	if private {
+		if err := os.Chmod(filepath.Dir(path), 0700); err != nil {
+			return nil, fmt.Errorf("restrict registry directory: %w", err)
+		}
 	}
 	sep := "?"
 	if strings.Contains(path, "?") {
@@ -115,6 +121,7 @@ func (r *Registry) migrate() error {
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
 		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
+		{"author", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -193,6 +200,24 @@ func (r *Registry) migrate() error {
 	}
 	if err := r.ensureColumn("delivery_intents", "dismissed_at", `TEXT`); err != nil {
 		return err
+	}
+	for _, column := range []struct{ name, decl string }{
+		{"handoff", `TEXT NOT NULL DEFAULT 'turn_finished'`},
+		{"event_cursor", `INTEGER NOT NULL DEFAULT 0`},
+		{"last_goal_key", `TEXT NOT NULL DEFAULT ''`},
+		{"last_error", `TEXT NOT NULL DEFAULT ''`},
+	} {
+		if err := r.ensureColumn("routes", column.name, column.decl); err != nil {
+			return err
+		}
+	}
+	if err := r.ensureColumn("delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if version < 13 {
+		if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
+			return err
+		}
 	}
 	if version < 9 {
 		if _, err := r.db.Exec(`
@@ -336,6 +361,27 @@ CREATE TABLE IF NOT EXISTS launcher_pending (
 	location BLOB NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS relay_sources (
+    source_key TEXT PRIMARY KEY,
+    cursor TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS relay_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_key TEXT NOT NULL,
+    completion_id TEXT NOT NULL,
+    input_id TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL,
+    relay_hops INTEGER NOT NULL DEFAULT 0,
+    completed_at_ms INTEGER NOT NULL DEFAULT 0,
+    captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_key,completion_id)
+);
+CREATE INDEX IF NOT EXISTS relay_events_source ON relay_events(source_key,id);
+CREATE TABLE IF NOT EXISTS relay_provenance (
+    queue_id INTEGER PRIMARY KEY REFERENCES message_queue(id) ON DELETE CASCADE,
+    input_id TEXT NOT NULL DEFAULT '',
+    completion_id TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS relay_deliveries (
 	route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
 	completion_id TEXT NOT NULL,
@@ -448,6 +494,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	provider_key TEXT NOT NULL DEFAULT '',
 	message TEXT NOT NULL DEFAULT '',
 	queue_id INTEGER NOT NULL DEFAULT 0,
+	relayed INTEGER NOT NULL DEFAULT 0,
 	status TEXT NOT NULL,
 	evidence TEXT NOT NULL,
 	failure TEXT NOT NULL DEFAULT '',
@@ -760,7 +807,7 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET to_session=? WHERE to_session=?`, []any{currentID, oldID}},
 		{`DELETE FROM routes WHERE from_session=to_session`, nil},
-		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
+		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern,handoff,once_only,active,event_cursor,last_goal_key) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
 		{`UPDATE message_queue SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE message_queue SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
@@ -909,15 +956,23 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
 		return r.resolveSubagentPath(path)
 	}
-	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
+	return r.resolveTarget(target, "")
+}
+
+// ResolveSurfaceTarget resolves a target like ResolveTarget, but matches and
+// judges ambiguity only among sessions of the given surface.
+func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string) (string, error) {
+	return r.resolveTarget(target, string(kind))
+}
+
+func (r *Registry) resolveTarget(target, kind string) (string, error) {
+	if sid, err := r.ExactTarget(surface.SurfaceKind(kind), target); err == nil {
 		return sid, nil
-	}
-	var exact string
-	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
-		return exact, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
 	}
 	prefix := escapeLike(target) + "%"
-	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' ORDER BY updated_at DESC, id LIMIT 2`, prefix); err != nil {
+	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, prefix, kind, kind); err != nil {
 		return "", err
 	} else if len(ids) == 1 {
 		return ids[0], nil
@@ -925,7 +980,7 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
 	}
 	contains := "%" + escapeLike(target) + "%"
-	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') ORDER BY updated_at DESC, id LIMIT 2`, contains, contains)
+	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') AND (? = '' OR surface = ?) ORDER BY updated_at DESC, id LIMIT 2`, contains, contains, kind, kind)
 	if err != nil {
 		return "", err
 	}
@@ -936,6 +991,28 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("ambiguous session target %q matches %s", target, strings.Join(ids, ", "))
 	}
 	return ids[0], nil
+}
+
+func (r *Registry) sessionSurface(id string) string {
+	var kind string
+	_ = r.read.QueryRow(`SELECT surface FROM sessions WHERE id = ?`, id).Scan(&kind)
+	return kind
+}
+
+// ExactTarget resolves only targets that name one session of surface kind
+// exactly, any surface when kind is empty: an alias, a session ID, or the
+// conversation ID a Claude transcript is named after.
+func (r *Registry) ExactTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil && (kind == "" || r.sessionSurface(sid) == string(kind)) {
+		return sid, nil
+	}
+	var exact string
+	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND (? = '' OR surface = ?)`, target, string(kind), string(kind)).Scan(&exact)
+	if err == nil || !errors.Is(err, sql.ErrNoRows) || target == "" || (kind != "" && kind != surface.KindClaude) {
+		return exact, err
+	}
+	err = r.read.QueryRow(`SELECT id FROM sessions WHERE surface=? AND transcript LIKE ? ESCAPE '\' ORDER BY updated_at DESC, rowid DESC LIMIT 1`, string(surface.KindClaude), "%/"+escapeLike(target)+".jsonl").Scan(&exact)
+	return exact, err
 }
 
 func (r *Registry) resolveSubagentPath(path string) (string, error) {
@@ -1047,6 +1124,16 @@ func (r *Registry) AddRoute(from, to, pattern string) (int64, error) {
 }
 
 func (r *Registry) AddRouteWithOptions(from, to, pattern string, once bool) (int64, error) {
+	return r.AddRelayRoute(from, to, pattern, once, HandoffTurnFinished)
+}
+
+func (r *Registry) AddRelayRoute(from, to, pattern string, once bool, handoff string) (int64, error) {
+	if handoff == "" {
+		handoff = HandoffTurnFinished
+	}
+	if handoff != HandoffTurnFinished && handoff != HandoffGoalCompleted {
+		return 0, fmt.Errorf("handoff must be turn_finished or goal_completed")
+	}
 	if _, err := regexp.Compile(pattern); err != nil {
 		return 0, fmt.Errorf("invalid relay pattern: %w", err)
 	}
@@ -1072,7 +1159,7 @@ func (r *Registry) AddRouteWithOptions(from, to, pattern string, once bool) (int
 	if cycle > 0 {
 		return 0, fmt.Errorf("relay route would create a cycle")
 	}
-	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern,once_only) VALUES (?,?,?,?)`, from, to, pattern, b2i(once))
+	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern,once_only,handoff,event_cursor) VALUES (?,?,?,?,?,COALESCE((SELECT MAX(id) FROM relay_events),0))`, from, to, pattern, b2i(once), handoff)
 	if err != nil {
 		return 0, err
 	}
@@ -1157,16 +1244,28 @@ func (r *Registry) queueMessageWithOptions(sessionID, message, deliveryKey strin
 }
 
 func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
-	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
-		options.BusyDelivery = "queue"
-	}
-	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
 	tx, err := r.db.Begin()
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt, options.BusyDelivery)
+	id, deliveryID, err := enqueueMessageTx(tx, r.now(), sessionID, message, deliveryKey, options, relayHops, operation, recordIntent)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message, Result: options.Model})
+	return id, deliveryID, nil
+}
+
+func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey string, options surface.SendOptions, relayHops int, operation QueueOperation, recordIntent bool) (int64, int64, error) {
+	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
+		options.BusyDelivery = "queue"
+	}
+	expiresAt := now.Add(queueMessageTTL).UnixMilli()
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt, options.BusyDelivery, options.Author)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -1184,16 +1283,10 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 	}
 	var deliveryID int64
 	if recordIntent && options.SourceSessionID != "" {
-		if deliveryID, err = insertQueuedDeliveryIntent(tx, options.SourceSessionID, sessionID, message, id); err != nil {
+		if deliveryID, err = insertQueuedDeliveryIntent(tx, options.SourceSessionID, sessionID, message, id, relayHops > 0); err != nil {
 			return 0, 0, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, 0, err
-	}
-	// History is observability, not delivery. Do not turn a successful enqueue
-	// into a failed send if the audit database write is unavailable.
-	_ = r.RecordHistory(HistoryEntry{Kind: "queued", SessionID: sessionID, QueueID: id, Message: message, Result: options.Model})
 	return id, deliveryID, nil
 }
 
@@ -1298,6 +1391,7 @@ type QueuedMessage struct {
 	RelayHops       int
 	Operation       QueueOperation
 	BusyDelivery    string
+	Author          surface.Author
 }
 
 const (
@@ -1806,7 +1900,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -2131,30 +2225,52 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 }
 
 func (r *Registry) RemoveRoute(id int64) error {
-	res, err := r.db.Exec(`DELETE FROM routes WHERE id=?`, id)
+	tx, err := r.db.Begin()
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("relay route %d does not exist", id)
+	defer tx.Rollback()
+	var source string
+	if err := tx.QueryRow(`SELECT from_session FROM routes WHERE id=?`, id).Scan(&source); err != nil {
+		return fmt.Errorf("relay route %d does not exist: %w", id, err)
 	}
-	return nil
+	if _, err := tx.Exec(`DELETE FROM routes WHERE id=?`, id); err != nil {
+		return err
+	}
+	key, err := relaySourceKeyOf(tx, source)
+	if err != nil && !errors.Is(err, errNoRelayTranscript) {
+		return err
+	}
+	if err == nil {
+		orphaned := `source_key=? AND NOT EXISTS(SELECT 1 FROM routes JOIN sessions s ON s.id=routes.from_session WHERE ` + relaySourceKey + `=?)`
+		for _, table := range []string{"relay_sources", "relay_events"} {
+			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE `+orphaned, key, key); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 type RouteRow struct {
-	ID          int64  `json:"id"`
-	FromSession string `json:"fromSession"`
-	ToSession   string `json:"toSession"`
-	Pattern     string `json:"pattern"`
-	Once        bool   `json:"once"`
-	Active      bool   `json:"active"`
-	FireCount   int64  `json:"fireCount"`
-	LastFiredAt string `json:"lastFiredAt,omitempty"`
+	Handoff      string `json:"handoff"`
+	EventCursor  int64  `json:"eventCursor"`
+	PendingCount int64  `json:"pendingCount"`
+	LastGoalKey  string `json:"-"`
+	LastError    string `json:"lastError,omitempty"`
+	ID           int64  `json:"id"`
+	FromSession  string `json:"fromSession"`
+	ToSession    string `json:"toSession"`
+	Pattern      string `json:"pattern"`
+	Once         bool   `json:"once"`
+	Active       bool   `json:"active"`
+	FireCount    int64  `json:"fireCount"`
+	LastFiredAt  string `json:"lastFiredAt,omitempty"`
 }
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	rows, err := r.read.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
-		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), '')
+		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), ''), r.handoff, r.event_cursor, r.last_goal_key, r.last_error, (SELECT COUNT(*) FROM relay_events e JOIN sessions s ON s.id=r.from_session WHERE e.source_key=` + relaySourceKey + ` AND e.id>r.event_cursor)
 		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
 		GROUP BY r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active
 		ORDER BY r.id`)
@@ -2166,7 +2282,9 @@ func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	for rows.Next() {
 		var r RouteRow
 		var once, active int
-		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &once, &active, &r.FireCount, &r.LastFiredAt); err == nil {
+		if err := rows.Scan(&r.ID, &r.FromSession, &r.ToSession, &r.Pattern, &once, &active, &r.FireCount, &r.LastFiredAt, &r.Handoff, &r.EventCursor, &r.LastGoalKey, &r.LastError, &r.PendingCount); err != nil {
+			return nil, err
+		} else {
 			r.Once = once != 0
 			r.Active = active != 0
 			out = append(out, r)

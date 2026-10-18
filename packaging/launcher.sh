@@ -12,12 +12,16 @@ export PYTHONDONTWRITEBYTECODE=1
 
 skill="$AGENTHAIL_ROOT/skills/agenthail-operations"
 if [ -f "$skill/SKILL.md" ]; then
-	for runtime in "$HOME/.claude" "$HOME/.codex" "$HOME/.hermes"; do
+	for runtime in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CODEX_HOME:-$HOME/.codex}" "$HOME/.hermes"; do
 		[ -d "$runtime" ] || continue
 		link="$runtime/skills/agenthail-operations"
 		mkdir -p "$runtime/skills"
 		if [ ! -e "$link" ]; then
 			ln -sfn "$skill" "$link"
+		fi
+		# The root uninstaller cannot see this user's CLAUDE_CONFIG_DIR or CODEX_HOME, so it reads the links from here.
+		if [ "$(readlink "$link" 2>/dev/null)" = "$skill" ] && ! grep -Fqx "$link" "$HOME/.agenthail/skill-links" 2>/dev/null; then
+			(umask 077 && mkdir -p "$HOME/.agenthail" && printf '%s\n' "$link" >>"$HOME/.agenthail/skill-links")
 		fi
 	done
 fi

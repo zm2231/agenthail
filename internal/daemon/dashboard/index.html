@@ -262,7 +262,6 @@
                   <label>Stable client message ID (required when adding) <input name="clientId" /></label>
                   <label>Queue order (comma-separated IDs) <input name="ids" /></label>
                   <label>Next-page cursor <input name="cursor" /></label>
-                  <label>Fork directory (optional) <input name="cwd" /></label>
                   <button type="submit">Run selected operation</button>
                 </form><pre id="session-operation-result" aria-live="polite"></pre>
               </details>
@@ -418,6 +417,10 @@
                 <p>Pass completed work from one agent to another.</p>
               </div>
               <form class="labeled-form" data-network-form="relay-add">
+                <label><span>Handoff when</span><select name="handoff">
+                  <option value="turn_finished">Turn finished</option>
+                  <option value="goal_completed">Goal completed (requires goal support)</option>
+                </select></label>
                 <label
                   ><span>From</span
                   ><input

@@ -48,3 +48,42 @@ type lifecycleCLISurface struct{ *cliSurface }
 func (*lifecycleCLISurface) SessionAction(context.Context, *surface.Session, string) (map[string]any, error) {
 	return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("native reply lost"))
 }
+
+func TestThreadForkPassesLastTurnAndRejectsRemovedFlags(t *testing.T) {
+	source := surface.Session{ID: "source", Surface: surface.KindCodex, Cwd: "/source"}
+	adapter := &forkCLISurface{cliSurface: &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"source": source}}}
+	app, _ := cliFixture(t, adapter.cliSurface)
+	app.Surfaces[0].Surface = adapter
+	if err := app.Registry.RegisterSession(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Registry.SetAlias("src", "source"); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"thread", "fork", "@src", "--last-turn", "turn-2", "--json"})
+	})
+	if err != nil || !strings.Contains(output, `"id":"forked"`) || len(adapter.options) != 1 || adapter.options[0] != (surface.ForkOptions{LastTurnID: "turn-2"}) {
+		t.Fatal(output, err, adapter.options)
+	}
+	for _, flag := range []string{"--cwd", "--before-turn"} {
+		if _, err := captureStdout(t, func() error { return app.Run([]string{"thread", "fork", "@src", flag, "x", "--json"}) }); err == nil {
+			t.Fatalf("%s accepted", flag)
+		}
+	}
+	if len(adapter.options) != 1 {
+		t.Fatal("a rejected flag reached the surface", adapter.options)
+	}
+}
+
+type forkCLISurface struct {
+	*cliSurface
+	options []surface.ForkOptions
+}
+
+func (s *forkCLISurface) ForkSession(_ context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
+	s.options = append(s.options, options)
+	fork := *session
+	fork.ID = "forked"
+	return &fork, nil
+}

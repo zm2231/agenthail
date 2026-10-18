@@ -38,6 +38,7 @@ type Claude struct {
 	subagents    *claudeSubagentObserver
 	transcripts  *claudeTranscriptIndex
 	request      ClaudeRequest
+	localOnly    bool
 }
 
 type ClaudeRequest func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error)
@@ -81,13 +82,23 @@ func (c *Claude) Capabilities() surface.Capabilities {
 	}
 }
 
+// DisableRemoteControl limits the surface to local Claude Code sessions on an
+// install that ships no sidecar, so health no longer probes claude.ai.
+func (c *Claude) DisableRemoteControl() {
+	c.localOnly = true
+}
+
 func (c *Claude) Health(ctx context.Context) error {
-	if sessions, err := c.List(ctx); err == nil {
+	sessions, err := c.List(ctx)
+	if err == nil {
 		for _, session := range sessions {
 			if session.Transport == "uds" {
 				return nil
 			}
 		}
+	}
+	if c.localOnly {
+		return err
 	}
 	if _, err := sidecarPath(); err != nil {
 		return err
@@ -158,7 +169,7 @@ func (c *Claude) conversationID(s *surface.Session) string {
 	if s.PID <= 0 {
 		return s.ID
 	}
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(s.PID)+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(s.PID)+".json"))
 	if err != nil {
 		return s.ID
 	}
@@ -196,7 +207,7 @@ type claudeProjectListing struct {
 }
 
 func newClaudeTranscriptIndex(home string) *claudeTranscriptIndex {
-	return &claudeTranscriptIndex{projects: filepath.Join(home, ".claude", "projects"), dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
+	return &claudeTranscriptIndex{projects: filepath.Join(surface.ClaudeConfigDir(home), "projects"), dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
 }
 
 // pass brings the index up to date once and returns a lookup over that
@@ -362,14 +373,32 @@ func (c *Claude) List(ctx context.Context) ([]surface.Session, error) {
 }
 
 type claudeProcess struct {
-	session   surface.Session
-	startedAt float64
+	session      surface.Session
+	conversation string
+	startedAt    float64
 }
 
 // processes returns a session for every live Claude process, including
 // processes that share a session id.
 func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
-	sessionsDir := filepath.Join(c.home, ".claude", "sessions")
+	records, err := c.records()
+	if err != nil {
+		return nil, err
+	}
+	var out []claudeProcess
+	transcript := c.transcripts.pass()
+	for _, record := range records {
+		if process, ok := c.process(ctx, record, transcript); ok {
+			out = append(out, process)
+		}
+	}
+	return out, nil
+}
+
+// records returns the session records of Claude processes that are alive,
+// excluding Agenthail's own peer workers.
+func (c *Claude) records() ([]map[string]any, error) {
+	sessionsDir := filepath.Join(surface.ClaudeConfigDir(c.home), "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -377,8 +406,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 		}
 		return nil, fmt.Errorf("read Claude session directory: %w", err)
 	}
-	var out []claudeProcess
-	transcript := c.transcripts.pass()
+	var out []map[string]any
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -388,61 +416,65 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 			continue
 		}
 		var m map[string]any
-		if json.Unmarshal(raw, &m) != nil {
+		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") == "peer-worker" {
 			continue
 		}
-		bridge, _ := m["bridgeSessionId"].(string)
-		if str(m, "agenthail") == "peer-worker" {
+		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeProcessAlive(int(pid)) {
 			continue
 		}
-		socket := c.peerSocket(ctx, m)
-		if bridge == "" && socket != "" {
-			bridge = str(m, "sessionId")
-		}
-		if bridge == "" {
-			continue
-		}
-		sess := surface.Session{
-			ID:      bridge,
-			Surface: surface.KindClaude,
-			Cwd:     str(m, "cwd"),
-			Status:  surface.SessionStatus(str(m, "status")),
-		}
-		if pid, ok := m["pid"].(float64); ok {
-			sess.PID = int(pid)
-		}
-		if socket != "" {
-			sess.Transport = "uds"
-		}
-		if sess.PID > 0 {
-			err := syscall.Kill(sess.PID, 0)
-			if err != nil && !errors.Is(err, syscall.EPERM) {
-				continue
-			}
-		}
-		if n, ok := m["name"].(string); ok {
-			sess.Name = n
-		}
-		sess.Transcript = transcript(str(m, "sessionId"))
-		sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
-		if sess.Name == "" {
-			sess.Name = c.firstUserMessage(sess.Transcript)
-		}
-		c.applyRecordStatus(ctx, &sess, m)
-		if sess.HasLocal {
-			if rollup, rollupErr := c.subagents.rollup(ctx, &sess); rollupErr == nil {
-				sess.Subagents = rollup
-			}
-		}
-		startedAt, ok := m["startedAt"].(float64)
-		if ok {
-			sess.StartedAt = time.UnixMilli(int64(startedAt))
-		} else {
-			startedAt = math.MaxFloat64
-		}
-		out = append(out, claudeProcess{session: sess, startedAt: startedAt})
+		out = append(out, m)
 	}
 	return out, nil
+}
+
+// process builds the session for a record Agenthail can deliver to: one with
+// a Remote Control bridge or a validated messaging socket. Without Remote
+// Control only the socket counts, under the record's native session id.
+func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(string) string) (claudeProcess, bool) {
+	bridge := ""
+	if !c.localOnly {
+		bridge = str(m, "bridgeSessionId")
+	}
+	socket := c.peerSocket(ctx, m)
+	if bridge == "" && socket != "" {
+		bridge = str(m, "sessionId")
+	}
+	if bridge == "" {
+		return claudeProcess{}, false
+	}
+	sess := surface.Session{
+		ID:      bridge,
+		Surface: surface.KindClaude,
+		Cwd:     str(m, "cwd"),
+		Status:  surface.SessionStatus(str(m, "status")),
+	}
+	if pid, ok := m["pid"].(float64); ok {
+		sess.PID = int(pid)
+	}
+	if socket != "" {
+		sess.Transport = "uds"
+	}
+	if n, ok := m["name"].(string); ok {
+		sess.Name = n
+	}
+	sess.Transcript = transcript(str(m, "sessionId"))
+	sess.HasLocal = sess.Transcript != "" && fileExists(sess.Transcript)
+	if sess.Name == "" {
+		sess.Name = c.firstUserMessage(sess.Transcript)
+	}
+	c.applyRecordStatus(ctx, &sess, m)
+	if sess.HasLocal {
+		if rollup, rollupErr := c.subagents.rollup(ctx, &sess); rollupErr == nil {
+			sess.Subagents = rollup
+		}
+	}
+	startedAt, ok := m["startedAt"].(float64)
+	if ok {
+		sess.StartedAt = time.UnixMilli(int64(startedAt))
+	} else {
+		startedAt = math.MaxFloat64
+	}
+	return claudeProcess{session: sess, conversation: str(m, "sessionId"), startedAt: startedAt}, true
 }
 
 // applyRecordStatus derives status and last activity from the peer record,
@@ -460,7 +492,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 }
 
 func (c *Claude) peerRecordPath(pid int) string {
-	return filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	return filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(pid)+".json")
 }
 
 func (c *Claude) LocalStatusFiles(session surface.Session) []string {
@@ -540,7 +572,7 @@ func (c *Claude) Resolve(ctx context.Context, target string) (*surface.Session, 
 		if process, found, err := c.processByPID(ctx, target); err != nil || found {
 			return process, err
 		}
-		return nil, fmt.Errorf("no session matched '%s'", target)
+		return nil, fmt.Errorf("%w '%s'", surface.ErrSessionNotFound, target)
 	}
 	if len(matches) > 1 {
 		var lines []string
@@ -572,7 +604,23 @@ func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Sess
 	return nil, false, nil
 }
 
+// Observe reads a session whose process exited as offline, unless no other
+// process holds its conversation: then it is at rest, and a message resumes it.
 func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
+	if sess.PID <= 0 || claudeProcessAlive(sess.PID) {
+		return c.observe(ctx, sess)
+	}
+	exited := *sess
+	exited.Status = surface.StatusOffline
+	observation, err := c.observe(ctx, &exited)
+	if err == nil && c.atRest(ctx, sess) {
+		observation.Status = surface.StatusIdle
+		observation.ActiveTurnID = ""
+	}
+	return observation, err
+}
+
+func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -625,12 +673,32 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if err := peerSlashCommand(sess, message); err != nil {
+		return nil, err
+	}
+	if _, err := c.reach(ctx, sess); err != nil {
+		return nil, err
+	}
 	if sess.Transport == "uds" {
-		if strings.HasPrefix(strings.TrimSpace(message), "/") {
-			return nil, surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
+		if err := peerSlashCommand(sess, message); err != nil {
+			return nil, err
 		}
 		return c.sendPeer(ctx, sess, message)
 	}
+	return c.postWhenIdle(ctx, sess, message)
+}
+
+// peerSlashCommand rejects a slash command for the peer socket, which cannot
+// run one. It is checked before reaching the session and again on the
+// transport the session was reached through.
+func peerSlashCommand(sess *surface.Session, message string) error {
+	if sess.Transport == "uds" && strings.HasPrefix(strings.TrimSpace(message), "/") {
+		return surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
+	}
+	return nil
+}
+
+func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
 		return nil, err
@@ -639,6 +707,30 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
 	return c.postMessage(ctx, sess, message)
+}
+
+// CanSendHumanTurn reports whether the session has a web bridge identity, the
+// only route that records the message as the user's own turn.
+func (c *Claude) CanSendHumanTurn(sess *surface.Session) bool {
+	return sess != nil && sess.Surface == surface.KindClaude && !c.localOnly && !nativeClaudeOnly(sess)
+}
+
+// SendHumanTurn submits a message through Claude's authenticated web bridge as
+// a user event, even when the session also has a native peer socket.
+func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if sess == nil {
+		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
+	}
+	if !c.CanSendHumanTurn(sess) {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
+	}
+	if _, err := c.reach(ctx, sess); err != nil {
+		return nil, err
+	}
+	if !c.CanSendHumanTurn(sess) {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
+	}
+	return c.postWhenIdle(ctx, sess, message)
 }
 
 func claudeProcessAlive(pid int) bool {
@@ -662,6 +754,9 @@ func claudeBridgeActivityAfterTerminal(sess *surface.Session, turn claudeTurn) b
 var claudeSendRequest = sidecarRequestWithCookies
 
 func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if c.localOnly {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude Remote Control is not available on this install; reach the session through its local Claude Code process"))
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -940,6 +1035,9 @@ func (c *Claude) Compact(ctx context.Context, sess *surface.Session) error {
 	if nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
+	if _, err := c.reach(ctx, sess); err != nil {
+		return err
+	}
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -990,6 +1088,9 @@ func (c *Claude) Model(ctx context.Context, sess *surface.Session, name string) 
 }
 
 func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, commandName, args string, timeout time.Duration) (string, error) {
+	if _, err := c.reach(ctx, sess); err != nil {
+		return "", err
+	}
 	path := sess.Transcript
 	if path == "" {
 		path = c.transcriptPath(sess)
@@ -1035,7 +1136,7 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
-	if nativeClaudeOnly(sess) {
+	if c.localOnly || nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
 	current, err := c.Resolve(ctx, sess.ID)

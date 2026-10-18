@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,8 +17,13 @@ func TestClaudeBackgroundCreationUsesReturnedIdentityAndLifecycle(t *testing.T) 
 	script := `#!/bin/sh
 printf '%s\n' "$@" >> "$HOME/argv"
 if [ "$1" = agents ]; then
- printf '[{"id":"ab12cd34","sessionId":"real-session-id","kind":"background","name":"builder","cwd":"%s","state":"done"}]\n' "$HOME"
+ printf '[{"id":"ab12cd34","sessionId":"real-session-id","kind":"background","name":"builder","cwd":"%s","state":"%s"}]\n' "$HOME" "$(cat "$HOME/state" 2>/dev/null || printf done)"
 elif [ "$1" = --bg ]; then
+ if [ "$2" = --resume ]; then
+  printf working > "$HOME/state"
+  mkdir -p "$HOME/.claude/sessions"
+  printf '{"pid":%s,"sessionId":"real-session-id","cwd":"%s","bridgeSessionId":"session_builder","status":"idle"}' "$AGENTHAIL_FIXTURE_PID" "$PWD" > "$HOME/.claude/sessions/$AGENTHAIL_FIXTURE_PID.json"
+ fi
  printf '\033[32mbackgrounded · ab12cd34\033[0m\n'
 else
  printf 'operation complete\n'
@@ -27,6 +33,7 @@ fi
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	t.Setenv("AGENTHAIL_FIXTURE_PID", strconv.Itoa(os.Getpid()))
 	c := NewClaude("Default", home)
 	session, turn, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "--literal prompt", Cwd: home, Name: "builder", Worktree: "feature", TurnOptions: surface.TurnOptions{Effort: "high"}})
 	if err != nil || session == nil || session.ID != "real-session-id" || turn != nil {

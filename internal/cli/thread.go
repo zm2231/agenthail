@@ -40,11 +40,11 @@ type threadCreateRequest struct {
 }
 
 const threadUsage = `usage: agenthail thread create <codex|claude> "message" [--cwd <path>] [--alias <name>] [--model <name>] [--approval <untrusted|on-request|never>] [--effort <level>] [--mode <plan|default>] [--service-tier <tier>] [--output-schema <file>] [--name <name>] [--worktree <name>] [--agent <name>] [--permission-mode <mode>] [--timeout <duration>] [--json]
-       agenthail thread fork <target> [--cwd <path>] [--model <model>] [--before-turn <id>|--last-turn <id>] [--alias <name>] [--json]
+       agenthail thread fork <target> [--model <model>] [--last-turn <id>] [--alias <name>] [--json]
        agenthail thread <status|stop|resume|logs> <target> [--json]
        agenthail thread queue <target> <list|add|update|delete|reorder|start> [message] [--id <id>] [--ids <id,id>] [--client-id <stable-id>] [--cursor <cursor>] [--json]
 
-Codex thread creation uses Codex Desktop. Use 'agenthail codex' for a managed terminal session.`
+Codex threads start on Codex Desktop when its bridge is reachable and on Codex's app-server daemon otherwise.`
 
 func (a *App) cmdThread(args []string) error {
 	if hasFlag(args, "--help") {

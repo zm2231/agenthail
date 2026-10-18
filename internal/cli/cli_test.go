@@ -40,6 +40,7 @@ type cliSurface struct {
 	searchResults []surface.SessionSearchResult
 	compactCalls  int
 	goal          *surface.GoalState
+	resolveErr    error
 }
 
 type runtimeCLISurface struct {
@@ -95,6 +96,9 @@ func (f *cliSurface) List(context.Context) ([]surface.Session, error) {
 	return f.listed, f.listErr
 }
 func (f *cliSurface) Resolve(_ context.Context, target string) (*surface.Session, error) {
+	if f.resolveErr != nil {
+		return nil, f.resolveErr
+	}
 	session, ok := f.sessions[target]
 	if !ok {
 		return nil, errors.New("not found")
@@ -174,7 +178,7 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }}, r
+	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }, daemonService: &fakeService{}}, r
 }
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -268,7 +272,7 @@ func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail launch codex"}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
-	app.daemonServiceLoaded = func() bool { return false }
+	app.daemonService = &fakeService{}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	if err == nil || !strings.Contains(err.Error(), "unhealthy") {
 		t.Fatalf("err=%v output=%s", err, output)
@@ -293,7 +297,7 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Problem: surface.RuntimeUnsupervised}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
-	app.daemonServiceLoaded = func() bool { return true }
+	app.daemonService = &fakeService{loaded: true}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	if err != nil {
 		t.Fatalf("err=%v output=%s", err, output)
@@ -311,7 +315,7 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 
 func TestDoctorStaysHealthyAndShowsNotesForUnavailableManagedTerminals(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
-	note := surface.RuntimeNote{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install the standalone runtime"}
+	note := surface.RuntimeNote{Problem: surface.RuntimeCodexMissing, Message: "managed terminals unavailable", Remediation: "install the standalone runtime"}
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Backend: "desktop", Notes: []surface.RuntimeNote{note}}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
@@ -1065,5 +1069,41 @@ func TestManagedCodexLaunchWritesProviderReceiptBeforeExec(t *testing.T) {
 	}
 	if receiptAtExec.LaunchID != "agenthail-launch" || receiptAtExec.ThreadID != "provider-thread" || receiptAtExec.Workspace != "workspace:7" || receiptAtExec.Surface != "surface:9" || receiptAtExec.TmuxPane != "" {
 		t.Fatalf("receipt=%+v", receiptAtExec)
+	}
+}
+
+func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	unreachable := surface.DeliveryUnavailable(errors.New("runtime unreachable"))
+	claude := &cliSurface{kind: surface.KindClaude, resolveErr: unreachable}
+	notion := &cliSurface{kind: surface.KindNotion, resolveErr: unreachable}
+	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "claude", Surface: claude}, {Name: "notion", Surface: notion}}, DefaultTimeout: 5 * time.Second, catalogDaemonRunning: func() bool { return false }}
+	for _, session := range []surface.Session{{ID: "shared-claude", Surface: surface.KindClaude, Name: "release"}, {ID: "shared-notion", Surface: surface.KindNotion, Name: "release"}} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, target := range []string{"claude:shared", "claude:release", "notion:shared", "notion:release"} {
+		session, adapter, err := app.resolveTarget(context.Background(), target)
+		kind, _, _ := strings.Cut(target, ":")
+		if err != nil || adapter.Name() != surface.SurfaceKind(kind) || session.ID != "shared-"+kind {
+			t.Fatalf("%s: session=%+v err=%v", target, session, err)
+		}
+	}
+	if err := r.RegisterSession(surface.Session{ID: "shared-claude-2", Surface: surface.KindClaude}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.resolveTarget(context.Background(), "claude:shared"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("err=%v, want ambiguity among Claude sessions", err)
+	}
+	if session, _, err := app.resolveTarget(context.Background(), "notion:shared"); err != nil || session.ID != "shared-notion" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+	if _, _, err := app.resolveTarget(context.Background(), "claude:missing"); !surface.IsDeliveryUnavailable(err) {
+		t.Fatalf("err=%v, want the surface's unavailable error for an unknown target", err)
 	}
 }

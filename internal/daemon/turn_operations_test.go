@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,7 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 	d, r, fake, _, _ := daemonFixture(t)
 	adapter := &operationSurface{daemonSurface: fake}
 	d.Surfaces = []surface.Surface{adapter}
-	for _, body := range []string{`{"action":"session-fork","sessionId":"from","fork":{"beforeTurnId":"turn-2"}}`, `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"list","cursor":"page2"}}`} {
+	for _, body := range []string{`{"action":"session-fork","sessionId":"from","fork":{"lastTurnId":"turn-2","cwd":"/elsewhere","beforeTurnId":"turn-1"}}`, `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"list","cursor":"page2"}}`} {
 		w := serveDashboardRequest(dashboardRouter(d), http.MethodPost, "/api/action", body)
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
@@ -73,7 +74,7 @@ func TestDashboardForkPersistsAndNativeQueuePreservesCursor(t *testing.T) {
 	if _, err := r.Session("forked"); err != nil {
 		t.Fatal(err)
 	}
-	if adapter.fork.BeforeTurnID != "turn-2" || adapter.queue.Cursor != "page2" {
+	if adapter.fork != (surface.ForkOptions{LastTurnID: "turn-2"}) || adapter.queue.Cursor != "page2" {
 		t.Fatal(adapter.fork, adapter.queue)
 	}
 	if count := r.QueueCount("from"); count != 0 {
@@ -112,4 +113,32 @@ type noSessionStartSurface struct {
 
 func (f *noSessionStartSurface) StartSession(context.Context, surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	return nil, nil, f.err
+}
+
+type unknownQueueStartSurface struct {
+	*daemonSurface
+	starts int
+}
+
+func (s *unknownQueueStartSurface) NativeQueue(context.Context, *surface.Session, surface.NativeQueueRequest) (map[string]any, error) {
+	s.starts++
+	return nil, surface.DeliveryOutcomeUnknown(errors.New("start reply lost"))
+}
+
+func TestRetriedNativeQueueStartWithSameKeyStartsOnce(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	adapter := &unknownQueueStartSurface{daemonSurface: fake}
+	d.Surfaces = []surface.Surface{adapter}
+	handler := d.idempotentActionHandler(d.dashboardActionHandler)
+	body := `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"start"}}`
+	first := serveAction(handler, actionRequestWithKey(body, "start-next"), "mac")
+	retry := serveAction(handler, actionRequestWithKey(body, "start-next"), "mac")
+	if adapter.starts != 1 {
+		t.Fatalf("starts=%d", adapter.starts)
+	}
+	for _, response := range []*httptest.ResponseRecorder{first, retry} {
+		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"unknown":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
 }

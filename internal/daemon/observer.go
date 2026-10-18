@@ -68,7 +68,8 @@ func (d *Daemon) scanAndRelay(ctx context.Context) {
 			d.log.Printf("transport for watched session %s unavailable: %s", d.resolveDisplay(session.ID), err)
 			continue
 		}
-		if relayTargetInactive(session) {
+		if relayTargetInactive(session) || (queueCounts[session.ID] == 0 && claudeProcessExited(session)) {
+			d.syncRelays(ctx, adapter, session)
 			continue
 		}
 		if queueCounts[session.ID] == 0 && !d.observationAllowed(session.ID) {
@@ -115,32 +116,28 @@ func (d *Daemon) refreshAndPruneInactiveClaudeRoutes(ctx context.Context, cutoff
 	}
 	removed := 0
 	for _, route := range routes {
-		stale := ""
-		for _, sessionID := range []string{route.FromSession, route.ToSession} {
-			session, sessionErr := d.Registry.Session(sessionID)
-			if sessionErr != nil || session.Surface != surface.KindClaude || !relayTargetInactive(session) {
-				continue
-			}
-			old, ageErr := d.Registry.SessionUpdatedBefore(sessionID, cutoff)
-			if ageErr == nil && old {
-				stale = sessionID
-				break
-			}
+		if route.Active {
+			continue
 		}
-		if stale == "" {
+		source, sessionErr := d.Registry.Session(route.FromSession)
+		if sessionErr != nil || !claudeProcessExited(source) {
+			continue
+		}
+		if old, ageErr := d.Registry.SessionUpdatedBefore(route.FromSession, cutoff); ageErr != nil || !old {
 			continue
 		}
 		if err := d.Registry.RemoveRoute(route.ID); err != nil {
 			d.log.Printf("remove inactive relay %d: %s", route.ID, err)
 			continue
 		}
-		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-removed", SessionID: route.ToSession, SourceSessionID: route.FromSession, RouteID: route.ID, Error: "Claude Code session did not resume within 1 hour: " + stale})
+		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "relay-removed", SessionID: route.ToSession, SourceSessionID: route.FromSession, RouteID: route.ID, Error: "Claude Code source session did not resume within 1 hour: " + route.FromSession})
 		removed++
 	}
 	return removed, refreshed
 }
 
 func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, session *surface.Session) {
+	d.syncRelays(ctx, adapter, session)
 	source, transport := session.Source, session.Transport
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	observation, err := adapter.Observe(operationCtx, session)
@@ -194,13 +191,6 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 					_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, CompletionID: observation.CompletedTurnID, Result: "provider completion correlated to delivery intent"})
 				}
 			}
-		}
-		text := ""
-		if observation.Reply != nil && observation.Reply.Done && observation.Reply.Error == "" {
-			text = observation.Reply.Text
-		}
-		if text != "" {
-			d.fireRelays(session, observation.CompletedTurnID, previous.RelayHops, text)
 		}
 		terminalCompletion := observation.ActiveTurnID == ""
 		if terminalCompletion && completionNotificationEligible(previous, d.consumeNotificationArm(session.ID)) && observation.Reply != nil && observation.Reply.Done {

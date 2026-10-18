@@ -174,14 +174,18 @@ type dashboardChannelMember struct {
 }
 
 type dashboardRelay struct {
-	ID          int64  `json:"id"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Pattern     string `json:"pattern"`
-	Once        bool   `json:"once"`
-	Active      bool   `json:"active"`
-	FireCount   int64  `json:"fireCount"`
-	LastFiredAt string `json:"lastFiredAt,omitempty"`
+	Handoff      string `json:"handoff"`
+	EventCursor  int64  `json:"eventCursor"`
+	PendingCount int64  `json:"pendingCount"`
+	LastError    string `json:"lastError,omitempty"`
+	ID           int64  `json:"id"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Pattern      string `json:"pattern"`
+	Once         bool   `json:"once"`
+	Active       bool   `json:"active"`
+	FireCount    int64  `json:"fireCount"`
+	LastFiredAt  string `json:"lastFiredAt,omitempty"`
 }
 
 type dashboardHistory struct {
@@ -771,7 +775,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.Channels = append(state.Channels, dashboardChannel{Name: channel.Name, Members: members, MemberDetails: memberDetails})
 	}
 	for _, route := range routes {
-		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern, Once: route.Once, Active: route.Active, FireCount: route.FireCount, LastFiredAt: route.LastFiredAt})
+		state.Relays = append(state.Relays, dashboardRelay{ID: route.ID, From: d.resolveDisplay(route.FromSession), To: d.resolveDisplay(route.ToSession), Pattern: route.Pattern, Handoff: route.Handoff, EventCursor: route.EventCursor, PendingCount: route.PendingCount, LastError: route.LastError, Once: route.Once, Active: route.Active, FireCount: route.FireCount, LastFiredAt: route.LastFiredAt})
 	}
 	for _, entry := range history {
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
@@ -926,7 +930,7 @@ func (d *Daemon) dashboardSurfaceHealth(ctx context.Context, adapter surface.Sur
 				entry.RepairLabel = "Launch Codex through Agenthail"
 			case surface.RuntimeStopped:
 				entry.RepairAction = "runtime-ensure"
-				entry.RepairLabel = "Start managed runtime"
+				entry.RepairLabel = "Start Codex app-server daemon"
 			}
 		}
 	}
@@ -1056,6 +1060,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		FromID          string                     `json:"fromId"`
 		ToID            string                     `json:"toId"`
 		Pattern         string                     `json:"pattern"`
+		Handoff         string                     `json:"handoff"`
 		Once            bool                       `json:"once"`
 		RelayID         int64                      `json:"relayId"`
 		DeliveryID      int64                      `json:"deliveryId"`
@@ -1063,6 +1068,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		Cwd             string                     `json:"cwd"`
 		Launcher        string                     `json:"launcher"`
 		Approval        string                     `json:"approvalPolicy"`
+		Author          surface.Author             `json:"author"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 140<<10)).Decode(&request); err != nil {
 		http.Error(w, "invalid dashboard request", http.StatusBadRequest)
@@ -1228,11 +1234,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		owner := ""
-		if request.Surface == string(surface.KindCodex) {
-			owner = "desktop"
-		}
-		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode, Owner: owner})
+		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode})
 		if session != nil {
 			session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
@@ -1463,7 +1465,21 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		if pattern == "" {
 			pattern = ".*"
 		}
-		if _, err := d.Registry.AddRouteWithOptions(fromID, toID, pattern, request.Once); err != nil {
+		fromSession, err := d.Registry.Session(fromID)
+		if err != nil {
+			http.Error(w, "source session not found", http.StatusNotFound)
+			return
+		}
+		fromAdapter := d.surfaceForKind(fromSession.Surface)
+		if fromAdapter == nil {
+			http.Error(w, "source surface is not configured", http.StatusConflict)
+			return
+		}
+		if err := d.Registry.PrepareRelaySource(r.Context(), fromAdapter, fromSession, request.Handoff); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, err := d.Registry.AddRelayRoute(fromID, toID, pattern, request.Once, request.Handoff); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1615,13 +1631,21 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
+		if request.Author != "" && request.Author != surface.AuthorPerson {
+			http.Error(w, "author must be \"person\" when set", http.StatusBadRequest)
+			return
+		}
+		if request.Author == surface.AuthorPerson && request.SourceSessionID != "" {
+			http.Error(w, "a person's message cannot also name a source session", http.StatusBadRequest)
+			return
+		}
 		if request.SourceSessionID != "" {
 			if _, err := d.Registry.Session(request.SourceSessionID); err != nil {
 				http.Error(w, "source session not found", http.StatusBadRequest)
 				return
 			}
 		}
-		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions})
+		receipt, actionErr := d.dispatcher().DeliverWithOptions(ctx, adapter, session, request.Message, "", surface.SendOptions{Model: request.Model, SourceSessionID: request.SourceSessionID, BusyDelivery: request.BusyDelivery, TurnOptions: request.TurnOptions, Author: request.Author})
 		if actionErr != nil {
 			http.Error(w, actionErr.Error(), http.StatusBadGateway)
 			return

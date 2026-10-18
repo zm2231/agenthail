@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -631,6 +633,94 @@ func TestReconcilePreservesReplacementSocketAtReusedPIDPath(t *testing.T) {
 	}
 }
 
+func TestReconcilePreservesListeningSocketThatReusedTheStaleInode(t *testing.T) {
+	home := shortTempDir(t, "cp-reused-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999998
+	generation := "stale"
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	peerPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	replacement, err := net.Listen("unix", peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	device, inode, err := socketIdentity(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-relay", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", SocketPath: peerPath, SocketDevice: device, SocketInode: inode}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(peerPath); err != nil {
+		t.Fatalf("listening socket with the stale identity was removed: %v", err)
+	}
+}
+
+func TestReconcileKeepsStaleSocketWhenLivenessIsAmbiguous(t *testing.T) {
+	home := shortTempDir(t, "cp-ambiguous-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999997
+	generation := "stale"
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	peerPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: peerPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	device, inode, err := socketIdentity(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-relay", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", SocketPath: peerPath, SocketDevice: device, SocketInode: inode}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	original := dialSocket
+	dialSocket = func(string) (net.Conn, error) { return nil, os.ErrDeadlineExceeded }
+	defer func() { dialSocket = original }()
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(peerPath); err != nil {
+		t.Fatalf("socket removed on an ambiguous liveness probe: %v", err)
+	}
+}
+
+func TestSocketRefusesConnectionsOnlyWhenNothingListens(t *testing.T) {
+	path := filepath.Join(shortTempDir(t, "cp-refuse-"), "s.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if SocketRefusesConnections(path) {
+		t.Fatal("listening socket reported as refusing")
+	}
+	listener.SetUnlinkOnClose(false)
+	listener.Close()
+	if !SocketRefusesConnections(path) {
+		t.Fatal("closed socket not reported as refusing")
+	}
+}
+
 func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 	home := shortTempDir(t, "cp-token-")
 	socketDir := filepath.Join(home, "socks")
@@ -789,5 +879,47 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 			t.Fatal("status change was not published")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestClaudeSocketDirsAddRuntimeDirsOnlyOnLinux(t *testing.T) {
+	if got := claudeSocketDirsFor("darwin", "/run/user/501", 501); fmt.Sprint(got) != "[/tmp/cc-socks]" {
+		t.Fatalf("darwin dirs=%v", got)
+	}
+	if got := claudeSocketDirsFor("linux", "/xdg", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /xdg/cc-socks /run/user/1000/cc-socks]" {
+		t.Fatalf("linux dirs=%v", got)
+	}
+	if got := claudeSocketDirsFor("linux", "/run/user/1000", 1000); fmt.Sprint(got) != "[/tmp/cc-socks /run/user/1000/cc-socks]" {
+		t.Fatalf("linux default runtime dirs=%v", got)
+	}
+}
+
+func TestValidateTargetSocketAcceptsClaudeRuntimeDirNamespace(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Claude Code binds peer sockets under XDG_RUNTIME_DIR only on Linux")
+	}
+	runtimeDir := shortTempDir(t, "cp-xdg-")
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	namespace := filepath.Join(runtimeDir, "cc-socks")
+	other := filepath.Join(runtimeDir, "elsewhere")
+	for _, dir := range []string{namespace, other} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := strconv.Itoa(os.Getpid()) + ".sock"
+	for _, dir := range []string{namespace, other} {
+		listener, err := net.Listen("unix", filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+	}
+	configured := filepath.Join(runtimeDir, "configured")
+	if err := validateTargetSocket(configured, filepath.Join(namespace, name)); err != nil {
+		t.Fatalf("Claude runtime-dir socket rejected: %v", err)
+	}
+	if err := validateTargetSocket(configured, filepath.Join(other, name)); err == nil {
+		t.Fatal("socket outside every Claude namespace accepted")
 	}
 }
