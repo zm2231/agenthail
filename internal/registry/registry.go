@@ -233,7 +233,7 @@ func (r *Registry) migrate() error {
 		return err
 	}
 	if version < 14 {
-		if err := r.rekeyClaudeConversations(); err != nil {
+		if err := r.rekeyClaudeConversations(version); err != nil {
 			return err
 		}
 	}

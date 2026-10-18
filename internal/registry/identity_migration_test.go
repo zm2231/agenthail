@@ -15,9 +15,11 @@ const (
 	rekeyedBridge  = "session_01Rekeyed"
 	collidedBridge = "session_01Collided"
 	orphanBridge   = "session_01Orphan"
+	launchedBridge = "session_01Launch"
+	keptOrphan     = "session_01Kept"
 )
 
-var retiredIDs = []string{rekeyedBridge, collidedBridge, orphanBridge}
+var retiredIDs = []string{rekeyedBridge, collidedBridge, orphanBridge, launchedBridge}
 
 func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
@@ -40,6 +42,24 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 	defer r.Close()
 
 	assertNoRetiredIDs(t, r.db)
+	var version int
+	if err := r.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+		t.Fatalf("user_version=%d err=%v", version, err)
+	}
+	if owner, err := r.LookupAlias("kept"); err != nil || owner != keptOrphan || r.QueueCount(keptOrphan) != 1 {
+		t.Fatalf("a referenced row without a transcript lost its alias or queue: owner=%q err=%v queue=%d", owner, err, r.QueueCount(keptOrphan))
+	}
+	launched, err := r.Session("conversation-launch")
+	if err != nil || launched.Transcript != "/claude/projects/-work/conversation-launch.jsonl" || !launched.HasLocal || launched.PID != 44 {
+		t.Fatalf("launched=%+v err=%v", launched, err)
+	}
+	if owner, err := r.LookupAlias("launched"); err != nil || owner != "conversation-launch" {
+		t.Fatalf("launched alias owner=%q err=%v", owner, err)
+	}
+	var receipt string
+	if err := r.db.QueryRow(`SELECT CAST(receipt AS TEXT) FROM action_receipts WHERE idempotency_key='fixture-key'`).Scan(&receipt); err != nil || !strings.Contains(receipt, `"sessionId":"conversation-worker"`) {
+		t.Fatalf("receipt=%s err=%v", receipt, err)
+	}
 	for alias, want := range map[string]string{"worker": "conversation-worker", "native": "conversation-native"} {
 		if owner, err := r.LookupAlias(alias); err != nil || owner != want {
 			t.Fatalf("alias %s owner=%q err=%v", alias, owner, err)
@@ -56,7 +76,7 @@ func TestSchema14RekeysClaudeRowsToTheirConversation(t *testing.T) {
 		t.Fatalf("queues worker=%d native=%d", r.QueueCount("conversation-worker"), r.QueueCount("conversation-native"))
 	}
 	rekeys, err := r.SessionRekeys()
-	if err != nil || len(rekeys) != 2 || rekeys[rekeyedBridge] != "conversation-worker" || rekeys[collidedBridge] != "conversation-native" {
+	if err != nil || len(rekeys) != 3 || rekeys[rekeyedBridge] != "conversation-worker" || rekeys[collidedBridge] != "conversation-native" || rekeys[launchedBridge] != "conversation-launch" {
 		t.Fatalf("rekeys=%v err=%v", rekeys, err)
 	}
 	removed := map[string]string{}
@@ -103,12 +123,19 @@ func seedVersion13(t *testing.T, r *Registry) {
 		{ID: "conversation-native", Surface: surface.KindClaude, Name: "native", Cwd: "/work", Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
 		{ID: collidedBridge, Surface: surface.KindClaude, Name: "native again", Cwd: "/work", PID: 42, Transcript: "/claude/projects/-work/conversation-native.jsonl", HasLocal: true},
 		{ID: orphanBridge, Surface: surface.KindClaude, Name: "no transcript", PID: 43},
+		{ID: keptOrphan, Surface: surface.KindClaude, Name: "no transcript, still addressed"},
+		{ID: "conversation-launch", Surface: surface.KindClaude, Name: "launched", PID: 44},
+		{ID: launchedBridge, Surface: surface.KindClaude, Name: "launched", Cwd: "/work", PID: 44, Transcript: "/claude/projects/-work/conversation-launch.jsonl", HasLocal: true},
 		{ID: "codex-peer", Surface: surface.KindCodex},
 	} {
 		exec(`INSERT INTO sessions(id,surface,name,cwd,pid,transcript,has_local) VALUES(?,?,?,?,?,?,?)`, s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, s.Transcript, b2i(s.HasLocal))
 	}
 	exec(`INSERT INTO sessions(id,surface,parent_session_id,root_session_id,forked_from) VALUES('child','claude',?,?,?)`, rekeyedBridge, rekeyedBridge, rekeyedBridge)
-	exec(`INSERT INTO aliases(name,session_id) VALUES('worker',?),('native','conversation-native'),('collided',?)`, rekeyedBridge, collidedBridge)
+	exec(`INSERT INTO aliases(name,session_id) VALUES('worker',?),('native','conversation-native'),('collided',?),('kept',?),('launched','conversation-launch')`, rekeyedBridge, collidedBridge, keptOrphan)
+	if err := r.QueueMessage(keptOrphan, "for the kept row"); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO action_receipts(idempotency_key,request_hash,status,receipt,created_at,updated_at) VALUES('fixture-key','hash','completed',?,datetime('now'),datetime('now'))`, []byte(`{"sessionId":"`+rekeyedBridge+`","status":"sent"}`))
 	channel, err := r.CreateChannel("crew")
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +166,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 		exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES(?,2)`, id)
 		exec(`INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,'x',?)`, "body-"+id, id, now)
 		exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES(?,'{}','{}',?)`, id, now)
-		exec(`INSERT INTO api_action_reservations(idempotency_key,session_id,action,source_session_id) VALUES(?,?,'send',?)`, "key-"+id, id, id)
+		exec(`INSERT INTO api_action_reservations(idempotency_key,session_id,action,source_session_id,receipt) VALUES(?,?,'send',?,?)`, "key-"+id, id, id, `{"sessionId":"`+id+`"}`)
 		exec(`INSERT INTO daemon_events(event_type,entity_id,payload,created_at) VALUES('session.status',?,?,?)`, id, []byte(`{"sessionId":"`+id+`"}`), now)
 		exec(`INSERT INTO daemon_event_items(dedupe_key,event_id) VALUES(?,1)`, "status:"+id)
 	}
@@ -153,7 +180,7 @@ type sessionColumn struct{ table, column string }
 // the live schema so a table added later is covered without editing this test.
 func sessionColumns(t *testing.T, db *sql.DB) []sessionColumn {
 	t.Helper()
-	rows, err := db.Query(`SELECT m.name,p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT IN ('session_rekeys','sqlite_sequence') AND (p.name LIKE '%session%' OR p.name IN ('entity_id','forked_from') OR (m.name='sessions' AND p.name='id') OR (m.name LIKE '%event%' AND p.name IN ('dedupe_key','payload')))`)
+	rows, err := db.Query(`SELECT m.name,p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT IN ('session_rekeys','sqlite_sequence') AND (p.name LIKE '%session%' OR p.name IN ('entity_id','forked_from') OR (m.name='sessions' AND p.name='id') OR (m.name LIKE '%event%' AND p.name IN ('dedupe_key','payload')) OR p.name='receipt')`)
 	if err != nil {
 		t.Fatal(err)
 	}

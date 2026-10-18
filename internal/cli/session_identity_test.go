@@ -142,3 +142,31 @@ func TestResumeInAnotherProcessKeepsTheAlias(t *testing.T) {
 		t.Fatalf("whoami=%+v", got)
 	}
 }
+
+func TestALaunchedSessionAndItsDiscoveredProcessAreOneRow(t *testing.T) {
+	app, r, fixture, _ := liveClaudeApp(t)
+	launched := surface.Session{ID: originalConversation, Surface: surface.KindClaude, Name: "launched", PID: fixture.PID, Status: surface.StatusBusy, Cwd: fixture.Home}
+	if err := r.RegisterSession(launched); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"identify", "claude:" + originalConversation, "relay"}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	transcript := fixture.Transcript(originalConversation, fixture.Home)
+	fixture.Record(originalConversation, fixture.Home, liveBridge)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := r.ListSessions(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != originalConversation || sessions[0].Transcript != transcript || sessions[0].Bridge != liveBridge || sessions[0].PID != fixture.PID {
+		t.Fatalf("sessions=%+v", sessions)
+	}
+	if owner, err := r.LookupAlias("relay"); err != nil || owner != originalConversation {
+		t.Fatalf("alias owner=%q err=%v", owner, err)
+	}
+}

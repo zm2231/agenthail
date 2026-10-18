@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/surface"
@@ -15,9 +16,11 @@ import (
 // the conversation id Claude names the transcript after. Each such row moves
 // to its conversation id with everything that references it. When the
 // conversation already has a row, that row's alias wins. Rows without a
-// transcript name no conversation and are deleted. session_rekeys records
-// each move so clients can follow ids they still hold.
-func (r *Registry) rekeyClaudeConversations() error {
+// transcript name no conversation: they are deleted when nothing references
+// them and kept unchanged otherwise, so no alias or queued work is lost.
+// session_rekeys records each move so clients can follow ids they still hold.
+// An existing registry commits user_version 14 with the data.
+func (r *Registry) rekeyClaudeConversations(version int) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -58,15 +61,28 @@ func (r *Registry) rekeyClaudeConversations() error {
 		replacements = append(replacements, m.old, m.new)
 	}
 	for _, id := range orphans {
+		referenced, err := sessionReferencedTx(tx, id)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			continue
+		}
 		if _, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, id); err != nil {
 			return err
 		}
 	}
 	if len(replacements) > 0 {
 		replacer := strings.NewReplacer(replacements...)
-		for _, table := range []string{"catalog_events", "daemon_events", "daemon_event_items"} {
+		for table, columns := range map[string][]string{
+			"catalog_events":          {"dedupe_key", "entity_id", "payload"},
+			"daemon_events":           {"dedupe_key", "entity_id", "payload"},
+			"daemon_event_items":      {"dedupe_key"},
+			"action_receipts":         {"receipt"},
+			"api_action_reservations": {"receipt"},
+		} {
 			if tables[table] {
-				if err := rewriteEventLogTx(tx, table, replacer); err != nil {
+				if err := rewriteSerializedTx(tx, table, columns, replacer); err != nil {
 					return err
 				}
 			}
@@ -79,7 +95,44 @@ func (r *Registry) rekeyClaudeConversations() error {
 			}
 		}
 	}
+	if version >= 1 {
+		if _, err := tx.Exec(`PRAGMA user_version=14`); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// sessionReferencedTx reports whether any table with a foreign key to
+// sessions holds a row for id; deleting the session would cascade into it.
+func sessionReferencedTx(tx *sql.Tx, id string) (bool, error) {
+	rows, err := tx.Query(`SELECT m.name,f."from" FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type='table' AND f."table"='sessions'`)
+	if err != nil {
+		return false, err
+	}
+	type reference struct{ table, column string }
+	var references []reference
+	for rows.Next() {
+		var ref reference
+		if err := rows.Scan(&ref.table, &ref.column); err != nil {
+			rows.Close()
+			return false, err
+		}
+		references = append(references, ref)
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	for _, ref := range references {
+		var found bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM `+ref.table+` WHERE `+ref.column+`=?)`, id).Scan(&found); err != nil {
+			return false, err
+		}
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func existingTables(tx *sql.Tx) (map[string]bool, error) {
@@ -123,6 +176,8 @@ func rekeySessionTx(tx *sql.Tx, tables map[string]bool, oldID, newID string) err
 		if _, err := tx.Exec(`INSERT INTO sessions(`+strings.Join(columns, ",")+`) SELECT `+strings.Join(selected, ",")+` FROM sessions WHERE id=?`, newID, oldID); err != nil {
 			return err
 		}
+	} else if _, err := tx.Exec(`UPDATE sessions SET transcript=CASE WHEN transcript='' THEN (SELECT transcript FROM sessions WHERE id=?1) ELSE transcript END,cwd=CASE WHEN cwd='' THEN (SELECT cwd FROM sessions WHERE id=?1) ELSE cwd END,has_local=MAX(has_local,(SELECT has_local FROM sessions WHERE id=?1)) WHERE id=?2`, oldID, newID); err != nil {
+		return err
 	}
 	var hasAlias, hasRuntime, hasJournal, hasCatalog bool
 	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM aliases WHERE session_id=?),EXISTS(SELECT 1 FROM session_runtime WHERE session_id=?),EXISTS(SELECT 1 FROM session_journal_state WHERE session_id=?) OR EXISTS(SELECT 1 FROM session_journal WHERE session_id=?)`, newID, newID, newID, newID).Scan(&hasAlias, &hasRuntime, &hasJournal); err != nil {
@@ -194,14 +249,14 @@ func tableColumns(tx *sql.Tx, table string) ([]string, error) {
 	return columns, rows.Err()
 }
 
-func rewriteEventLogTx(tx *sql.Tx, table string, replacer *strings.Replacer) error {
+func rewriteSerializedTx(tx *sql.Tx, table string, wanted []string, replacer *strings.Replacer) error {
 	present, err := tableColumns(tx, table)
 	if err != nil {
 		return err
 	}
 	var columns, selected []string
 	for _, column := range present {
-		if column == "dedupe_key" || column == "entity_id" || column == "payload" {
+		if slices.Contains(wanted, column) {
 			columns = append(columns, column)
 			selected = append(selected, `CAST(`+column+` AS TEXT)`)
 		}
@@ -234,7 +289,7 @@ func rewriteEventLogTx(tx *sql.Tx, table string, replacer *strings.Replacer) err
 		for i, value := range values {
 			replaced := replacer.Replace(value.String)
 			changed = changed || replaced != value.String
-			if columns[i] == "payload" {
+			if columns[i] == "payload" || columns[i] == "receipt" {
 				next[i] = []byte(replaced)
 			} else {
 				next[i] = replaced
