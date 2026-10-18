@@ -18,6 +18,7 @@ final class SessionPane: ObservableObject, Identifiable {
     @Published private(set) var olderError: String?
     @Published var inspectorVisible = true
     @Published var renamingSession: SessionState?
+    @Published private(set) var forking = false
     @Published private(set) var controlPending = false
     @Published private(set) var composerDraft = ComposerDraft() {
         didSet { observeDraft() }
@@ -264,12 +265,79 @@ final class SessionPane: ObservableObject, Identifiable {
 
     func submit(busyDelivery: String?) {
         guard let sessionID = selectedSessionID, removedSession == nil else { return }
+        if composerDraft.attachments.isEmpty, let session = selectedSession {
+            let input = SlashInput(composer, available: SlashCommand.available(capabilities: session.capabilities, working: session.isWorking))
+            if let problem = input.problem {
+                model.operationError = problem
+                return
+            }
+            if case let .command(command, argument) = input {
+                composer = ""
+                run(command, argument: argument, sessionID: sessionID)
+                return
+            }
+        }
         let text = composer
         let attachments = composerDraft.attachments
         composer = ""
         composerDraft.attachments = []
         let settings = selectedSession?.surface == "codex" && busyDelivery != "steer" ? model.turnSettings(for: sessionID) : TurnSettings()
         model.send(text, attachments: attachments, to: sessionID, busyDelivery: busyDelivery, turnSettings: settings)
+    }
+
+    private func run(_ command: SlashCommand, argument: String, sessionID: String) {
+        model.operationError = nil
+        switch command {
+        case .name:
+            if let problem = SessionHandle.problem(with: argument) {
+                model.operationError = problem
+                composer = command.token + " " + argument
+                return
+            }
+            Task {
+                if let failure = await model.rename(sessionID, to: SessionHandle.normalized(argument)) { model.operationError = failure }
+            }
+        case .compact: compactContext()
+        case .stop: interrupt()
+        case .steer: model.send(argument, to: sessionID, busyDelivery: "steer")
+        case .model: changeModel(to: resolvedModelID(argument))
+        case .goal: model.perform(action: "goal-set", sessionID: sessionID, message: argument)
+        }
+    }
+
+    func resolvedModelID(_ query: String) -> String {
+        let options = detail?.models ?? []
+        return options.first { $0.id.caseInsensitiveCompare(query) == .orderedSame || $0.displayName.caseInsensitiveCompare(query) == .orderedSame }?.id ?? query
+    }
+
+    func forkAgain(_ session: SessionState) {
+        model.actionKeys.abandon(.fork(session.id))
+        fork(session)
+    }
+
+    func fork(_ session: SessionState) {
+        guard !forking, removedSession == nil, SessionOperationAvailability.fork(session) else { return }
+        forking = true
+        Task { await forkNow(session) }
+    }
+
+    func forkNow(_ session: SessionState) async {
+        defer { forking = false }
+        guard let api = model.api else {
+            model.operationError = "Agenthail isn't connected."
+            return
+        }
+        model.pendingForks.remove(session.id)
+        do {
+            let forked = try await api.forkSession(id: session.id, keys: model.actionKeys)
+            model.operationError = nil
+            await model.openCreatedSession(forked.id, in: closed ? nil : self)
+        } catch AgenthailAPIError.outcomeUnknown {
+            model.operationError = nil
+            model.pendingForks.insert(session.id)
+        } catch {
+            model.operationError = error.localizedDescription
+        }
     }
 
     static func stopAvailable(_ session: SessionState?, removed: Bool, draftEmpty: Bool) -> Bool {

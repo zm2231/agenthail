@@ -1,6 +1,6 @@
 # Session creation, lifecycle and Codex native controls
 
-Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. Use the web dashboard or CLI for lifecycle operations, Codex forks, native Codex queue editing and advanced Codex turn settings.
+Agenthail exposes these operations through the CLI and the authenticated dashboard API. The web dashboard has creation controls, Codex turn options, and a session operations form. The native iPhone companion supports Claude background creation with name, worktree, named-agent, model, effort and permission options, plus ordinary session and Agenthail queue controls. The Mac app has Claude background lifecycle, Codex forks, native Codex queue editing, and Codex effort and plan mode; see [native apps](../native-apps.md). On iPhone, use the web dashboard, Mac app or CLI for those.
 
 The immediate send status in CLI JSON and dashboard/mobile API results is `sent`, `queued`, or `submitted`, followed by the target. `sent` means the selected transport accepted the request, `queued` means Agenthail durably accepted delayed work, and `submitted` means Agenthail recorded the intent without asserting provider acceptance. Human/API sends without an agent sender use the durable operator identity. Channel sends count `submitted` members separately from `sent` and `queued`. Receipt copy does not ask the sender to investigate read or confirmation state. Success is silent; proven delivery problems appear as notices. Internal audit evidence retains `transport_accepted`, `held`, `delivered`, `reply_observed`, `failed`, `unknown`, `expired`, and `canceled`. Socket acceptance never proves model completion.
 
@@ -91,10 +91,10 @@ If creation returns a session, that session is registered before the initial-tur
 
 ```sh
 agenthail thread fork codex:<source-id> --alias experiment --json
-agenthail thread fork @builder --before-turn <turn-id> --cwd /path/to/repo --json
+agenthail thread fork @builder --last-turn <turn-id> --json
 ```
 
-Optional `--model`, `--cwd`, `--before-turn` and `--last-turn` pass to the owning app-server. Before-turn and last-turn are mutually exclusive. A fork retains the source transport, uses the returned identity, and is registered for subsequent sends. Goal continuation is deferred until explicit input; forking alone does not launch an automatic goal continuation. A fork does not create a Git worktree.
+Optional `--model` and `--last-turn` pass to the owning app-server; `--last-turn` keeps history through that turn. The fork stays in the source folder. A fork retains the source transport, uses the returned identity, and is registered for subsequent sends. Goal continuation is deferred until explicit input; forking alone does not launch an automatic goal continuation. A fork does not create a Git worktree.
 
 ## Codex native input queue
 
@@ -133,7 +133,7 @@ Turn settings survive the durable Agenthail queue, retries and daemon replay eve
 
 - `session-create`: `surface`, `message`, `cwd`, `alias`, `model`, plus creation and turn fields.
 - `send`: `sessionId`, `message`, `effort`, `mode`, `serviceTier`, `outputSchema`.
-- `session-fork`: `sessionId`, `fork: {cwd, model, beforeTurnId, lastTurnId}`.
+- `session-fork`: `sessionId`, `fork: {model, lastTurnId}`.
 - `native-queue`: `sessionId`, `nativeQueue: {queueAction, message, queuedSubmissionId, clientUserMessageId, queuedSubmissionIds, cursor}`.
 - `session-lifecycle-status`, `session-lifecycle-logs`, `session-lifecycle-stop`, `session-lifecycle-resume`: `sessionId`.
 

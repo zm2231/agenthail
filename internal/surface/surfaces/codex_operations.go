@@ -51,11 +51,8 @@ func applyCodexTurnOptions(ctx context.Context, client codexClient, session *sur
 }
 
 func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
-	if options.BeforeTurnID != "" && options.LastTurnID != "" {
-		return nil, fmt.Errorf("before-turn and last-turn are mutually exclusive")
-	}
 	params := map[string]any{"threadId": session.ID, "deferGoalContinuation": true, "excludeTurns": true, "threadSource": "agenthail"}
-	for k, v := range map[string]string{"cwd": options.Cwd, "model": options.Model, "beforeTurnId": options.BeforeTurnID, "lastTurnId": options.LastTurnID} {
+	for k, v := range map[string]string{"model": options.Model, "lastTurnId": options.LastTurnID} {
 		if v != "" {
 			params[k] = v
 		}
@@ -86,9 +83,6 @@ func (c *Codex) ForkSession(ctx context.Context, session *surface.Session, optio
 	}
 	if fork.Cwd == "" {
 		fork.Cwd = str(thread, "cwd")
-	}
-	if fork.Cwd == "" {
-		fork.Cwd = options.Cwd
 	}
 	fork.LastActive = time.Now()
 	if fork.Cwd == "" {
