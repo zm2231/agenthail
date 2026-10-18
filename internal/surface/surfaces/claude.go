@@ -696,6 +696,12 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if !c.CanSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
 	}
+	if _, err := c.reach(ctx, sess); err != nil {
+		return nil, err
+	}
+	if !c.CanSendHumanTurn(sess) {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
+	}
 	return c.postWhenIdle(ctx, sess, message)
 }
 

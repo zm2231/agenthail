@@ -88,7 +88,12 @@ func newOrphanFixture(t *testing.T) *orphanFixture {
 
 func (f *orphanFixture) send(t *testing.T, key, message string) (int, map[string]any) {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{"action": "send", "sessionId": f.session.ID, "message": message})
+	return f.action(t, key, map[string]string{"action": "send", "sessionId": f.session.ID, "message": message})
+}
+
+func (f *orphanFixture) action(t *testing.T, key string, request map[string]string) (int, map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(request)
 	response := serveV1Action(f.handler, string(body), key, f.token)
 	var decoded map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
@@ -215,5 +220,16 @@ func TestRelayToExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) {
 	}
 	if routes, err := f.r.ListRoutes(); err != nil || len(routes) != 1 {
 		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+}
+
+func TestAPIPersonSendToEndedBackgroundJobResumesAndPostsOneHumanTurn(t *testing.T) {
+	f := newOrphanFixture(t)
+	code, body := f.action(t, "person-1", map[string]string{"action": "send", "author": "person", "sessionId": f.session.ID, "message": "hello"})
+	if code != http.StatusOK || receiptField(body, "evidence") != string(surface.EvidenceDelivered) {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	if f.resumes() != 1 || f.posts.count("hello") != 1 || f.posts.containing(`"type":"user"`) != 1 || f.posts.containing(`"session_id":"session_orphan"`) != 1 {
+		t.Fatalf("resumes=%d posts=%v", f.resumes(), f.posts.bodies)
 	}
 }

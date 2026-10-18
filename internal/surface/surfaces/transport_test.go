@@ -113,14 +113,15 @@ func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
 	var requestBody, requestURL string
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+	home, pid := liveHumanTurnProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
 		if method != http.MethodPost {
 			t.Fatalf("method=%s", method)
 		}
 		requestURL, requestBody = url, body
 		return http.StatusOK, `{}`, nil
 	})
-	session := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
+	session := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
 	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
@@ -164,11 +165,12 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
 	var requestURL string
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
+	home, pid := liveHumanTurnProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
 		requestURL = url
 		return http.StatusOK, `{}`, nil
 	})
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -178,15 +180,26 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 }
 
 func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
-	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+	home, pid := liveHumanTurnProcess(t)
+	claude := NewClaudeWithRequest("Default", home, func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
 		t.Fatal("human turn bypassed the active-turn gate")
 		return 0, "", nil
 	})
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
-	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, PID: pid, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
 	if err != nil || result == nil || result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
+}
+
+// liveHumanTurnProcess records a live process that owns session_bridge through
+// Remote Control and a messaging socket.
+func liveHumanTurnProcess(t *testing.T) (string, int) {
+	t.Helper()
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.Record("conversation-bridge", fixture.Home, "session_bridge")
+	return fixture.Home, fixture.PID
 }
 
 func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
