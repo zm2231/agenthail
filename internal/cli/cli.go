@@ -1007,44 +1007,42 @@ func relTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
-// registeredSession falls back to the registry row of a session its surface
-// no longer lists, such as a Claude session whose process exited, so a send
-// can still reach it. Only a target naming the session exactly falls back: a
-// name or folder fragment must not resolve to historical sessions.
-func (a *App) registeredSession(sid, target string, adapter surface.Surface, resolveErr error) (*surface.Session, error) {
-	err := fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
-	if !errors.Is(resolveErr, surface.ErrSessionNotFound) {
-		return nil, err
-	}
-	if exact, exactErr := a.Registry.ExactTarget(adapter.Name(), target); exactErr != nil || exact != sid {
-		return nil, err
-	}
-	session, lookupErr := a.Registry.Session(sid)
-	if lookupErr != nil || session.Surface != adapter.Name() {
-		return nil, err
-	}
-	if validateErr := surface.ValidateRuntimeTransport(session); validateErr != nil {
-		return nil, validateErr
-	}
-	return session, nil
-}
-
-// resolveSession refreshes a session through its surface. An unreachable
-// runtime is not a missing session: a session the registry already knows
-// stands as registered, and each operation decides whether it can proceed.
-func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector string) (*surface.Session, error) {
+// resolveSession refreshes a session through its surface, resolving selector
+// there. It is the one place a target falls back to the registry. An
+// unreachable runtime is not a missing session: a session the registry already
+// knows stands as registered, and each operation decides whether it can
+// proceed. A session the surface no longer lists, such as a Claude session
+// whose process exited, stands as registered only when the user's target names
+// it exactly, so a send can still reach it; a name or folder fragment never
+// resolves to a historical session. target is the user's text, which differs
+// from selector when the registry already resolved it to an ID.
+func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adapter surface.Surface, selector, target string) (*surface.Session, error) {
 	session, err := adapter.Resolve(ctx, selector)
-	if !surface.IsDeliveryUnavailable(err) || a.Registry == nil {
+	if err == nil || a.Registry == nil {
 		return session, err
 	}
-	sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
-	if errors.Is(lookupErr, sql.ErrNoRows) {
+	if surface.IsDeliveryUnavailable(err) {
+		sid, lookupErr := a.Registry.ResolveSurfaceTarget(kind, selector)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, err
+		}
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		return a.Registry.Session(sid)
+	}
+	if !errors.Is(err, surface.ErrSessionNotFound) {
 		return nil, err
 	}
-	if lookupErr != nil {
-		return nil, lookupErr
+	sid, exactErr := a.Registry.ExactTarget(kind, target)
+	if exactErr != nil || (selector != target && sid != selector) {
+		return nil, err
 	}
-	return a.Registry.Session(sid)
+	registered, lookupErr := a.Registry.Session(sid)
+	if lookupErr != nil || registered.Surface != kind {
+		return nil, err
+	}
+	return registered, nil
 }
 
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
@@ -1054,14 +1052,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 		if adapter == nil {
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
-		session, err := a.resolveSession(ctx, kind, adapter, selector)
-		if err != nil && a.Registry != nil {
-			if sid, exactErr := a.Registry.ExactTarget(kind, selector); exactErr == nil {
-				if registered, registeredErr := a.registeredSession(sid, selector, adapter, err); registeredErr == nil {
-					return registered, adapter, nil
-				}
-			}
-		}
+		session, err := a.resolveSession(ctx, kind, adapter, selector, selector)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
@@ -1095,13 +1086,9 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				if adapter == nil {
 					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
 				}
-				session, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid)
+				session, resolveErr := a.resolveSession(ctx, surface.SurfaceKind(kindText), adapter, sid, target)
 				if resolveErr != nil {
-					registered, registeredErr := a.registeredSession(sid, target, adapter, resolveErr)
-					if registeredErr != nil {
-						return nil, nil, registeredErr
-					}
-					return registered, adapter, nil
+					return nil, nil, fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
 				}
 				if err := a.Registry.RegisterSession(*session); err != nil {
 					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
