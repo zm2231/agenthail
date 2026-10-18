@@ -15,7 +15,7 @@ const (
 	HandoffGoalCompleted = "goal_completed"
 )
 
-var relayEnvelope = regexp.MustCompile(`(?m)^\[agenthail relay hops=\d+ id=(\d+) source=.* turn=([^\]\s]+)\]`)
+var relayEnvelope = regexp.MustCompile(`(?m)^\[agenthail relay hops=\d+ id=(\d+) source=.*? turn=([^\]\s]+)\]`)
 
 type RelayEvent struct {
 	CompletedAt     time.Time

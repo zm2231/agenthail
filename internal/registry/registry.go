@@ -799,6 +799,17 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 	}{
 		{`DELETE FROM channel_members WHERE session_id=?`, []any{oldID}},
 		{`INSERT INTO relay_sources(session_id,cursor) SELECT ?,cursor FROM relay_sources WHERE session_id=? ON CONFLICT(session_id) DO NOTHING`, []any{currentID, oldID}},
+		{`DELETE FROM relay_events WHERE source_session_id=? AND EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=?)
+			AND NOT EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=? AND s.completion_id=relay_events.completion_id)
+			AND NOT EXISTS(SELECT 1 FROM routes r WHERE r.from_session=? AND r.active=1 AND relay_events.id>r.event_cursor)`, []any{oldID, currentID, currentID, oldID}},
+		{`UPDATE routes SET event_cursor=COALESCE(
+				(SELECT MIN(COALESCE(p.survivor,p.unique_id),COALESCE(p.unique_id,p.survivor))-1 FROM (SELECT
+					(SELECT MIN(s.id) FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id>routes.event_cursor) AS survivor,
+					(SELECT MIN(o.id) FROM relay_events o WHERE o.source_session_id=?2 AND o.id>routes.event_cursor AND NOT EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=?1 AND s.completion_id=o.completion_id)) AS unique_id) p
+					WHERE p.survivor IS NOT NULL OR p.unique_id IS NOT NULL),
+				(SELECT MAX(s.id) FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id<=routes.event_cursor),
+				event_cursor)
+			WHERE from_session=?2 AND EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=?1)`, []any{currentID, oldID}},
 		{`UPDATE OR IGNORE relay_events SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET to_session=? WHERE to_session=?`, []any{currentID, oldID}},
