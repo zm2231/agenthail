@@ -60,7 +60,7 @@ agenthail doctor
 
 `daemon install` starts a systemd user service, `agenthail.service`, and turns on lingering so the daemon keeps running after you log out. If it prints `linger: off`, run `sudo loginctl enable-linger $USER`; until then systemd stops the daemon at logout and `agenthail doctor` reports it as unhealthy. Restarting or updating the daemon leaves the agents it started running. `agenthail update` installs new releases in place and restores the previous version if the new daemon does not answer.
 
-Run `daemon install` from the shell your agents use: the service records that shell's `PATH`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. `CODEX_HOME` must be on a filesystem that can run programs, because Codex's app-server daemon installs and runs its own binary there; `agenthail doctor` flags one that cannot. Claude Remote Control and Notion need the Python sidecar and a signed-in desktop browser, which the Linux archive does not ship, so Agenthail on Linux leaves Notion out unless `AGENTHAIL_SIDECAR` points at a sidecar.
+Run `daemon install` from the shell your agents use: the service records that shell's `PATH`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. `CODEX_HOME` must be on a filesystem that can run programs, because Codex's app-server daemon installs and runs its own binary there; `agenthail doctor` flags one that cannot. Claude Remote Control and Notion need a signed-in desktop browser and helper components the Linux download does not include, so they are not available on Linux.
 
 Developing Agenthail itself? See the [maintainer documentation](docs/maintainers/).
 
