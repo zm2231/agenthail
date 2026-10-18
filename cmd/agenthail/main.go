@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/zm2231/agenthail/internal/claudepeer"
@@ -51,18 +52,20 @@ func main() {
 	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
 	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
 	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
-	notion := surfaces.NewNotion(
-		envOr("AGENTHAIL_NOTION_SPACE", ""),
-		envOr("AGENTHAIL_NOTION_USER", ""),
-	)
+	entries := []cli.SurfaceEntry{
+		{Name: "claude", Surface: claude},
+		{Name: "codex", Surface: codex},
+	}
+	if notionAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR")) {
+		entries = append(entries, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(
+			envOr("AGENTHAIL_NOTION_SPACE", ""),
+			envOr("AGENTHAIL_NOTION_USER", ""),
+		)})
+	}
 
 	app := cli.App{
-		Registry: reg,
-		Surfaces: []cli.SurfaceEntry{
-			{Name: "claude", Surface: claude},
-			{Name: "codex", Surface: codex},
-			{Name: "notion", Surface: notion},
-		},
+		Registry:       reg,
+		Surfaces:       entries,
 		DefaultTimeout: 2 * time.Minute,
 		Version:        version,
 		Revision:       revision,
@@ -73,6 +76,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// notionAvailable reports whether this install can reach Notion. The Mac
+// package ships the sidecar Notion talks through; the Linux archive does not,
+// so off macOS Notion is registered only when AGENTHAIL_SIDECAR names one.
+func notionAvailable(goos, sidecar string) bool {
+	return goos == "darwin" || sidecar != ""
 }
 
 func envOr(key, def string) string {

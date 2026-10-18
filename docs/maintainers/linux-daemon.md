@@ -54,7 +54,7 @@ The Claude, exec and SQLite checks read the environment recorded in the unit, no
 
 Agenthail resolves Claude Code state through `surface.ClaudeConfigDir`: `CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`. Claude Code 2.1.302 keeps `sessions/`, peer key files, `jobs/` and `projects/` there. On Linux it puts peer sockets under `$XDG_RUNTIME_DIR/cc-socks` rather than `/tmp/cc-socks`, and records `procStart` as the starttime field of `/proc/<pid>/stat` in clock ticks rather than as a date. Peer discovery accepts both socket directories and verifies the start time from `/proc`, so a reused PID is not trusted.
 
-Claude Remote Control and Notion depend on the Python sidecar and a signed-in desktop browser. The Linux archive does not ship the sidecar, so both report unavailable.
+Claude Remote Control and Notion depend on the Python sidecar and a signed-in desktop browser. The Linux archive does not ship the sidecar, so off macOS `cmd/agenthail` registers the Notion surface only when `AGENTHAIL_SIDECAR` is set, and `list` and `doctor` stay clean on a plain Linux install.
 
 ## Releases and updates
 
