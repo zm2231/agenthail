@@ -159,7 +159,7 @@ func TestClaudeSendResumesTerminalSessionInItsTranscriptCwd(t *testing.T) {
 	session := exitedSession(fixture)
 	session.Cwd = ""
 	result, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
-	if err != nil || !result.Accepted || session.ID != "session_resumed" || session.Cwd != fixture.Home || posts.count("hello") != 1 {
+	if err != nil || !result.Accepted || session.ID != "session_resumed" || !samePath(t, session.Cwd, fixture.Home) || posts.count("hello") != 1 {
 		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
 	}
 	if fixture.Invocations("--bg", "--resume", fixtureConversation) != 1 {
@@ -192,6 +192,13 @@ func TestClaudeResumeOfBridgedSessionUsesSocketWhenRemoteControlNeverReturns(t *
 	if _, err := NewClaude("", fixture.Home).reach(context.Background(), &session); err != nil || session.ID != fixtureConversation || session.Transport != "uds" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
+}
+
+func samePath(t *testing.T, a, b string) bool {
+	t.Helper()
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 func TestClaudeConversationOfBridgeIDComesFromItsJob(t *testing.T) {

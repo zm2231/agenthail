@@ -658,16 +658,29 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 }
 
 func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if err := peerSlashCommand(sess, message); err != nil {
+		return nil, err
+	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
 	if sess.Transport == "uds" {
-		if strings.HasPrefix(strings.TrimSpace(message), "/") {
-			return nil, surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
+		if err := peerSlashCommand(sess, message); err != nil {
+			return nil, err
 		}
 		return c.sendPeer(ctx, sess, message)
 	}
 	return c.postWhenIdle(ctx, sess, message)
+}
+
+// peerSlashCommand rejects a slash command for the peer socket, which cannot
+// run one. It is checked before reaching the session and again on the
+// transport the session was reached through.
+func peerSlashCommand(sess *surface.Session, message string) error {
+	if sess.Transport == "uds" && strings.HasPrefix(strings.TrimSpace(message), "/") {
+		return surface.DeliveryTerminal(fmt.Errorf("Claude peer messages cannot execute slash commands; use the Claude session directly"), surface.DeliveryInvalidRequest)
+	}
+	return nil
 }
 
 func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
