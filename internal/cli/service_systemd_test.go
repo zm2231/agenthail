@@ -21,6 +21,7 @@ type fakeService struct {
 
 func (f *fakeService) Name() string               { return "fake" }
 func (f *fakeService) Loaded() bool               { return f.loaded }
+func (f *fakeService) Check() error               { return nil }
 func (f *fakeService) Install() error             { return nil }
 func (f *fakeService) Uninstall() error           { return nil }
 func (f *fakeService) Start() error               { return nil }
@@ -417,5 +418,65 @@ func TestSystemdUnitRecordsClaudeConfigDirAndDoctorFlagsDrift(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(output), &payload); err != nil || payload.ClaudeConfigDir != configured {
 		t.Fatalf("payload=%+v err=%v output=%s", payload, err, output)
+	}
+}
+
+func TestSystemdLifecycleRefusesUnsupervisedFallbackWhenManagerIsUnreachable(t *testing.T) {
+	fake, service := newFakeSystemctl(t)
+	if _, err := captureStdout(t, service.Install); err != nil {
+		t.Fatal(err)
+	}
+	fake.stopDaemon()
+	fake.managerDown = true
+	for name, operation := range map[string]func() error{"start": service.Start, "stop": service.Stop, "restart": service.Restart, "uninstall": service.Uninstall} {
+		output, err := captureStdout(t, operation)
+		if err == nil || !strings.Contains(err.Error(), "agenthail.service is installed but the systemd user manager is unreachable") || !strings.Contains(err.Error(), "loginctl enable-linger agent") {
+			t.Fatalf("%s err=%v output=%s", name, err, output)
+		}
+		if _, running := daemon.IsRunning(); running {
+			t.Fatalf("%s started an unsupervised daemon", name)
+		}
+	}
+	if _, err := os.Stat(fake.unitPath); err != nil {
+		t.Fatalf("unit removed while the manager was unreachable: %v", err)
+	}
+	if err := service.Check(); err == nil {
+		t.Fatal("Check accepted an unreachable manager")
+	}
+}
+
+func TestDaemonStatusShowsSystemdStateWhenDaemonIsStopped(t *testing.T) {
+	fake, service := newFakeSystemctl(t)
+	fake.linger = true
+	if _, err := captureStdout(t, service.Install); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, service.Stop); err != nil {
+		t.Fatal(err)
+	}
+	app := &App{daemonService: service}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"daemon", "status"}) })
+	if err == nil || !strings.Contains(output, "service: systemd agenthail.service (inactive)") || !strings.Contains(output, "linger: on") {
+		t.Fatalf("err=%v output=%s", err, output)
+	}
+	fake.managerDown = true
+	output, _ = captureStdout(t, func() error { return app.Run([]string{"daemon", "status"}) })
+	if !strings.Contains(output, "service: systemd agenthail.service (manager unreachable)") {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestSystemdUnitEscapesLogPath(t *testing.T) {
+	unit, err := systemdUnit("/opt/agenthail", map[string]string{}, `/home/a\b 100%/.agenthail/daemon.log`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(unit, `StandardOutput=append:/home/a\b 100%%/.agenthail/daemon.log`) {
+		t.Fatalf("unit=%s", unit)
+	}
+	for _, bad := range []string{"/home/a\nb/daemon.log", "/home/a\rb/daemon.log"} {
+		if _, err := systemdUnit("/opt/agenthail", map[string]string{}, bad); err == nil {
+			t.Fatalf("log path %q accepted", bad)
+		}
 	}
 }

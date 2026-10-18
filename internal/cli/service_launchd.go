@@ -26,6 +26,7 @@ func (launchdService) Loaded() bool {
 	return daemonServiceLoaded() || homebrewDaemonServiceLoaded()
 }
 
+func (launchdService) Check() error               { return nil }
 func (launchdService) StatusLines() []string      { return nil }
 func (launchdService) Problems() []serviceProblem { return nil }
 

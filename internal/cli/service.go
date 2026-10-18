@@ -17,6 +17,7 @@ import (
 type daemonService interface {
 	Name() string
 	Loaded() bool
+	Check() error
 	Install() error
 	Uninstall() error
 	Start() error
@@ -210,6 +211,7 @@ func (s unsupportedService) err() error {
 
 func (s unsupportedService) Name() string               { return "" }
 func (s unsupportedService) Loaded() bool               { return false }
+func (s unsupportedService) Check() error               { return nil }
 func (s unsupportedService) Install() error             { return s.err() }
 func (s unsupportedService) Uninstall() error           { return s.err() }
 func (s unsupportedService) Start() error               { return startUnsupervisedDaemon() }

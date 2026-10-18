@@ -32,6 +32,7 @@ type updateDeps struct {
 	goos            string
 	goarch          string
 	daemonExpected  func() bool
+	serviceCheck    func() error
 	restartDaemon   func(string) error
 	daemonHealthy   func() error
 }
@@ -64,6 +65,7 @@ func defaultUpdateDeps() *updateDeps {
 		goos:            runtime.GOOS,
 		goarch:          runtime.GOARCH,
 		daemonExpected:  defaultDaemonExpected,
+		serviceCheck:    func() error { return newDaemonService("linux").Check() },
 		restartDaemon:   defaultRestartDaemon,
 		daemonHealthy:   defaultDaemonHealthy,
 		run: func(name string, args ...string) error {

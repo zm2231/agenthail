@@ -129,6 +129,9 @@ func installArchiveUpdate(deps *updateDeps, release *latestRelease, executable s
 	if err := json.Unmarshal(output, &stamped); err != nil || stamped.Version != release.TagName {
 		return fmt.Errorf("downloaded agenthail reports version %q, want %s", stamped.Version, release.TagName)
 	}
+	if err := deps.serviceCheck(); err != nil {
+		return fmt.Errorf("refusing to update without a reachable service manager to restart and verify the daemon: %w", err)
+	}
 	restart := deps.daemonExpected()
 	previous := dataDir + ".previous"
 	if err := os.RemoveAll(previous); err != nil {

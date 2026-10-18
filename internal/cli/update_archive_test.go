@@ -111,6 +111,7 @@ func newArchiveUpdateFixture(t *testing.T, archive []byte) *archiveUpdateFixture
 		goos:           "linux",
 		goarch:         "amd64",
 		daemonExpected: func() bool { return true },
+		serviceCheck:   func() error { return nil },
 		restartDaemon: func(binary string) error {
 			data, err := os.ReadFile(binary)
 			if err != nil {
@@ -252,5 +253,22 @@ func TestLinuxUpdateRejectsDevelopmentBuild(t *testing.T) {
 	err := fixture.app.Run([]string{"update"})
 	if err == nil || !strings.Contains(err.Error(), "update this source install") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLinuxUpdateRefusesToSwapWhenServiceManagerIsUnreachable(t *testing.T) {
+	fixture := newArchiveUpdateFixture(t, releaseArchive(t, "v0.2.0"))
+	fixture.app.update.serviceCheck = func() error {
+		return errors.New("agenthail.service is installed but the systemd user manager is unreachable")
+	}
+	err := fixture.app.Run([]string{"update"})
+	if err == nil || !strings.Contains(err.Error(), "refusing to update without a reachable service manager") {
+		t.Fatalf("err=%v", err)
+	}
+	if fixture.installedVersion(t) != versionScript("v0.1.7") || len(fixture.restarts) != 0 {
+		t.Fatalf("install changed: restarts=%q", fixture.restarts)
+	}
+	if _, err := os.Stat(fixture.dataDir + ".previous"); !os.IsNotExist(err) {
+		t.Fatalf("previous install moved: %v", err)
 	}
 }

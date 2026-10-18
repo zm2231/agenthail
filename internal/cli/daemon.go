@@ -32,6 +32,9 @@ func (a *App) daemonRestart() error {
 func (a *App) daemonStatus() error {
 	pid, ok := daemon.IsRunning()
 	if !ok {
+		for _, line := range a.service().StatusLines() {
+			fmt.Println(line)
+		}
 		return fmt.Errorf("daemon is not running (start it with 'agenthail daemon start')")
 	}
 	fmt.Printf("daemon: running (pid %d)\n", pid)

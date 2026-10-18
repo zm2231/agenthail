@@ -75,16 +75,26 @@ func (s *systemdService) managerProblem() *serviceProblem {
 }
 
 func (s *systemdService) Loaded() bool {
-	if _, err := os.Stat(s.unitPath); err != nil {
-		return false
+	_, err := os.Stat(s.unitPath)
+	return err == nil
+}
+
+func (s *systemdService) Check() error {
+	if !s.Loaded() {
+		return nil
 	}
-	state, err := s.systemctl("show", systemdUnitName, "--property=LoadState", "--value")
-	return err == nil && state == "loaded"
+	if problem := s.managerProblem(); problem != nil {
+		return fmt.Errorf("%s is installed but %s; %s", systemdUnitName, problem.Detail, problem.Fix)
+	}
+	return nil
 }
 
 func (s *systemdService) Start() error {
 	if !s.Loaded() {
 		return startUnsupervisedDaemon()
+	}
+	if err := s.Check(); err != nil {
+		return err
 	}
 	if pid, ok := daemon.IsRunning(); ok {
 		return fmt.Errorf("daemon already running (pid %d)", pid)
@@ -104,6 +114,9 @@ func (s *systemdService) Stop() error {
 	if !s.Loaded() {
 		return stopUnsupervisedDaemon()
 	}
+	if err := s.Check(); err != nil {
+		return err
+	}
 	pid, running := daemon.IsRunning()
 	if output, err := s.systemctl("stop", systemdUnitName); err != nil {
 		return fmt.Errorf("stop %s: %w (%s)", systemdUnitName, err, output)
@@ -119,6 +132,9 @@ func (s *systemdService) Stop() error {
 func (s *systemdService) Restart() error {
 	if !s.Loaded() {
 		return restartUnsupervisedDaemon()
+	}
+	if err := s.Check(); err != nil {
+		return err
 	}
 	before, _ := daemon.IsRunning()
 	if output, err := s.systemctl("restart", systemdUnitName); err != nil {
@@ -218,6 +234,9 @@ func (s *systemdService) ensureLinger() {
 }
 
 func (s *systemdService) Uninstall() error {
+	if err := s.Check(); err != nil {
+		return err
+	}
 	if s.Loaded() {
 		if output, err := s.systemctl("disable", "--now", systemdUnitName); err != nil {
 			return fmt.Errorf("disable %s: %w (%s)", systemdUnitName, err, output)
@@ -236,6 +255,9 @@ func (s *systemdService) Uninstall() error {
 func (s *systemdService) StatusLines() []string {
 	if !s.Loaded() {
 		return []string{"service: not installed (run 'agenthail daemon install')"}
+	}
+	if problem := s.managerProblem(); problem != nil {
+		return []string{fmt.Sprintf("service: systemd %s (manager unreachable)", systemdUnitName), "fix: " + problem.Fix}
 	}
 	state, _ := s.systemctl("is-active", systemdUnitName)
 	linger := "off"
@@ -393,9 +415,11 @@ func systemdUnit(exe string, environment map[string]string, logPath string) (str
 		}
 		fmt.Fprintf(&b, "Environment=%s\n", quoted)
 	}
-	if strings.ContainsAny(logPath, "\n") {
+	if strings.ContainsAny(logPath, "\n\r") {
 		return "", fmt.Errorf("log path %q cannot be written to a systemd unit", logPath)
 	}
+	// systemd expands specifiers in append: paths but takes backslashes
+	// literally, so only % is escaped.
 	escapedLog := strings.ReplaceAll(logPath, "%", "%%")
 	// KillMode=process limits stop and restart to the daemon itself. tmux
 	// servers and Codex app-servers the daemon launched share its cgroup, and

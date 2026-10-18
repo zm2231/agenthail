@@ -32,6 +32,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	code := m.Run()
 	if buildDir != "" {
 		_ = os.RemoveAll(buildDir)
