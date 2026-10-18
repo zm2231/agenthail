@@ -43,7 +43,7 @@ One function decides a thread's route from what Codex reports:
 
 A thread the daemon has loaded locks Desktop out of it until the daemon unloads it, up to 1800 seconds after its last turn. That is why an unknown creator never routes to the daemon.
 
-Writes resolve the route at the moment of the write. Before a turn, Agenthail reads `canAcceptDirectInput` on the route's runtime, resumes the thread there when it is not the live writer, and reads it again. A writer conflict is a terminal ownership conflict; any other resume failure leaves the message undelivered and retryable.
+Writes resolve the route at the moment of the write. Before a turn, Agenthail reads `canAcceptDirectInput` on the route's runtime, resumes the thread there when it is not the live writer, and reads it again. Every write (send, steer, interrupt, compaction, goal and model changes, forks) acquires the writer this way. A writer conflict is a terminal ownership conflict; any other resume failure leaves the write undone and retryable. When a reachable runtime cannot list its loaded threads, no route can be decided, so writes are refused as retryable until it can.
 
 Creation uses Codex Desktop when its bridge is reachable and the daemon otherwise. Every created thread carries `threadSource: agenthail`; its route afterwards follows the rules above.
 

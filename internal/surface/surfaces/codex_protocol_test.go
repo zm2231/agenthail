@@ -166,6 +166,11 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 					}
 					resumed = true
 					return `{"result":{"thread":{"id":"thread"}}}`
+				case "thread/loaded/list":
+					if test.wantResume == 0 {
+						return `{"result":{"data":["thread"]}}`
+					}
+					return `{"result":{"data":[]}}`
 				case "thread/turns/list":
 					return `{"result":{"data":[]}}`
 				case "turn/start":

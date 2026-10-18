@@ -57,4 +57,15 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	if len(thread.Turns) != 2 || !strings.Contains(thread.Turns[0].User, "Mention breaking changes") || thread.Turns[0].Status != "interrupted" || thread.Turns[1].User != "Write it again, shorter" {
 		t.Fatalf("thread=%+v", thread)
 	}
+
+	lifecycle.Crash()
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@headless", "After the daemon stopped"}) }); err != nil {
+		t.Fatalf("send after the daemon stopped err=%v", err)
+	}
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 3 || thread.Turns[2].User != "After the daemon stopped" {
+		t.Fatalf("thread=%+v", thread)
+	}
+	if commands := lifecycle.Commands(); len(commands) != 2 {
+		t.Fatalf("lifecycle commands=%v, want a second start after the daemon stopped", commands)
+	}
 }

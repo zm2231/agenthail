@@ -102,7 +102,7 @@ func ReadOnlySessionReason(session *Session) string {
 	if !IsReadOnlySession(session) {
 		return ""
 	}
-	return "Codex session is read only: Codex Desktop owns it and its bridge is unavailable; run 'agenthail launch codex'"
+	return "Codex session is read only: Codex Desktop created it, or Codex recorded no creator, and the Desktop bridge is unavailable; run 'agenthail launch codex'"
 }
 
 type SendResult struct {

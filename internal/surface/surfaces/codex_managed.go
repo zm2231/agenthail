@@ -167,6 +167,9 @@ func (c *Codex) EnsureWritable(ctx context.Context, sess *surface.Session) error
 	}
 	runtimes := c.openRuntimes(ctx)
 	defer runtimes.Close()
+	if err := runtimes.ownershipUnknown(); err != nil {
+		return err
+	}
 	c.resolveRoute(ctx, runtimes, sess)
 	if surface.IsReadOnlySession(sess) {
 		return fmt.Errorf("%s", surface.ReadOnlySessionReason(sess))
@@ -274,12 +277,9 @@ func (c *Codex) requestSession(ctx context.Context, sess *surface.Session, writa
 	}
 	client, err := c.openWriter(ctx, sess)
 	if err != nil {
-		return nil, surface.DeliveryUnavailable(err)
+		return nil, err
 	}
 	defer client.Close()
-	if err := c.requireDirectInput(ctx, client, sess); err != nil {
-		return nil, surface.DeliveryUnavailable(err)
-	}
 	return client.Request(ctx, method, params, wait)
 }
 

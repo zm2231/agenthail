@@ -2,6 +2,7 @@ package surfaces
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,6 +154,99 @@ func TestCodexUncertainTurnWritesAreUnknown(t *testing.T) {
 			}
 			if !surface.IsDeliveryOutcomeUnknown(err) {
 				t.Fatalf("err=%v, want unknown", err)
+			}
+		})
+	}
+}
+
+func TestCodexUnknownLoadedStateFailsClosedForWrites(t *testing.T) {
+	loadedListFails := func(method string, _ map[string]any) map[string]any {
+		if method == "thread/loaded/list" {
+			return map[string]any{"error": map[string]any{"code": -32603, "message": "loaded list unavailable"}}
+		}
+		return nil
+	}
+	for _, test := range []struct {
+		name    string
+		respond codextest.Responder
+		desktop func(string) string
+	}{
+		{name: "daemon loaded list fails", respond: loadedListFails},
+		{name: "Desktop loaded list fails", desktop: func(method string) string {
+			if method == "thread/loaded/list" {
+				return `{"error":{"code":-32603,"message":"loaded list unavailable"}}`
+			}
+			return ""
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := startManagedCodex(t, test.respond)
+			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
+			codex := isolatedManagedRuntime(t)
+			var desktop *codextest.Desktop
+			if test.desktop != nil {
+				desktop = startDesktopBridge(t, test.desktop)
+				codex = NewCodex(desktop.URL)
+			}
+			session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, Transport: codexTransportManaged}
+			_, err := codex.Send(context.Background(), session, "hello")
+			if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) || !strings.Contains(err.Error(), "cannot tell which Codex runtime owns") {
+				t.Fatalf("err=%v", err)
+			}
+			if err := codex.EnsureWritable(context.Background(), session); err == nil {
+				t.Fatal("EnsureWritable accepted a session whose owner is unknown")
+			}
+			for _, method := range []string{"thread/resume", "turn/start"} {
+				if calls := fake.Calls(method); len(calls) != 0 {
+					t.Fatalf("the daemon received %s: %v", method, fake.Methods())
+				}
+			}
+			if desktop != nil {
+				for _, method := range desktop.Methods() {
+					if method == "thread/resume" || method == "turn/start" {
+						t.Fatalf("Desktop received %s", method)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestCodexWriterConflictIsTerminalForEveryWrite(t *testing.T) {
+	ctx := context.Background()
+	for _, test := range []struct {
+		name  string
+		write func(*Codex, *surface.Session) error
+	}{
+		{name: "send", write: func(c *Codex, s *surface.Session) error { _, err := c.Send(ctx, s, "hello"); return err }},
+		{name: "steer", write: func(c *Codex, s *surface.Session) error { return c.Steer(ctx, s, "focus") }},
+		{name: "interrupt", write: func(c *Codex, s *surface.Session) error { return c.Interrupt(ctx, s) }},
+		{name: "compact", write: func(c *Codex, s *surface.Session) error { return c.Compact(ctx, s) }},
+		{name: "goal clear", write: func(c *Codex, s *surface.Session) error { return c.GoalClear(ctx, s) }},
+		{name: "model", write: func(c *Codex, s *surface.Session) error { _, err := c.Model(ctx, s, "gpt-5.6-sol"); return err }},
+		{name: "fork", write: func(c *Codex, s *surface.Session) error {
+			_, err := c.ForkSession(ctx, s, surface.ForkOptions{})
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+				if method == "thread/resume" {
+					return map[string]any{"error": map[string]any{"code": -32600, "message": "thread " + managedThreadID + " already has an active writer"}}
+				}
+				return nil
+			})
+			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail", Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
+			fake.Unload(managedThreadID)
+			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex})
+			var terminal surface.DeliveryTerminalError
+			if !errors.As(err, &terminal) || terminal.Kind != surface.DeliveryOwnershipConflict || surface.IsDeliveryUnavailable(err) {
+				t.Fatalf("err=%v, want a terminal ownership conflict", err)
+			}
+			for _, method := range []string{"turn/start", "turn/steer", "turn/interrupt", "thread/compact/start", "thread/goal/clear", "thread/fork"} {
+				if calls := fake.Calls(method); len(calls) != 0 {
+					t.Fatalf("%s ran after a writer conflict", method)
+				}
 			}
 		})
 	}

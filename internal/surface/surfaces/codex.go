@@ -288,7 +288,11 @@ func (c *Codex) listLoaded(ctx context.Context, conn codexClient, limit int, run
 }
 
 func (c *Codex) loadedThreadIDs(ctx context.Context, conn codexClient, limit int) ([]string, error) {
-	resp, err := conn.Request(ctx, "thread/loaded/list", map[string]any{"limit": limit}, 5*time.Second)
+	params := map[string]any{}
+	if limit > 0 {
+		params["limit"] = limit
+	}
+	resp, err := conn.Request(ctx, "thread/loaded/list", params, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +438,7 @@ func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, err
 	defer runtimes.Close()
 	reader := runtimes.reader(id)
 	if reader == nil {
-		return nil, runtimes.unavailable()
+		return nil, surface.DeliveryUnavailable(runtimes.unavailable())
 	}
 	thread, err := c.readThreadObject(ctx, reader, id)
 	if err != nil {
@@ -693,16 +697,9 @@ func (c *Codex) SendWithOptions(ctx context.Context, sess *surface.Session, mess
 	defer releaseCodexWriteLock(lock)
 	conn, err := c.openWriter(ctx, sess)
 	if err != nil {
-		return nil, surface.DeliveryUnavailable(err)
+		return nil, err
 	}
 	defer conn.Close()
-	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
-		var notWritable *codexNotWritableError
-		if errors.As(err, &notWritable) {
-			return nil, surface.DeliveryTerminal(err, surface.DeliveryOwnershipConflict)
-		}
-		return nil, surface.DeliveryUnavailable(err)
-	}
 	active, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("inspect active turn: %w", err))
@@ -1080,12 +1077,9 @@ func (c *Codex) interruptTurn(ctx context.Context, sess *surface.Session, expect
 	defer releaseCodexWriteLock(lock)
 	conn, err := c.openWriter(ctx, sess)
 	if err != nil {
-		return surface.DeliveryUnavailable(err)
+		return err
 	}
 	defer conn.Close()
-	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
-		return surface.DeliveryUnavailable(err)
-	}
 	return c.interruptActiveTurn(ctx, conn, sess.ID, expectedTurnID)
 }
 
@@ -1115,12 +1109,9 @@ func (c *Codex) Steer(ctx context.Context, sess *surface.Session, message string
 	defer releaseCodexWriteLock(lock)
 	conn, err := c.openWriter(ctx, sess)
 	if err != nil {
-		return surface.DeliveryUnavailable(err)
+		return err
 	}
 	defer conn.Close()
-	if err := c.requireDirectInput(ctx, conn, sess); err != nil {
-		return surface.DeliveryUnavailable(err)
-	}
 	turnID, err := c.activeTurnID(ctx, conn, sess.ID)
 	if err != nil {
 		return surface.DeliveryUnavailable(err)

@@ -1073,6 +1073,12 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 					return nil, nil, fmt.Errorf("session %s has unknown surface %q", sid, kindText)
 				}
 				session, resolveErr := adapter.Resolve(ctx, sid)
+				if surface.IsDeliveryUnavailable(resolveErr) {
+					// An unreachable runtime is not a missing session; the operation decides.
+					if registered, lookupErr := a.Registry.Session(sid); lookupErr == nil {
+						session, resolveErr = registered, nil
+					}
+				}
 				if resolveErr != nil {
 					return nil, nil, a.registeredSessionUnavailable(ctx, sid, target, adapter, resolveErr)
 				}

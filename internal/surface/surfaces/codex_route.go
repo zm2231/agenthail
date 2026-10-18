@@ -31,29 +31,31 @@ type codexRuntimes struct {
 	desktopLoaded map[string]bool
 	managedLoaded map[string]bool
 	failures      []string
+	loadFailures  []string
 }
 
 func (c *Codex) openRuntimes(ctx context.Context) *codexRuntimes {
 	runtimes := &codexRuntimes{desktopLoaded: map[string]bool{}, managedLoaded: map[string]bool{}}
 	if client, err := c.openDesktop(ctx); err == nil {
 		runtimes.desktop = client
-		runtimes.desktopLoaded = c.loadedSet(ctx, client)
+		runtimes.desktopLoaded = runtimes.loadedSet(ctx, c, client, "Codex Desktop")
 	} else {
 		runtimes.failures = append(runtimes.failures, err.Error())
 	}
 	if client, err := c.dialManaged(ctx); err == nil {
 		runtimes.managed = client
-		runtimes.managedLoaded = c.loadedSet(ctx, client)
+		runtimes.managedLoaded = runtimes.loadedSet(ctx, c, client, "Codex's app-server daemon")
 	} else {
 		runtimes.failures = append(runtimes.failures, "Codex's app-server daemon is not running: "+err.Error())
 	}
 	return runtimes
 }
 
-func (c *Codex) loadedSet(ctx context.Context, client codexClient) map[string]bool {
+func (r *codexRuntimes) loadedSet(ctx context.Context, c *Codex, client codexClient, name string) map[string]bool {
 	loaded := map[string]bool{}
-	ids, err := c.loadedThreadIDs(ctx, client, 100)
+	ids, err := c.loadedThreadIDs(ctx, client, 0)
 	if err != nil {
+		r.loadFailures = append(r.loadFailures, name+": "+err.Error())
 		return loaded
 	}
 	for _, id := range ids {
@@ -69,6 +71,15 @@ func (r *codexRuntimes) Close() {
 	if r.managed != nil {
 		_ = r.managed.Close()
 	}
+}
+
+// ownershipUnknown reports a reachable runtime whose loaded threads could not
+// be listed; until it can, no thread's writer route can be decided.
+func (r *codexRuntimes) ownershipUnknown() error {
+	if len(r.loadFailures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("cannot tell which Codex runtime owns the session: %s", strings.Join(r.loadFailures, "; "))
 }
 
 func (r *codexRuntimes) unavailable() error {
@@ -185,10 +196,33 @@ func (c *Codex) resolveRoute(ctx context.Context, runtimes *codexRuntimes, sess 
 	sess.Transport = runtimes.route(sess.ID, originator)
 }
 
-// openWriter returns a client on the session's writer route, starting Codex's
-// daemon only when the route is managed and the daemon is not running.
+// openWriter makes the session's route the thread's live writer and returns a
+// client on it. Its errors are classified for delivery: a writer held by
+// another runtime is a terminal ownership conflict, anything else unavailable.
 func (c *Codex) openWriter(ctx context.Context, sess *surface.Session) (codexClient, error) {
+	client, err := c.openRoute(ctx, sess)
+	if err != nil {
+		return nil, surface.DeliveryUnavailable(err)
+	}
+	if err := c.requireDirectInput(ctx, client, sess); err != nil {
+		_ = client.Close()
+		var notWritable *codexNotWritableError
+		if errors.As(err, &notWritable) {
+			return nil, surface.DeliveryTerminal(err, surface.DeliveryOwnershipConflict)
+		}
+		return nil, surface.DeliveryUnavailable(err)
+	}
+	return client, nil
+}
+
+// openRoute returns a client on the session's writer route, starting Codex's
+// daemon only when the route is managed and the daemon is not running.
+func (c *Codex) openRoute(ctx context.Context, sess *surface.Session) (codexClient, error) {
 	runtimes := c.openRuntimes(ctx)
+	if err := runtimes.ownershipUnknown(); err != nil {
+		runtimes.Close()
+		return nil, err
+	}
 	c.resolveRoute(ctx, runtimes, sess)
 	switch sess.Transport {
 	case codexTransportDesktop:
