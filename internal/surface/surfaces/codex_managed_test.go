@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -70,22 +70,6 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 	}
 	if output, _ := os.ReadFile(logPath); len(output) != 0 {
 		t.Fatalf("history search bootstrapped managed runtime: %s", output)
-	}
-}
-
-func TestCodexDiscoveryDoesNotStartManagedRuntime(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
-	logPath := filepath.Join(home, "managed-runtime.log")
-	installStandaloneCodex(t, home, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 1\n")
-	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	codex := NewCodex("")
-	codex.desktopURL = "http://127.0.0.1:1"
-	if err := codex.Ready(context.Background()); err == nil {
-		t.Fatal("Ready() succeeded without any available Codex transport")
-	}
-	if output, _ := os.ReadFile(logPath); len(output) != 0 {
-		t.Fatalf("discovery started managed runtime: %s", output)
 	}
 }
 
@@ -160,67 +144,12 @@ func TestCodexRuntimeStatusPrefersReachableDesktopBridge(t *testing.T) {
 	}
 }
 
-func TestCodexEnsureRuntimeStartsMissingManagedDaemonOnce(t *testing.T) {
-	root := t.TempDir()
-	logPath := filepath.Join(root, "calls.log")
-	codeHome := filepath.Join(root, "codex-home")
-	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
-	installStandaloneCodex(t, codeHome, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nif [ \"$1 $2 $3\" = \"app-server daemon enable-remote-control\" ]; then exit 0; fi\nif [ \"$1 $2 $3\" = \"app-server daemon start\" ]; then mkdir -p \"$(dirname \"$AGENTHAIL_TEST_SOCKET\")\"; : > \"$AGENTHAIL_TEST_SOCKET\"; exit 0; fi\nexit 2\n")
-	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	t.Setenv("AGENTHAIL_TEST_SOCKET", socketPath)
-	t.Setenv("CODEX_HOME", codeHome)
-	codex := NewCodex("")
-	if err := codex.EnsureRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := codex.EnsureRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Count(string(data), "app-server daemon start"); got != 1 {
-		t.Fatalf("start calls=%d log=%q", got, data)
-	}
-}
-
-func TestCodexEnsureRuntimeNamesMissingStandaloneInstall(t *testing.T) {
+func TestCodexEnsureRuntimeNamesMissingCodex(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	isolateCodexInstalls(t, false)
 	err := NewCodex("").EnsureRuntime(context.Background())
-	if !errors.Is(err, ErrCodexStandaloneMissing) || !strings.Contains(err.Error(), CodexStandaloneInstallCommand) {
+	if !errors.Is(err, ErrCodexMissing) || !strings.Contains(err.Error(), CodexInstallCommand) {
 		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestCodexEnsureRuntimeEnablesRemoteControlWhenDisabled(t *testing.T) {
-	root := t.TempDir()
-	codeHome := filepath.Join(root, "codex-home")
-	socketPath := filepath.Join(codeHome, "app-server-control", "app-server-control.sock")
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(socketPath, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	settingsPath := filepath.Join(codeHome, "app-server-daemon", "settings.json")
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(settingsPath, []byte(`{"remoteControlEnabled":false}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(root, "calls.log")
-	installStandaloneCodex(t, codeHome, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$AGENTHAIL_TEST_LOG\"\nexit 0\n")
-	t.Setenv("AGENTHAIL_TEST_LOG", logPath)
-	t.Setenv("CODEX_HOME", codeHome)
-	if err := NewCodex("").EnsureRuntime(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(logPath)
-	if err != nil || strings.TrimSpace(string(data)) != "app-server daemon enable-remote-control" {
-		t.Fatalf("log=%q err=%v", data, err)
 	}
 }
 
@@ -235,118 +164,9 @@ func isolatedManagedRuntime(t *testing.T) *Codex {
 
 const managedThreadID = "019f004a-0000-7000-8000-00000000beef"
 
-// managedCodex is a fake managed Codex app-server listening on the
-// $CODEX_HOME control socket. Every JSON-RPC request is recorded and answered
-// by respond; notifications queued with Notify (also from inside respond) are
-// delivered ahead of the next thread/read response, the way the app-server
-// interleaves them.
-type managedCodex struct {
-	Home    string
-	mu      sync.Mutex
-	calls   []managedCall
-	pending []map[string]any
-}
-
-type managedCall struct {
-	Method string
-	Params map[string]any
-}
-
-func (m *managedCodex) Notify(method string, params map[string]any) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pending = append(m.pending, map[string]any{"method": method, "params": params})
-}
-
-func (m *managedCodex) Calls(method string) []map[string]any {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var params []map[string]any
-	for _, call := range m.calls {
-		if call.Method == method {
-			params = append(params, call.Params)
-		}
-	}
-	return params
-}
-
-func (m *managedCodex) Methods() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	methods := make([]string, 0, len(m.calls))
-	for _, call := range m.calls {
-		methods = append(methods, call.Method)
-	}
-	return methods
-}
-
-func startManagedCodex(t *testing.T, respond func(method string, params map[string]any) map[string]any) *managedCodex {
+func startManagedCodex(t *testing.T, respond codextest.Responder) *codextest.Daemon {
 	t.Helper()
-	home, err := os.MkdirTemp("/tmp", "ah-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	t.Setenv("CODEX_HOME", home)
-	t.Setenv("HOME", home)
-	for _, dir := range []string{"app-server-control", "app-server-daemon"} {
-		if err := os.MkdirAll(filepath.Join(home, dir), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(home, "app-server-daemon", "settings.json"), []byte(`{"remoteControlEnabled":true}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("unix", filepath.Join(home, "app-server-control", "app-server-control.sock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fake := &managedCodex{Home: home}
-	upgrader := websocket.Upgrader{}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		connection, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer connection.Close()
-		for {
-			var request map[string]any
-			if connection.ReadJSON(&request) != nil {
-				return
-			}
-			id, hasID := request["id"]
-			if !hasID {
-				continue
-			}
-			method, _ := request["method"].(string)
-			params, _ := request["params"].(map[string]any)
-			fake.mu.Lock()
-			fake.calls = append(fake.calls, managedCall{Method: method, Params: params})
-			fake.mu.Unlock()
-			result := respond(method, params)
-			var notifications []map[string]any
-			if method == "thread/read" {
-				fake.mu.Lock()
-				notifications, fake.pending = fake.pending, nil
-				fake.mu.Unlock()
-			}
-			for _, notification := range notifications {
-				_ = connection.WriteJSON(notification)
-			}
-			response := map[string]any{"id": id, "result": map[string]any{}}
-			if result != nil {
-				if rpcError, failed := result["error"]; failed {
-					response = map[string]any{"id": id, "error": rpcError}
-				} else {
-					response["result"] = result
-				}
-			}
-			_ = connection.WriteJSON(response)
-		}
-	})}
-	go server.Serve(listener)
-	t.Cleanup(func() { _ = server.Close() })
-	return fake
+	return codextest.Start(t, respond)
 }
 
 func managedDiscovery(method string, _ map[string]any) map[string]any {
@@ -572,9 +392,12 @@ func TestCodexManagedInterruptTargetsOnlyTheConfirmedTurn(t *testing.T) {
 					return map[string]any{"thread": map[string]any{"id": "thread"}}
 				case "thread/turns/list":
 					return map[string]any{"data": []any{map[string]any{"id": test.active, "status": map[string]any{"type": "inProgress"}}}}
+				case "turn/interrupt":
+					return map[string]any{}
 				}
 				return nil
 			})
+			fake.AddThread(codextest.Thread{ID: "thread", Originator: "agenthail"})
 			err := isolatedManagedRuntime(t).InterruptTurn(context.Background(), managedSession(), "turn-a")
 			interrupts := fake.Calls("turn/interrupt")
 			if !test.interrupt {
@@ -602,6 +425,7 @@ func TestCodexManagedSendEncodesTurnOptionsWithActiveModel(t *testing.T) {
 		}
 		return nil
 	})
+	fake.AddThread(codextest.Thread{ID: "thread", Originator: "agenthail"})
 	options := surface.TurnOptions{Effort: "high", Mode: "plan", ServiceTier: "fast", OutputSchema: json.RawMessage(`{"type":"object"}`)}
 	sent, err := isolatedManagedRuntime(t).SendWithOptions(context.Background(), managedSession(), "hello", surface.SendOptions{TurnOptions: options})
 	if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
