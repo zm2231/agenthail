@@ -307,12 +307,14 @@ function syncComposerAction() {
   sendButton.querySelector("span:first-child").textContent = stopping ? "Stop" : "Send";
   sendButton.querySelector("span:last-child").textContent = stopping ? "■" : "↑";
   sendButton.disabled = readOnly || (!hasMessage && !stopping);
-  steerButton.hidden = !(busy && capabilities.steer && hasMessage && !readOnly);
+  steerButton.hidden = !(busy && !app.selected?.waitingOn && capabilities.steer && hasMessage && !readOnly);
   steerButton.disabled = steerButton.hidden;
   $("#composer").classList.toggle("is-stopping", stopping);
   $("#composer").classList.toggle("has-steer", !steerButton.hidden);
   if (readOnly) return;
-  $("#composer-note").textContent = busy
+  $("#composer-note").textContent = app.selected?.waitingOn
+    ? "This agent is waiting on you. Messages queue until you answer it."
+    : busy
     ? hasMessage
       ? "Send queues this for next. Steer now changes the turn in progress."
       : "This agent is working. Stop ends the current turn."
@@ -381,6 +383,7 @@ function statusLabel(status) {
   );
 }
 function presenceLabel(session) {
+  if (session.waitingOn) return "Waiting on you";
   return (
     {
       working: "Working",
@@ -425,7 +428,7 @@ function renderSharedNote(session) {
   note.hidden = !peers.length;
 }
 function conversationMeta(session, model = "") {
-  const parts = [statusLabel(session.status), `${session.queueCount || 0} queued`];
+  const parts = [session.waitingOn ? "Waiting on you" : statusLabel(session.status), `${session.queueCount || 0} queued`];
   if (session.status !== "busy") parts.push(`last active ${timeAgo(session.lastActive)}`);
   if (model) parts.push(model);
   return parts.join(" · ");
@@ -651,9 +654,15 @@ function queueReason(item) {
       ? "Loading this Codex conversation before delivery"
       : "Codex conversation is not available to load";
   }
-  return target?.status === "busy"
-    ? "Waiting for this agent to finish"
-    : "Waiting for delivery";
+  return (
+    {
+      waiting: "Held: this agent is waiting on you",
+      busy: "Held: this agent is working",
+      offline: "Held: this agent is offline",
+      unknown: "Held: this agent's state is unknown",
+      retrying: "Held: waiting to retry",
+    }[item.heldBy] || "Delivers on the next scan"
+  );
 }
 function renderOperations() {
   const { queue, channels, relays, history = [] } = app.state;

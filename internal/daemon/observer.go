@@ -152,6 +152,9 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.releaseSessionSource(session.ID, "active-turn")
 	}
 	session.Status = observation.Status
+	session.WaitingOn = observation.WaitingOn
+	observation.WaitingOn = d.noteWaiting(*session, true)
+	session.WaitingOn = observation.WaitingOn
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {
 			d.log.Printf("persist refreshed session %s: %s", d.resolveDisplay(session.ID), err)
@@ -231,7 +234,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	}
 	canSteerQueued := steerQueued && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer
 	canDrainQueue := (observation.Status == surface.StatusIdle && observation.ActiveTurnID == "") || canLoadDesktopQueue
-	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy
+	canDrainSteer := canSteerQueued && observation.Status == surface.StatusBusy && observation.WaitingOn == nil
 	if canDrainQueue || canDrainSteer {
 		queued := d.Registry.QueueCount(session.ID)
 		if canDrainQueue {

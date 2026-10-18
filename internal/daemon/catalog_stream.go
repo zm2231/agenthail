@@ -424,7 +424,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		statusCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		refreshed, err := source.LocalStatus(statusCtx, live.session)
 		cancel()
-		if err != nil || refreshed.Status == live.session.Status {
+		if err != nil || refreshed.Status == live.session.Status && surface.SameWaiting(refreshed.WaitingOn, live.session.WaitingOn) {
 			continue
 		}
 		if config == nil {
@@ -459,6 +459,7 @@ func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.
 	if err != nil {
 		return false
 	}
+	session.WaitingOn = d.noteWaiting(session, false)
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
 		row.SharedWith = shared
@@ -673,5 +674,5 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	}
 	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
 	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents}
 }

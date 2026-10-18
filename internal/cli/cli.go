@@ -972,6 +972,12 @@ func mergeSearchResults(left, right []surface.SessionSearchResult) []surface.Ses
 
 func sessStat(s surface.Session, queued int) string {
 	busy := s.Status == surface.StatusBusy || s.Status == "running" || s.Status == "active"
+	if busy && s.WaitingOn != nil {
+		if queued > 0 {
+			return "wait+q"
+		}
+		return "wait"
+	}
 	if busy {
 		if queued > 0 {
 			return "run+q"
@@ -988,6 +994,31 @@ func sessStat(s surface.Session, queued int) string {
 		return "?"
 	}
 	return "idle"
+}
+
+// queuedTime parses the UTC timestamp SQLite writes for queued_at.
+func queuedTime(value string) time.Time {
+	t, err := time.ParseInLocation(time.DateTime, value, time.UTC)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+func queueHoldLabel(hold registry.QueueHold) string {
+	switch hold {
+	case registry.QueueHeldWaiting:
+		return "held: target is waiting on you"
+	case registry.QueueHeldBusy:
+		return "held: target is busy"
+	case registry.QueueHeldOffline:
+		return "held: target is offline"
+	case registry.QueueHeldUnknown:
+		return "held: target state is unknown"
+	case registry.QueueHeldRetrying:
+		return "held: waiting to retry"
+	}
+	return "delivers on the next daemon scan"
 }
 
 func relTime(t time.Time) string {
@@ -1481,7 +1512,11 @@ func (a *App) cmdSend(args []string) error {
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(receipt)
 		} else {
-			fmt.Printf("target is active; queued for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", a.resolveDisplay(sess.ID), target)
+			if receipt.WaitingOn != nil {
+				fmt.Printf("queued #%d for %s, which is waiting on you; it delivers after you answer\n", receipt.QueueID, a.resolveDisplay(sess.ID))
+			} else {
+				fmt.Printf("target is active; queued #%d for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", receipt.QueueID, a.resolveDisplay(sess.ID), target)
+			}
 		}
 		return nil
 	}
@@ -1991,7 +2026,9 @@ func (a *App) cmdSteer(args []string) error {
 		return err
 	}
 	target := a.resolveDisplay(sess.ID)
-	if receipt.Status == string(registry.DeliveryIntentSubmitted) {
+	if receipt.Evidence == surface.EvidenceQueued {
+		fmt.Printf("Queued #%d for %s, which is waiting on you; it delivers after you answer.\n", receipt.QueueID, target)
+	} else if receipt.Status == string(registry.DeliveryIntentSubmitted) {
 		fmt.Printf("Submitted to %s.\n", target)
 	} else {
 		fmt.Printf("Sent to %s.\n", target)
@@ -2032,6 +2069,9 @@ func (a *App) cmdQueue(args []string) error {
 		}
 		for _, row := range rows {
 			fmt.Printf("#%-4d %-18s attempts=%d target=%s %s\n", row.ID, row.Evidence, row.Attempts, a.resolveDisplay(row.SessionID), truncate(strings.ReplaceAll(row.Message, "\n", " "), 100))
+			if row.Status == "pending" {
+				fmt.Printf("      queued %s; %s\n", relTime(queuedTime(row.QueuedAt)), queueHoldLabel(row.HeldBy))
+			}
 			if row.LastError != "" {
 				fmt.Printf("      last error: %s\n", row.LastError)
 			}
@@ -2133,7 +2173,11 @@ func (a *App) cmdQueue(args []string) error {
 	if err := a.Registry.QueueMessage(sess.ID, message); err != nil {
 		return err
 	}
-	fmt.Printf("queued for %s (delivered when the target is idle on a daemon scan)\n", a.resolveDisplay(sess.ID))
+	if waiting, err := a.Registry.SessionWaiting(sess.ID); err == nil && waiting != nil {
+		fmt.Printf("queued for %s, which is waiting on you; it delivers after you answer\n", a.resolveDisplay(sess.ID))
+	} else {
+		fmt.Printf("queued for %s (delivered when the target is idle on a daemon scan)\n", a.resolveDisplay(sess.ID))
+	}
 	return nil
 }
 

@@ -87,6 +87,7 @@ type dashboardSession struct {
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
 	Status            surface.SessionStatus      `json:"status"`
+	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
@@ -155,6 +156,7 @@ type dashboardQueue struct {
 	Attempts        int                      `json:"attempts"`
 	LastError       string                   `json:"lastError,omitempty"`
 	QueuedAt        string                   `json:"queuedAt"`
+	HeldBy          registry.QueueHold       `json:"heldBy,omitempty"`
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       registry.QueueOperation  `json:"operation"`
@@ -162,7 +164,7 @@ type dashboardQueue struct {
 }
 
 func (d *Daemon) dashboardQueueItem(item registry.QueueRow) dashboardQueue {
-	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery}
+	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, HeldBy: item.HeldBy, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery}
 }
 
 type dashboardChannel struct {

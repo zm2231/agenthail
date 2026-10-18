@@ -48,6 +48,9 @@ type Thread struct {
 	Cwd        string
 	Originator string
 	Turns      []Turn
+	// ActiveFlags are what an active thread reports it is blocked on, such as
+	// waitingOnApproval.
+	ActiveFlags []string
 }
 
 type Daemon struct {
@@ -242,6 +245,15 @@ func (d *Daemon) CompleteTurn(threadID, reply string) {
 	}
 }
 
+// SetActiveFlags sets what the thread's active turn reports it is waiting on.
+func (d *Daemon) SetActiveFlags(threadID string, flags ...string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if thread := d.threads[threadID]; thread != nil {
+		thread.ActiveFlags = flags
+	}
+}
+
 func (d *Daemon) Thread(threadID string) (Thread, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -415,13 +427,21 @@ func (d *Daemon) threadJSON(thread *Thread, includeTurns bool) map[string]any {
 	if len(thread.Turns) > 0 {
 		preview = thread.Turns[0].User
 	}
+	threadStatus := map[string]any{"type": status}
+	if status == "active" {
+		flags := make([]any, 0, len(thread.ActiveFlags))
+		for _, flag := range thread.ActiveFlags {
+			flags = append(flags, flag)
+		}
+		threadStatus["activeFlags"] = flags
+	}
 	value := map[string]any{
 		"id":                   thread.ID,
 		"cwd":                  thread.Cwd,
 		"source":               "vscode",
 		"originator":           thread.Originator,
 		"preview":              preview,
-		"status":               map[string]any{"type": status},
+		"status":               threadStatus,
 		"canAcceptDirectInput": d.loaded[thread.ID],
 		"recencyAt":            float64(1792300000 + len(d.order)),
 	}
