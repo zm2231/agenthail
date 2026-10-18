@@ -5,7 +5,7 @@ description: "Operate AgentHail across Claude, Codex, and Notion: discover sessi
 
 # AgentHail Operations
 
-AgentHail connects to agents that already exist on the local Mac. Its CLI owns
+AgentHail connects to agents that already exist on the local Mac or Linux machine. Its CLI owns
 target resolution, surface capability checks, durable delivery, and ambiguity
 errors. Do not build a second target picker or choose between ambiguous matches.
 
@@ -30,6 +30,12 @@ Update a package or Homebrew installation with `agenthail update`. Use
 `agenthail upgrade` is an alias. Source checkouts update with `git pull` and
 `./install.sh`.
 
+On Linux (amd64 or arm64) the release ships `agenthail-<tag>-linux-<arch>.tar.gz`
+with a `.sha256`. Unpack it to `~/.local/share/agenthail`, link
+`~/.local/bin/agenthail` to the binary, then run `agenthail daemon install`.
+`agenthail update` replaces that directory in place, restarts the daemon and
+rolls back when the restarted daemon does not answer on its API.
+
 For a source checkout:
 
 ```bash
@@ -38,7 +44,7 @@ agenthail daemon install
 agenthail doctor --json
 ```
 
-AgentHail targets macOS. Native Claude messages use local sockets and require
+AgentHail targets macOS and runs headless on Linux. Native Claude messages use local sockets and require
 the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
 Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
@@ -54,9 +60,11 @@ credentials.
 
 AgentHail reads these overrides from the environment of each CLI or daemon
 process and stores shared session, alias, queue, relay, and delivery state in
-`~/.agenthail/registry.db`. A launchd service does not inherit variables that
-exist only in an interactive shell. Put required `AGENTHAIL_*` overrides in the
-service environment as well as the shell that runs the operator.
+`~/.agenthail/registry.db`. A launchd or systemd service does not inherit
+variables that exist only in an interactive shell. `daemon install` records the
+installing shell's `PATH`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `AGENTHAIL_*`
+overrides in the service; rerun it after changing them. Claude Code state is
+read from `CLAUDE_CONFIG_DIR` when it is set, otherwise `~/.claude`.
 
 One unhealthy surface does not block the others. Preserve the `errors` object
 from JSON discovery output when reporting partial availability.
@@ -356,9 +364,20 @@ agenthail daemon uninstall
 ```
 
 Homebrew manages its service with `brew services start|stop|restart agenthail`.
-For a source install, `daemon install` creates a supervised launchd service.
-Remove that service with `daemon uninstall`, not `daemon stop`. Check daemon
-status before relying on queues, relays, or background observation.
+On macOS, `daemon install` creates a supervised launchd service; remove it with
+`daemon uninstall`, not `daemon stop`. On Linux, `daemon install` creates the
+systemd user service `agenthail.service` with `KillMode=process`, so stop,
+restart and update leave the agents the daemon started running, and enables
+lingering so the daemon survives logout. When logind refuses lingering without
+root, install prints `linger: off` and the exact `sudo loginctl enable-linger
+<user>` command; do not run sudo on the user's behalf. `daemon start|stop|restart`
+drive the unit through `systemctl --user`. `doctor --json` reports Linux daemon
+problems under `daemon.problems`, each with a `fix`: unreachable systemd user
+manager, linger off, service not installed or inactive, Claude missing from the
+daemon `PATH`, a `CODEX_HOME` or state directory that cannot run programs or
+hold SQLite, and a service whose `CODEX_HOME` or `CLAUDE_CONFIG_DIR` differs
+from the calling shell. Check daemon status before relying on queues, relays,
+or background observation.
 
 ## Dashboard
 

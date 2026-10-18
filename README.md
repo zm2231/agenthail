@@ -24,7 +24,7 @@ Agenthail connects those pieces. It gives you one view of what is running, a way
 
 ## Install
 
-Agenthail supports Apple silicon Macs. Download the latest `Agenthail-*-arm64.pkg` from [GitHub Releases](https://github.com/zm2231/agenthail/releases), open it, then run:
+Agenthail supports Apple silicon Macs and, as a headless daemon, [Linux](#linux). Download the latest `Agenthail-*-arm64.pkg` from [GitHub Releases](https://github.com/zm2231/agenthail/releases), open it, then run:
 
 ```bash
 agenthail doctor
@@ -47,6 +47,20 @@ agenthail update
 ```
 
 To remove a package installation, run `sudo agenthail-uninstall`. Your local conversations, queue, and history are preserved unless you add `--purge-data`.
+
+### Linux
+
+Agenthail runs on Linux (amd64 and arm64) as a headless daemon for Claude Code and Codex on remote machines. It needs systemd and installs in your home directory without root:
+
+```bash
+tag=$(curl -fsSL https://api.github.com/repos/zm2231/agenthail/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') && arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && name=agenthail-$tag-linux-$arch && cd "$(mktemp -d)" && curl -fsSLO "https://github.com/zm2231/agenthail/releases/download/$tag/$name.tar.gz" -O "https://github.com/zm2231/agenthail/releases/download/$tag/$name.tar.gz.sha256" && sha256sum -c "$name.tar.gz.sha256" && tar -xzf "$name.tar.gz" && test ! -e ~/.local/share/agenthail && mkdir -p ~/.local/share ~/.local/bin && mv "$name" ~/.local/share/agenthail && ln -sfn ~/.local/share/agenthail/agenthail ~/.local/bin/agenthail
+agenthail daemon install
+agenthail doctor
+```
+
+`daemon install` starts a systemd user service, `agenthail.service`, and turns on lingering so the daemon keeps running after you log out. If it prints `linger: off`, run `sudo loginctl enable-linger $USER`; until then systemd stops the daemon at logout and `agenthail doctor` reports it as unhealthy. Restarting or updating the daemon leaves the agents it started running. `agenthail update` installs new releases in place and restores the previous version if the new daemon does not answer.
+
+Run `daemon install` from the shell your agents use: the service records that shell's `PATH`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`. `CODEX_HOME` must be on a filesystem that can run programs, because Codex's app-server daemon installs and runs its own binary there; `agenthail doctor` flags one that cannot. Claude Remote Control and Notion need a signed-in desktop browser and are unavailable on Linux.
 
 Developing Agenthail itself? See the [maintainer documentation](docs/maintainers/).
 
