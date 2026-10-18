@@ -124,9 +124,8 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 	if err != nil {
 		return nil, err
 	}
-	localID := c.conversationOf(session)
 	for _, record := range records {
-		if record.Kind != "background" || (record.SessionID != session.ID && record.SessionID != localID) {
+		if record.Kind != "background" || record.SessionID != session.ID {
 			continue
 		}
 		if action == "status" {

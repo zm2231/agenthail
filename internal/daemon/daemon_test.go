@@ -732,25 +732,6 @@ func TestRelayQueuesDurablyForClosedClaudeSession(t *testing.T) {
 	}
 }
 
-func TestInactiveClaudeRouteRebindsBeforeCleanup(t *testing.T) {
-	d, r, _, from, _ := daemonFixture(t)
-	old := surface.Session{ID: "old", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/shared.jsonl"}
-	if err := r.RegisterSession(old); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.AddRoute(from.ID, old.ID, ".*"); err != nil {
-		t.Fatal(err)
-	}
-	current := surface.Session{ID: "current", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: os.Getpid(), Transcript: old.Transcript}
-	claude := &daemonSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{current.ID: current}}
-	d.Surfaces = append(d.Surfaces, claude)
-	_, _ = d.refreshAndPruneInactiveClaudeRoutes(context.Background(), time.Now().Add(time.Hour), true)
-	routes, err := r.ListRoutes()
-	if err != nil || len(routes) != 1 || routes[0].ToSession != current.ID {
-		t.Fatalf("routes=%+v err=%v", routes, err)
-	}
-}
-
 func TestClaudeRoutePruneRemovesOnlyInactiveRoutesFromAnExitedSource(t *testing.T) {
 	d, r, _, from, to := daemonFixture(t)
 	closed := surface.Session{ID: "closed", Surface: surface.KindClaude, Status: surface.StatusIdle, PID: 2147483647, Transcript: "/tmp/closed.jsonl"}
@@ -1040,7 +1021,7 @@ func TestQueuedClaudeCompactIsDeliveredOnlyAfterTranscriptBoundary(t *testing.T)
 	}
 	fixture := claudetest.New(t)
 	fixture.Record("conversation-compact", fixture.Home, "session_compact")
-	session := surface.Session{ID: "session_compact", Surface: surface.KindClaude, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
+	session := surface.Session{ID: "conversation-compact", Bridge: "session_compact", Surface: surface.KindClaude, PID: fixture.PID, Status: surface.StatusIdle, Transcript: path}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}

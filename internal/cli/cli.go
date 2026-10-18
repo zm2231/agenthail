@@ -207,7 +207,7 @@ Other:
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
 Sender: --from resolves a session; otherwise identity comes from AGENTHAIL_SESSION_ID,
-        CLAUDE_SESSION_ID, the verified native Claude caller, then CODEX_THREAD_ID.
+        CLAUDE_CODE_SESSION_ID, the verified native Claude caller, then CODEX_THREAD_ID.
         Native Claude peers require the daemon and register automatically before sending.
 `)
 }
@@ -2154,7 +2154,7 @@ func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, tar
 			return nil, err
 		}
 		if mineID == "" {
-			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_SESSION_ID")
+			return nil, fmt.Errorf("--mine requires a caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_CODE_SESSION_ID")
 		}
 	}
 	root := ""
