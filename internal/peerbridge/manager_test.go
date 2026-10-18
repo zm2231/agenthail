@@ -94,7 +94,10 @@ func newPeerFixture(t *testing.T, sessionIDs ...string) *peerFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	socketDir := filepath.Join(home, "socks")
-	manager, err := start(ctx, home, reg, agenthailBinary(t), socketDir)
+	debugStart := time.Now()
+	debugBinary := agenthailBinary(t)
+	t.Logf("DEBUG agenthailBinary took %v", time.Since(debugStart))
+	manager, err := start(ctx, home, reg, debugBinary, socketDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,9 +258,13 @@ func (n *nativePeer) replySocket(t *testing.T) string {
 
 func TestManagerOwnsOnePeerPerSessionAndHealsLostWorkers(t *testing.T) {
 	f := newPeerFixture(t, "recent", "older")
+	debugDeadline, _ := f.ctx.Deadline()
+	t.Logf("DEBUG ctx remaining before first Ensure %v", time.Until(debugDeadline))
+	debugStart := time.Now()
 	if err := f.manager.Ensure(f.ctx, "recent"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("after %v: %v", time.Since(debugStart), err)
 	}
+	t.Logf("DEBUG first Ensure took %v", time.Since(debugStart))
 	if _, err := f.reg.ReverseAlias("recent"); err != sql.ErrNoRows {
 		t.Fatalf("background registration minted handle: %v", err)
 	}
