@@ -2,6 +2,7 @@ package registry
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -75,7 +76,7 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 	}
 	rowArgs := append(append([]any{}, args...), request.Limit+1, request.Offset)
 	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,
 		COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		`+from+` WHERE `+where+` ORDER BY CASE WHEN s.status=? THEN 0 ELSE 1 END,s.last_active_ms DESC,s.updated_at DESC,s.id LIMIT ? OFFSET ?`, append(rowArgs[:len(rowArgs)-2], string(surface.StatusBusy), rowArgs[len(rowArgs)-2], rowArgs[len(rowArgs)-1])...)
 	if err != nil {
@@ -150,10 +151,15 @@ func scanCatalogSession(scanner interface{ Scan(...any) error }) (CatalogSession
 	var hasLocal, focusable, generation, misses, discoveryFailures int
 	var lastActiveMS int64
 	var launcher string
-	var location []byte
+	var location, waitingOn []byte
 	var subagent subagentColumns
-	if err := scanner.Scan(append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+	if err := scanner.Scan(append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &waitingOn, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 		return CatalogSessionState{}, err
+	}
+	if len(waitingOn) > 0 {
+		if err := json.Unmarshal(waitingOn, &state.Session.WaitingOn); err != nil {
+			return CatalogSessionState{}, fmt.Errorf("parse catalog waiting state: %w", err)
+		}
 	}
 	subagent.apply(&state.Session)
 	state.Session.Surface = surface.SurfaceKind(kind)
