@@ -1,0 +1,162 @@
+package surfaces
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
+)
+
+func fakeBackgroundClaude(t *testing.T, initialState, onResume string) (string, *Claude) {
+	t.Helper()
+	home := t.TempDir()
+	script := `#!/bin/sh
+env >> "$HOME/env"
+setstate() {
+ printf '%s' "$1" > "$HOME/state"
+ mkdir -p "$HOME/.claude/jobs/job12345"
+ printf '{"state":"%s","detail":"%s","updatedAt":"2999-01-01T00:00:00Z"}' "$1" "$2" > "$HOME/.claude/jobs/job12345/state.json"
+}
+if [ "$1" = agents ]; then
+ printf '[{"id":"job12345","sessionId":"fixture-session","kind":"background","name":"fixture","cwd":"%s","state":"%s"}]\n' "$HOME" "$(cat "$HOME/state")"
+elif [ "$1" = --bg ] && [ "$2" = --resume ]; then
+ ` + onResume + `
+ printf 'backgrounded · job12345 (idle)\n'
+elif [ "$1" = --bg ]; then
+ printf 'backgrounded · job12345\n'
+fi
+`
+	binary := filepath.Join(home, "claude")
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "state"), []byte(initialState), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTHAIL_CLAUDE_BIN", binary)
+	return home, NewClaude("", home)
+}
+
+func TestClaudeBackgroundCommandsDropCmuxTerminalState(t *testing.T) {
+	t.Setenv("CMUX_SURFACE_ID", "fixture-surface")
+	t.Setenv("CMUX_SOCKET_PATH", "/nonexistent/fixture.sock")
+	t.Setenv("CMUX_CLAUDE_HOOKS_DISABLED", "0")
+	t.Setenv("AGENTHAIL_FIXTURE_KEEP", "kept")
+	home, c := fakeBackgroundClaude(t, "working", "")
+	if _, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "hello", Cwd: home}); err != nil {
+		t.Fatal(err)
+	}
+	env, err := os.ReadFile(filepath.Join(home, "env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(env), "\n") {
+		if strings.HasPrefix(line, "CMUX_") {
+			t.Fatalf("Claude inherited terminal state %q", line)
+		}
+	}
+	if !strings.Contains(string(env), "AGENTHAIL_FIXTURE_KEEP=kept\n") || !strings.Contains(string(env), "HOME="+home+"\n") {
+		t.Fatalf("env=%s", env)
+	}
+}
+
+func writeJobRecord(t *testing.T, home, state, detail string, updated time.Time) {
+	t.Helper()
+	jobDir := filepath.Join(home, ".claude", "jobs", "job12345")
+	if err := os.MkdirAll(jobDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	record, err := json.Marshal(map[string]any{"state": state, "detail": detail, "updatedAt": updated})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), record, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaudeResumeReportsJobThatFailsToStart(t *testing.T) {
+	detail := "exit 1 before init: Error: Settings file not found: /fixture/settings.json"
+	settled, err := json.Marshal(map[string]any{"state": "failed", "detail": detail, "updatedAt": time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, c := fakeBackgroundClaude(t, "failed", `printf failed > "$HOME/state"; printf '%s' '`+string(settled)+`' > "$HOME/.claude/jobs/job12345/state.json"`)
+	writeJobRecord(t, home, "failed", "earlier failure", time.Now().Add(-time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err == nil || !strings.Contains(err.Error(), "is failed after resume") || !strings.Contains(err.Error(), detail) || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeWaitsForRunningJob(t *testing.T) {
+	_, c := fakeBackgroundClaude(t, "stopped", `setstate starting; (sleep 0.3; setstate working) >/dev/null 2>&1 &`)
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err != nil || result["state"] != "working" || result["id"] != "job12345" {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeIgnoresTerminalStateLeftFromBeforeResume(t *testing.T) {
+	home, c := fakeBackgroundClaude(t, "stopped", `(sleep 0.3; setstate working) >/dev/null 2>&1 &`)
+	writeJobRecord(t, home, "stopped", "", time.Now().Add(-time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err != nil || result["state"] != "working" {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeIgnoresLiveStateLeftFromBeforeResume(t *testing.T) {
+	detail := "exit 1 before init: Error: Settings file not found: /fixture/settings.json"
+	home, c := fakeBackgroundClaude(t, "idle", `(sleep 0.3; setstate failed '`+detail+`') >/dev/null 2>&1 &`)
+	writeJobRecord(t, home, "idle", "", time.Now().Add(-time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err == nil || !strings.Contains(err.Error(), "is failed after resume") || !strings.Contains(err.Error(), detail) {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeDecidesFromJobRecordWhenListingDisagrees(t *testing.T) {
+	detail := "exit 1 before init: Error: Settings file not found: /fixture/settings.json"
+	home, c := fakeBackgroundClaude(t, "idle", "")
+	writeJobRecord(t, home, "failed", detail, time.Now().Add(time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err == nil || !strings.Contains(err.Error(), "is failed after resume") || !strings.Contains(err.Error(), detail) {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeIgnoresStaleListingWhileJobRecordIsUnreadable(t *testing.T) {
+	timeout := claudeResumeSettleTimeout
+	claudeResumeSettleTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { claudeResumeSettleTimeout = timeout })
+	home, c := fakeBackgroundClaude(t, "idle", `printf '{"state":"fai' > "$HOME/.claude/jobs/job12345/state.json"`)
+	writeJobRecord(t, home, "idle", "", time.Now().Add(-time.Hour))
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err == nil || !surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeAcceptsShellState(t *testing.T) {
+	_, c := fakeBackgroundClaude(t, "stopped", `setstate shell`)
+	result, err := c.SessionAction(context.Background(), &surface.Session{ID: "fixture-session"}, "resume")
+	if err != nil || result["state"] != "shell" {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+}
+
+func TestClaudeResumeCountsFailureInTheSameMillisecond(t *testing.T) {
+	home, c := fakeBackgroundClaude(t, "failed", "")
+	started := time.Date(2026, 1, 2, 3, 4, 5, 123_600_000, time.UTC)
+	writeJobRecord(t, home, "failed", "fixture failure", started.Truncate(time.Millisecond))
+	_, err := c.awaitResumed(context.Background(), "job12345", started)
+	if err == nil || !strings.Contains(err.Error(), "fixture failure") || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+}
