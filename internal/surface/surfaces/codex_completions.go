@@ -10,7 +10,7 @@ import (
 )
 
 func (c *Codex) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
-	conn, err := c.openSession(ctx, sess, false)
+	conn, err := c.openReader(ctx, sess)
 	if err != nil {
 		return surface.CompletionBatch{}, err
 	}

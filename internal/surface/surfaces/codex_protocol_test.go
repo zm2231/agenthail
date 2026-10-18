@@ -2,91 +2,18 @@ package surfaces
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/gorilla/websocket"
+	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-var desktopRPCMethod = regexp.MustCompile(`request\("([^"]+)"`)
-
-// desktopBridge is a fake Codex Desktop renderer reachable over the Chrome
-// DevTools protocol. It answers hook installation itself and hands every
-// app-server request to respond, keyed by JSON-RPC method.
-type desktopBridge struct {
-	URL         string
-	mu          sync.Mutex
-	methods     []string
-	expressions []string
-}
-
-func (b *desktopBridge) Methods() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.methods...)
-}
-
-func (b *desktopBridge) Request(method string) string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for index, seen := range b.methods {
-		if seen == method {
-			return b.expressions[index]
-		}
-	}
-	return ""
-}
-
-func startDesktopBridge(t *testing.T, respond func(method string) string) *desktopBridge {
+func startDesktopBridge(t *testing.T, respond func(method string) string) *codextest.Desktop {
 	t.Helper()
-	bridge := &desktopBridge{}
-	upgrader := websocket.Upgrader{}
-	var server *httptest.Server
-	handler := http.NewServeMux()
-	handler.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]any{{"type": "page", "url": "app://-/index.html", "webSocketDebuggerUrl": "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"}})
-	})
-	handler.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			var request map[string]any
-			if conn.ReadJSON(&request) != nil {
-				return
-			}
-			params, _ := request["params"].(map[string]any)
-			expression, _ := params["expression"].(string)
-			value := any("")
-			switch match := desktopRPCMethod.FindStringSubmatch(expression); {
-			case strings.Contains(expression, "electronBridge.sendMessageFromView"):
-				value = "hooked"
-			case match != nil:
-				bridge.mu.Lock()
-				bridge.methods = append(bridge.methods, match[1])
-				bridge.expressions = append(bridge.expressions, expression)
-				bridge.mu.Unlock()
-				value = respond(match[1])
-			case strings.Contains(expression, "__agenthailPayloads"):
-				value = "ok"
-			}
-			_ = conn.WriteJSON(map[string]any{"id": request["id"], "result": map[string]any{"result": map[string]any{"value": value}}})
-		}
-	})
-	server = httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	bridge.URL = server.URL
-	return bridge
+	return codextest.StartDesktop(t, respond)
 }
 
 func startRendererDesktopBridge(t *testing.T) string {
@@ -119,7 +46,7 @@ func TestCodexStartSessionPrefersDesktopOwner(t *testing.T) {
 		}
 		return ""
 	})
-	session, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Model: "gpt-5.6-sol", ApprovalPolicy: "on-request", Owner: codexTransportDesktop})
+	session, sent, err := NewCodex(bridge.URL).StartSession(context.Background(), surface.SessionStartOptions{Message: "Build the release", Cwd: "/tmp/project", Model: "gpt-5.6-sol", ApprovalPolicy: "on-request"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +166,11 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 					}
 					resumed = true
 					return `{"result":{"thread":{"id":"thread"}}}`
+				case "thread/loaded/list":
+					if test.wantResume == 0 {
+						return `{"result":{"data":["thread"]}}`
+					}
+					return `{"result":{"data":[]}}`
 				case "thread/turns/list":
 					return `{"result":{"data":[]}}`
 				case "turn/start":
@@ -251,7 +183,7 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 			if err != nil || sent == nil || !sent.Accepted || sent.UUID != "turn" {
 				t.Fatalf("sent=%+v err=%v", sent, err)
 			}
-			if session.Source != "vscode" || session.Transport != codexTransportDesktop {
+			if session.Transport != codexTransportDesktop {
 				t.Fatalf("session=%+v", session)
 			}
 			methods := bridge.Methods()
@@ -273,15 +205,13 @@ func TestCodexDesktopSendNeverResumesLoadedThreadAndLoadsUnloadedThreadOnce(t *t
 	}
 }
 
-func TestCodexObserveRepairsStaleManagedTransport(t *testing.T) {
+func TestCodexObserveReadsThroughDesktopWhenTheDaemonIsStopped(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
 	codex := NewCodex(startRendererDesktopBridge(t))
 	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
 	observation, err := codex.Observe(context.Background(), session)
 	if err != nil || observation == nil || observation.Status != surface.StatusIdle {
 		t.Fatalf("observation=%+v err=%v", observation, err)
-	}
-	if session.Source != "vscode" || session.Transport != codexTransportDesktop {
-		t.Fatalf("session=%+v", session)
 	}
 }
 

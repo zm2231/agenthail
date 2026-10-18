@@ -532,8 +532,8 @@ func TestDashboardSnapshotCarriesCodexRuntimeProblemAndRepair(t *testing.T) {
 	}{
 		{name: "bridge closed", runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Problem: surface.RuntimeBridgeUnavailable, Detail: "bridge closed"}, health: "degraded", repair: "codex-launch"},
 		{name: "managed runtime stopped", runtime: surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeStopped, Detail: "socket missing"}, health: "degraded", repair: "runtime-ensure"},
-		{name: "standalone missing", runtime: surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeStandaloneMissing, Detail: "no standalone"}, health: "degraded"},
-		{name: "healthy with a note", runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Notes: []surface.RuntimeNote{{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install"}}}, health: "healthy"},
+		{name: "standalone missing", runtime: surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeCodexMissing, Detail: "no standalone"}, health: "degraded"},
+		{name: "healthy with a note", runtime: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Notes: []surface.RuntimeNote{{Problem: surface.RuntimeCodexMissing, Message: "managed terminals unavailable", Remediation: "install"}}}, health: "healthy"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, registry, _, _, _ := daemonFixture(t)
@@ -593,7 +593,7 @@ func TestCatalogStreamPublishesANoteThatAppearsWhileHealthy(t *testing.T) {
 	if event := latestSurfaceHealthEvent(t, d); event.Health != "healthy" || event.Runtime == nil || len(event.Runtime.Notes) != 0 {
 		t.Fatalf("event=%+v", event)
 	}
-	adapter.runtime.Notes = []surface.RuntimeNote{{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install"}}
+	adapter.runtime.Notes = []surface.RuntimeNote{{Problem: surface.RuntimeCodexMissing, Message: "managed terminals unavailable", Remediation: "install"}}
 	d.discoverCatalog(context.Background())
 	if event := latestSurfaceHealthEvent(t, d); event.Health != "healthy" || event.Runtime == nil || len(event.Runtime.Notes) != 1 {
 		t.Fatalf("a note that appeared while healthy was not published: %+v", event)
