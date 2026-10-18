@@ -207,7 +207,7 @@ Other:
 
 Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
 Sender: --from resolves a session; otherwise identity comes from AGENTHAIL_SESSION_ID,
-        CLAUDE_CODE_SESSION_ID, the verified native Claude caller, then CODEX_THREAD_ID.
+        CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID.
         Native Claude peers require the daemon and register automatically before sending.
 `)
 }

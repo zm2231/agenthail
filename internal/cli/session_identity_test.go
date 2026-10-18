@@ -15,7 +15,7 @@ import (
 const (
 	originalConversation = "0f3c1d52-7f0e-4c1a-9a43-1d2e8b7c6a01"
 	branchConversation   = "6b9e2a17-2c44-4d8e-b0f5-3e7a9c1d4b02"
-	liveBridge           = "session_01FixtureLive"
+	liveBridge           = "session_live"
 )
 
 func liveClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixture, *claudePosts) {
@@ -105,7 +105,7 @@ func TestBranchInALiveProcessKeepsTheAliasOnTheOriginalConversation(t *testing.T
 	if sender := sendFrom(t, app, r, originalConversation, "claude:"+branchConversation, "to the branch"); sender != originalConversation || posts.count("to the branch") != 1 {
 		t.Fatalf("send to the branch: sender=%q posts=%d", sender, posts.count("to the branch"))
 	}
-	fixture.ResumeBridge("session_01FixtureResumed")
+	fixture.ResumeBridge("session_resumed")
 	if sender := sendFrom(t, app, r, branchConversation, "@worker", "to the original"); sender != branchConversation || posts.count("to the original") != 1 {
 		t.Fatalf("send to @worker: sender=%q posts=%d", sender, posts.count("to the original"))
 	}
@@ -123,7 +123,7 @@ func TestResumeInAnotherProcessKeepsTheAlias(t *testing.T) {
 	}
 
 	fixture.RemoveRecord()
-	fixture.Record(originalConversation, fixture.Home, "session_01FixtureOtherProcess")
+	fixture.Record(originalConversation, fixture.Home, "session_other")
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) }); err != nil {
 		t.Fatal(err)
 	}

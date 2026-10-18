@@ -16,7 +16,7 @@ func TestStateReportsRekeyedIDsAndBranchParents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	upgraded := surface.Session{ID: "session_01FixtureUpgraded", Surface: surface.KindClaude, Name: "upgraded", Status: surface.StatusIdle, Transcript: "/fixture/.claude/projects/fixture/conversation-upgraded.jsonl", HasLocal: true}
+	upgraded := surface.Session{ID: "session_upgraded", Surface: surface.KindClaude, Name: "upgraded", Status: surface.StatusIdle, Transcript: "/fixture/.claude/projects/fixture/conversation-upgraded.jsonl", HasLocal: true}
 	branch := surface.Session{ID: "conversation-branch", Surface: surface.KindClaude, Name: "branch", Status: surface.StatusIdle, ForkedFrom: "conversation-upgraded", Transcript: "/fixture/.claude/projects/fixture/conversation-branch.jsonl", HasLocal: true}
 	for _, session := range []surface.Session{upgraded, branch} {
 		if err := r.RegisterSession(session); err != nil {
