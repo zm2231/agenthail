@@ -124,6 +124,13 @@ func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch sur
 		return err
 	}
 	if n != 1 {
+		var current string
+		if err := tx.QueryRow(`SELECT cursor FROM relay_sources WHERE source_key=?`, key).Scan(&current); err != nil {
+			return err
+		}
+		if current == batch.Cursor {
+			return nil
+		}
 		return ErrRelayCursorMoved
 	}
 	for _, event := range batch.Events {
