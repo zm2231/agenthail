@@ -915,3 +915,41 @@ func TestFederationRemovalCommitsAndRevokesDespiteCatalogGap(t *testing.T) {
 		t.Fatalf("remote devices after remove=%+v err=%v", devices, err)
 	}
 }
+
+func TestFederationReconcileKeepsCommittedRowsDespiteCatalogGap(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	if err := remote.reg.RegisterSession(surface.Session{ID: "remote-c", Surface: surface.KindCodex, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	remote.fake.mu.Lock()
+	remote.fake.sessions["remote-c"] = surface.Session{ID: "remote-c", Surface: surface.KindCodex, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}
+	remote.fake.mu.Unlock()
+	remote.daemon.discoverCatalog(context.Background())
+	window, err := local.reg.CatalogEventsAfter(0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.daemon.catalog.mu.Lock()
+	local.daemon.catalog.publishedSeq = window.LatestSeq + 1<<40
+	local.daemon.catalog.mu.Unlock()
+	host, _ := local.daemon.pairedHost(record.ID)
+	if _, err := local.daemon.reconcileHost(context.Background(), host); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := local.reg.HostCatalogRows(record.ID)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("rows after gapped reconcile=%+v err=%v", rows, err)
+	}
+	if got := len(sessionsOf(local.snapshot(t), record.ID)); got != 3 {
+		t.Fatalf("snapshot rows after gapped reconcile=%d", got)
+	}
+	after, err := local.reg.CatalogEventsAfter(window.EarliestSeq-1, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range after.Events {
+		if event.Type == "session.removed" && strings.Contains(string(event.Payload), "omitted_by_host") {
+			t.Fatalf("committed row removed: %s", event.Payload)
+		}
+	}
+}

@@ -385,7 +385,7 @@ func (d *Daemon) reconcileHost(ctx context.Context, host *pairedHost) (uint64, e
 		if _, found := keep[row.Session.ID]; found {
 			continue
 		}
-		if _, _, err := d.catalog.removeHostRow(host.record.ID, row.Session.ID, hosts.Qualify(host.record.ID, row.Session.ID), "omitted_by_host"); err != nil {
+		if err := d.removeHostRow(host.record.ID, row.Session.ID, "omitted_by_host"); err != nil {
 			return 0, err
 		}
 	}
@@ -467,8 +467,7 @@ func (d *Daemon) applyHostCatalogEvent(host *pairedHost, envelope catalogStreamE
 		if payload.SessionID == "" || strings.Contains(payload.SessionID, hosts.Separator) {
 			return nil
 		}
-		_, _, err := d.catalog.removeHostRow(host.record.ID, payload.SessionID, hosts.Qualify(host.record.ID, payload.SessionID), "removed_by_host")
-		return err
+		return d.removeHostRow(host.record.ID, payload.SessionID, "removed_by_host")
 	case "session.queue":
 		var payload struct {
 			SessionID  string `json:"sessionId"`
@@ -535,44 +534,50 @@ func (d *Daemon) applyMirroredProjection(hostID string, session surface.Session,
 	if err != nil {
 		return err
 	}
-	_, _, err = d.catalog.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, HostProject: hostProject, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
-	return err
+	return d.publishHostRow(hostID, registry.HostCatalogRow{Session: session, EntityID: projection.ID, Projection: encoded, HostProject: hostProject, Checkout: checkout, UnavailableReason: projection.UnavailableReason, ObservedAt: time.Now().UTC(), QueueCount: projection.QueueCount})
 }
 
 func (d *Daemon) refreshHostQueueCounts() {
-	if err := d.catalog.refreshHostQueueCounts(); err != nil {
+	d.catalog.mu.Lock()
+	defer d.catalog.mu.Unlock()
+	changed, err := d.Registry.RefreshHostQueueCounts()
+	if err != nil {
 		d.logRuntimeError("host queue counts", err)
+		return
+	}
+	if changed > 0 {
+		d.publishCommittedHostWriteLocked("host queue counts")
 	}
 }
 
-func (h *catalogHub) refreshHostQueueCounts() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	changed, err := h.registry.RefreshHostQueueCounts()
-	if err != nil || changed == 0 {
+// publishHostRow and removeHostRow return only whether the registry write
+// committed. A later publication failure is logged and left to catalog
+// subscribers, who reconcile from a snapshot after a gap; callers must never
+// treat a committed mirror row as absent.
+func (d *Daemon) publishHostRow(hostID string, row registry.HostCatalogRow) error {
+	d.catalog.mu.Lock()
+	defer d.catalog.mu.Unlock()
+	if _, _, err := d.Registry.ApplyHostCatalogRow(hostID, row); err != nil {
 		return err
 	}
-	return h.flushCommittedLocked()
+	d.publishCommittedHostWriteLocked("host " + hostID + " mirror " + row.Session.ID)
+	return nil
 }
 
-func (h *catalogHub) publishHostRow(hostID string, row registry.HostCatalogRow) (registry.CatalogEvent, bool, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	event, created, err := h.registry.ApplyHostCatalogRow(hostID, row)
-	if err != nil {
-		return event, created, err
+func (d *Daemon) removeHostRow(hostID, sessionID, reason string) error {
+	d.catalog.mu.Lock()
+	defer d.catalog.mu.Unlock()
+	if _, _, err := d.Registry.RemoveHostCatalogRow(hostID, sessionID, hosts.Qualify(hostID, sessionID), reason); err != nil {
+		return err
 	}
-	return event, created, h.flushCommittedLocked()
+	d.publishCommittedHostWriteLocked("host " + hostID + " remove " + sessionID)
+	return nil
 }
 
-func (h *catalogHub) removeHostRow(hostID, sessionID, entityID, reason string) (registry.CatalogEvent, bool, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	event, created, err := h.registry.RemoveHostCatalogRow(hostID, sessionID, entityID, reason)
-	if err != nil {
-		return event, created, err
+func (d *Daemon) publishCommittedHostWriteLocked(what string) {
+	if err := d.catalog.flushCommittedLocked(); err != nil {
+		d.logRuntimeError(what+" catalog", err)
 	}
-	return event, created, h.flushCommittedLocked()
 }
 
 const (
