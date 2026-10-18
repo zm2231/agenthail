@@ -133,7 +133,7 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 	d.syncRelays(ctx, adapter, session)
 	source, transport := session.Source, session.Transport
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
-	observation, err := adapter.Observe(operationCtx, session)
+	observation, err := d.observeTurn(operationCtx, adapter, session)
 	cancel()
 	if err != nil {
 		d.recordObservationFailure(session.ID)
@@ -152,8 +152,6 @@ func (d *Daemon) observeSession(ctx context.Context, adapter surface.Surface, se
 		d.releaseSessionSource(session.ID, "active-turn")
 	}
 	session.Status = observation.Status
-	session.WaitingOn = observation.WaitingOn
-	observation.WaitingOn = d.noteWaiting(*session, true)
 	session.WaitingOn = observation.WaitingOn
 	if session.Source != source || session.Transport != transport {
 		if err := d.Registry.RegisterSession(*session); err != nil {

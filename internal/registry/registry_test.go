@@ -1424,3 +1424,81 @@ func TestOpenKeepsLiveClaudeRowsAndAbsorbsExitedOnesIntoALiveRow(t *testing.T) {
 		t.Fatalf("alias=%q err=%v", resolved, err)
 	}
 }
+
+func TestRecordWaitingAnnouncesEachQuestionUntilMarked(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "asking")
+	question := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_one"}
+	first := time.Date(2026, 10, 18, 8, 14, 41, 0, time.UTC)
+	recorded, announce, err := r.RecordWaiting("asking", question, first)
+	if err != nil || !announce || recorded == nil || !recorded.Since.Equal(first) {
+		t.Fatalf("recorded=%+v announce=%v err=%v", recorded, announce, err)
+	}
+	if recorded, announce, err = r.RecordWaiting("asking", question, first.Add(time.Hour)); err != nil || !announce || !recorded.Since.Equal(first) {
+		t.Fatalf("an unannounced question must stay due with its first-seen time: %+v announce=%v err=%v", recorded, announce, err)
+	}
+	if err := r.MarkWaitingAnnounced("asking", "toolu_other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, announce, _ = r.RecordWaiting("asking", question, first); !announce {
+		t.Fatal("marking another question announced this one")
+	}
+	if err := r.MarkWaitingAnnounced("asking", "toolu_one"); err != nil {
+		t.Fatal(err)
+	}
+	if _, announce, _ = r.RecordWaiting("asking", question, first); announce {
+		t.Fatal("an announced question is due again")
+	}
+	if recorded, announce, err = r.RecordWaiting("asking", nil, first); err != nil || recorded != nil || announce {
+		t.Fatalf("clear: %+v announce=%v err=%v", recorded, announce, err)
+	}
+	if _, announce, _ = r.RecordWaiting("asking", question, first); !announce {
+		t.Fatal("the same question asked again after it cleared is not due")
+	}
+}
+
+func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "target")
+	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := r.QueueMessageWithOptions("target", "after the turn", "", surface.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steer, err := r.QueueMessageWithOptions("target", "into the turn", "", surface.SendOptions{BusyDelivery: "steer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := func(id int64) QueueHold {
+		t.Helper()
+		item, err := r.QueueItem(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item.HeldBy
+	}
+	if held(queued) != QueueHeldBusy || held(steer) != "" {
+		t.Fatalf("busy turn: queued=%q steer=%q, want busy and nothing", held(queued), held(steer))
+	}
+	if _, _, err := r.RecordWaiting("target", &surface.Waiting{Kind: surface.WaitingApproval, ID: "thread:approval"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if held(queued) != QueueHeldWaiting || held(steer) != QueueHeldWaiting {
+		t.Fatalf("waiting turn: queued=%q steer=%q", held(queued), held(steer))
+	}
+	if _, _, err := r.RecordWaiting("target", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextSteerMessage("target", time.Now())
+	if err != nil || item == nil || item.ID != steer {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	if err := r.DeferMessage(steer, errors.New("target refused the steer"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if held(steer) != QueueHeldRetrying {
+		t.Fatalf("deferred steer=%q, want retrying", held(steer))
+	}
+}

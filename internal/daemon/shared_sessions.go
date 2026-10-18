@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -71,7 +72,7 @@ func (d *Daemon) savedSharedSessions(sessionID string) ([]dashboardSharedSession
 // no longer matches the rows that committed, so a relation only names peers
 // clients can open and each entry carries its peer's current status. A failed
 // republish is retried on the next status tick.
-func (d *Daemon) refreshCatalogShared(config *DashboardConfig, counts map[string]int) {
+func (d *Daemon) refreshCatalogShared(ctx context.Context, config *DashboardConfig, counts map[string]int) {
 	sessions := make([]surface.Session, 0, len(d.catalogLive))
 	for _, live := range d.catalogLive {
 		if live.adapter.Name() == surface.KindClaude {
@@ -95,7 +96,7 @@ func (d *Daemon) refreshCatalogShared(config *DashboardConfig, counts map[string
 				return
 			}
 		}
-		if d.publishCatalogSession(live.adapter, live.session, live.identity, live.alias, counts[id], live.open, shared[id], *config, time.Now().UTC()) {
+		if d.publishCatalogSession(ctx, live.adapter, live.session, live.identity, live.alias, counts[id], live.open, shared[id], *config, time.Now().UTC()) {
 			live.shared = shared[id]
 		}
 	}

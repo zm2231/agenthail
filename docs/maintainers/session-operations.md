@@ -60,10 +60,13 @@ assistant `tool_use` named `AskUserQuestion` or `ExitPlanMode` with no matching
 also clears it. Codex reads it from the thread status, `active` with
 `waitingOnApproval` or `waitingOnUserInput` in `activeFlags`, and names it
 `<thread>:<kind>` in both listings and observations. The registry keeps the
-current question in `session_runtime` and announces each new one once, on the
-desktop and to paired devices (`session.waiting`), across daemon restarts.
-Observation clears a question it no longer sees; a catalog listing clears one only
-when it shows the session idle or offline. While a target waits, nothing is steered
+current question in `session_runtime`. Each read of a turn and the write of what
+it waits on happen as one step per session, so a slower read never overwrites a
+newer one. A catalog listing that disagrees with the record is confirmed by
+observing the turn before anything changes. Each new question is announced on
+the desktop and to paired devices (`session.waiting`) and marked announced once
+both were attempted; a question recorded but not yet announced when the daemon
+stops is announced after it restarts. While a target waits, nothing is steered
 into it: `send` under the `steer` policy and `steer` both queue a steer, with a
 receipt that names the wait. The daemon steers queued steers once the question is answered and
 delivers other messages when the turn ends. Queue rows report `heldBy`: `waiting`,

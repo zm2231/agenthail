@@ -34,6 +34,9 @@ type Daemon struct {
 	observeRetry      map[string]observeRetry
 	notificationMu    sync.Mutex
 	notificationArmed map[string]bool
+	waitingLocks      sync.Map
+	announceMu        sync.Mutex
+	announcing        map[string]string
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub

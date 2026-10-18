@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,9 +23,32 @@ import (
 // with the peer socket replaced by a recorder.
 type recordingClaude struct {
 	*surfaces.Claude
-	mu      sync.Mutex
-	sent    []string
-	steered []string
+	mu       sync.Mutex
+	sent     []string
+	steered  []string
+	observed int
+}
+
+func (c *recordingClaude) Observe(ctx context.Context, session *surface.Session) (*surface.TurnObservation, error) {
+	observation, err := c.Claude.Observe(ctx, session)
+	c.mu.Lock()
+	c.observed++
+	c.mu.Unlock()
+	return observation, err
+}
+
+// awaitObservations returns once the daemon has read the transcript n more
+// times, so an absence checked afterwards covers that many passes.
+func (c *recordingClaude) awaitObservations(t *testing.T, n int) {
+	t.Helper()
+	c.mu.Lock()
+	target := c.observed + n
+	c.mu.Unlock()
+	eventually(t, fmt.Sprintf("%d more observations", n), func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.observed >= target
+	})
 }
 
 func (c *recordingClaude) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
@@ -154,7 +178,18 @@ func appendClaudeRecords(t *testing.T, path string, records ...string) {
 	}
 }
 
-func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *testing.T) {
+type claudeQuestion struct {
+	store      *registry.Registry
+	claude     *recordingClaude
+	pushes     *pushRecorder
+	session    surface.Session
+	transcript string
+}
+
+// newClaudeQuestion is a Claude session whose turn has asked the user an
+// unanswered AskUserQuestion.
+func newClaudeQuestion(t *testing.T) claudeQuestion {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	process := claudetest.New(t)
 	process.Listen()
@@ -176,6 +211,12 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	pushes := newPushRecorder(t, store)
 	claude := &recordingClaude{Claude: surfaces.NewClaude("Default", process.Home)}
 
+	return claudeQuestion{store: store, claude: claude, pushes: pushes, session: session, transcript: transcript}
+}
+
+func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *testing.T) {
+	q := newClaudeQuestion(t)
+	store, claude, pushes, session, transcript := q.store, q.claude, q.pushes, q.session, q.transcript
 	h, stop := runDaemon(t, store, claude)
 	eventually(t, "the session to show it is waiting on the user", func() bool {
 		waiting := h.sessionWaiting(session.ID)
@@ -189,7 +230,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 		}
 	}
 	queuedID, steerID := queueID(t, queued), queueID(t, steer)
-	settle()
+	claude.awaitObservations(t, 3)
 	for _, id := range []int64{queuedID, steerID} {
 		if item := h.queueItem(id); item.Status != "pending" || item.HeldBy != registry.QueueHeldWaiting {
 			t.Fatalf("item=%+v", item)
@@ -203,7 +244,10 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	stop()
 	h, _ = runDaemon(t, store, claude)
 	eventually(t, "the restarted daemon to see the question", func() bool { return h.sessionWaiting(session.ID) != nil })
-	settle()
+	claude.awaitObservations(t, 3)
+	if _, announced, err := store.WaitingState(session.ID); err != nil || !announced {
+		t.Fatalf("announced=%v err=%v", announced, err)
+	}
 	if got := pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
@@ -226,7 +270,14 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 		sent, _ := claude.delivered()
 		return len(sent) == 1
 	})
-	settle()
+	eventually(t, "both held messages to finish", func() bool {
+		for _, id := range []int64{queuedID, steerID} {
+			if item, err := store.QueueItem(id); err != nil || item.Status != "delivered" {
+				return false
+			}
+		}
+		return true
+	})
 	sent, steered := claude.delivered()
 	if len(sent) != 1 || sent[0] != "after you answer" || len(steered) != 1 || steered[0] != "steer after the answer" {
 		t.Fatalf("sent=%q steered=%q", sent, steered)
@@ -268,7 +319,7 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 		t.Fatalf("a steer into a pending approval was not held: %v", receipt)
 	}
 	held := queueID(t, receipt)
-	settle()
+	awaitThreadReads(t, lifecycle, 3)
 	if item := h.queueItem(held); item.Status != "pending" || item.HeldBy != registry.QueueHeldWaiting {
 		t.Fatalf("item=%+v", item)
 	}
@@ -282,11 +333,70 @@ func TestCodexPendingApprovalShowsWaitingAndHoldsSteerUntilApproved(t *testing.T
 		thread, _ := lifecycle.Daemon().Thread(id)
 		return thread.Turns[0].User == "Apply the migration\nalso update the changelog"
 	})
-	settle()
+	awaitThreadReads(t, lifecycle, 3)
 	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 1 || thread.Turns[0].User != "Apply the migration\nalso update the changelog" {
 		t.Fatalf("thread=%+v", thread.Turns)
 	}
 	if got := pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one approval notified %d times", got)
+	}
+}
+
+// awaitThreadReads returns once the daemon has read Codex threads n more
+// times.
+func awaitThreadReads(t *testing.T, lifecycle *codextest.Lifecycle, n int) {
+	t.Helper()
+	target := len(lifecycle.Daemon().Calls("thread/read")) + n
+	eventually(t, fmt.Sprintf("%d more thread reads", n), func() bool { return len(lifecycle.Daemon().Calls("thread/read")) >= target })
+}
+
+func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
+	q := newClaudeQuestion(t)
+	since := time.Date(2026, 10, 18, 8, 14, 41, 0, time.UTC)
+	if _, announce, err := q.store.RecordWaiting(q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_question", Since: since}, since); err != nil || !announce {
+		t.Fatalf("announce=%v err=%v", announce, err)
+	}
+	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	runDaemon(t, q.store, q.claude)
+	eventually(t, "the pending announcement", func() bool { return q.pushes.count("session.waiting") == 1 })
+	eventually(t, "the announcement to be recorded", func() bool {
+		_, announced, err := q.store.WaitingState(q.session.ID)
+		return err == nil && announced
+	})
+	q.claude.awaitObservations(t, 3)
+	if got := q.pushes.count("session.waiting"); got != 1 {
+		t.Fatalf("one question notified %d times", got)
+	}
+}
+
+func TestStaleCatalogListingCannotReviveAnAnsweredQuestion(t *testing.T) {
+	q := newClaudeQuestion(t)
+	d := New(q.store, []surface.Surface{q.claude})
+	ctx := context.Background()
+	asked := q.session
+	if observation, err := d.observeTurn(ctx, q.claude, &asked); err != nil || observation.WaitingOn == nil {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	eventually(t, "the question to be announced", func() bool {
+		_, announced, err := q.store.WaitingState(q.session.ID)
+		return err == nil && announced
+	})
+	stale := q.session
+	stale.WaitingOn = &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_question"}
+	appendClaudeRecords(t, q.transcript, `{"type":"user","uuid":"answer","timestamp":"2026-10-18T20:18:07Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_question","content":"main"}]}}`)
+	answered := q.session
+	if observation, err := d.observeTurn(ctx, q.claude, &answered); err != nil || observation.WaitingOn != nil {
+		t.Fatalf("observation=%+v err=%v", observation, err)
+	}
+	if waiting := d.catalogWaiting(ctx, q.claude, stale); waiting != nil {
+		t.Fatalf("a listing taken before the answer brought the question back: %+v", waiting)
+	}
+	if waiting, _, err := q.store.WaitingState(q.session.ID); err != nil || waiting != nil {
+		t.Fatalf("recorded=%+v err=%v", waiting, err)
+	}
+	if got := q.pushes.count("session.waiting"); got != 1 {
+		t.Fatalf("one question notified %d times", got)
 	}
 }

@@ -146,6 +146,7 @@ func (r *Registry) migrate() error {
 		{"waiting_kind", `TEXT NOT NULL DEFAULT ''`},
 		{"waiting_id", `TEXT NOT NULL DEFAULT ''`},
 		{"waiting_since_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"waiting_announced", `INTEGER NOT NULL DEFAULT 0`},
 	} {
 		if err := r.ensureColumn("session_runtime", column.name, column.decl); err != nil {
 			return err
@@ -1600,10 +1601,13 @@ const (
 )
 
 // queueRowSelect reads queue rows with the hold reason derived from the
-// target's last observed state. Its first argument is the current time.
+// target's last observed state, by the same rules the daemon drains by: a
+// busy turn holds a message but not a steer into it. Its first argument is
+// the current time.
 const queueRowSelect = `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
 	CASE WHEN q.status!='pending' THEN ''
 		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'
+		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')='busy' AND q.busy_delivery='steer' AND q.model='' AND (q.turn_options='' OR q.turn_options='{}') THEN CASE WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
 		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')='busy' THEN 'busy'
 		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')='offline' THEN 'offline'
 		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown') NOT IN ('idle','notLoaded') THEN 'unknown'
@@ -2185,50 +2189,57 @@ func (r *Registry) SaveRuntimeState(sessionID string, observation surface.TurnOb
 
 // SessionWaiting returns the question a session was last seen waiting on.
 func (r *Registry) SessionWaiting(sessionID string) (*surface.Waiting, error) {
-	var kind, id string
-	var sinceMS int64
-	err := r.read.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms FROM session_runtime WHERE session_id=? AND waiting_id!=''`, sessionID).Scan(&kind, &id, &sinceMS)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &surface.Waiting{Kind: surface.WaitingKind(kind), ID: id, Since: time.UnixMilli(sinceMS).UTC()}, nil
+	waiting, _, err := r.WaitingState(sessionID)
+	return waiting, err
 }
 
-// RecordWaiting stores the question a session waits on and reports whether it
-// is a new question. The returned waiting state carries the time the
-// question was first seen. An unchanged state is answered from the read
-// connection, so a pass over settled sessions writes nothing.
+// WaitingState returns the recorded question and whether the user has been
+// told about it.
+func (r *Registry) WaitingState(sessionID string) (*surface.Waiting, bool, error) {
+	return scanWaiting(r.read.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced FROM session_runtime WHERE session_id=?`, sessionID))
+}
+
+func scanWaiting(row *sql.Row) (*surface.Waiting, bool, error) {
+	var kind, id string
+	var sinceMS int64
+	var announced bool
+	err := row.Scan(&kind, &id, &sinceMS, &announced)
+	if err == sql.ErrNoRows || err == nil && id == "" {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return &surface.Waiting{Kind: surface.WaitingKind(kind), ID: id, Since: time.UnixMilli(sinceMS).UTC()}, announced, nil
+}
+
+// RecordWaiting stores the question a session waits on. It returns the
+// recorded state, which keeps the time the question was first seen, and
+// whether that question still has to be announced. An unchanged state is
+// answered from the read connection, so a pass over settled sessions writes
+// nothing.
 func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now time.Time) (*surface.Waiting, bool, error) {
-	current, err := r.SessionWaiting(sessionID)
+	current, announced, err := r.WaitingState(sessionID)
 	if err != nil {
 		return nil, false, err
 	}
 	if surface.SameWaiting(current, waiting) {
-		return current, false, nil
+		return current, current != nil && !announced, nil
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	var kind, id string
-	var sinceMS int64
-	err = tx.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms FROM session_runtime WHERE session_id=?`, sessionID).Scan(&kind, &id, &sinceMS)
-	if err != nil && err != sql.ErrNoRows {
+	stored, announced, err := scanWaiting(tx.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced FROM session_runtime WHERE session_id=?`, sessionID))
+	if err != nil {
 		return nil, false, err
 	}
-	stored := &surface.Waiting{Kind: surface.WaitingKind(kind), ID: id, Since: time.UnixMilli(sinceMS).UTC()}
-	if id == "" {
-		stored = nil
-	}
 	if surface.SameWaiting(stored, waiting) {
-		return stored, false, tx.Commit()
+		return stored, stored != nil && !announced, tx.Commit()
 	}
 	if waiting == nil {
-		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0 WHERE session_id=?`, sessionID); err != nil {
+		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0,waiting_announced=0 WHERE session_id=?`, sessionID); err != nil {
 			return nil, false, err
 		}
 		return nil, false, tx.Commit()
@@ -2237,11 +2248,18 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 	if next.Since.IsZero() {
 		next.Since = now.UTC()
 	}
-	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,waiting_kind,waiting_id,waiting_since_ms,updated_at) SELECT ?,?,?,?,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?)
-		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), sessionID); err != nil {
+	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,waiting_kind,waiting_id,waiting_since_ms,waiting_announced,updated_at) SELECT ?,?,?,?,0,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?)
+		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms,waiting_announced=0`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), sessionID); err != nil {
 		return nil, false, err
 	}
 	return &next, true, tx.Commit()
+}
+
+// MarkWaitingAnnounced records that the user was told about question id. A
+// question replaced in the meantime is left to be announced.
+func (r *Registry) MarkWaitingAnnounced(sessionID, id string) error {
+	_, err := r.db.Exec(`UPDATE session_runtime SET waiting_announced=1 WHERE session_id=? AND waiting_id=?`, sessionID, id)
+	return err
 }
 
 func (r *Registry) ClearCompletionNotification(sessionID string) error {

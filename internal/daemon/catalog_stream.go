@@ -360,7 +360,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identityCancel()
 			open := session.Surface == surface.KindClaude && openClaude[session.PID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(adapter, session, identity, alias, counts[session.ID], open, shared[session.ID], config, observedAt) {
+			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, shared[session.ID], config, observedAt) {
 				delete(d.catalogLive, session.ID)
 				continue
 			}
@@ -378,7 +378,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 		}
 		d.forgetCatalogLive(adapter.Name(), seen)
 		if adapter.Name() == surface.KindClaude {
-			d.refreshCatalogShared(&config, counts)
+			d.refreshCatalogShared(ctx, &config, counts)
 		}
 		complete := true
 		if bounded, ok := adapter.(surface.CatalogListCompleteness); ok {
@@ -439,18 +439,18 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				return
 			}
 		}
-		if d.publishCatalogSession(live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, live.shared, *config, time.Now().UTC()) {
+		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, live.shared, *config, time.Now().UTC()) {
 			live.session = refreshed
 		} else {
 			live.stamps = nil
 		}
 	}
-	d.refreshCatalogShared(config, counts)
+	d.refreshCatalogShared(ctx, config, counts)
 }
 
 // publishCatalogSession records one session row, rebuilding the projection
 // when the queue count changed under it. It reports whether the row committed.
-func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, shared []dashboardSharedSession, config DashboardConfig, observedAt time.Time) bool {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, shared []dashboardSharedSession, config DashboardConfig, observedAt time.Time) bool {
 	hostProject, err := json.Marshal(identity.HostProject)
 	if err != nil {
 		return false
@@ -459,7 +459,7 @@ func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.
 	if err != nil {
 		return false
 	}
-	session.WaitingOn = d.noteWaiting(session, false)
+	session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
 		row.SharedWith = shared

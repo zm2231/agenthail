@@ -57,7 +57,7 @@ type DeliveryIntent struct {
 	// failure is reported on its own.
 	Retries   int
 	CreatedAt time.Time
-	UpdatedAt           time.Time
+	UpdatedAt time.Time
 }
 
 type DeliveryProblem struct {
