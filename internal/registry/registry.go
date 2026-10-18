@@ -356,21 +356,21 @@ CREATE TABLE IF NOT EXISTS launcher_pending (
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS relay_sources (
-    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    source_key TEXT PRIMARY KEY,
     cursor TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS relay_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    source_key TEXT NOT NULL,
     completion_id TEXT NOT NULL,
     input_id TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL,
     relay_hops INTEGER NOT NULL DEFAULT 0,
     completed_at_ms INTEGER NOT NULL DEFAULT 0,
     captured_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(source_session_id,completion_id)
+    UNIQUE(source_key,completion_id)
 );
-CREATE INDEX IF NOT EXISTS relay_events_source ON relay_events(source_session_id,id);
+CREATE INDEX IF NOT EXISTS relay_events_source ON relay_events(source_key,id);
 CREATE TABLE IF NOT EXISTS relay_provenance (
     queue_id INTEGER PRIMARY KEY REFERENCES message_queue(id) ON DELETE CASCADE,
     input_id TEXT NOT NULL DEFAULT '',
@@ -639,12 +639,6 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 			return err
 		}
 		for _, duplicate := range duplicates {
-			if overlap, err := relaySourcesOverlapTx(tx, duplicate, s.ID); err != nil || overlap {
-				if err != nil {
-					return err
-				}
-				continue
-			}
 			if err := mergeSessionTx(tx, duplicate, s.ID); err != nil {
 				return err
 			}
@@ -719,11 +713,7 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 			return err
 		}
 		for _, duplicate := range exited {
-			overlap, err := relaySourcesOverlapTx(tx, duplicate, survivor)
-			if err == nil && !overlap {
-				err = mergeSessionTx(tx, duplicate, survivor)
-			}
-			if err != nil {
+			if err := mergeSessionTx(tx, duplicate, survivor); err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -808,9 +798,6 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 		args  []any
 	}{
 		{`DELETE FROM channel_members WHERE session_id=?`, []any{oldID}},
-		{`DELETE FROM relay_events WHERE source_session_id=? AND EXISTS(SELECT 1 FROM relay_sources WHERE session_id=?)`, []any{oldID, currentID}},
-		{`INSERT INTO relay_sources(session_id,cursor) SELECT ?,cursor FROM relay_sources WHERE session_id=? ON CONFLICT(session_id) DO NOTHING`, []any{currentID, oldID}},
-		{`UPDATE OR IGNORE relay_events SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET to_session=? WHERE to_session=?`, []any{currentID, oldID}},
 		{`DELETE FROM routes WHERE from_session=to_session`, nil},
@@ -840,17 +827,6 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 	}
 	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID)
 	return err
-}
-
-// relaySourcesOverlapTx reports whether merging oldID into currentID would
-// join two completion logs of one transcript while oldID still feeds an
-// active relay. Their readers advance independently, so neither log can
-// express the other's route boundaries; the exited row stays until its
-// relays are spent or removed, and its own reader keeps them exact.
-func relaySourcesOverlapTx(tx *sql.Tx, oldID, currentID string) (bool, error) {
-	var overlap bool
-	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM relay_sources WHERE session_id=?) AND EXISTS(SELECT 1 FROM routes WHERE from_session=? AND active=1)`, currentID, oldID).Scan(&overlap)
-	return overlap, err
 }
 
 // removeMergedCatalogRowTx tells catalog subscribers that a merged session's
@@ -1147,7 +1123,7 @@ func (r *Registry) AddRelayRoute(from, to, pattern string, once bool, handoff st
 	if cycle > 0 {
 		return 0, fmt.Errorf("relay route would create a cycle")
 	}
-	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern,once_only,handoff,event_cursor) VALUES (?,?,?,?,?,COALESCE((SELECT MAX(id) FROM relay_events WHERE source_session_id=?),0))`, from, to, pattern, b2i(once), handoff, from)
+	res, err := tx.Exec(`INSERT INTO routes (from_session,to_session,pattern,once_only,handoff,event_cursor) VALUES (?,?,?,?,?,COALESCE((SELECT MAX(id) FROM relay_events),0))`, from, to, pattern, b2i(once), handoff)
 	if err != nil {
 		return 0, err
 	}
@@ -2225,8 +2201,17 @@ func (r *Registry) RemoveRoute(id int64) error {
 	if _, err := tx.Exec(`DELETE FROM routes WHERE id=?`, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM relay_sources WHERE session_id=? AND NOT EXISTS(SELECT 1 FROM routes WHERE from_session=?)`, source, source); err != nil {
+	key, err := relaySourceKeyOf(tx, source)
+	if err != nil && !errors.Is(err, errNoRelayTranscript) {
 		return err
+	}
+	if err == nil {
+		orphaned := `source_key=? AND NOT EXISTS(SELECT 1 FROM routes JOIN sessions s ON s.id=routes.from_session WHERE ` + relaySourceKey + `=?)`
+		for _, table := range []string{"relay_sources", "relay_events"} {
+			if _, err := tx.Exec(`DELETE FROM `+table+` WHERE `+orphaned, key, key); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit()
 }
@@ -2249,7 +2234,7 @@ type RouteRow struct {
 
 func (r *Registry) ListRoutes() ([]RouteRow, error) {
 	rows, err := r.read.Query(`SELECT r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active,
-		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), ''), r.handoff, r.event_cursor, r.last_goal_key, r.last_error, (SELECT COUNT(*) FROM relay_events e WHERE e.source_session_id=r.from_session AND e.id>r.event_cursor)
+		COUNT(d.completion_id), COALESCE(MAX(d.delivered_at), ''), r.handoff, r.event_cursor, r.last_goal_key, r.last_error, (SELECT COUNT(*) FROM relay_events e JOIN sessions s ON s.id=r.from_session WHERE e.source_key=` + relaySourceKey + ` AND e.id>r.event_cursor)
 		FROM routes r LEFT JOIN relay_deliveries d ON d.route_id = r.id
 		GROUP BY r.id, r.from_session, r.to_session, r.pattern, r.once_only, r.active
 		ORDER BY r.id`)
