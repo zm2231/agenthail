@@ -86,9 +86,11 @@ Continue the task without adding receipt/read-state hedges or investigation
 chores. Agenthail reports proven delivery problems separately; never resend
 automatically.
 
-The daemon registers each agent in the default Codex/Notion discovery page as
-an individual Claude `ListAgents` peer, refreshing every 30 seconds. Older
-senders register on first send to Claude. `--from` must resolve to a session
+The daemon registers the busiest and most recently active Codex/Notion agents
+(up to 112) as individual Claude `ListAgents` peers, refreshing every 30
+seconds. Other senders register on first send to Claude. A send never fails
+because the peer pool is full: it displaces the least recently used peer
+outside that set, or else the lowest ranked registered peer. `--from` must resolve to a session
 or alias; otherwise identity is resolved in this order: `AGENTHAIL_SESSION_ID`,
 `CLAUDE_SESSION_ID`, the verified native Claude caller discovered through the
 command's process ancestry, then `CODEX_THREAD_ID`. The verified native Claude

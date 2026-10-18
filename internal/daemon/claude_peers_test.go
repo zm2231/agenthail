@@ -37,8 +37,10 @@ func TestRecentPeerRegistrationReadsFreshCatalogRowsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]int{}
-	d.registerRecentClaudePeers(context.Background(), func(ctx context.Context, id string) error {
-		seen[id]++
+	d.registerRecentClaudePeers(context.Background(), func(_ context.Context, sessions []surface.Session) map[string]error {
+		for _, session := range sessions {
+			seen[session.ID]++
+		}
 		return nil
 	})
 	if len(seen) != 1 || seen["recent"] != 1 {
@@ -97,8 +99,10 @@ func TestPeerRegistrationFollowsDiscoveryWithoutWaitingForTheTicker(t *testing.T
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.runClaudePeerRegistration(ctx, func(_ context.Context, id string) error {
-			ensured <- id
+		d.runClaudePeerRegistration(ctx, func(_ context.Context, sessions []surface.Session) map[string]error {
+			for _, session := range sessions {
+				ensured <- session.ID
+			}
 			return nil
 		}, func(time.Time) { passes <- struct{}{} })
 	}()

@@ -31,19 +31,19 @@ func (d *Daemon) startClaudePeers(ctx context.Context) (func(), error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.runClaudePeerRegistration(ctx, manager.Ensure, func(now time.Time) { manager.RetireInactive(now, claudePeerIdleLifetime) })
+		d.runClaudePeerRegistration(ctx, manager.Advertise, func(now time.Time) { manager.RetireInactive(now, claudePeerIdleLifetime) })
 	}()
 	return func() { cancel(); <-done; manager.Close() }, nil
 }
 
-// runClaudePeerRegistration registers peers at startup, whenever discovery
+// runClaudePeerRegistration advertises peers at startup, whenever discovery
 // commits a session change, and every 30 seconds so idle peers age out.
-func (d *Daemon) runClaudePeerRegistration(ctx context.Context, ensure func(context.Context, string) error, retire func(time.Time)) {
+func (d *Daemon) runClaudePeerRegistration(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error, retire func(time.Time)) {
 	changed := d.watchCatalogSessions(ctx)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
-		d.registerRecentClaudePeers(ctx, ensure)
+		d.registerRecentClaudePeers(ctx, advertise)
 		retire(time.Now())
 		select {
 		case <-ctx.Done():
@@ -114,7 +114,7 @@ func (d *Daemon) subscribeCatalogSessions(ctx context.Context, signal func()) (<
 // registerRecentClaudePeers reads the catalog that discovery commits instead
 // of listing surfaces again, so a failing surface is listed once per
 // discovery pass and stale rows are not proxied.
-func (d *Daemon) registerRecentClaudePeers(ctx context.Context, ensure func(context.Context, string) error) {
+func (d *Daemon) registerRecentClaudePeers(ctx context.Context, advertise func(context.Context, []surface.Session) map[string]error) {
 	snapshot, err := d.Registry.CatalogSnapshot()
 	if err != nil {
 		d.logRuntimeError("claude-peers:catalog", err)
@@ -125,19 +125,21 @@ func (d *Daemon) registerRecentClaudePeers(ctx context.Context, ensure func(cont
 		configured[adapter.Name()] = true
 	}
 	now := time.Now()
+	var eligible []surface.Session
 	for _, record := range snapshot.Sessions {
 		session := record.Session
 		// Native Claude sessions publish their own records and socket endpoints.
 		if session.Surface == surface.KindClaude || !configured[session.Surface] || record.Freshness.Stale || !claudePeerEligible(session, now) {
 			continue
 		}
-		if err := ctx.Err(); err != nil {
-			return
-		}
-		operationCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-		err := ensure(operationCtx, session.ID)
-		cancel()
-		if err != nil {
+		eligible = append(eligible, session)
+	}
+	failures := advertise(ctx, eligible)
+	if ctx.Err() != nil {
+		return
+	}
+	for _, session := range eligible {
+		if err := failures[session.ID]; err != nil {
 			d.logRuntimeError("claude-peers:"+session.ID, err)
 		} else {
 			d.clearObserveError("claude-peers:" + session.ID)
