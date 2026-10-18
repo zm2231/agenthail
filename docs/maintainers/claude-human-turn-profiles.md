@@ -24,8 +24,11 @@ Mac notification Reply) post composer messages as action `send` with
 rejects any other author value, and rejects `author: person` combined with
 `sourceSessionId`. It carries the value as `SendOptions.Author`
 (`surface.AuthorPerson`). A send that does not declare an author is
-unattributed and stays native, whatever its caller: scripts and other
-`/api/v1/actions` clients, channel broadcasts, the CLI, relays and voice.
+unattributed, whatever its caller: scripts and other `/api/v1/actions`
+clients, channel broadcasts, the CLI, relays and voice. An unattributed message
+to a session with a native socket uses that socket. A bridge-only session (one
+with no socket) receives every send through Remote Control, as it already did,
+whatever the author.
 
 [`delivery.RouteFor`](../../internal/delivery/route.go) is the one place that
 picks a message's transport. A person's message to an adapter that implements
