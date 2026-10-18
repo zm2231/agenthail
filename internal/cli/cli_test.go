@@ -235,6 +235,36 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	}
 }
 
+func TestCmdSteerReadsMessageFromStdin(t *testing.T) {
+	fake := &cliSurface{
+		kind:     surface.KindCodex,
+		sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, Transport: "desktop", Status: surface.StatusBusy}},
+		caps:     surface.Capabilities{Steer: true},
+	}
+	app, r := cliFixture(t, fake)
+	if err := r.RegisterSession(fake.sessions["target"]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "steer.txt")
+	if err := os.WriteFile(path, []byte("focus on the parser\nthen report"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	input, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	oldStdin := os.Stdin
+	os.Stdin = input
+	defer func() { os.Stdin = oldStdin }()
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"steer", "target", "-"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.steered) != 1 || fake.steered[0] != "focus on the parser\nthen report" {
+		t.Fatalf("steered=%q", fake.steered)
+	}
+}
+
 func TestSendFlagValidation(t *testing.T) {
 	for _, test := range []struct {
 		name      string
