@@ -11,8 +11,12 @@ final class NativeQueueController: ObservableObject {
     @Published private(set) var busy = false
     @Published var error: String?
     private(set) var sessionID: String?
-    private var clientMessageID = UUID().uuidString
     private var generation: UInt64 = 0
+    private let keys: ActionRetryKeys
+
+    init(keys: ActionRetryKeys) {
+        self.keys = keys
+    }
 
     var canReorder: Bool { loaded && nextCursor == nil && items.count > 1 }
 
@@ -25,7 +29,6 @@ final class NativeQueueController: ObservableObject {
         loaded = false
         busy = false
         error = nil
-        clientMessageID = UUID().uuidString
     }
 
     func reload(_ api: AgenthailAPI?) async {
@@ -43,7 +46,7 @@ final class NativeQueueController: ObservableObject {
         busy = true
         defer { if generation == started { busy = false } }
         do {
-            let page: NativeQueuePage = try await api.nativeQueue(sessionID: sessionID, NativeQueueCommand(queueAction: .list, cursor: cursor))
+            let page: NativeQueuePage = try await api.nativeQueue(sessionID: sessionID, NativeQueueCommand(queueAction: .list, cursor: cursor), keys: keys)
             guard generation == started else { return }
             if cursor == nil {
                 items = page.data
@@ -61,10 +64,7 @@ final class NativeQueueController: ObservableObject {
     }
 
     func add(_ text: String, api: AgenthailAPI?) async -> Bool {
-        let command = NativeQueueCommand(queueAction: .add, message: text, clientUserMessageId: clientMessageID)
-        let succeeded = await mutate(api, command)
-        if succeeded { clientMessageID = UUID().uuidString }
-        return succeeded
+        await mutate(api, NativeQueueCommand(queueAction: .add, message: text))
     }
 
     func update(_ item: NativeQueuedSubmission, text: String, api: AgenthailAPI?) async -> Bool {
@@ -90,7 +90,7 @@ final class NativeQueueController: ObservableObject {
         let started = generation
         busy = true
         do {
-            let _: OperationAck = try await api.nativeQueue(sessionID: sessionID, command)
+            let _: OperationAck = try await api.nativeQueue(sessionID: sessionID, command, keys: keys)
             guard generation == started else { return false }
             busy = false
             error = nil
@@ -114,6 +114,11 @@ final class BackgroundSessionController: ObservableObject {
     @Published var error: String?
     private(set) var sessionID: String?
     private var generation: UInt64 = 0
+    private let keys: ActionRetryKeys
+
+    init(keys: ActionRetryKeys) {
+        self.keys = keys
+    }
 
     func reset(sessionID: String) {
         guard sessionID != self.sessionID else { return }
@@ -132,7 +137,7 @@ final class BackgroundSessionController: ObservableObject {
         busyAction = action
         defer { if generation == started { busyAction = nil } }
         do {
-            let result = try await api.sessionLifecycle(sessionID: sessionID, action: action)
+            let result = try await api.sessionLifecycle(sessionID: sessionID, action: action, keys: keys)
             guard generation == started else { return false }
             error = nil
             resumeUnchanged = action == "resume" && result.unchanged == true
@@ -140,7 +145,7 @@ final class BackgroundSessionController: ObservableObject {
             case "status": status = result
             case "logs": logs = result.output ?? ""
             default:
-                if let refreshed = try? await api.sessionLifecycle(sessionID: sessionID, action: "status"), generation == started { status = refreshed }
+                if let refreshed = try? await api.sessionLifecycle(sessionID: sessionID, action: "status", keys: keys), generation == started { status = refreshed }
             }
             return true
         } catch {

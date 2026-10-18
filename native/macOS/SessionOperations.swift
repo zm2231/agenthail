@@ -15,10 +15,62 @@ struct SessionOperationRequest: Encodable {
     let action: String
     let sessionId: String
     var nativeQueue: NativeQueueCommand? = nil
+
+    var mutates: Bool {
+        switch action {
+        case "native-queue": return nativeQueue?.queueAction != .list
+        case "session-lifecycle-status", "session-lifecycle-logs": return false
+        default: return true
+        }
+    }
 }
 
-struct SessionOperationResponse<Result: Decodable>: Decodable {
-    let result: Result
+private struct SessionOperationResponse<Result: Decodable>: Decodable {
+    let status: String?
+    let result: Result?
+}
+
+@MainActor
+final class ActionRetryKeys {
+    private var pending: [Data: String] = [:]
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return encoder
+    }()
+
+    func post<Result: Decodable>(_ request: SessionOperationRequest, api: AgenthailAPI) async throws -> Result {
+        guard request.mutates else { return try Self.unwrap(await api.postAction(request)) }
+        var request = request
+        let adding = request.nativeQueue?.queueAction == .add
+        if adding { request.nativeQueue?.clientUserMessageId = nil }
+        let identity = try encoder.encode(request)
+        let key = pending[identity] ?? UUID().uuidString
+        pending[identity] = key
+        if adding { request.nativeQueue?.clientUserMessageId = key }
+        do {
+            let result: Result = try Self.unwrap(await api.postAction(request, idempotencyKey: key))
+            pending[identity] = nil
+            return result
+        } catch {
+            let uncertain = Self.uncertain(error)
+            if uncertain == nil { pending[identity] = nil }
+            throw uncertain ?? error
+        }
+    }
+
+    private static func unwrap<Result>(_ response: SessionOperationResponse<Result>) throws -> Result {
+        if let result = response.result { return result }
+        guard response.status == "submitted" else { throw AgenthailAPIError.invalidResponse }
+        throw AgenthailAPIError.outcomeUnknown("Agenthail is still finishing this request.")
+    }
+
+    private static func uncertain(_ error: Error) -> AgenthailAPIError? {
+        if case AgenthailAPIError.outcomeUnknown = error { return error as? AgenthailAPIError }
+        guard let error = error as? URLError else { return nil }
+        let notSent: Set<URLError.Code> = [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .badURL, .unsupportedURL, .userAuthenticationRequired]
+        return notSent.contains(error.code) ? nil : .outcomeUnknown(error.localizedDescription)
+    }
 }
 
 struct NativeQueueInput: Decodable, Equatable {
@@ -91,21 +143,19 @@ enum SessionOperationAvailability {
 }
 
 extension AgenthailAPI {
-    func forkSession(id: String) async throws -> ForkedSession {
-        let request = SessionOperationRequest(action: "session-fork", sessionId: id)
-        let response: SessionOperationResponse<SessionForkResult> = try await postAction(request, idempotencyKey: UUID().uuidString)
-        return response.result.session
+    @MainActor
+    func forkSession(id: String, keys: ActionRetryKeys) async throws -> ForkedSession {
+        let result: SessionForkResult = try await keys.post(SessionOperationRequest(action: "session-fork", sessionId: id), api: self)
+        return result.session
     }
 
-    func nativeQueue<Result: Decodable>(sessionID: String, _ command: NativeQueueCommand, idempotencyKey: String? = nil) async throws -> Result {
-        let request = SessionOperationRequest(action: "native-queue", sessionId: sessionID, nativeQueue: command)
-        let response: SessionOperationResponse<Result> = try await postAction(request, idempotencyKey: idempotencyKey)
-        return response.result
+    @MainActor
+    func nativeQueue<Result: Decodable>(sessionID: String, _ command: NativeQueueCommand, keys: ActionRetryKeys) async throws -> Result {
+        try await keys.post(SessionOperationRequest(action: "native-queue", sessionId: sessionID, nativeQueue: command), api: self)
     }
 
-    func sessionLifecycle(sessionID: String, action: String) async throws -> SessionLifecycleResult {
-        let request = SessionOperationRequest(action: "session-lifecycle-" + action, sessionId: sessionID)
-        let response: SessionOperationResponse<SessionLifecycleResult> = try await postAction(request)
-        return response.result
+    @MainActor
+    func sessionLifecycle(sessionID: String, action: String, keys: ActionRetryKeys) async throws -> SessionLifecycleResult {
+        try await keys.post(SessionOperationRequest(action: "session-lifecycle-" + action, sessionId: sessionID), api: self)
     }
 }

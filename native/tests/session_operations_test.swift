@@ -20,9 +20,16 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             }
             stream.close()
         }
-        Self.keys.append(request.value(forHTTPHeaderField: "Idempotency-Key"))
-        Self.bodies.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
-        let (status, body) = Self.replies.isEmpty ? (200, "{}") : Self.replies.removeFirst()
+        let action = request.httpMethod == "POST" && request.url?.path == "/api/v1/actions"
+        if action {
+            Self.keys.append(request.value(forHTTPHeaderField: "Idempotency-Key"))
+            Self.bodies.append((try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:])
+        }
+        let (status, body) = !action || Self.replies.isEmpty ? (200, "{}") : Self.replies.removeFirst()
+        if status < 0 {
+            client?.urlProtocol(self, didFailWithError: URLError(URLError.Code(rawValue: status)))
+            return
+        }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
@@ -42,6 +49,7 @@ struct SessionOperationsTest {
         await checkNativeQueueController()
         await checkBackgroundController()
         await checkFork()
+        await checkRetryIdentity()
         print("session operations tests passed")
     }
 
@@ -92,16 +100,18 @@ struct SessionOperationsTest {
         StubProtocol.replies = replies
     }
 
+    @MainActor
     static func checkRequests() async {
         let api = api()
+        let keys = ActionRetryKeys()
         reset([(200, #"{"ok":true,"result":{"session":{"id":"fork-1","surface":"codex"}}}"#)])
-        let forked = try? await api.forkSession(id: "S")
+        let forked = try? await api.forkSession(id: "S", keys: keys)
         check(forked?.id == "fork-1", "fork returns the new session")
         check(StubProtocol.bodies.first?["action"] as? String == "session-fork" && StubProtocol.bodies.first?["sessionId"] as? String == "S", "fork names the action and source")
         check(StubProtocol.bodies.first?.keys.sorted() == ["action", "sessionId"], "fork sends only the action and source: \(String(describing: StubProtocol.bodies.first))")
 
         reset([(200, #"{"ok":true,"result":{"data":[{"id":"q1","clientUserMessageId":"c1","input":[{"type":"text","text":"first","text_elements":[]},{"type":"localImage","path":"/x.png"}]}],"nextCursor":"next"}}"#)])
-        let page: NativeQueuePage? = try? await api.nativeQueue(sessionID: "S", NativeQueueCommand(queueAction: .list))
+        let page: NativeQueuePage? = try? await api.nativeQueue(sessionID: "S", NativeQueueCommand(queueAction: .list), keys: keys)
         check(page?.data.first?.text == "first\nImage" && page?.nextCursor == "next", "a queue page decodes Codex submissions")
         check(page?.data.first?.editableText == nil, "input with an image is not editable as text")
         let queue = StubProtocol.bodies.first?["nativeQueue"] as? [String: Any]
@@ -109,13 +119,13 @@ struct SessionOperationsTest {
 
         reset([(502, #"{"ok":false,"unknown":false,"error":"session is not a Claude background agent"}"#), (502, #"{"ok":false,"unknown":true,"error":"Claude stop: exit 1"}"#)])
         do {
-            _ = try await api.sessionLifecycle(sessionID: "C", action: "status")
+            _ = try await api.sessionLifecycle(sessionID: "C", action: "status", keys: keys)
             check(false, "a failed operation throws")
         } catch {
             check(error.localizedDescription == "session is not a Claude background agent", "operation errors show the daemon's message")
         }
         do {
-            _ = try await api.sessionLifecycle(sessionID: "C", action: "stop")
+            _ = try await api.sessionLifecycle(sessionID: "C", action: "stop", keys: keys)
         } catch {
             check(error.localizedDescription.hasSuffix("The outcome is unknown; check the session before retrying."), "an unknown outcome is called out")
         }
@@ -134,7 +144,7 @@ struct SessionOperationsTest {
     @MainActor
     static func checkNativeQueueController() async {
         let api = api()
-        let controller = NativeQueueController()
+        let controller = NativeQueueController(keys: ActionRetryKeys())
         controller.reset(sessionID: "S")
         let empty = #"{"ok":true,"result":{"data":[],"nextCursor":null}}"#
         let two = #"{"ok":true,"result":{"data":[{"id":"q1","clientUserMessageId":"c1","input":[{"type":"text","text":"one"}]},{"id":"q2","clientUserMessageId":"c2","input":[{"type":"text","text":"two"}]}],"nextCursor":null}}"#
@@ -145,7 +155,7 @@ struct SessionOperationsTest {
         check(!failed && controller.error?.contains("timed out") == true, "a failed add reports its error")
         _ = await controller.add("next", api: api)
         let retryID = (StubProtocol.bodies[1]["nativeQueue"] as? [String: Any])?["clientUserMessageId"] as? String
-        check(firstID != nil && firstID == retryID, "retrying an uncertain add reuses its client message ID")
+        check(firstID != nil && firstID == retryID && StubProtocol.keys[0] == StubProtocol.keys[1], "retrying an uncertain add reuses its client message ID and key")
         check(controller.loaded && controller.error == nil, "a successful add reloads the queue")
         _ = await controller.add("other", api: api)
         let freshID = (StubProtocol.bodies[3]["nativeQueue"] as? [String: Any])?["clientUserMessageId"] as? String
@@ -174,7 +184,7 @@ struct SessionOperationsTest {
     @MainActor
     static func checkBackgroundController() async {
         let api = api()
-        let controller = BackgroundSessionController()
+        let controller = BackgroundSessionController(keys: ActionRetryKeys())
         controller.reset(sessionID: "C")
         reset([(200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","action":"stop","output":"stopped"}}"#), (200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","state":"stopped"}}"#)])
         let stopped = await controller.run("stop", api: api)
@@ -192,32 +202,110 @@ struct SessionOperationsTest {
         check(controller.status == nil && controller.logs == nil && !controller.resumeUnchanged, "switching sessions clears background state")
     }
 
+    static let unknownReply = (502, #"{"ok":false,"unknown":true,"error":"timed out"}"#)
+    static let lostReply = (Int(URLError.networkConnectionLost.rawValue), "")
+    static let refusedReply = (Int(URLError.cannotConnectToHost.rawValue), "")
+    static let submittedReply = (202, #"{"ok":true,"status":"submitted"}"#)
+    static let forkedReply = (200, #"{"ok":true,"result":{"session":{"id":"fork-1"}}}"#)
+    static let pendingFork = "Codex may still be creating this fork. It will appear in the sidebar when ready."
+
     @MainActor
     static func checkFork() async {
         let model = AgenthailModel(connecting: false, api: api())
         guard let pane = model.mainPane else { return check(false, "the model has a main pane") }
-        let source = SessionState(id: "S", surface: "codex", name: "s", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        let source = codexSession("S")
         let forks: () -> [Int] = { StubProtocol.bodies.indices.filter { StubProtocol.bodies[$0]["action"] as? String == "session-fork" } }
 
-        reset([(502, #"{"ok":false,"unknown":false,"error":"thread not found"}"#)])
+        reset([(502, #"{"ok":false,"unknown":false,"error":"thread not found"}"#), forkedReply])
         await pane.forkNow(source)
-        check(model.operationError == "thread not found" && !pane.forking, "a definite failure shows its error")
+        check(model.operationError == "thread not found" && model.pendingNotice == nil && !pane.forking, "a definite failure shows its error")
+        await pane.forkNow(source)
+        check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] != StubProtocol.keys[1], "a retry after a definite failure sends a new key")
+        check(forks().count == 2 && StubProtocol.bodies[1]["fork"] == nil, "a fork sends no options")
 
-        reset([(502, #"{"ok":false,"unknown":true,"error":"timed out"}"#)])
-        await pane.forkNow(source)
-        check(model.operationError?.hasPrefix("timed out") == true && model.operationError?.contains("outcome is unknown") == true, "an unknown outcome shows an error: \(String(describing: model.operationError))")
-        let unknownKey = StubProtocol.keys[forks()[0]]
+        for (reply, label) in [(unknownReply, "an unknown outcome"), (lostReply, "a lost connection after dispatch"), (submittedReply, "a submitted reply")] {
+            reset([reply, forkedReply, forkedReply])
+            await pane.forkNow(source)
+            check(model.operationError == nil && model.pendingNotice?.sessionID == "S" && model.pendingNotice?.text == pendingFork, "\(label) shows the pending note")
+            await pane.forkNow(source)
+            check(StubProtocol.keys[0] != nil && StubProtocol.keys[0] == StubProtocol.keys[1], "a retry after \(label) sends the same key")
+            check(model.pendingNotice == nil && model.operationError == nil, "a confirmed fork clears the note after \(label)")
+            await pane.forkNow(source)
+            check(StubProtocol.keys[2] != StubProtocol.keys[1], "a fork after a confirmed one sends a new key after \(label)")
+        }
 
-        reset([(200, #"{"ok":true,"result":{"session":{"id":"fork-1"}}}"#)])
+        reset([refusedReply, forkedReply])
         await pane.forkNow(source)
-        let retryKey = StubProtocol.keys[forks()[0]]
-        check(unknownKey != nil && retryKey != nil && unknownKey != retryKey, "every click sends a fresh key, even after an unknown outcome")
-        check(forks().count == 1 && StubProtocol.bodies[forks()[0]]["fork"] == nil, "one click sends one fork request with no options")
+        check(model.operationError != nil && model.pendingNotice == nil, "a connection that never opened is a definite failure")
+        await pane.forkNow(source)
+        check(StubProtocol.keys[0] != StubProtocol.keys[1], "a retry after a refused connection sends a new key")
 
         let readOnly = SessionState(id: "R", surface: "codex", name: "r", alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: true, readOnlyReason: nil)
         reset([])
         pane.fork(readOnly)
         check(!pane.forking && StubProtocol.bodies.isEmpty, "a read-only session does not fork")
+    }
+
+    @MainActor
+    static func checkRetryIdentity() async {
+        let model = AgenthailModel(connecting: false, api: api())
+        guard let pane = model.mainPane else { return check(false, "the model has a main pane") }
+        reset([unknownReply, forkedReply, forkedReply])
+        await pane.forkNow(codexSession("S"))
+        await pane.forkNow(codexSession("T"))
+        await pane.forkNow(codexSession("S"))
+        check(StubProtocol.keys[0] == StubProtocol.keys[2] && StubProtocol.keys[1] != StubProtocol.keys[0], "another session's fork leaves the pending key alone")
+
+        let api = api()
+        let keys = ActionRetryKeys()
+        let queue = { () -> NativeQueueController in
+            let controller = NativeQueueController(keys: keys)
+            controller.reset(sessionID: "S")
+            return controller
+        }
+        let empty = (200, #"{"ok":true,"result":{"data":[],"nextCursor":null}}"#)
+        let started = (200, #"{"ok":true,"result":{}}"#)
+        reset([unknownReply, lostReply, started, empty, started, empty])
+        _ = await queue().start(nil, api: api)
+        _ = await queue().start(nil, api: api)
+        let succeeded = await queue().start(nil, api: api)
+        check(StubProtocol.keys[0] != nil && Set(StubProtocol.keys[0...2]).count == 1, "start next keeps its key across uncertain outcomes and reopened sections")
+        check(succeeded && StubProtocol.bodies[2]["nativeQueue"].flatMap { ($0 as? [String: Any])?["queuedSubmissionId"] } == nil, "the confirmed retry still lets Codex choose")
+        _ = await queue().start(nil, api: api)
+        check(StubProtocol.keys[4] != StubProtocol.keys[2], "start next after a confirmed start sends a new key")
+
+        reset([unknownReply, started, empty, started, empty])
+        _ = await queue().add("same", api: api)
+        _ = await queue().add("same", api: api)
+        let ids = StubProtocol.bodies.compactMap { ($0["nativeQueue"] as? [String: Any])?["clientUserMessageId"] as? String }
+        check(ids.count == 2 && ids[0] == ids[1] && StubProtocol.keys[0] == StubProtocol.keys[1], "an uncertain add keeps its client message ID when the section reopens")
+        _ = await queue().add("same", api: api)
+        let next = (StubProtocol.bodies[3]["nativeQueue"] as? [String: Any])?["clientUserMessageId"] as? String
+        check(next != nil && next != ids[0], "adding again after a confirmed add is new work")
+
+        reset([unknownReply, (200, #"{"ok":true,"result":{}}"#), empty])
+        let item = NativeQueuedSubmission(id: "q1", clientUserMessageId: nil, input: [])
+        _ = await queue().update(item, text: "a", api: api)
+        _ = await queue().update(item, text: "b", api: api)
+        check(StubProtocol.keys[0] != StubProtocol.keys[1], "a different edit is a new operation")
+
+        let background = { () -> BackgroundSessionController in
+            let controller = BackgroundSessionController(keys: keys)
+            controller.reset(sessionID: "C")
+            return controller
+        }
+        let status = (200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","state":"working"}}"#)
+        reset([unknownReply, (200, #"{"ok":true,"result":{"id":"bg1","sessionId":"C","action":"resume"}}"#), status, status, status])
+        _ = await background().run("resume", api: api)
+        _ = await background().run("resume", api: api)
+        check(StubProtocol.keys[0] == StubProtocol.keys[1], "an uncertain resume keeps its key")
+        _ = await background().run("status", api: api)
+        _ = await background().run("status", api: api)
+        check(StubProtocol.keys[3] != StubProtocol.keys[4], "reads never reuse a key")
+    }
+
+    static func codexSession(_ id: String) -> SessionState {
+        SessionState(id: id, surface: "codex", name: id, alias: nil, status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
     }
 
     static func check(_ condition: Bool, _ message: String) {

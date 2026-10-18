@@ -1308,6 +1308,11 @@ struct ComposerView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(DesktopPalette.red)
                     .padding(.top, 6)
+            } else if let notice = model.pendingNotice, notice.sessionID == session.id {
+                Text(notice.text)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(DesktopPalette.text2)
+                    .padding(.top, 6)
             }
         }
         .frame(maxWidth: 700)

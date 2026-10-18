@@ -37,6 +37,7 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var daemonSlow = false
     @Published var reconnecting = false
     @Published var operationError: String?
+    @Published var pendingNotice: (sessionID: String, text: String)?
     @Published var loading = false
     @Published var operationsVisible = false
     @Published var sessionFilter: SessionFilter = .recent
@@ -45,6 +46,7 @@ final class AgenthailModel: ObservableObject {
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
 
     private(set) var api: AgenthailAPI?
+    let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
     private var visibleWindows = 0

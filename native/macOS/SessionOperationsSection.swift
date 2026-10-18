@@ -27,8 +27,14 @@ struct SessionOperationsSection: View {
 struct NativeQueueSection: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
-    @StateObject private var queue = NativeQueueController()
+    @StateObject private var queue: NativeQueueController
     @State private var editor: QueueEditor?
+
+    init(model: AgenthailModel, session: SessionState) {
+        self.model = model
+        self.session = session
+        _queue = StateObject(wrappedValue: NativeQueueController(keys: model.actionKeys))
+    }
 
     private var writable: Bool { SessionOperationAvailability.nativeQueueWritable(session) }
 
@@ -192,7 +198,13 @@ struct QueueEditorSheet: View {
 struct BackgroundSessionSection: View {
     @ObservedObject var model: AgenthailModel
     let session: SessionState
-    @StateObject private var controller = BackgroundSessionController()
+    @StateObject private var controller: BackgroundSessionController
+
+    init(model: AgenthailModel, session: SessionState) {
+        self.model = model
+        self.session = session
+        _controller = StateObject(wrappedValue: BackgroundSessionController(keys: model.actionKeys))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

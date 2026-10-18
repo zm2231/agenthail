@@ -322,10 +322,14 @@ final class SessionPane: ObservableObject, Identifiable {
             model.operationError = "Agenthail isn't connected."
             return
         }
+        if model.pendingNotice?.sessionID == session.id { model.pendingNotice = nil }
         do {
-            let forked = try await api.forkSession(id: session.id)
+            let forked = try await api.forkSession(id: session.id, keys: model.actionKeys)
             model.operationError = nil
             await model.openCreatedSession(forked.id, in: closed ? nil : self)
+        } catch AgenthailAPIError.outcomeUnknown {
+            model.operationError = nil
+            model.pendingNotice = (session.id, "Codex may still be creating this fork. It will appear in the sidebar when ready.")
         } catch {
             model.operationError = error.localizedDescription
         }

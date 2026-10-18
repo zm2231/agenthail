@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -94,4 +95,32 @@ type unknownStartSurface struct{ *daemonSurface }
 
 func (*unknownStartSurface) StartSession(context.Context, surface.SessionStartOptions) (*surface.Session, *surface.SendResult, error) {
 	return nil, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("native response lost"))
+}
+
+type unknownQueueStartSurface struct {
+	*daemonSurface
+	starts int
+}
+
+func (s *unknownQueueStartSurface) NativeQueue(context.Context, *surface.Session, surface.NativeQueueRequest) (map[string]any, error) {
+	s.starts++
+	return nil, surface.DeliveryOutcomeUnknown(errors.New("start reply lost"))
+}
+
+func TestRetriedNativeQueueStartWithSameKeyStartsOnce(t *testing.T) {
+	d, _, fake, _, _ := daemonFixture(t)
+	adapter := &unknownQueueStartSurface{daemonSurface: fake}
+	d.Surfaces = []surface.Surface{adapter}
+	handler := d.idempotentActionHandler(d.dashboardActionHandler)
+	body := `{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"start"}}`
+	first := serveAction(handler, actionRequestWithKey(body, "start-next"), "mac")
+	retry := serveAction(handler, actionRequestWithKey(body, "start-next"), "mac")
+	if adapter.starts != 1 {
+		t.Fatalf("starts=%d", adapter.starts)
+	}
+	for _, response := range []*httptest.ResponseRecorder{first, retry} {
+		if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), `"unknown":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
 }
