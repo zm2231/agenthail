@@ -72,6 +72,12 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	return true, nil
 }
 
+// NeedsWake reports whether a send to sess would first have to find or resume
+// a process for its conversation.
+func (c *Claude) NeedsWake(ctx context.Context, sess *surface.Session) bool {
+	return !c.reachableAsIs(ctx, sess)
+}
+
 // reachableAsIs reports whether sess already names a live process that owns
 // it and offers the transport sess would use.
 func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool {

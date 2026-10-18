@@ -23,6 +23,7 @@ const (
 type orphanPosts struct {
 	mu     sync.Mutex
 	bodies []string
+	onPost func(body string)
 }
 
 func (p *orphanPosts) request(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
@@ -30,6 +31,9 @@ func (p *orphanPosts) request(_ context.Context, method, url string, _ map[strin
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {
 		p.bodies = append(p.bodies, body)
+		if p.onPost != nil {
+			p.onPost(body)
+		}
 	}
 	return 200, `{}`, nil
 }
@@ -64,6 +68,13 @@ type orphanFixture struct {
 // exited, behind the real Claude adapter and the daemon's public API.
 func newOrphanFixture(t *testing.T) *orphanFixture {
 	t.Helper()
+	return newOrphanFixtureOn(t, "uds")
+}
+
+// newOrphanFixtureOn registers the exited session on transport, "uds" for a
+// messaging socket or "" for Remote Control alone.
+func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
+	t.Helper()
 	fixture := &orphanFixture{claude: claudetest.New(t), posts: &orphanPosts{}}
 	r, err := registry.Open(t.TempDir() + "/registry.db")
 	if err != nil {
@@ -71,7 +82,7 @@ func newOrphanFixture(t *testing.T) *orphanFixture {
 	}
 	t.Cleanup(func() { _ = r.Close() })
 	fixture.r = r
-	fixture.session = surface.Session{ID: "session_orphan", Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: "uds", Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
+	fixture.session = surface.Session{ID: "session_orphan", Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
 	if err := r.RegisterSession(fixture.session); err != nil {
 		t.Fatal(err)
 	}
