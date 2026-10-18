@@ -86,6 +86,16 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	return batch, err
 }
 
+// transcriptAnchor is completionAnchor for callers that treat an unreadable
+// anchor as a mismatch.
+func transcriptAnchor(path string, offset int64) string {
+	anchor, err := completionAnchor(path, offset)
+	if err != nil {
+		return ""
+	}
+	return anchor
+}
+
 func completionAnchor(path string, offset int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {

@@ -18,13 +18,14 @@ const (
 {"type":"assistant","uuid":"a0","message":{"id":"m0","stop_reason":"end_turn","content":[{"type":"text","text":"earlier answer"}]}}
 {"type":"system","subtype":"turn_duration"}
 `
-	promptRecord   = `{"type":"user","uuid":"u1","timestamp":"2026-10-18T22:07:50Z","message":{"content":"say one"}}` + "\n"
-	thinkingRecord = `{"type":"assistant","uuid":"a1-thinking","timestamp":"2026-10-18T22:07:54.199Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"","signature":"sig"}]}}` + "\n"
-	textRecord     = `{"type":"assistant","uuid":"a1-text","timestamp":"2026-10-18T22:07:54.2Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ONE"}]}}` + "\n"
-	hookRecord     = `{"type":"system","subtype":"stop_hook_summary","timestamp":"2026-10-18T22:07:54.3Z"}` + "\n"
-	durationRecord = `{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T22:07:54.4Z"}` + "\n"
-	attachRecord   = `{"type":"attachment","timestamp":"2026-10-18T22:07:54.3Z"}` + "\n"
-	nextRecord     = `{"type":"user","uuid":"u2","timestamp":"2026-10-18T22:08:00Z","message":{"content":"next"}}` + "\n"
+	promptRecord    = `{"type":"user","uuid":"u1","timestamp":"2026-10-18T22:07:50Z","message":{"content":"say one"}}` + "\n"
+	thinkingRecord  = `{"type":"assistant","uuid":"a1-thinking","timestamp":"2026-10-18T22:07:54.199Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"","signature":"sig"}]}}` + "\n"
+	textRecord      = `{"type":"assistant","uuid":"a1-text","timestamp":"2026-10-18T22:07:54.2Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ONE"}]}}` + "\n"
+	hookRecord      = `{"type":"system","subtype":"stop_hook_summary","timestamp":"2026-10-18T22:07:54.3Z"}` + "\n"
+	durationRecord  = `{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T22:07:54.4Z"}` + "\n"
+	attachRecord    = `{"type":"attachment","timestamp":"2026-10-18T22:07:54.3Z"}` + "\n"
+	interruptRecord = `{"type":"user","uuid":"interrupt","timestamp":"2026-10-18T22:07:54.3Z","message":{"content":"[Request interrupted by user]"}}` + "\n"
+	nextRecord      = `{"type":"user","uuid":"u2","timestamp":"2026-10-18T22:08:00Z","message":{"content":"next"}}` + "\n"
 )
 
 func appendRecords(t *testing.T, path string, records ...string) {
@@ -61,7 +62,7 @@ func TestClaudeCompletionClosesAfterLastContentBlock(t *testing.T) {
 		{"thinking then text", []string{promptRecord, thinkingRecord, textRecord, hookRecord, durationRecord}, textAt},
 		{"no turn_duration closes on next user", []string{promptRecord, thinkingRecord, textRecord, nextRecord}, textAt},
 		{"text only", []string{promptRecord, textRecord, attachRecord}, textAt},
-		{"turn_duration alone", []string{promptRecord, thinkingRecord, textRecord, durationRecord}, time.Date(2026, 10, 18, 22, 7, 54, 400_000_000, time.UTC)},
+		{"turn_duration alone", []string{promptRecord, thinkingRecord, textRecord, durationRecord}, textAt},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path, session, cursor := baselineCompletions(t)
@@ -179,5 +180,67 @@ func TestClaudeSourceStreamCarriesClosingTurnAcrossWindows(t *testing.T) {
 	appendRecords(t, path, durationRecord)
 	if done := window(); len(done) != 1 || done["u1"] != 1 || session.ClaudeClosingTurn.TurnID != "" {
 		t.Fatalf("closing turn not finished once: done=%v closing=%+v", done, session.ClaudeClosingTurn)
+	}
+}
+
+func TestClaudeInterruptAfterClosingBlockInterruptsTheTurn(t *testing.T) {
+	path, session, cursor := baselineCompletions(t)
+	appendRecords(t, path, promptRecord, thinkingRecord, textRecord, interruptRecord, durationRecord)
+	batch, err := NewClaude("", t.TempDir()).ReadCompletions(context.Background(), session, cursor)
+	if err != nil || len(batch.Events) != 0 {
+		t.Fatalf("interrupted turn relayed: %+v err=%v", batch.Events, err)
+	}
+	observed := writeTranscript(t, promptRecord+thinkingRecord+textRecord+interruptRecord)
+	observation, err := NewClaude("", t.TempDir()).observe(context.Background(), &surface.Session{ID: "source", Surface: surface.KindClaude, Transcript: observed, Status: surface.StatusIdle})
+	if err != nil || observation.CompletedTurnID != "" || observation.Status != surface.StatusIdle {
+		t.Fatalf("interrupted turn completed: %+v err=%v", observation, err)
+	}
+	targeted := writeTranscript(t, promptRecord+thinkingRecord+textRecord+interruptRecord)
+	err = NewClaude("", t.TempDir()).Stream(context.Background(), &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: targeted}, "u1", func(surface.StreamEvent) {}, time.Second)
+	if err == nil || errors.Is(err, surface.ErrStreamWindow) {
+		t.Fatalf("targeted stream err=%v", err)
+	}
+	source := writeTranscript(t, closedTurnRecords)
+	sourceSession := seededClaudeStreamSession(t, source, "")
+	appendRecords(t, source, promptRecord, thinkingRecord, textRecord, interruptRecord)
+	var terminals []string
+	err = NewClaude("", t.TempDir()).Stream(context.Background(), sourceSession, "", func(event surface.StreamEvent) {
+		if event.Kind == "done" {
+			terminals = append(terminals, event.TurnID+":"+event.Status)
+		}
+	}, 150*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) || len(terminals) != 1 || terminals[0] != "u1:cancelled" {
+		t.Fatalf("source stream err=%v terminals=%v", err, terminals)
+	}
+}
+
+func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewritten(t *testing.T) {
+	path := writeTranscript(t, closedTurnRecords)
+	session := seededClaudeStreamSession(t, path, "")
+	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	claude := NewClaude("", t.TempDir())
+	if err := claude.Stream(context.Background(), session, "", func(surface.StreamEvent) {}, 150*time.Millisecond); !errors.Is(err, surface.ErrStreamWindow) || session.ClaudeClosingTurn.TurnID != "u1" {
+		t.Fatalf("stream err=%v closing=%+v", err, session.ClaudeClosingTurn)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rewritten strings.Builder
+	for rewritten.Len() <= int(info.Size()) {
+		rewritten.WriteString(`{"type":"user","uuid":"v1","message":{"content":"new generation"}}` + "\n")
+	}
+	rewritten.WriteString(`{"type":"user","uuid":"v2","message":{"content":"after the old offset"}}` + "\n")
+	if err := os.WriteFile(path, []byte(rewritten.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := map[string]int{}
+	err = claude.Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		if event.Kind == "done" {
+			done[event.TurnID]++
+		}
+	}, 150*time.Millisecond)
+	if !errors.Is(err, surface.ErrStreamWindow) || len(done) != 0 {
+		t.Fatalf("stale closing turn finished after rewrite: err=%v done=%v", err, done)
 	}
 }

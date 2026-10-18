@@ -851,7 +851,9 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		// The session source resumes at its seed or previous window boundary, so records written
 		// in between are delivered once without replaying history the seed bounded away.
 		offset = sess.TranscriptOffset
-		closing = sess.ClaudeClosingTurn
+		if sess.ClaudeClosingTurn.TurnID != "" && sess.ClaudeClosingTurn.Anchor == transcriptAnchor(path, offset) {
+			closing = sess.ClaudeClosingTurn
+		}
 	}
 	if uuid != "" && offset > 0 {
 		file, openErr := os.Open(path)
@@ -904,7 +906,9 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			}
 			messageID := strNested(record, "message", "id")
 			if closing.TurnID != "" && !claudeRecordContinuesMessage(str(record, "type"), messageID, closing.MessageID) {
-				finish(closing.TurnID, closing.Key)
+				if !claudeRecordIsInterrupt(record) {
+					finish(closing.TurnID, closing.Key)
+				}
 				closing = surface.ClaudeClosingTurn{}
 			}
 			turnID := currentTurnID
@@ -962,7 +966,13 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			sess.TranscriptOffset = offset
 			sess.TranscriptOffsetSet = true
 			sess.TranscriptIdentity = identity
-			sess.ClaudeClosingTurn = closing
+			sess.ClaudeClosingTurn = surface.ClaudeClosingTurn{}
+			if closing.TurnID != "" {
+				if closing.Anchor, err = completionAnchor(path, offset); err != nil {
+					return err
+				}
+				sess.ClaudeClosingTurn = closing
+			}
 		}
 		if completed {
 			return nil

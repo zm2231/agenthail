@@ -55,11 +55,13 @@ type Session struct {
 
 // ClaudeClosingTurn is a Claude turn whose end_turn message has been read but
 // may still have content blocks to write. A stream that resumes at
-// TranscriptOffset finishes it at the first record outside MessageID.
+// TranscriptOffset finishes it at the first record outside MessageID, provided
+// the transcript bytes before that offset still match Anchor.
 type ClaudeClosingTurn struct {
 	TurnID    string
 	MessageID string
 	Key       string
+	Anchor    string
 }
 
 // Subagent identifies a session spawned by another session. RootID is the
