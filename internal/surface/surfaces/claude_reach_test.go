@@ -1,8 +1,11 @@
 package surfaces
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -162,6 +165,33 @@ func TestClaudeSendResumesTerminalSessionInItsTranscriptCwd(t *testing.T) {
 	}
 }
 
+func TestClaudeResumeOfBridgedSessionWaitsForRemoteControl(t *testing.T) {
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
+	posts := &claudePosts{}
+	session := exitedSession(fixture)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		fixture.Record(fixtureConversation, fixture.Home, "session_fixture")
+	}()
+	result, err := NewClaudeWithRequest("", fixture.Home, posts.request).Send(context.Background(), &session, "hello")
+	if err != nil || !result.Accepted || session.ID != "session_fixture" || session.Transport != "" || posts.count("hello") != 1 {
+		t.Fatalf("result=%+v session=%+v err=%v", result, session, err)
+	}
+}
+
+func TestClaudeResumeOfBridgedSessionUsesSocketWhenRemoteControlNeverReturns(t *testing.T) {
+	shortResumeSettle(t)
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.Job("fe758937", fixtureConversation, fixture.Home, "done", 0)
+	session := exitedSession(fixture)
+	if _, err := NewClaude("", fixture.Home).reach(context.Background(), &session); err != nil || session.ID != fixtureConversation || session.Transport != "uds" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+}
+
 func TestClaudeConversationOfBridgeIDComesFromItsJob(t *testing.T) {
 	fixture := claudetest.New(t)
 	fixture.JobState("fe758937", "done", "", time.Now())
@@ -176,4 +206,49 @@ func TestClaudeConversationOfBridgeIDComesFromItsJob(t *testing.T) {
 	if got := c.conversationOf(&surface.Session{ID: "session_fixture"}); got != fixtureConversation {
 		t.Fatalf("conversation=%q", got)
 	}
+}
+
+func TestClaudeResumeLockExcludesAnotherProcess(t *testing.T) {
+	if home := os.Getenv("AGENTHAIL_HOLD_RESUME_LOCK"); home != "" {
+		unlock, err := NewClaude("", home).lockConversation(context.Background(), fixtureConversation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stdout.WriteString("locked\n")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		unlock()
+		return
+	}
+	home := t.TempDir()
+	holder := exec.Command(os.Args[0], "-test.run=^TestClaudeResumeLockExcludesAnotherProcess$")
+	holder.Env = append(os.Environ(), "AGENTHAIL_HOLD_RESUME_LOCK="+home)
+	release, err := holder.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := holder.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Process.Kill(); _ = holder.Wait() })
+	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "locked\n" {
+		t.Fatalf("holder line=%q err=%v", line, err)
+	}
+	c := NewClaude("", home)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := c.lockConversation(ctx, fixtureConversation); err == nil {
+		t.Fatal("took the resume lock while another process held it")
+	}
+	_ = release.Close()
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	unlock, err := c.lockConversation(ctx, fixtureConversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
 }

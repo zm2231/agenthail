@@ -134,7 +134,7 @@ func TestClaudeResumeCountsFailureInTheSameMillisecond(t *testing.T) {
 	fixture, c := endedBackgroundJob(t)
 	started := time.Date(2026, 1, 2, 3, 4, 5, 123_600_000, time.UTC)
 	fixture.JobState("fe758937", "failed", "fixture failure", started.Truncate(time.Millisecond))
-	_, err := c.awaitReachable(context.Background(), fixtureConversation, "fe758937", started)
+	_, err := c.awaitReachable(context.Background(), fixtureConversation, "fe758937", started, false)
 	if err == nil || !strings.Contains(err.Error(), "fixture failure") || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
 	}

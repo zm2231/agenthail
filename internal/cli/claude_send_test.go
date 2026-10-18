@@ -106,3 +106,14 @@ func TestFragmentDoesNotResolveAnExitedHistoricalSession(t *testing.T) {
 		t.Fatal("a fragment resumed or delivered to an exited historical session")
 	}
 }
+
+func TestSendWithReplyToSessionResumedUnderNewIDDoesNotWaitOnTheOldOne(t *testing.T) {
+	app, _, fixture, posts, _ := exitedClaudeApp(t)
+	fixture.ResumeBridge("session_resumed")
+	output, err := captureStdout(t, func() error {
+		return app.Run([]string{"send", "session_terminal", "hello", "--reply", "--timeout", "2s"})
+	})
+	if err != nil || !strings.HasPrefix(output, "sent (turn ") || posts.count("hello") != 1 {
+		t.Fatalf("output=%q err=%v posts=%d", output, err, posts.count("hello"))
+	}
+}
