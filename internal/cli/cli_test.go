@@ -311,7 +311,7 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 
 func TestDoctorStaysHealthyAndShowsNotesForUnavailableManagedTerminals(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
-	note := surface.RuntimeNote{Problem: surface.RuntimeStandaloneMissing, Message: "managed terminals unavailable", Remediation: "install the standalone runtime"}
+	note := surface.RuntimeNote{Problem: surface.RuntimeCodexMissing, Message: "managed terminals unavailable", Remediation: "install the standalone runtime"}
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex Desktop bridge", Reachable: true, Durable: true, Backend: "desktop", Notes: []surface.RuntimeNote{note}}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface

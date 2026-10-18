@@ -102,13 +102,7 @@ func ReadOnlySessionReason(session *Session) string {
 	if !IsReadOnlySession(session) {
 		return ""
 	}
-	if session.Source == "vscode" {
-		return "Codex Desktop is not available through Agenthail's Desktop bridge; quit Codex and run 'agenthail launch codex'"
-	}
-	if session.Source == "cli" || session.Transport == "readOnly" {
-		return "Codex terminal session is read only; start a writable session with 'agenthail codex'"
-	}
-	return "Codex session ownership is unknown; open it in Codex Desktop to make it writable"
+	return "Codex session is read only: Codex Desktop owns it and its bridge is unavailable; run 'agenthail launch codex'"
 }
 
 type SendResult struct {
@@ -285,7 +279,6 @@ type SessionStartOptions struct {
 	Cwd            string `json:"cwd,omitempty"`
 	Model          string `json:"model,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
-	Owner          string `json:"owner,omitempty"`
 }
 
 type SessionStarter interface {
@@ -338,7 +331,7 @@ type RuntimeProblem string
 
 const (
 	RuntimeBridgeUnavailable RuntimeProblem = "bridge-unavailable"
-	RuntimeStandaloneMissing RuntimeProblem = "standalone-missing"
+	RuntimeCodexMissing      RuntimeProblem = "codex-missing"
 	RuntimeStopped           RuntimeProblem = "runtime-stopped"
 	RuntimeUnsupervised      RuntimeProblem = "unsupervised"
 )

@@ -48,8 +48,4 @@ func TestCodexOperationsUseNativeSocketAndReturnedIdentity(t *testing.T) {
 	if after := len(fake.Methods()); after != before {
 		t.Fatalf("invalid queue requests reached the app-server: %v", fake.Methods()[before:])
 	}
-	session.Transport = codexTransportReadOnly
-	if _, err := codex.NativeQueue(context.Background(), session, surface.NativeQueueRequest{Action: "start"}); !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
-		t.Fatal(err)
-	}
 }

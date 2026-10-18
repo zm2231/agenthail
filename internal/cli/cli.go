@@ -222,16 +222,14 @@ func (a *App) cmdCodex(args []string) error {
 			return fmt.Errorf("agenthail codex manages the remote transport; remove %s", arg)
 		}
 	}
-	path, err := surfaces.ManagedCodexBinary()
+	path, err := surfaces.CodexDaemonCLI()
 	if err != nil {
 		return fmt.Errorf("find codex: %w", err)
 	}
-	start := exec.Command(path, "app-server", "daemon", "start")
-	start.Stdin = os.Stdin
-	start.Stdout = io.Discard
-	start.Stderr = os.Stderr
-	if err := start.Run(); err != nil {
-		return fmt.Errorf("start Codex app-server: %w", err)
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancelStart()
+	if err := surfaces.NewCodex("").EnsureRuntime(startCtx); err != nil {
+		return err
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -360,7 +358,7 @@ func repairManagedCodexRuntime(ctx context.Context) error {
 	if err := surfaces.RestartManagedCodexRuntime(ctx); err != nil {
 		return fmt.Errorf("restart managed Codex runtime: %w", err)
 	}
-	fmt.Println("managed Codex runtime restarted; retry the affected Desktop conversation")
+	fmt.Println("Codex's app-server daemon restarted; retry the affected conversation")
 	return nil
 }
 
@@ -2443,8 +2441,8 @@ func launchCodex(codex surface.Surface) error {
 	exe := install.Desktop
 	if exe == "" {
 		message := fmt.Sprintf("Codex Desktop is not installed (tried %s)", strings.Join(surfaces.CodexDesktopExecutables, ", "))
-		if install.Standalone != "" {
-			message += "; use 'agenthail codex' for a managed terminal session"
+		if install.Daemon != "" {
+			message += "; Agenthail creates and drives Codex conversations on Codex's app-server daemon without it"
 		}
 		return errors.New(message)
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,40 +21,22 @@ type codexDaemonVersion struct {
 	SocketPath string `json:"socketPath"`
 }
 
-type codexDaemonSettings struct {
-	RemoteControlEnabled bool `json:"remoteControlEnabled"`
-}
-
-func codexDaemonSettingsPath() string {
-	return filepath.Join(codexHome(), "app-server-daemon", "settings.json")
-}
-
-func codexRemoteControlEnabled() (bool, error) {
-	data, err := os.ReadFile(codexDaemonSettingsPath())
-	if err != nil {
-		return false, err
-	}
-	var settings codexDaemonSettings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return false, err
-	}
-	return settings.RemoteControlEnabled, nil
-}
-
 const (
-	codexLaunchRemediation       = "run 'agenthail launch codex' (quit Codex first if it is already open)"
-	codexStartManagedRemediation = "run 'agenthail codex' to start the managed Codex app-server"
-	codexInstallRemediation      = "install the standalone Codex runtime: " + CodexStandaloneInstallCommand
+	codexLaunchRemediation  = "run 'agenthail launch codex' (quit Codex first if it is already open)"
+	codexDaemonRemediation  = "start Codex's app-server daemon; Agenthail also starts it for the next managed conversation"
+	codexInstallRemediation = "install Codex: " + CodexInstallCommand
 )
 
-var ErrCodexStandaloneMissing = errors.New("standalone Codex runtime is not installed")
+var ErrCodexMissing = errors.New("no Codex CLI found to run Codex's app-server daemon")
 
-func ManagedCodexBinary() (string, error) {
+// CodexDaemonCLI returns the Codex CLI that runs `codex app-server daemon`
+// lifecycle commands.
+func CodexDaemonCLI() (string, error) {
 	install := DetectCodexInstallation()
-	if install.Standalone == "" {
-		return "", fmt.Errorf("%w: %s; %s", ErrCodexStandaloneMissing, install.standaloneMissingNote(), codexInstallRemediation)
+	if install.Daemon == "" {
+		return "", fmt.Errorf("%w (looked in %s and PATH); %s", ErrCodexMissing, strings.Join(codexDaemonPackageBinaries(), ", "), codexInstallRemediation)
 	}
-	return install.Standalone, nil
+	return install.Daemon, nil
 }
 
 func RestartManagedCodexRuntime(ctx context.Context) error {
@@ -74,26 +55,27 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 		commandCtx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
-	binary, err := ManagedCodexBinary()
+	binary, err := CodexDaemonCLI()
 	if err != nil {
 		return nil, err
 	}
-	output, err := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action).CombinedOutput()
+	output, err := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action).Output()
 	if err != nil {
-		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
-			return output, fmt.Errorf("codex app-server daemon %s timed out after %s; Agenthail ended the command (%s)", action, timeout, strings.TrimSpace(string(output)))
+		detail := strings.TrimSpace(string(output))
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			detail = strings.TrimSpace(detail + " " + strings.TrimSpace(string(exitErr.Stderr)))
 		}
-		return output, fmt.Errorf("codex app-server daemon %s: %w (%s)", action, err, strings.TrimSpace(string(output)))
+		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+			return output, fmt.Errorf("codex app-server daemon %s timed out after %s; Agenthail ended the command (%s)", action, timeout, detail)
+		}
+		return output, fmt.Errorf("codex app-server daemon %s: %w (%s)", action, err, detail)
 	}
 	return output, nil
 }
 
 func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 	install := DetectCodexInstallation()
-	var notes []surface.RuntimeNote
-	if c.managed && install.Standalone == "" {
-		notes = append(notes, surface.RuntimeNote{Problem: surface.RuntimeStandaloneMissing, Message: install.standaloneMissingNote(), Remediation: codexInstallRemediation})
-	}
 	desktopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	desktopErr := c.DesktopReady(desktopCtx)
 	cancel()
@@ -104,7 +86,6 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 			Reachable: true,
 			Durable:   true,
 			Backend:   "desktop",
-			Notes:     notes,
 		}
 	}
 	bridge := surface.RuntimeStatus{
@@ -112,108 +93,98 @@ func (c *Codex) RuntimeStatus(ctx context.Context) surface.RuntimeStatus {
 		Problem:     surface.RuntimeBridgeUnavailable,
 		Detail:      desktopErr.Error(),
 		Remediation: codexLaunchRemediation,
-		Notes:       notes,
 	}
 	if !c.managed {
 		return bridge
 	}
-	if install.Standalone == "" {
+	if install.Daemon == "" {
 		if install.Desktop != "" {
 			return bridge
 		}
 		return surface.RuntimeStatus{
-			Name:        "Codex managed app-server",
-			Problem:     surface.RuntimeStandaloneMissing,
-			Detail:      install.standaloneMissingNote() + "; Codex Desktop is not installed either",
+			Name:        "Codex app-server daemon",
+			Problem:     surface.RuntimeCodexMissing,
+			Detail:      ErrCodexMissing.Error() + " and Codex Desktop is not installed",
 			Remediation: codexInstallRemediation,
 		}
 	}
-	managed := surface.RuntimeStatus{Name: "Codex managed app-server", Problem: surface.RuntimeStopped, Remediation: codexStartManagedRemediation}
+	daemon := surface.RuntimeStatus{Name: "Codex app-server daemon", Problem: surface.RuntimeStopped, Remediation: codexDaemonRemediation}
 	output, err := runCodexDaemon(ctx, "version")
-	if err != nil {
-		managed.Detail = err.Error()
-	} else {
-		var version codexDaemonVersion
-		if err := json.Unmarshal(output, &version); err != nil {
-			managed.Detail = fmt.Sprintf("parse Codex managed app-server status: %v", err)
-		} else if version.Status != "running" {
-			managed.Detail = fmt.Sprintf("managed Codex app-server is %s", version.Status)
-		} else {
-			managed.Reachable = true
-			managed.Backend = version.Backend
-			managed.Problem = ""
-			managed.Remediation = ""
-			supervisor := strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_SUPERVISOR"))
-			launchdService := strings.TrimSpace(os.Getenv("XPC_SERVICE_NAME")) == "com.agenthail.daemon"
-			managed.Durable = version.Backend != "" && version.Backend != "pid" || supervisor == "homebrew" || launchdService
-			if !managed.Durable {
-				managed.Problem = surface.RuntimeUnsupervised
-				managed.Detail = "reachable but not supervised across reboot"
-				managed.Remediation = "run 'agenthail daemon install'"
-			}
-			if install.Desktop != "" {
-				managed.Notes = append(managed.Notes, surface.RuntimeNote{Problem: surface.RuntimeBridgeUnavailable, Message: "Codex Desktop conversations need the Desktop bridge: " + desktopErr.Error(), Remediation: codexLaunchRemediation})
-			}
-			return managed
+	var version codexDaemonVersion
+	switch {
+	case err != nil:
+		daemon.Detail = err.Error()
+	case json.Unmarshal(output, &version) != nil:
+		daemon.Detail = fmt.Sprintf("parse Codex app-server daemon status: %s", strings.TrimSpace(string(output)))
+	case version.Status != "running":
+		daemon.Detail = fmt.Sprintf("Codex app-server daemon is %s", version.Status)
+	default:
+		daemon.Reachable = true
+		daemon.Backend = version.Backend
+		daemon.Problem = ""
+		daemon.Remediation = ""
+		supervisor := strings.TrimSpace(os.Getenv("AGENTHAIL_DAEMON_SUPERVISOR"))
+		launchdService := strings.TrimSpace(os.Getenv("XPC_SERVICE_NAME")) == "com.agenthail.daemon"
+		daemon.Durable = version.Backend != "" && version.Backend != "pid" || supervisor == "homebrew" || launchdService
+		if !daemon.Durable {
+			daemon.Problem = surface.RuntimeUnsupervised
+			daemon.Detail = "reachable but not supervised across reboot"
+			daemon.Remediation = "run 'agenthail daemon install'"
 		}
 	}
-	if install.Desktop != "" {
-		bridge.Notes = append(bridge.Notes, surface.RuntimeNote{Problem: surface.RuntimeStopped, Message: "the managed Codex app-server is not running: " + managed.Detail, Remediation: codexStartManagedRemediation})
-		return bridge
+	if install.Desktop == "" {
+		return daemon
 	}
-	return managed
+	if daemon.Reachable {
+		daemon.Notes = append(daemon.Notes, surface.RuntimeNote{Problem: surface.RuntimeBridgeUnavailable, Message: "Codex Desktop conversations need the Desktop bridge: " + desktopErr.Error(), Remediation: codexLaunchRemediation})
+		return daemon
+	}
+	bridge.Notes = append(bridge.Notes, surface.RuntimeNote{Problem: surface.RuntimeStopped, Message: "Codex's app-server daemon is not running: " + daemon.Detail, Remediation: codexDaemonRemediation})
+	return bridge
 }
 
+// EnsureRuntime starts Codex's app-server daemon when it is not serving its
+// control socket.
 func (c *Codex) EnsureRuntime(ctx context.Context) error {
+	client, err := c.openManaged(ctx)
+	if err != nil {
+		return err
+	}
+	return client.Close()
+}
+
+// openManaged is the only path that starts Codex's app-server daemon. It is
+// for managed-route writes and creation; discovery and reads use dialManaged.
+func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {
+	if !c.managed {
+		return nil, errors.New("Codex's app-server daemon is disabled for a remote Codex Desktop endpoint")
+	}
+	if client, err := dialManagedCodex(ctx); err == nil {
+		return client, nil
+	}
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
-	return c.ensureRuntime(ctx)
-}
-
-func (c *Codex) ensureRuntime(ctx context.Context) error {
-	if !c.managed {
-		return nil
-	}
-	if enabled, err := codexRemoteControlEnabled(); err != nil || !enabled {
-		if _, err := runCodexDaemon(ctx, "enable-remote-control"); err != nil {
-			return fmt.Errorf("enable Codex app-server remote control: %w", err)
-		}
-	}
-	if _, err := os.Stat(managedCodexSocketPath()); err == nil {
-		return nil
+	if client, err := dialManagedCodex(ctx); err == nil {
+		return client, nil
 	}
 	if _, err := runCodexDaemon(ctx, "start"); err != nil {
-		return fmt.Errorf("managed Codex app-server is unavailable: %w", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(managedCodexSocketPath()); err == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("managed Codex app-server did not become ready: %w", ctx.Err())
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	return fmt.Errorf("managed Codex app-server did not create %s; run 'agenthail codex' again or inspect 'agenthail doctor'", managedCodexSocketPath())
-}
-
-func (c *Codex) openManaged(ctx context.Context) (codexClient, error) {
-	if err := c.EnsureRuntime(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("start Codex's app-server daemon: %w", err)
 	}
 	client, err := dialManagedCodex(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("managed Codex app-server is unreachable: %w; restart it from Codex only after closing active remote sessions", err)
+		return nil, fmt.Errorf("Codex's app-server daemon started but is unreachable: %w", err)
 	}
 	return client, nil
 }
 
-func (c *Codex) openExistingManaged(ctx context.Context) (codexClient, error) {
+// dialManaged connects to a running daemon and never starts one.
+func (c *Codex) dialManaged(ctx context.Context) (codexClient, error) {
+	if !c.managed {
+		return nil, errors.New("Codex's app-server daemon is disabled for a remote Codex Desktop endpoint")
+	}
 	client, err := dialManagedCodex(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("managed Codex app-server is unavailable: %w", err)
+		return nil, err
 	}
 	return client, nil
 }

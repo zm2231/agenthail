@@ -480,7 +480,7 @@ func humanSize(n int64) string {
 }
 
 func printCodexSetupNote() {
-	if _, err := surfaces.ManagedCodexBinary(); err != nil {
+	if _, err := surfaces.CodexDaemonCLI(); err != nil {
 		fmt.Printf("Codex: %s\n", err)
 	}
 }
