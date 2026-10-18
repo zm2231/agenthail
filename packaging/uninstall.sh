@@ -41,12 +41,18 @@ while read -r user uid; do
 	if [ -f "$plist" ] && [ "$(plutil -extract ProgramArguments.0 raw -o - "$plist" 2>/dev/null || true)" = "/Library/Application Support/Agenthail/agenthail" ]; then
 		rm -f "$plist"
 	fi
-	for runtime in .claude .codex .hermes; do
-		link="$home/$runtime/skills/agenthail-operations"
+	links=("$home/.claude/skills/agenthail-operations" "$home/.codex/skills/agenthail-operations" "$home/.hermes/skills/agenthail-operations")
+	if [ -f "$home/.agenthail/skill-links" ] && [ ! -L "$home/.agenthail/skill-links" ]; then
+		while IFS= read -r link; do
+			links+=("$link")
+		done <"$home/.agenthail/skill-links"
+	fi
+	for link in "${links[@]}"; do
 		if [ -L "$link" ] && [ "$(readlink "$link")" = "/Library/Application Support/Agenthail/skills/agenthail-operations" ]; then
-			rm -f "$link"
+			/usr/bin/sudo -u "$user" /bin/rm -f "$link" || true
 		fi
 	done
+	[ -L "$home/.agenthail/skill-links" ] || rm -f "$home/.agenthail/skill-links"
 	if [ "$purge_data" -eq 1 ]; then
 		rm -rf "$home/.agenthail"
 	fi

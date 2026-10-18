@@ -46,12 +46,18 @@ func queueMessageTTLLabel() string {
 }
 
 func Open(path string) (*Registry, error) {
-	if path == "" {
+	private := path == ""
+	if private {
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".agenthail", "registry.db")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create registry directory: %w", err)
+	}
+	if private {
+		if err := os.Chmod(filepath.Dir(path), 0700); err != nil {
+			return nil, fmt.Errorf("restrict registry directory: %w", err)
+		}
 	}
 	sep := "?"
 	if strings.Contains(path, "?") {

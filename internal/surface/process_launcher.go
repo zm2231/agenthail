@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,7 @@ type processLauncher struct {
 	run      commandRunner
 	pidAlive func(int) bool
 	ps       commandRunner
+	goos     string
 }
 
 func newCMUX() Launcher {
@@ -36,7 +38,7 @@ func newCMUX() Launcher {
 }
 
 func newTMUX() Launcher {
-	return &processLauncher{id: LauncherTMUX, command: "tmux", agents: []SurfaceKind{KindClaude, KindCodex}, run: defaultCommandRunner, pidAlive: pidExists, ps: defaultCommandRunner}
+	return &processLauncher{id: LauncherTMUX, command: "tmux", agents: []SurfaceKind{KindClaude, KindCodex}, run: defaultCommandRunner, pidAlive: pidExists, ps: defaultCommandRunner, goos: runtime.GOOS}
 }
 
 func (l *processLauncher) ID() string            { return l.id }
@@ -587,6 +589,9 @@ func (l *processLauncher) Focus(ctx context.Context, location Location) error {
 		return nil
 	}
 	attach := "tmux attach-session -t " + shellQuote(location.Session)
+	if l.goos != "darwin" {
+		return fmt.Errorf("no tmux client is attached to %s; attach from a terminal with: %s", location.Session, attach)
+	}
 	script := `tell application "Terminal" to do script ` + appleScriptQuote(attach)
 	if out, err := l.run(ctx, "osascript", "-e", script); err != nil {
 		return fmt.Errorf("attach Terminal to tmux session: %w: %s", err, strings.TrimSpace(string(out)))

@@ -108,6 +108,7 @@ func TestCodexManagedRuntimeStatusReportsDurability(t *testing.T) {
 	}{
 		{name: "unsupervised pid backend", backend: "pid", remediation: true},
 		{name: "homebrew-supervised pid backend", backend: "pid", supervisor: "homebrew", durable: true},
+		{name: "systemd-supervised pid backend", backend: "pid", supervisor: "systemd", durable: true},
 		{name: "launchd-supervised pid backend", backend: "pid", xpc: "com.agenthail.daemon", durable: true},
 		{name: "unknown supervisor", backend: "pid", supervisor: "unknown"},
 		{name: "launchd backend", backend: "launchd", durable: true},

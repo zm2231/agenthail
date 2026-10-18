@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+unset CLAUDE_CONFIG_DIR CODEX_HOME
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agenthail-install-test.XXXXXX")"
 TEST_HOME="$TMP/home odd\" dollar\$ back\\slash"
 DATA_DIR="$TEST_HOME/data odd\" dollar\$ back\\slash"
@@ -221,6 +222,17 @@ grep -Fq 'is not an agenthail symlink' "$TMP/skill-collision.log"
 grep -Fqx 'mine' "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 test "$(readlink "$SKILL_HOME/.codex/skills/agenthail-operations")" = "$TMP/checkout/skills/agenthail-operations"
 test "$(readlink "$SKILL_HOME/.hermes/skills/agenthail-operations")" = "$SKILL_DATA/skills/agenthail-operations"
+
+CONFIGURED_CLAUDE="$SKILL_HOME/claude config"
+CONFIGURED_CODEX="$SKILL_HOME/codex home"
+mkdir -p "$CONFIGURED_CLAUDE" "$CONFIGURED_CODEX"
+printf '{"remoteControlAtStartup":true}\n' >"$CONFIGURED_CLAUDE/settings.json"
+rm -f "$SKILL_HOME/.claude/settings.json"
+CLAUDE_CONFIG_DIR="$CONFIGURED_CLAUDE" CODEX_HOME="$CONFIGURED_CODEX" install_once "$SKILL_HOME" "$SKILL_BIN" "$SKILL_DATA" >"$TMP/skill-configured.log"
+grep -Fq 'Remote Control is enabled for all sessions' "$TMP/skill-configured.log"
+test "$(readlink "$CONFIGURED_CLAUDE/skills/agenthail-operations")" = "$SKILL_DATA/skills/agenthail-operations"
+test "$(readlink "$CONFIGURED_CODEX/skills/agenthail-operations")" = "$SKILL_DATA/skills/agenthail-operations"
+grep -Fqx 'mine' "$SKILL_HOME/.claude/skills/agenthail-operations/SKILL.md"
 
 install_once "$CUSTOM_HOME" "$CUSTOM_BIN" "$CUSTOM_DATA_1" >/dev/null
 CUSTOM_PID_1="$(cat "$CUSTOM_HOME/.agenthail/daemon.pid")"

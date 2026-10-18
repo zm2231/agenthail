@@ -223,7 +223,23 @@ test "$first_pid" != "$second_pid"
 test "$(/usr/local/bin/agenthail version --json | jq -r .revision)" = "$expected_revision"
 fixture_is_running "$unrelated_pid" "$unrelated_app/Contents/MacOS/Agenthail"
 
+custom_claude="$HOME/.agenthail-pkg-claude"
+custom_codex="$HOME/.agenthail-pkg-codex"
+rm -rf "$custom_claude" "$custom_codex"
+mkdir -p "$custom_claude" "$custom_codex/skills/unrelated"
+ln -s "$custom_codex/skills/unrelated" "$custom_codex/skills/agenthail-other"
+CLAUDE_CONFIG_DIR="$custom_claude" CODEX_HOME="$custom_codex" /usr/local/bin/agenthail version >/dev/null
+test -L "$custom_claude/skills/agenthail-operations"
+test -L "$custom_codex/skills/agenthail-operations"
+test "$(stat -f %Lp "$HOME/.agenthail")" = 700
+test "$(stat -f %Lp "$HOME/.agenthail/skill-links")" = 600
+
 sudo /usr/local/bin/agenthail-uninstall
+test ! -e "$custom_claude/skills/agenthail-operations" && test ! -L "$custom_claude/skills/agenthail-operations"
+test ! -L "$custom_codex/skills/agenthail-operations"
+test -L "$custom_codex/skills/agenthail-other"
+test ! -e "$HOME/.agenthail/skill-links"
+rm -rf "$custom_claude" "$custom_codex"
 test ! -e /usr/local/bin/agenthail
 test ! -e /usr/local/bin/agenthail-uninstall
 test ! -e "/Library/Application Support/Agenthail"
