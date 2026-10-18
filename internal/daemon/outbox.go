@@ -41,10 +41,14 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		return
 	}
 	if item.Operation == registry.QueueOperationCompact {
+		// The compact may resume the session and move it to another process;
+		// it works on its own copy so the observer's session is never written
+		// from this goroutine.
+		compacting := *session
 		d.queueWorkers.Add(1)
 		go func() {
 			defer d.queueWorkers.Done()
-			d.runQueuedCompact(ctx, adapter, session, item)
+			d.runQueuedCompact(ctx, adapter, &compacting, item)
 		}()
 		return
 	}
