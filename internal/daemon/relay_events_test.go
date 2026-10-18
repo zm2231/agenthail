@@ -191,7 +191,7 @@ func TestGoalRelayWaitsForExplicitCompletionAndReleasesLatestOnce(t *testing.T) 
 	if r.QueueCount(to.ID) != 1 {
 		t.Fatalf("goal handoffs=%d", r.QueueCount(to.ID))
 	}
-	item, err := r.QueueItem(1)
+	item, err := r.QueueItem(1, nil)
 	if err != nil || !strings.HasSuffix(item.Message, "final") {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -353,7 +353,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	if len(routes) != 1 || routes[0].FireCount != 1 || routes[0].PendingCount != 0 || routes[0].LastError != "" || r.QueueCount(to.ID) != 1 {
 		t.Fatalf("routes=%+v queued=%d", routes, r.QueueCount(to.ID))
 	}
-	items, err := r.ListQueue(false)
+	items, err := r.ListQueue(false, nil)
 	if err != nil || len(items) != 1 || !strings.Contains(items[0].Message, "answer C") {
 		t.Fatalf("queue=%+v err=%v", items, err)
 	}

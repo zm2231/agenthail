@@ -517,7 +517,7 @@ func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("retry err=%v", err)
 	}
-	item, err := r.QueueItem(id)
+	item, err := r.QueueItem(id, nil)
 	if err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -1116,7 +1116,7 @@ func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 	if err := r.RegisterSession(asking); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.RecordWaiting(asking.ID, waiting, time.Now()); err != nil {
+	if _, err := r.RecordWaiting(asking.ID, waiting, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.QueueMessageWithOptions(asking.ID, "after the answer", "", surface.SendOptions{}); err != nil {

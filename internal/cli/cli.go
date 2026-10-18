@@ -1005,6 +1005,14 @@ func queuedTime(value string) time.Time {
 	return t
 }
 
+func (a *App) steerSurfaces() registry.SteerSurfaces {
+	steer := registry.SteerSurfaces{}
+	for _, entry := range a.Surfaces {
+		steer[entry.Surface.Name()] = entry.Surface.Capabilities().Steer
+	}
+	return steer
+}
+
 func queueHoldLabel(hold registry.QueueHold) string {
 	switch hold {
 	case registry.QueueHeldWaiting:
@@ -1017,6 +1025,8 @@ func queueHoldLabel(hold registry.QueueHold) string {
 		return "held: target state is unknown"
 	case registry.QueueHeldRetrying:
 		return "held: waiting to retry"
+	case registry.QueueHeldBehind:
+		return "held: behind an earlier message"
 	}
 	return "delivers on the next daemon scan"
 }
@@ -2052,7 +2062,7 @@ func (a *App) cmdQueue(args []string) error {
 		if len(stripFlags(args)) != 1 {
 			return fmt.Errorf("usage: agenthail queue list [--json] [--all] [--target <target>] [--mine] [--cwd <path>]")
 		}
-		rows, err := a.Registry.ListQueue(hasFlag(args, "--all"))
+		rows, err := a.Registry.ListQueue(hasFlag(args, "--all"), a.steerSurfaces())
 		if err != nil {
 			return err
 		}
@@ -2086,7 +2096,7 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil || id <= 0 {
 			return fmt.Errorf("invalid queue id %q", args[1])
 		}
-		item, err := a.Registry.QueueItem(id)
+		item, err := a.Registry.QueueItem(id, a.steerSurfaces())
 		if err != nil {
 			return err
 		}

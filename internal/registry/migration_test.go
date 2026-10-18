@@ -113,7 +113,7 @@ func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {
 
 func assertMigratedQueue(t *testing.T, r *Registry, source string) {
 	t.Helper()
-	rows, err := r.ListQueue(true)
+	rows, err := r.ListQueue(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if listed == nil {
 		t.Fatalf("queued row missing from %+v", rows)
 	}
-	row, err := r.QueueItem(id)
+	row, err := r.QueueItem(id, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func assertMigratedRouteRelaysDurably(t *testing.T, r *Registry) {
 
 func assertLegacyStatusNotNormalized(t *testing.T, r *Registry) {
 	t.Helper()
-	rows, err := r.ListQueue(true)
+	rows, err := r.ListQueue(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,13 +329,13 @@ func TestOpenRetiresQueueExpiry(t *testing.T) {
 	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
 		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 	}
-	if row, err := r.QueueItem(50); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
+	if row, err := r.QueueItem(50, nil); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
 		t.Fatalf("expired row=%+v err=%v", row, err)
 	}
-	if row, err := r.QueueItem(2); err != nil || row.Status != "pending" {
+	if row, err := r.QueueItem(2, nil); err != nil || row.Status != "pending" {
 		t.Fatalf("pending row=%+v err=%v", row, err)
 	}
-	if row, err := r.QueueItem(51); err != nil || row.DeadAt != time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC).UnixMilli() {
+	if row, err := r.QueueItem(51, nil); err != nil || row.DeadAt != time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC).UnixMilli() {
 		t.Fatalf("dead row=%+v err=%v", row, err)
 	}
 	if intent, err := r.DeliveryIntent(50); err != nil || intent.Status != DeliveryIntentFailed || intent.Evidence != surface.EvidenceFailed || intent.Failure != "expired before delivery" {

@@ -56,7 +56,7 @@ func TestAdvancedOptionsWithoutModelReachDashboardAndOutbox(t *testing.T) {
 		t.Fatal(string(data))
 	}
 	d.drainMessageQueue(context.Background(), adapter, &from)
-	item, err := r.QueueItem(id)
+	item, err := r.QueueItem(id, nil)
 	if err != nil || item.Status != "delivered" || adapter.options.Effort != "xhigh" || adapter.options.Mode != "plan" {
 		t.Fatal(item, adapter.options, err)
 	}

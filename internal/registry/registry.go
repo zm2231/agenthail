@@ -1598,24 +1598,71 @@ const (
 	QueueHeldOffline  QueueHold = "offline"
 	QueueHeldUnknown  QueueHold = "unknown"
 	QueueHeldRetrying QueueHold = "retrying"
+	QueueHeldBehind   QueueHold = "behind"
 )
 
-// queueRowSelect reads queue rows with the hold reason derived from the
-// target's last observed state, by the same rules the daemon drains by: a
-// busy turn holds a message but not a steer into it. Its first argument is
-// the current time.
-const queueRowSelect = `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
-	CASE WHEN q.status!='pending' THEN ''
-		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'
-		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')='busy' AND q.busy_delivery='steer' AND q.model='' AND (q.turn_options='' OR q.turn_options='{}') THEN CASE WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END
-		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')='busy' THEN 'busy'
-		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')='offline' THEN 'offline'
-		WHEN COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown') NOT IN ('idle','notLoaded') THEN 'unknown'
+// SteerSurfaces says which surfaces can steer a message into a running turn,
+// as their adapters declare it.
+type SteerSurfaces map[surface.SurfaceKind]bool
+
+// queueTargetStatus is the target's last observed status, as the daemon
+// drains by it.
+const queueTargetStatus = `COALESCE(CASE WHEN sr.turn_observed=1 THEN sr.last_status END,s.status,'unknown')`
+
+// queueSteerRow matches a message a busy turn can take as a steer.
+const queueSteerRow = `%[1]s.busy_delivery='steer' AND %[1]s.model='' AND (%[1]s.turn_options='' OR %[1]s.turn_options='{}')`
+
+// queueHoldCase derives why a pending message is held by the rules the
+// daemon drains by. A drain claims only the earliest open message of a
+// session, or of its steerable messages while a turn runs, so a message
+// behind an earlier one is held by it. A busy turn holds a message but not a
+// steer into it when the target can steer. Its first argument is the current
+// time.
+func queueHoldCase(canSteer bool) string {
+	earliest := `(SELECT MIN(m.id) FROM message_queue m WHERE m.session_id=q.session_id AND m.status IN ('pending','inflight')%s)`
+	steer := ""
+	if canSteer {
+		steer = `
+		WHEN ` + queueTargetStatus + `='busy' AND ` + fmt.Sprintf(queueSteerRow, "q") + ` THEN CASE WHEN q.id!=` + fmt.Sprintf(earliest, " AND "+fmt.Sprintf(queueSteerRow, "m")) + ` THEN 'behind' WHEN q.available_at_ms>?1 THEN 'retrying' ELSE '' END`
+	}
+	return `CASE WHEN q.status!='pending' THEN ''
+		WHEN COALESCE(sr.waiting_id,'')!='' THEN 'waiting'` + steer + `
+		WHEN ` + queueTargetStatus + `='busy' THEN 'busy'
+		WHEN ` + queueTargetStatus + `='offline' THEN 'offline'
+		WHEN ` + queueTargetStatus + ` NOT IN ('idle','notLoaded') THEN 'unknown'
+		WHEN q.id!=` + fmt.Sprintf(earliest, "") + ` THEN 'behind'
 		WHEN q.available_at_ms>?1 THEN 'retrying'
-		ELSE '' END
+		ELSE '' END`
+}
+
+// queueRowSelect reads queue rows with the hold reason for a target that can
+// steer and for one that cannot, and the target facts that decide which.
+var queueRowSelect = `SELECT q.id,q.session_id,q.message,q.model,q.source_session_id,q.turn_options,q.status,q.attempts,q.last_error,q.queued_at,q.dead_at_ms,q.evidence,q.operation,q.busy_delivery,
+	` + queueHoldCase(true) + `,
+	` + queueHoldCase(false) + `,
+	COALESCE(s.surface,''),COALESCE(s.transport,'')
 	FROM message_queue q LEFT JOIN sessions s ON s.id=q.session_id LEFT JOIN session_runtime sr ON sr.session_id=q.session_id`
 
-func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
+type queueRowScanner interface{ Scan(...any) error }
+
+func scanQueueRow(scanner queueRowScanner, steer SteerSurfaces, now time.Time) (QueueRow, error) {
+	var row QueueRow
+	var evidence, targetSurface, transport string
+	var steerHold, otherHold QueueHold
+	if err := scanner.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &steerHold, &otherHold, &targetSurface, &transport); err != nil {
+		return QueueRow{}, err
+	}
+	target := &surface.Session{ID: row.SessionID, Surface: surface.SurfaceKind(targetSurface), Transport: transport}
+	row.HeldBy = otherHold
+	if surface.EffectiveCapabilities(target, surface.Capabilities{Steer: steer[target.Surface]}).Steer {
+		row.HeldBy = steerHold
+	}
+	row.Historical = queueRowIsHistorical(row, now)
+	row.Evidence = queueEvidence(row, surface.DeliveryEvidence(evidence))
+	return row, nil
+}
+
+func (r *Registry) ListQueue(includeDelivered bool, steer SteerSurfaces) ([]QueueRow, error) {
 	now := r.now()
 	query := queueRowSelect
 	args := []any{now.UnixMilli()}
@@ -1631,28 +1678,21 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	defer rows.Close()
 	result := make([]QueueRow, 0)
 	for rows.Next() {
-		var row QueueRow
-		var evidence string
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.HeldBy); err != nil {
+		row, err := scanQueueRow(rows, steer, now)
+		if err != nil {
 			return nil, err
 		}
-		row.Historical = queueRowIsHistorical(row, now)
-		row.Evidence = queueEvidence(row, surface.DeliveryEvidence(evidence))
 		result = append(result, row)
 	}
 	return result, rows.Err()
 }
 
-func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
+func (r *Registry) QueueItem(id int64, steer SteerSurfaces) (*QueueRow, error) {
 	now := r.now()
-	var row QueueRow
-	var evidence string
-	err := r.read.QueryRow(queueRowSelect+` WHERE q.id=?`, now.UnixMilli(), id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery, &row.HeldBy)
+	row, err := scanQueueRow(r.read.QueryRow(queueRowSelect+` WHERE q.id=?`, now.UnixMilli(), id), steer, now)
 	if err != nil {
 		return nil, err
 	}
-	row.Historical = queueRowIsHistorical(row, now)
-	row.Evidence = queueEvidence(row, surface.DeliveryEvidence(evidence))
 	return &row, nil
 }
 
@@ -2213,36 +2253,44 @@ func scanWaiting(row *sql.Row) (*surface.Waiting, bool, error) {
 	return &surface.Waiting{Kind: surface.WaitingKind(kind), ID: id, Since: time.UnixMilli(sinceMS).UTC()}, announced, nil
 }
 
-// RecordWaiting stores the question a session waits on. It returns the
-// recorded state, which keeps the time the question was first seen, and
-// whether that question still has to be announced. An unchanged state is
-// answered from the read connection, so a pass over settled sessions writes
-// nothing.
-func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now time.Time) (*surface.Waiting, bool, error) {
+// WaitingRecord is the result of recording what a session waits on.
+type WaitingRecord struct {
+	// Waiting is the recorded question, which keeps when it was first seen.
+	Waiting *surface.Waiting
+	// Announce reports that the user has not been told about it yet.
+	Announce bool
+	// Changed reports that the record now names a different question or none.
+	Changed bool
+}
+
+// RecordWaiting stores the question a session waits on. An unchanged state
+// is answered from the read connection, so a pass over settled sessions
+// writes nothing.
+func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now time.Time) (WaitingRecord, error) {
 	current, announced, err := r.WaitingState(sessionID)
 	if err != nil {
-		return nil, false, err
+		return WaitingRecord{}, err
 	}
 	if surface.SameWaiting(current, waiting) {
-		return current, current != nil && !announced, nil
+		return WaitingRecord{Waiting: current, Announce: current != nil && !announced}, nil
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
-		return nil, false, err
+		return WaitingRecord{}, err
 	}
 	defer tx.Rollback()
 	stored, announced, err := scanWaiting(tx.QueryRow(`SELECT waiting_kind,waiting_id,waiting_since_ms,waiting_announced FROM session_runtime WHERE session_id=?`, sessionID))
 	if err != nil {
-		return nil, false, err
+		return WaitingRecord{}, err
 	}
 	if surface.SameWaiting(stored, waiting) {
-		return stored, stored != nil && !announced, tx.Commit()
+		return WaitingRecord{Waiting: stored, Announce: stored != nil && !announced}, tx.Commit()
 	}
 	if waiting == nil {
 		if _, err := tx.Exec(`UPDATE session_runtime SET waiting_kind='',waiting_id='',waiting_since_ms=0,waiting_announced=0 WHERE session_id=?`, sessionID); err != nil {
-			return nil, false, err
+			return WaitingRecord{}, err
 		}
-		return nil, false, tx.Commit()
+		return WaitingRecord{Changed: true}, tx.Commit()
 	}
 	next := *waiting
 	if next.Since.IsZero() {
@@ -2250,9 +2298,9 @@ func (r *Registry) RecordWaiting(sessionID string, waiting *surface.Waiting, now
 	}
 	if _, err := tx.Exec(`INSERT INTO session_runtime(session_id,waiting_kind,waiting_id,waiting_since_ms,waiting_announced,updated_at) SELECT ?,?,?,?,0,datetime('now') WHERE EXISTS(SELECT 1 FROM sessions WHERE id=?)
 		ON CONFLICT(session_id) DO UPDATE SET waiting_kind=excluded.waiting_kind,waiting_id=excluded.waiting_id,waiting_since_ms=excluded.waiting_since_ms,waiting_announced=0`, sessionID, string(next.Kind), next.ID, next.Since.UnixMilli(), sessionID); err != nil {
-		return nil, false, err
+		return WaitingRecord{}, err
 	}
-	return &next, true, tx.Commit()
+	return WaitingRecord{Waiting: &next, Announce: true, Changed: true}, tx.Commit()
 }
 
 // MarkWaitingAnnounced records that the user was told about question id. A

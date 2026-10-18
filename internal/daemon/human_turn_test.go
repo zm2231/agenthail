@@ -176,7 +176,7 @@ func TestPersonSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
 	assertHumanTurnPost(t, f.posts[0], "after this turn")
-	item, err := f.r.QueueItem(queueID)
+	item, err := f.r.QueueItem(queueID, nil)
 	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -227,7 +227,7 @@ func TestUncertainQueuedHumanTurnDeadLettersWithoutRetry(t *testing.T) {
 	if len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
-	item, err := f.r.QueueItem(queueID)
+	item, err := f.r.QueueItem(queueID, nil)
 	if err != nil || item.Status != "dead" || item.Evidence != surface.EvidenceUnknown {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -282,7 +282,7 @@ func TestQueuedPersonMessageWithOptionsIsRejectedAtDrain(t *testing.T) {
 	if len(f.posts) != 0 || len(f.claude.native) != 0 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
-	if item, err := f.r.QueueItem(queueID); err != nil || item.Status != "dead" {
+	if item, err := f.r.QueueItem(queueID, nil); err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }

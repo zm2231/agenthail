@@ -119,7 +119,7 @@ func TestDismissDeliveryProblemIsIdempotentAndAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queued, err := r.ListQueue(true)
+	queued, err := r.ListQueue(true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

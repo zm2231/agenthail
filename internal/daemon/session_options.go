@@ -50,7 +50,7 @@ func (d *Daemon) mobileQueueHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Use GET for queued instructions.", http.StatusMethodNotAllowed)
 		return
 	}
-	rows, err := d.Registry.ListQueue(true)
+	rows, err := d.Registry.ListQueue(true, d.steerSurfaces())
 	if err != nil {
 		http.Error(w, "Queued instructions are unavailable.", http.StatusInternalServerError)
 		return

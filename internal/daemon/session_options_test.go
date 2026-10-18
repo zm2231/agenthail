@@ -108,7 +108,7 @@ func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatal(response.Body.String())
 	}
-	item, err := registry.QueueItem(id)
+	item, err := registry.QueueItem(id, nil)
 	if err != nil || item.Status != "pending" {
 		t.Fatalf("%+v %v", item, err)
 	}

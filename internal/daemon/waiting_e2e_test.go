@@ -39,6 +39,12 @@ func (c *recordingClaude) Observe(ctx context.Context, session *surface.Session)
 
 // awaitObservations returns once the daemon has read the transcript n more
 // times, so an absence checked afterwards covers that many passes.
+func (c *recordingClaude) observations() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.observed
+}
+
 func (c *recordingClaude) awaitObservations(t *testing.T, n int) {
 	t.Helper()
 	c.mu.Lock()
@@ -76,6 +82,9 @@ func (c *recordingClaude) delivered() (sent, steered []string) {
 type pushRecorder struct {
 	mu     sync.Mutex
 	events map[string][]map[string]string
+	// stall, while set, holds every response open after the push is
+	// recorded, as a relay would look to a daemon stopped mid-delivery.
+	stall chan struct{}
 }
 
 func newPushRecorder(t *testing.T, store *registry.Registry) *pushRecorder {
@@ -89,7 +98,11 @@ func newPushRecorder(t *testing.T, store *registry.Registry) *pushRecorder {
 		}
 		recorder.mu.Lock()
 		recorder.events[payload["eventType"]] = append(recorder.events[payload["eventType"]], payload)
+		stall := recorder.stall
 		recorder.mu.Unlock()
+		if stall != nil {
+			<-stall
+		}
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("AGENTHAIL_PUSH_RELAY_URL", server.URL)
@@ -111,6 +124,12 @@ func (p *pushRecorder) count(eventType string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.events[eventType])
+}
+
+func (p *pushRecorder) all(eventType string) []map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]map[string]string(nil), p.events[eventType]...)
 }
 
 func (p *pushRecorder) first(eventType string) map[string]string {
@@ -141,7 +160,7 @@ func runDaemon(t *testing.T, store *registry.Registry, adapters ...surface.Surfa
 		})
 	}
 	t.Cleanup(stop)
-	return &runningDaemon{t: t, server: server, store: store}, stop
+	return &runningDaemon{t: t, server: server, store: store, daemon: d}, stop
 }
 
 func (h *runningDaemon) sessionWaiting(id string) *surface.Waiting {
@@ -184,6 +203,23 @@ type claudeQuestion struct {
 	pushes     *pushRecorder
 	session    surface.Session
 	transcript string
+	process    *claudetest.Fixture
+}
+
+// questionAsked is when the synthetic session started waiting on its user.
+var questionAsked = time.Date(2026, 10, 18, 8, 14, 41, 0, time.UTC)
+
+// questionID is the id Agenthail gives that question.
+var questionID = fmt.Sprintf("conversation-question:question:%d", questionAsked.UnixMilli())
+
+// answer records what Claude writes once the user answers: the process is
+// working again and the resolved tool call reaches the transcript.
+func (q claudeQuestion) answer(t *testing.T) {
+	t.Helper()
+	q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "busy", "", questionAsked.Add(time.Hour))
+	appendClaudeRecords(t, q.transcript,
+		`{"type":"assistant","uuid":"ask","timestamp":"2026-10-18T08:14:41Z","message":{"id":"msg-ask","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_question","name":"AskUserQuestion","input":{"questions":[{"question":"Which branch?"}]}}]}}`,
+		`{"type":"user","uuid":"answer","timestamp":"2026-10-18T20:18:07Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_question","content":"main"}]}}`)
 }
 
 // newClaudeQuestion is a Claude session whose turn has asked the user an
@@ -194,10 +230,9 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 	process := claudetest.New(t)
 	process.Listen()
 	transcript := process.Transcript("conversation-question", process.Home)
-	process.Record("conversation-question", process.Home, "session_question")
+	process.RecordStatus("conversation-question", process.Home, "session_question", "waiting", "input needed", questionAsked)
 	appendClaudeRecords(t, transcript,
 		`{"type":"user","uuid":"prompt","timestamp":"2026-10-18T08:14:31Z","message":{"content":"Plan the release"}}`,
-		`{"type":"assistant","uuid":"ask","timestamp":"2026-10-18T08:14:41Z","message":{"id":"msg-ask","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_question","name":"AskUserQuestion","input":{"questions":[{"question":"Which branch?"}]}}]}}`,
 		`{"type":"attachment","timestamp":"2026-10-18T08:14:42Z"}`)
 	store, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
@@ -211,7 +246,7 @@ func newClaudeQuestion(t *testing.T) claudeQuestion {
 	pushes := newPushRecorder(t, store)
 	claude := &recordingClaude{Claude: surfaces.NewClaude("Default", process.Home)}
 
-	return claudeQuestion{store: store, claude: claude, pushes: pushes, session: session, transcript: transcript}
+	return claudeQuestion{store: store, claude: claude, pushes: pushes, session: session, transcript: transcript, process: process}
 }
 
 func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *testing.T) {
@@ -220,7 +255,7 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	h, stop := runDaemon(t, store, claude)
 	eventually(t, "the session to show it is waiting on the user", func() bool {
 		waiting := h.sessionWaiting(session.ID)
-		return waiting != nil && waiting.ID == "toolu_question" && waiting.Kind == surface.WaitingQuestion
+		return waiting != nil && waiting.ID == questionID && waiting.Kind == surface.WaitingQuestion
 	})
 	queued := h.receipt(map[string]any{"action": "send", "sessionId": session.ID, "message": "after you answer", "busyDelivery": "queue"})
 	steer := h.receipt(map[string]any{"action": "steer", "sessionId": session.ID, "message": "steer after the answer"})
@@ -251,11 +286,11 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	if got := pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)
 	}
-	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != "toolu_question" || push["message"] != "Claude Code agent is waiting on you" {
+	if push := pushes.first("session.waiting"); push["sessionId"] != session.ID || push["turnId"] != questionID || push["message"] != "Claude Code agent is waiting on you" {
 		t.Fatalf("push=%v", push)
 	}
 
-	appendClaudeRecords(t, transcript, `{"type":"user","uuid":"answer","timestamp":"2026-10-18T20:18:07Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_question","content":"main"}]}}`)
+	q.answer(t)
 	eventually(t, "the held steer to reach the answered turn", func() bool {
 		_, steered := claude.delivered()
 		return len(steered) == 1
@@ -266,13 +301,14 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 	}
 
 	appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`)
+	q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
 	eventually(t, "the queued message after the turn ends", func() bool {
 		sent, _ := claude.delivered()
 		return len(sent) == 1
 	})
 	eventually(t, "both held messages to finish", func() bool {
 		for _, id := range []int64{queuedID, steerID} {
-			if item, err := store.QueueItem(id); err != nil || item.Status != "delivered" {
+			if item, err := store.QueueItem(id, nil); err != nil || item.Status != "delivered" {
 				return false
 			}
 		}
@@ -352,9 +388,8 @@ func awaitThreadReads(t *testing.T, lifecycle *codextest.Lifecycle, n int) {
 
 func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 	q := newClaudeQuestion(t)
-	since := time.Date(2026, 10, 18, 8, 14, 41, 0, time.UTC)
-	if _, announce, err := q.store.RecordWaiting(q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_question", Since: since}, since); err != nil || !announce {
-		t.Fatalf("announce=%v err=%v", announce, err)
+	if record, err := q.store.RecordWaiting(q.session.ID, &surface.Waiting{Kind: surface.WaitingQuestion, ID: questionID, Since: questionAsked}, questionAsked); err != nil || !record.Announce {
+		t.Fatalf("record=%+v err=%v", record, err)
 	}
 	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{}); err != nil {
 		t.Fatal(err)
@@ -371,30 +406,82 @@ func TestQuestionRecordedButNotAnnouncedIsAnnouncedAfterRestart(t *testing.T) {
 	}
 }
 
-func TestStaleCatalogListingCannotReviveAnAnsweredQuestion(t *testing.T) {
+func TestQuestionAnnouncedAgainAfterAStopMidDeliveryCollapsesIntoOne(t *testing.T) {
 	q := newClaudeQuestion(t)
-	d := New(q.store, []surface.Surface{q.claude})
-	ctx := context.Background()
-	asked := q.session
-	if observation, err := d.observeTurn(ctx, q.claude, &asked); err != nil || observation.WaitingOn == nil {
-		t.Fatalf("observation=%+v err=%v", observation, err)
+	stall := make(chan struct{})
+	q.pushes.mu.Lock()
+	q.pushes.stall = stall
+	q.pushes.mu.Unlock()
+	t.Cleanup(func() { close(stall) })
+	_, stop := runDaemon(t, q.store, q.claude)
+	eventually(t, "the first announcement", func() bool { return q.pushes.count("session.waiting") == 1 })
+	stop()
+	if _, announced, err := q.store.WaitingState(q.session.ID); err != nil || announced {
+		t.Fatalf("announced=%v err=%v before the delivery finished", announced, err)
 	}
+	q.pushes.mu.Lock()
+	q.pushes.stall = nil
+	q.pushes.mu.Unlock()
+	runDaemon(t, q.store, q.claude)
+	eventually(t, "the repeated announcement", func() bool { return q.pushes.count("session.waiting") == 2 })
+	key := waitingNotificationKey(q.session.ID, questionID)
+	for _, push := range q.pushes.all("session.waiting") {
+		if push["collapseId"] != key || push["turnId"] != questionID {
+			t.Fatalf("push=%v, want collapse id %s so the device shows one notification", push, key)
+		}
+	}
+	if other := waitingNotificationKey(q.session.ID, questionID+"-next"); other == key || len(key) > 64 {
+		t.Fatalf("key=%q next question=%q", key, other)
+	}
+}
+
+func TestCatalogRowSelectedBeforeTheAnswerCannotReviveTheQuestion(t *testing.T) {
+	q := newClaudeQuestion(t)
+	h, _ := runDaemon(t, q.store, q.claude)
+	eventually(t, "the session to show it is waiting on the user", func() bool { return h.sessionWaiting(q.session.ID) != nil })
 	eventually(t, "the question to be announced", func() bool {
 		_, announced, err := q.store.WaitingState(q.session.ID)
 		return err == nil && announced
 	})
-	stale := q.session
-	stale.WaitingOn = &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_question"}
-	appendClaudeRecords(t, q.transcript, `{"type":"user","uuid":"answer","timestamp":"2026-10-18T20:18:07Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_question","content":"main"}]}}`)
-	answered := q.session
-	if observation, err := d.observeTurn(ctx, q.claude, &answered); err != nil || observation.WaitingOn != nil {
-		t.Fatalf("observation=%+v err=%v", observation, err)
+	if _, err := q.store.QueueMessageWithOptions(q.session.ID, "after you answer", "", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
 	}
-	if waiting := d.catalogWaiting(ctx, q.claude, stale); waiting != nil {
-		t.Fatalf("a listing taken before the answer brought the question back: %+v", waiting)
+	q.claude.awaitObservations(t, 1)
+	// A catalog publication that has selected the question holds the
+	// session's waiting lock until its row commits.
+	unlock := h.daemon.lockWaiting(q.session.ID)
+	if waiting := h.daemon.catalogWaiting(context.Background(), q.claude, q.session); waiting == nil || waiting.ID != questionID {
+		unlock()
+		t.Fatalf("selected=%+v", waiting)
 	}
-	if waiting, _, err := q.store.WaitingState(q.session.ID); err != nil || waiting != nil {
-		t.Fatalf("recorded=%+v err=%v", waiting, err)
+	q.answer(t)
+	before := q.claude.observations()
+	time.Sleep(50 * time.Millisecond)
+	if after := q.claude.observations(); after != before {
+		unlock()
+		t.Fatalf("the turn was observed %d times while a catalog row was being published", after-before)
+	}
+	unlock()
+	cleared := func() bool {
+		recorded, _, err := q.store.WaitingState(q.session.ID)
+		if err != nil || recorded != nil || h.sessionWaiting(q.session.ID) != nil {
+			return false
+		}
+		snapshot, err := q.store.CatalogSnapshot()
+		if err != nil {
+			return false
+		}
+		for _, row := range snapshot.Sessions {
+			if row.Session.ID == q.session.ID {
+				return row.Session.WaitingOn == nil
+			}
+		}
+		return false
+	}
+	eventually(t, "the answer to clear the record, the catalog and the API", cleared)
+	q.claude.awaitObservations(t, 3)
+	if !cleared() {
+		t.Fatal("a later pass brought the answered question back")
 	}
 	if got := q.pushes.count("session.waiting"); got != 1 {
 		t.Fatalf("one question notified %d times", got)

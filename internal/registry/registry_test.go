@@ -144,7 +144,7 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 		}
 		now = now.Add(6 * time.Minute)
 	}
-	item, err := r.QueueItem(1)
+	item, err := r.QueueItem(1, nil)
 	if err != nil || item.Status != "pending" || item.Attempts != 0 {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -158,7 +158,7 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 		}
 		now = now.Add(6 * time.Minute)
 	}
-	if item, err := r.QueueItem(1); err != nil || item.Status != "pending" {
+	if item, err := r.QueueItem(1, nil); err != nil || item.Status != "pending" {
 		t.Fatalf("real errors after deferrals spent the budget early: item=%+v err=%v", item, err)
 	}
 }
@@ -262,7 +262,7 @@ func TestRegisterSessionMergesResumedClaudeIdentity(t *testing.T) {
 	if err != nil || len(routes) != 1 || routes[0].ToSession != resumed.ID {
 		t.Fatalf("routes=%+v err=%v", routes, err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].SessionID != resumed.ID {
 		t.Fatalf("queue=%+v err=%v", rows, err)
 	}
@@ -590,7 +590,7 @@ func TestDeadDeliveryMovesToHistoryAfterReviewWindow(t *testing.T) {
 	if err := r.DeadLetterUnknown(item.ID, errors.New("daemon stopped")); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].Historical {
 		t.Fatalf("fresh dead rows=%+v err=%v", rows, err)
 	}
@@ -599,11 +599,11 @@ func TestDeadDeliveryMovesToHistoryAfterReviewWindow(t *testing.T) {
 	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = r.ListQueue(false)
+	rows, err = r.ListQueue(false, nil)
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
-	rows, err = r.ListQueue(true)
+	rows, err = r.ListQueue(true, nil)
 	if err != nil || len(rows) != 1 || !rows[0].Historical || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("history rows=%+v err=%v", rows, err)
 	}
@@ -629,7 +629,7 @@ func TestInflightRemainsCurrentUntilFinalized(t *testing.T) {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 	r.now = func() time.Time { return now.Add(2 * deadReviewWindow) }
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].Status != "inflight" || rows[0].Historical {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
@@ -651,7 +651,7 @@ func TestQueueRetainsTransportAcceptanceEvidence(t *testing.T) {
 	if err := r.AckMessageWithEvidence(item.ID, "s", 0, surface.EvidenceTransportAccepted, ""); err != nil {
 		t.Fatal(err)
 	}
-	row, err := r.QueueItem(item.ID)
+	row, err := r.QueueItem(item.ID, nil)
 	if err != nil || row.Evidence != surface.EvidenceTransportAccepted {
 		t.Fatalf("row=%+v err=%v", row, err)
 	}
@@ -722,7 +722,7 @@ func TestRecoverInflightAndRuntimeState(t *testing.T) {
 	if n, err := r.RecoverInflight(now.Add(time.Second)); err != nil || n != 1 {
 		t.Fatalf("recovered=%d err=%v", n, err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
@@ -811,7 +811,7 @@ func TestQueueDeadLetterAndExplicitRetry(t *testing.T) {
 		}
 		now = now.Add(time.Minute)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || rows[0].Attempts != 3 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
@@ -891,7 +891,7 @@ func TestAttentionItemResolvesWhenDeadLetterIsCanceled(t *testing.T) {
 	if err != nil || len(all) != 1 || all[0].Resolution != "canceled" || all[0].ResolvedAt == "" {
 		t.Fatalf("all=%+v err=%v", all, err)
 	}
-	if row, err := r.QueueItem(item.ID); err != nil || row.Status != "canceled" {
+	if row, err := r.QueueItem(item.ID, nil); err != nil || row.Status != "canceled" {
 		t.Fatalf("canceled row=%+v err=%v", row, err)
 	}
 }
@@ -949,7 +949,7 @@ func TestQueueSnapshotsAndBackgroundScanKeepOldPendingDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	beforeRow, err := r.QueueItem(id)
+	beforeRow, err := r.QueueItem(id, nil)
 	if err != nil || beforeRow.Status != "pending" {
 		t.Fatalf("before row=%+v err=%v", beforeRow, err)
 	}
@@ -957,13 +957,13 @@ func TestQueueSnapshotsAndBackgroundScanKeepOldPendingDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows, err := r.ListQueue(false); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
+	if rows, err := r.ListQueue(false, nil); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
 		t.Fatalf("old current snapshot=%+v err=%v", rows, err)
 	}
 	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
 		t.Fatalf("attention snapshot=%+v err=%v", items, err)
 	}
-	afterRow, err := r.QueueItem(id)
+	afterRow, err := r.QueueItem(id, nil)
 	if err != nil || afterRow.Status != "pending" {
 		t.Fatalf("after row=%+v err=%v", afterRow, err)
 	}
@@ -978,7 +978,7 @@ func TestQueueSnapshotsAndBackgroundScanKeepOldPendingDelivery(t *testing.T) {
 	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
 		t.Fatal(err)
 	}
-	scanned, err := r.QueueItem(id)
+	scanned, err := r.QueueItem(id, nil)
 	if err != nil || scanned.Status != "pending" {
 		t.Fatalf("background scan row=%+v err=%v", scanned, err)
 	}
@@ -994,14 +994,14 @@ func TestQueueCancelRemovesPendingDelivery(t *testing.T) {
 	if err := r.QueueMessage("s", "cancel me"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 	if err := r.CancelMessage(rows[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if visible, err := r.ListQueue(false); err != nil || len(visible) != 0 {
+	if visible, err := r.ListQueue(false, nil); err != nil || len(visible) != 0 {
 		t.Fatalf("visible=%+v err=%v", visible, err)
 	}
 	if item, err := r.ClaimNextMessage("s", time.Now()); err != nil || item != nil {
@@ -1044,7 +1044,7 @@ func TestSteerQueueNormalizesOptionsAndExcludesThemFromSteerClaims(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := r.QueueItem(id)
+	item, err := r.QueueItem(id, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1196,7 +1196,7 @@ func TestClaimDeadLettersStaleInflightWithoutAutomaticRedelivery(t *testing.T) {
 	if err != nil || recovered != nil {
 		t.Fatalf("recovered=%+v err=%v", recovered, err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].Status != "dead" || rows[0].Evidence != surface.EvidenceUnknown {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
@@ -1352,7 +1352,7 @@ func TestRegisterSessionKeepsALiveClaudeProcessSharingItsConversation(t *testing
 	if resolved, err := r.LookupAlias("collab"); err != nil || resolved != original.ID {
 		t.Fatalf("alias=%q err=%v", resolved, err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err := r.ListQueue(false, nil)
 	if err != nil || len(rows) != 1 || rows[0].SessionID != original.ID {
 		t.Fatalf("queue=%+v err=%v", rows, err)
 	}
@@ -1428,77 +1428,118 @@ func TestOpenKeepsLiveClaudeRowsAndAbsorbsExitedOnesIntoALiveRow(t *testing.T) {
 func TestRecordWaitingAnnouncesEachQuestionUntilMarked(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "asking")
-	question := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_one"}
+	question := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "conversation:question:1"}
 	first := time.Date(2026, 10, 18, 8, 14, 41, 0, time.UTC)
-	recorded, announce, err := r.RecordWaiting("asking", question, first)
-	if err != nil || !announce || recorded == nil || !recorded.Since.Equal(first) {
-		t.Fatalf("recorded=%+v announce=%v err=%v", recorded, announce, err)
+	record := func(waiting *surface.Waiting, now time.Time) WaitingRecord {
+		t.Helper()
+		result, err := r.RecordWaiting("asking", waiting, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
 	}
-	if recorded, announce, err = r.RecordWaiting("asking", question, first.Add(time.Hour)); err != nil || !announce || !recorded.Since.Equal(first) {
-		t.Fatalf("an unannounced question must stay due with its first-seen time: %+v announce=%v err=%v", recorded, announce, err)
+	if got := record(question, first); !got.Announce || !got.Changed || got.Waiting == nil || !got.Waiting.Since.Equal(first) {
+		t.Fatalf("new question=%+v", got)
 	}
-	if err := r.MarkWaitingAnnounced("asking", "toolu_other"); err != nil {
+	if got := record(question, first.Add(time.Hour)); !got.Announce || got.Changed || !got.Waiting.Since.Equal(first) {
+		t.Fatalf("an unannounced question must stay due with its first-seen time and unchanged: %+v", got)
+	}
+	if err := r.MarkWaitingAnnounced("asking", "conversation:question:2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, announce, _ = r.RecordWaiting("asking", question, first); !announce {
+	if !record(question, first).Announce {
 		t.Fatal("marking another question announced this one")
 	}
-	if err := r.MarkWaitingAnnounced("asking", "toolu_one"); err != nil {
+	if err := r.MarkWaitingAnnounced("asking", question.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, announce, _ = r.RecordWaiting("asking", question, first); announce {
+	if record(question, first).Announce {
 		t.Fatal("an announced question is due again")
 	}
-	if recorded, announce, err = r.RecordWaiting("asking", nil, first); err != nil || recorded != nil || announce {
-		t.Fatalf("clear: %+v announce=%v err=%v", recorded, announce, err)
+	if got := record(nil, first); got.Waiting != nil || got.Announce || !got.Changed {
+		t.Fatalf("clear=%+v", got)
 	}
-	if _, announce, _ = r.RecordWaiting("asking", question, first); !announce {
+	if got := record(nil, first); got.Changed {
+		t.Fatalf("clearing nothing changed the record: %+v", got)
+	}
+	if !record(question, first).Announce {
 		t.Fatal("the same question asked again after it cleared is not due")
 	}
 }
 
 func TestQueueHoldFollowsTheDrainRules(t *testing.T) {
 	r := openTestRegistry(t)
-	register(t, r, "target")
+	if err := r.RegisterSession(surface.Session{ID: "target", Surface: surface.KindCodex, Transport: "app-server"}); err != nil {
+		t.Fatal(err)
+	}
+	steers := SteerSurfaces{surface.KindCodex: true}
 	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusBusy, ActiveTurnID: "turn-1"}); err != nil {
 		t.Fatal(err)
 	}
-	queued, err := r.QueueMessageWithOptions("target", "after the turn", "", surface.SendOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	steer, err := r.QueueMessageWithOptions("target", "into the turn", "", surface.SendOptions{BusyDelivery: "steer"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	held := func(id int64) QueueHold {
+	queue := func(message, busyDelivery string) int64 {
 		t.Helper()
-		item, err := r.QueueItem(id)
+		id, err := r.QueueMessageWithOptions("target", message, "", surface.SendOptions{BusyDelivery: busyDelivery})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	queued, steer, nextSteer := queue("after the turn", ""), queue("into the turn", "steer"), queue("also into the turn", "steer")
+	held := func(id int64, steer SteerSurfaces) QueueHold {
+		t.Helper()
+		item, err := r.QueueItem(id, steer)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return item.HeldBy
 	}
-	if held(queued) != QueueHeldBusy || held(steer) != "" {
-		t.Fatalf("busy turn: queued=%q steer=%q, want busy and nothing", held(queued), held(steer))
+	// Empty must mean the next claim of that kind takes exactly that row.
+	claimable := func(claim func(string, time.Time) (*QueuedMessage, error), id int64) {
+		t.Helper()
+		item, err := claim("target", time.Now())
+		if err != nil || item == nil || item.ID != id {
+			t.Fatalf("claim=%+v err=%v, want %d", item, err, id)
+		}
 	}
-	if _, _, err := r.RecordWaiting("target", &surface.Waiting{Kind: surface.WaitingApproval, ID: "thread:approval"}, time.Now()); err != nil {
+	if held(queued, steers) != QueueHeldBusy || held(steer, steers) != "" || held(nextSteer, steers) != QueueHeldBehind {
+		t.Fatalf("busy turn: queued=%q steer=%q next=%q, want busy, nothing, behind", held(queued, steers), held(steer, steers), held(nextSteer, steers))
+	}
+	if held(steer, nil) != QueueHeldBusy || held(steer, SteerSurfaces{surface.KindClaude: true}) != QueueHeldBusy {
+		t.Fatalf("a target that cannot steer reported steer=%q", held(steer, nil))
+	}
+	if _, err := r.RecordWaiting("target", &surface.Waiting{Kind: surface.WaitingApproval, ID: "thread:approval"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if held(queued) != QueueHeldWaiting || held(steer) != QueueHeldWaiting {
-		t.Fatalf("waiting turn: queued=%q steer=%q", held(queued), held(steer))
+	if held(queued, steers) != QueueHeldWaiting || held(steer, steers) != QueueHeldWaiting {
+		t.Fatalf("waiting turn: queued=%q steer=%q", held(queued, steers), held(steer, steers))
 	}
-	if _, _, err := r.RecordWaiting("target", nil, time.Now()); err != nil {
+	if _, err := r.RecordWaiting("target", nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	item, err := r.ClaimNextSteerMessage("target", time.Now())
-	if err != nil || item == nil || item.ID != steer {
-		t.Fatalf("claim=%+v err=%v", item, err)
-	}
+	claimable(r.ClaimNextSteerMessage, steer)
 	if err := r.DeferMessage(steer, errors.New("target refused the steer"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if held(steer) != QueueHeldRetrying {
-		t.Fatalf("deferred steer=%q, want retrying", held(steer))
+	if held(steer, steers) != QueueHeldRetrying || held(nextSteer, steers) != QueueHeldBehind {
+		t.Fatalf("deferred steer=%q next=%q, want retrying and behind", held(steer, steers), held(nextSteer, steers))
+	}
+	if item, err := r.ClaimNextSteerMessage("target", time.Now()); err != nil || item != nil {
+		t.Fatalf("a steer behind a deferred one was claimable: %+v err=%v", item, err)
+	}
+	if err := r.SaveRuntimeState("target", surface.TurnObservation{Status: surface.StatusIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if held(queued, steers) != "" || held(steer, steers) != QueueHeldBehind || held(nextSteer, steers) != QueueHeldBehind {
+		t.Fatalf("idle: queued=%q steer=%q next=%q, want nothing then behind", held(queued, steers), held(steer, steers), held(nextSteer, steers))
+	}
+	claimable(r.ClaimNextMessage, queued)
+	if err := r.DeferMessage(queued, errors.New("target refused the message"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if held(queued, steers) != QueueHeldRetrying || held(steer, steers) != QueueHeldBehind {
+		t.Fatalf("deferred first message=%q second=%q, want retrying and behind", held(queued, steers), held(steer, steers))
+	}
+	if item, err := r.ClaimNextMessage("target", time.Now()); err != nil || item != nil {
+		t.Fatalf("a message behind a deferred one was claimable: %+v err=%v", item, err)
 	}
 }

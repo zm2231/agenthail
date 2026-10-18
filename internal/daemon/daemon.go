@@ -37,6 +37,7 @@ type Daemon struct {
 	waitingLocks      sync.Map
 	announceMu        sync.Mutex
 	announcing        map[string]string
+	catalogNudge      chan struct{}
 	queueWorkers      sync.WaitGroup
 	events            *eventHub
 	catalog           *catalogHub
@@ -94,6 +95,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sourceHolds:       map[string]map[string]func(){},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
+		catalogNudge:      make(chan struct{}, 1),
 	}
 	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
 	if err := reg.EnsureCatalogState(); err != nil {
@@ -233,6 +235,8 @@ func (d *Daemon) runCatalog(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-discoveryTicker.C:
+			d.discoverCatalog(ctx)
+		case <-d.catalogNudge:
 			d.discoverCatalog(ctx)
 		case <-statusTicker.C:
 			d.refreshCatalogStatus(ctx)

@@ -241,6 +241,7 @@ type runningDaemon struct {
 	agent  *scriptedAgent
 	server *httptest.Server
 	store  *registry.Registry
+	daemon *Daemon
 }
 
 func startRunningDaemon(t *testing.T, agent *scriptedAgent) *runningDaemon {

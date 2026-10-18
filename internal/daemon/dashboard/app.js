@@ -661,6 +661,7 @@ function queueReason(item) {
       offline: "Held: this agent is offline",
       unknown: "Held: this agent's state is unknown",
       retrying: "Held: waiting to retry",
+      behind: "Held: behind an earlier message",
     }[item.heldBy] || "Delivers on the next scan"
   );
 }

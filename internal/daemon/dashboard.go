@@ -163,6 +163,14 @@ type dashboardQueue struct {
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
 }
 
+func (d *Daemon) steerSurfaces() registry.SteerSurfaces {
+	steer := registry.SteerSurfaces{}
+	for _, adapter := range d.Surfaces {
+		steer[adapter.Name()] = adapter.Capabilities().Steer
+	}
+	return steer
+}
+
 func (d *Daemon) dashboardQueueItem(item registry.QueueRow) dashboardQueue {
 	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, HeldBy: item.HeldBy, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery}
 }
@@ -349,7 +357,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if !GetNotificationStatus().Enabled {
 			err = fmt.Errorf("desktop notifications are not enabled")
 		} else {
-			err = Notify("Agenthail", "Notifications are working", "")
+			err = Notify("Agenthail", "Notifications are working", "", "")
 		}
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)
@@ -733,7 +741,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for _, alias := range aliases {
 		aliasByID[alias.SessionID] = alias.Name
 	}
-	queue, err := d.Registry.ListQueue(false)
+	queue, err := d.Registry.ListQueue(false, d.steerSurfaces())
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read queue: %w", err)
 	}
@@ -1288,7 +1296,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "queueId is required", http.StatusBadRequest)
 			return
 		}
-		item, itemErr := d.Registry.QueueItem(request.QueueID)
+		item, itemErr := d.Registry.QueueItem(request.QueueID, d.steerSurfaces())
 		if itemErr != nil {
 			http.Error(w, itemErr.Error(), http.StatusBadRequest)
 			return

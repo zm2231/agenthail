@@ -25,7 +25,7 @@ func TestQueueCountAndQueueCountsKeepOldPendingRows(t *testing.T) {
 	if err != nil || counts["session"] != 2 {
 		t.Fatalf("QueueCounts=%v err=%v", counts, err)
 	}
-	row, err := r.QueueItem(old)
+	row, err := r.QueueItem(old, nil)
 	if err != nil || row.Status != "pending" || row.LastError != "" || row.Historical {
 		t.Fatalf("old row changed: row=%+v err=%v", row, err)
 	}
