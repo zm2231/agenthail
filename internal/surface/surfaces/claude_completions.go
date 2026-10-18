@@ -86,23 +86,38 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	return batch, err
 }
 
+const transcriptAnchorBytes = 256
+
 func completionAnchor(path string, offset int64) (string, error) {
-	f, err := os.Open(path)
+	tail, err := transcriptTail(path, offset)
 	if err != nil {
 		return "", err
+	}
+	return anchorOf(tail), nil
+}
+
+func anchorOf(tail []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(tail))
+}
+
+// transcriptTail returns the bytes an anchor at offset covers.
+func transcriptTail(path string, offset int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if offset < 0 || offset > info.Size() {
-		return "", fmt.Errorf("relay transcript was truncated before its saved cursor")
+		return nil, fmt.Errorf("relay transcript was truncated before its saved cursor")
 	}
-	start := max(int64(0), offset-256)
+	start := max(int64(0), offset-transcriptAnchorBytes)
 	data := make([]byte, offset-start)
 	if _, err := io.ReadFull(io.NewSectionReader(f, start, offset-start), data); err != nil {
-		return "", err
+		return nil, err
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+	return data, nil
 }

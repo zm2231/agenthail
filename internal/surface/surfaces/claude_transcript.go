@@ -26,6 +26,7 @@ type claudeTurn struct {
 	StartedAt   time.Time
 	TerminalAt  time.Time
 	Done        bool
+	Closing     bool
 	Interrupted bool
 }
 
@@ -122,7 +123,20 @@ func claudeAssistantModel(line []byte) string {
 	return record.Message.Model
 }
 
+// appendClaudeTurn folds one transcript record into turns. Claude Code writes
+// each content block of an API message as its own record, and every block
+// carries the message's stop_reason, so end_turn on a block only marks the
+// turn as closing. It closes at the first later record that is not another
+// block of the same message, or at turn_duration. An interrupt marker at that
+// point interrupts the turn instead of completing it.
 func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
+	if len(turns) > 0 {
+		turn := &turns[len(turns)-1]
+		if turn.Closing && !claudeRecordContinuesMessage(record.Type, record.Message.ID, turn.MessageID) {
+			turn.Closing = false
+			turn.Done = record.Type != "user" || !isClaudeInterruptMarker(transcriptText(record.Message.Content))
+		}
+	}
 	switch record.Type {
 	case "user":
 		text := transcriptText(record.Message.Content)
@@ -164,18 +178,29 @@ func appendClaudeTurn(turns []claudeTurn, record claudeRecord) []claudeTurn {
 				turn.Assistant += "\n" + text
 			}
 		}
-		turn.Done = record.Message.StopReason == "end_turn"
+		turn.Done = false
+		turn.Closing = record.Message.StopReason == "end_turn"
 		turn.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
-		if turn.Done || turn.Interrupted {
+		if turn.Closing || turn.Interrupted {
 			turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
 		}
 	case "system":
 		if record.Subtype == "turn_duration" && len(turns) > 0 {
-			turns[len(turns)-1].Done = true
-			turns[len(turns)-1].TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+			turn := &turns[len(turns)-1]
+			turn.Closing = false
+			turn.Done = true
+			if turn.TerminalAt.IsZero() {
+				turn.TerminalAt, _ = time.Parse(time.RFC3339Nano, record.Timestamp)
+			}
 		}
 	}
 	return turns
+}
+
+// claudeRecordContinuesMessage reports whether a record is another content
+// block of the API message messageID, which keeps a closing turn open.
+func claudeRecordContinuesMessage(recordType, recordMessageID, messageID string) bool {
+	return recordType == "assistant" && recordMessageID != "" && recordMessageID == messageID
 }
 
 func claudeTerminalInterruption(reason string) bool {
