@@ -39,6 +39,9 @@ LDFLAGS="-s -w -X main.version=$VERSION -X main.revision=$REVISION -X main.built
 if [ -n "${AGENTHAIL_PUSH_RELAY_URL:-}" ]; then
 	LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/daemon.bundledPushRelayURL=$AGENTHAIL_PUSH_RELAY_URL"
 fi
+if [ -n "${AGENTHAIL_UPDATE_RELEASE_URL:-}" ]; then
+	LDFLAGS="$LDFLAGS -X github.com/zm2231/agenthail/internal/cli.latestReleaseURL=$AGENTHAIL_UPDATE_RELEASE_URL"
+fi
 CGO_ENABLED=0 GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" go build -trimpath -ldflags "$LDFLAGS" -o "$STAGE/agenthail" ./cmd/agenthail
 if [ "$GOOS_VALUE" = "darwin" ] && ! command -v codesign >/dev/null 2>&1; then
 	echo "error: macOS release packaging requires codesign" >&2

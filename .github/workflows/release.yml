@@ -175,6 +175,7 @@ jobs:
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
           AGENTHAIL_PUSH_RELAY_URL: ${{ vars.AGENTHAIL_PUSH_RELAY_URL }}
+          AGENTHAIL_UPDATE_RELEASE_URL: https://api.github.com/repos/${{ github.repository }}/releases/latest
           AGENTHAIL_VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           : "${AGENTHAIL_PUSH_RELAY_URL:?missing AGENTHAIL_PUSH_RELAY_URL repository variable}"
