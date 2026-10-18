@@ -108,6 +108,7 @@ func (r *Registry) migrate() error {
 		{"turn_options", `TEXT NOT NULL DEFAULT '{}'`},
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
 		{"dead_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"deferrals", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
@@ -357,6 +358,7 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	source_session_id TEXT NOT NULL DEFAULT '',
 	turn_options TEXT NOT NULL DEFAULT '{}',
 	dead_at_ms INTEGER NOT NULL DEFAULT 0,
+	deferrals INTEGER NOT NULL DEFAULT 0,
 	evidence TEXT NOT NULL DEFAULT '',
 	operation TEXT NOT NULL DEFAULT 'message',
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1730,7 +1732,7 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
 	}
@@ -1988,23 +1990,21 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 	return r.ReconcileAttentionItems(now)
 }
 
+// DeferMessage returns a claim that provably did not reach the target, such as
+// a busy refusal or an unavailable transport. The claim's attempt is given
+// back so only real delivery errors spend the retry budget; deferrals keep
+// their own count for backoff.
 func (r *Registry) DeferMessage(id int64, cause error, now time.Time) error {
-	var attempts int
-	if err := r.db.QueryRow(`SELECT attempts FROM message_queue WHERE id=?`, id).Scan(&attempts); err != nil {
+	var deferrals int
+	if err := r.db.QueryRow(`SELECT deferrals FROM message_queue WHERE id=?`, id).Scan(&deferrals); err != nil {
 		return err
 	}
-	shift := attempts - 1
-	if shift < 0 {
-		shift = 0
-	}
-	if shift > 6 {
-		shift = 6
-	}
+	shift := min(deferrals, 6)
 	message := "delivery did not start"
 	if cause != nil {
 		message = cause.Error()
 	}
-	_, err := r.db.Exec(`UPDATE message_queue SET status='pending',last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), id)
+	_, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), id)
 	if err != nil {
 		return err
 	}

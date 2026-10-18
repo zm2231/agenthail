@@ -145,8 +145,21 @@ func TestDeferMessageNeverDeadLettersPreDeliveryFailures(t *testing.T) {
 		now = now.Add(6 * time.Minute)
 	}
 	item, err := r.QueueItem(1)
-	if err != nil || item.Status != "pending" || item.Attempts != 7 {
+	if err != nil || item.Status != "pending" || item.Attempts != 0 {
 		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	for attempt := 1; attempt < 3; attempt++ {
+		claimed, err := r.ClaimNextMessage("session", now)
+		if err != nil || claimed == nil || claimed.Attempts != attempt {
+			t.Fatalf("attempt=%d claimed=%+v err=%v", attempt, claimed, err)
+		}
+		if err := r.NackMessage(claimed.ID, errors.New("transport closed"), now, 3); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(6 * time.Minute)
+	}
+	if item, err := r.QueueItem(1); err != nil || item.Status != "pending" {
+		t.Fatalf("real errors after deferrals spent the budget early: item=%+v err=%v", item, err)
 	}
 }
 

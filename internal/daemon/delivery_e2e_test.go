@@ -545,13 +545,26 @@ func TestBusyRefusalNeverExhaustsTheQueuedMessage(t *testing.T) {
 	agent.refuseSends("target", true)
 	agent.setStatus("target", surface.StatusIdle)
 	for attempt := 2; attempt <= maxDeliveryAttempts+3; attempt++ {
+		if attempt > 2 {
+			h.makeQueueItemAvailable(id)
+		}
 		eventually(t, fmt.Sprintf("refused attempt %d", attempt), func() bool { return agent.attemptsFor("target") >= attempt })
-		h.makeQueueItemAvailable(id)
 	}
-	if item := h.queueItem(id); item.Status != "pending" || item.Historical || item.Evidence != surface.EvidenceQueued {
+	settle()
+	if item := h.queueItem(id); item.Status != "pending" || item.Historical || item.Evidence != surface.EvidenceQueued || item.Attempts != 0 {
 		t.Fatalf("refused item=%+v", item)
 	}
 	agent.refuseSends("target", false)
+	agent.failSends("target", errors.New("transport closed"))
+	refused := agent.attemptsFor("target")
+	h.makeQueueItemAvailable(id)
+	eventually(t, "one real delivery error", func() bool { return agent.attemptsFor("target") > refused })
+	settle()
+	if item := h.queueItem(id); item.Status != "pending" || item.Attempts != 1 {
+		t.Fatalf("after one real error item=%+v", item)
+	}
+	agent.failSends("target", nil)
+	h.makeQueueItemAvailable(id)
 	eventually(t, "delivery after refusals", func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 {
@@ -623,7 +636,7 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	agent.setStatus("target", surface.StatusIdle)
 	eventually(t, "deferred attempt", func() bool { return agent.attemptsFor("target") >= 2 })
 	settle()
-	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts < 1 || item.LastError == "" {
+	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts != 0 || item.LastError == "" {
 		t.Fatalf("unavailable delivery was not kept pending with its failure recorded: %+v", item)
 	}
 	agent.failSends("target", nil)

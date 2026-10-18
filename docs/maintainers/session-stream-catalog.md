@@ -35,7 +35,7 @@ with the delivery failure/notice state. A direct send's failure also queues
 one notice to its sender; a relay's failure does not, since the relay source
 never sent the message and its reply would be relayed again. Every queue mutation that changes a
 session's pending or in-flight count (enqueue, drain, cancel, retry, dead
-letter, expiry sweep) commits a `session.queue` event with `sessionId` and the
+letter) commits a `session.queue` event with `sessionId` and the
 new `queueCount` in the same transaction, so `catalogSeq` moves with the paging
 membership that reads the live queue and stale page cursors are rejected.
 Clients update the known row's `queueCount` and presence (`current` and

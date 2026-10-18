@@ -78,6 +78,9 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				t.Fatalf("user_version=%d err=%v, want %d", version, err, fixture.wantVersion)
 			}
 			assertMigratedSessionsAndRoutes(t, r)
+			if exists, err := r.columnExists("message_queue", "expires_at_ms"); fixture.stampVersion == 0 && (err != nil || exists) {
+				t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
+			}
 			assertMigratedQueue(t, r, fixture.source)
 			if fixture.check != nil {
 				fixture.check(t, r)
@@ -294,40 +297,31 @@ func assertV11SeedCheckpointMigrated(t *testing.T, r *Registry) {
 }
 
 func TestOpenRetiresQueueExpiry(t *testing.T) {
+	dump, err := os.ReadFile(filepath.Join("testdata", "migrations", "v11.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(t.TempDir(), "registry.db")
-	r, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	register(t, r, "sender", "target")
-	expiredID, deliveryID, err := r.QueueDeliveryWithIntent("target", "old report", "old-report", surface.SendOptions{SourceSessionID: "sender"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pendingID, err := r.QueueMessageWithKey("target", "still waiting", "still-waiting")
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadID, err := r.QueueMessageWithKey("target", "failed earlier", "failed-earlier")
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
-		`ALTER TABLE message_queue ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
-		fmt.Sprintf(`UPDATE message_queue SET status='expired',evidence='expired',last_error='message expired after 1 hour' WHERE id=%d`, expiredID),
-		fmt.Sprintf(`UPDATE delivery_intents SET status='expired',evidence='expired',failure='message expired after 1 hour' WHERE id=%d`, deliveryID),
-		fmt.Sprintf(`UPDATE message_queue SET status='dead',dead_at_ms=0,updated_at='2026-10-18 08:00:00',last_error='delivery failed' WHERE id=%d`, deadID),
-		fmt.Sprintf(`INSERT INTO delivery_history(kind,session_id,queue_id,message,result) VALUES('expired','target',%d,'old report','removed after 1 hour without delivery')`, expiredID),
-		`PRAGMA user_version=13`,
+		string(dump),
+		`INSERT INTO message_queue(id,session_id,message,queued_at,status,evidence,last_error,source_session_id,expires_at_ms,updated_at) VALUES(50,'target','old report','2026-10-18 08:08:00','expired','expired','message expired after 1 hour','sender',1,'2026-10-18 09:08:00')`,
+		`INSERT INTO delivery_intents(id,sender_session_id,target_session_id,message,queue_id,status,evidence,failure) VALUES(50,'sender','target','old report',50,'expired','expired','message expired after 1 hour')`,
+		`INSERT INTO message_queue(id,session_id,message,queued_at,status,last_error,expires_at_ms,updated_at) VALUES(51,'target','failed earlier','2026-10-18 07:00:00','dead','delivery failed',1,'2026-10-18 08:00:00')`,
+		`INSERT INTO delivery_history(kind,session_id,queue_id,message,result) VALUES('expired','target',50,'old report','removed after 1 hour without delivery')`,
 	} {
-		if _, err := r.db.Exec(statement); err != nil {
-			t.Fatalf("%s: %v", statement, err)
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
 		}
 	}
-	if err := r.Close(); err != nil {
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err = Open(path)
+	r, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,19 +329,19 @@ func TestOpenRetiresQueueExpiry(t *testing.T) {
 	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
 		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
 	}
-	if row, err := r.QueueItem(expiredID); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
+	if row, err := r.QueueItem(50); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
 		t.Fatalf("expired row=%+v err=%v", row, err)
 	}
-	if row, err := r.QueueItem(pendingID); err != nil || row.Status != "pending" {
+	if row, err := r.QueueItem(2); err != nil || row.Status != "pending" {
 		t.Fatalf("pending row=%+v err=%v", row, err)
 	}
-	if row, err := r.QueueItem(deadID); err != nil || row.DeadAt != time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC).UnixMilli() {
+	if row, err := r.QueueItem(51); err != nil || row.DeadAt != time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC).UnixMilli() {
 		t.Fatalf("dead row=%+v err=%v", row, err)
 	}
-	if intent, err := r.DeliveryIntent(deliveryID); err != nil || intent.Status != DeliveryIntentFailed || intent.Evidence != surface.EvidenceFailed || intent.Failure != "expired before delivery" {
+	if intent, err := r.DeliveryIntent(50); err != nil || intent.Status != DeliveryIntentFailed || intent.Evidence != surface.EvidenceFailed || intent.Failure != "expired before delivery" {
 		t.Fatalf("intent=%+v err=%v", intent, err)
 	}
-	history, err := r.ListHistory(10, "target")
+	history, err := r.ListHistory(50, "")
 	if err != nil {
 		t.Fatal(err)
 	}
