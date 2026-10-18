@@ -258,12 +258,17 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t 
 		rewritten.WriteString(`{"type":"user","uuid":"v1","message":{"content":"new generation"}}` + "\n")
 	}
 	rewritten.WriteString(`{"type":"user","uuid":"v2","message":{"content":"after the old offset"}}` + "\n")
+	original := transcriptPollInterval
+	transcriptPollInterval = 300 * time.Millisecond
+	t.Cleanup(func() { transcriptPollInterval = original })
 	var mu sync.Mutex
 	done := map[string]int{}
 	closingSeen := make(chan struct{})
+	written := make(chan error, 1)
 	go func() {
 		<-closingSeen
-		os.WriteFile(path, []byte(rewritten.String()), 0600)
+		time.Sleep(100 * time.Millisecond)
+		written <- os.WriteFile(path, []byte(rewritten.String()), 0600)
 	}()
 	var once sync.Once
 	err = NewClaude("", t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
@@ -275,7 +280,10 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t 
 		if event.Kind == "done" {
 			done[event.TurnID]++
 		}
-	}, 400*time.Millisecond)
+	}, 700*time.Millisecond)
+	if writeErr := <-written; writeErr != nil {
+		t.Fatal(writeErr)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if !errors.Is(err, surface.ErrStreamWindow) || len(done) != 0 {

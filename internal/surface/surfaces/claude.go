@@ -895,13 +895,19 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	}
 	for time.Now().Before(deadline) {
 		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
-		if anchor := transcriptAnchor(path, offset); closing.TurnID != "" && (anchor == "" || anchor != closing.Anchor) {
+		// The anchor then rolls forward over the bytes this scan parses, never a later read.
+		tail, tailErr := transcriptTail(path, offset)
+		if closing.TurnID != "" && (tailErr != nil || anchorOf(tail) != closing.Anchor) {
 			closing = surface.ClaudeClosingTurn{}
 		}
 		lineOffset := offset
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			recordOffset := lineOffset
 			lineOffset += int64(len(line))
+			tail = append(tail, line...)
+			if len(tail) > transcriptAnchorBytes {
+				tail = append(tail[:0], tail[len(tail)-transcriptAnchorBytes:]...)
+			}
 			var record map[string]any
 			if json.Unmarshal(line, &record) != nil {
 				return nil
@@ -965,7 +971,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 		offset = next
 		if closing.TurnID != "" {
-			closing.Anchor = transcriptAnchor(path, offset)
+			closing.Anchor = anchorOf(tail)
 		}
 		if uuid == "" {
 			sess.TranscriptOffset = offset
