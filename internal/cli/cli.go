@@ -1401,7 +1401,7 @@ func (a *App) cmdSend(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	if surf.Name() == surface.KindClaude && sess.Transport == "uds" && (wantStream || wantReply) {
+	if delivery.RouteFor(surf, sess, "") == delivery.RoutePeer && (wantStream || wantReply) {
 		return fmt.Errorf("Claude peer message IDs cannot be correlated with transcript turns; use 'last' or native SendMessage replies")
 	}
 

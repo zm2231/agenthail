@@ -96,6 +96,87 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 	}
 }
 
+func TestClaudeSendHumanTurnUsesAuthenticatedBridgeForUDSSession(t *testing.T) {
+	transcript := writeTranscript(t, `
+{"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	var requestBody, requestURL string
+	claude := NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method != http.MethodPost {
+			t.Fatalf("method=%s", method)
+		}
+		requestURL, requestBody = url, body
+		return http.StatusOK, `{}`, nil
+	})
+	session := &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, Transcript: transcript}
+	result, err := claude.SendHumanTurn(context.Background(), session, "Please inspect the failure.")
+	if err != nil || result == nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if !strings.Contains(requestURL, "/v1/code/sessions/cse_bridge/events") {
+		t.Fatalf("url=%q", requestURL)
+	}
+	var envelope struct {
+		Events []struct {
+			Payload struct {
+				Type    string `json:"type"`
+				Session string `json:"session_id"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"payload"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(requestBody), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Events) != 1 || envelope.Events[0].Payload.Type != "user" || envelope.Events[0].Payload.Session != "session_bridge" || envelope.Events[0].Payload.Message.Role != "user" || envelope.Events[0].Payload.Message.Content != "Please inspect the failure." {
+		t.Fatalf("envelope=%s", requestBody)
+	}
+}
+
+func TestClaudeSendHumanTurnRejectsNativeOnlySession(t *testing.T) {
+	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		t.Fatal("human turn attempted a web request without a bridge identity")
+		return 0, "", nil
+	})
+	_, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "native-session", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle}, "hello")
+	if !surface.IsDeliveryUnavailable(err) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
+	transcript := writeTranscript(t, `
+{"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`)
+	var requestURL string
+	claude := NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, _ string, url string, _ map[string]string, _ string, _ string, _ string, _ time.Duration) (int, string, error) {
+		requestURL = url
+		return http.StatusOK, `{}`, nil
+	})
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "remote-control", Status: surface.StatusIdle, Transcript: transcript}, "continue")
+	if err != nil || result == nil || !result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if !strings.Contains(requestURL, "/v1/code/sessions/cse_bridge/events") {
+		t.Fatalf("url=%q", requestURL)
+	}
+}
+
+func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
+	claude := NewClaudeWithRequest("Default", t.TempDir(), func(context.Context, string, string, map[string]string, string, string, string, time.Duration) (int, string, error) {
+		t.Fatal("human turn bypassed the active-turn gate")
+		return 0, "", nil
+	})
+	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
+	result, err := claude.SendHumanTurn(context.Background(), &surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, Transcript: active}, "wait")
+	if err != nil || result == nil || result.Accepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string

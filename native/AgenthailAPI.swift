@@ -118,8 +118,8 @@ final class AgenthailAPI: @unchecked Sendable {
         return data
     }
 
-    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
-        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery)
+    func sendInstruction(action: String, sessionID: String, message: String, turnSettings: TurnSettings = .init(), busyDelivery: String? = nil, author: String? = nil, idempotencyKey: String? = nil) async throws -> ActionReceipt {
+        let body = InstructionRequest(action: action, sessionID: sessionID, message: message, turnSettings: turnSettings, busyDelivery: busyDelivery, author: author)
         return try await requestEncoded("/api/v1/actions", method: "POST", body: body, idempotencyKey: idempotencyKey)
     }
 
@@ -451,8 +451,9 @@ private struct InstructionRequest: Encodable {
     let message: String
     let turnSettings: TurnSettings
     var busyDelivery: String? = nil
+    var author: String? = nil
 
-    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery }
+    enum CodingKeys: String, CodingKey { case action; case sessionID = "sessionId"; case message; case effort; case mode; case busyDelivery; case author }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -460,6 +461,7 @@ private struct InstructionRequest: Encodable {
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(busyDelivery, forKey: .busyDelivery)
+        try container.encodeIfPresent(author, forKey: .author)
         if action != "steer" {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)

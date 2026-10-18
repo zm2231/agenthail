@@ -631,6 +631,10 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		}
 		return c.sendPeer(ctx, sess, message)
 	}
+	return c.postWhenIdle(ctx, sess, message)
+}
+
+func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
 	observation, err := c.Observe(ctx, sess)
 	if err != nil {
 		return nil, err
@@ -639,6 +643,24 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 		return &surface.SendResult{UUID: sess.ID, Accepted: false}, nil
 	}
 	return c.postMessage(ctx, sess, message)
+}
+
+// CanSendHumanTurn reports whether the session has a web bridge identity, the
+// only route that records the message as the user's own turn.
+func (c *Claude) CanSendHumanTurn(sess *surface.Session) bool {
+	return sess != nil && sess.Surface == surface.KindClaude && !nativeClaudeOnly(sess)
+}
+
+// SendHumanTurn submits a message through Claude's authenticated web bridge as
+// a user event, even when the session also has a native peer socket.
+func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if sess == nil {
+		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
+	}
+	if !c.CanSendHumanTurn(sess) {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
+	}
+	return c.postWhenIdle(ctx, sess, message)
 }
 
 func claudeProcessAlive(pid int) bool {

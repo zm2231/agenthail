@@ -115,6 +115,7 @@ func (r *Registry) migrate() error {
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
 		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
+		{"author", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -1170,7 +1171,7 @@ func (r *Registry) enqueueMessage(sessionID, message, deliveryKey string, option
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt, options.BusyDelivery)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt, options.BusyDelivery, options.Author)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -1302,6 +1303,7 @@ type QueuedMessage struct {
 	RelayHops       int
 	Operation       QueueOperation
 	BusyDelivery    string
+	Author          surface.Author
 }
 
 const (
@@ -1810,7 +1812,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 	var status string
 	var availableAt int64
 	var inflightAt int64
-	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery)
+	err = tx.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,attempts,relay_hops,status,available_at_ms,inflight_at_ms,operation,busy_delivery,author FROM message_queue WHERE `+filter, args...).Scan(&item.ID, &item.SessionID, &item.Message, &item.Model, &item.SourceSessionID, &item.TurnOptions, &item.Attempts, &item.RelayHops, &status, &availableAt, &inflightAt, &item.Operation, &item.BusyDelivery, &item.Author)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

@@ -558,7 +558,7 @@ func (s *Service) delegate(ctx context.Context, a Action) error {
 	if target == nil || target.Session == nil || target.Adapter == nil {
 		return errors.New("selected target is no longer available")
 	}
-	if target.Session.Surface == surface.KindClaude && target.Session.Transport == "uds" {
+	if delivery.RouteFor(target.Adapter, target.Session, "") == delivery.RoutePeer {
 		return errors.New("selected Claude peer cannot correlate a voice request to a target turn; use a Claude session with a correlated transcript transport")
 	}
 	if !target.Adapter.Capabilities().Stream {

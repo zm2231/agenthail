@@ -229,6 +229,8 @@ agenthail goal @builder clear
 
 `compact` is a typed control, never a queued message. Claude sessions with a Remote Control identity compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
 
+Messages a person types in the dashboard or the Mac/iPhone app carry `"author": "person"` and reach a Claude session with a Remote Control identity as that person's own user turn, as do composer steers. A `send` action without `author`, and every CLI, relay, channel, voice or agent send to Claude, stays a native peer message whenever the session has a native socket; bridge-only sessions receive every send through Remote Control. Do not set `author: person` on a message an agent wrote.
+
 `send` queues a busy target by default. `--no-queue` requires immediate
 delivery. `--reply` waits for one new completed reply only when delivery is
 immediate. A queued `--reply` returns the durable queue receipt. `--stream`
