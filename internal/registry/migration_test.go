@@ -176,6 +176,30 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if err != nil || !found || state.RelayHops != 0 || state.NotificationArmed {
 		t.Fatalf("runtime=%+v found=%v err=%v", state, found, err)
 	}
+	relayID, err := r.QueueRelayMessageWithOptions("target", "relay after upgrade", "relay:upgrade", 1, surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil || expired == 0 {
+		t.Fatalf("expired=%d err=%v", expired, err)
+	}
+	problems, err := r.ListDeliveryProblems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var relayed *DeliveryIntent
+	for _, problem := range problems {
+		intent, err := r.DeliveryIntent(problem.DeliveryID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if intent.QueueID == relayID {
+			relayed = intent
+		}
+	}
+	if relayed == nil || !relayed.Relayed || relayed.NotificationQueueID != 0 {
+		t.Fatalf("relayed intent=%+v problems=%+v", relayed, problems)
+	}
 }
 
 func assertLegacyStatusNotNormalized(t *testing.T, r *Registry) {

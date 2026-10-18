@@ -31,7 +31,9 @@ idle transition from its local status files within about a second, between
 discovery passes (see `catalog-bounded-freshness.md`). A proven delivery problem is one idempotent
 `delivery.problem` catalog event with `deliveryId`, target and source session
 IDs, bounded message or body reference, reason and timestamp; it is committed
-with the delivery failure/notice state. Every queue mutation that changes a
+with the delivery failure/notice state. A direct send's failure also queues
+one notice to its sender; a relay's failure does not, since the relay source
+never sent the message and its reply would be relayed again. Every queue mutation that changes a
 session's pending or in-flight count (enqueue, drain, cancel, retry, dead
 letter, expiry sweep) commits a `session.queue` event with `sessionId` and the
 new `queueCount` in the same transaction, so `catalogSeq` moves with the paging

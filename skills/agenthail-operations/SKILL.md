@@ -259,7 +259,10 @@ self-routes and cycles, remember delivered completion IDs across restarts, and
 require the daemon. `relay list` derives per-route firing evidence from that
 delivery ledger, reporting each rule's fire count and last-fired timestamp in
 both text and `--json` output. `--once` deactivates the rule after its first
-matching completion while retaining that firing evidence.
+matching completion while retaining that firing evidence. A relay that cannot be
+delivered or expires is reported as a delivery problem to the human; the source
+agent is not sent a failure notice, because its reply to that notice would be
+relayed again.
 
 Human completion notifications:
 
