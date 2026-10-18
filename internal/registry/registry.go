@@ -639,6 +639,12 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 			return err
 		}
 		for _, duplicate := range duplicates {
+			if overlap, err := relaySourcesOverlapTx(tx, duplicate, s.ID); err != nil || overlap {
+				if err != nil {
+					return err
+				}
+				continue
+			}
 			if err := mergeSessionTx(tx, duplicate, s.ID); err != nil {
 				return err
 			}
@@ -713,7 +719,11 @@ func (r *Registry) mergeDuplicateClaudeSessions() error {
 			return err
 		}
 		for _, duplicate := range exited {
-			if err := mergeSessionTx(tx, duplicate, survivor); err != nil {
+			overlap, err := relaySourcesOverlapTx(tx, duplicate, survivor)
+			if err == nil && !overlap {
+				err = mergeSessionTx(tx, duplicate, survivor)
+			}
+			if err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -793,14 +803,12 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,? FROM channel_members WHERE session_id=?`, currentID, oldID); err != nil {
 		return err
 	}
-	if err := rebaseMergedRelayRoutesTx(tx, oldID, currentID); err != nil {
-		return err
-	}
 	statements := []struct {
 		query string
 		args  []any
 	}{
 		{`DELETE FROM channel_members WHERE session_id=?`, []any{oldID}},
+		{`DELETE FROM relay_events WHERE source_session_id=? AND EXISTS(SELECT 1 FROM relay_sources WHERE session_id=?)`, []any{oldID, currentID}},
 		{`INSERT INTO relay_sources(session_id,cursor) SELECT ?,cursor FROM relay_sources WHERE session_id=? ON CONFLICT(session_id) DO NOTHING`, []any{currentID, oldID}},
 		{`UPDATE OR IGNORE relay_events SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
@@ -834,27 +842,15 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 	return err
 }
 
-// rebaseMergedRelayRoutesTx moves the old row's active relay routes onto the
-// survivor's completion log when the survivor already captures the same
-// transcript. Both logs follow transcript order, so each route resumes after
-// the last completion it consumed, found by completion identity. The old log
-// is then dropped; interleaving two logs would put events out of order and
-// expose the old row's history to the survivor's own routes.
-func rebaseMergedRelayRoutesTx(tx *sql.Tx, oldID, currentID string) error {
-	var survivorEvents bool
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM relay_events WHERE source_session_id=?)`, currentID).Scan(&survivorEvents); err != nil || !survivorEvents {
-		return err
-	}
-	if _, err := tx.Exec(`UPDATE routes SET event_cursor=COALESCE(
-			(SELECT MAX(s.id) FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id<=routes.event_cursor),
-			(SELECT MIN(s.id)-1 FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id>routes.event_cursor),
-			(SELECT CASE WHEN MAX(s.id)<(SELECT MIN(o.id) FROM relay_events o WHERE o.source_session_id=?2) THEN MAX(s.id) ELSE MIN(s.id)-1 END FROM relay_events s WHERE s.source_session_id=?1 AND EXISTS(SELECT 1 FROM relay_events o WHERE o.source_session_id=?2)),
-			(SELECT COALESCE(MAX(s.id),0) FROM relay_events s WHERE s.source_session_id=?1 AND s.captured_at<=routes.created_at))
-		WHERE from_session=?2 AND active=1`, currentID, oldID); err != nil {
-		return err
-	}
-	_, err := tx.Exec(`DELETE FROM relay_events WHERE source_session_id=?`, oldID)
-	return err
+// relaySourcesOverlapTx reports whether merging oldID into currentID would
+// join two completion logs of one transcript while oldID still feeds an
+// active relay. Their readers advance independently, so neither log can
+// express the other's route boundaries; the exited row stays until its
+// relays are spent or removed, and its own reader keeps them exact.
+func relaySourcesOverlapTx(tx *sql.Tx, oldID, currentID string) (bool, error) {
+	var overlap bool
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM relay_sources WHERE session_id=?) AND EXISTS(SELECT 1 FROM routes WHERE from_session=? AND active=1)`, currentID, oldID).Scan(&overlap)
+	return overlap, err
 }
 
 // removeMergedCatalogRowTx tells catalog subscribers that a merged session's

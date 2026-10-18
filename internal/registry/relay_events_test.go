@@ -374,9 +374,6 @@ func pendingCompletions(t *testing.T, r *Registry) map[int64]string {
 	}
 	pending := map[int64]string{}
 	for _, route := range routes {
-		if route.FromSession != "survivor" {
-			t.Fatalf("route was not rebound: %+v", route)
-		}
 		events, err := r.PendingRelayEvents(route)
 		if err != nil {
 			t.Fatal(err)
@@ -385,45 +382,58 @@ func pendingCompletions(t *testing.T, r *Registry) map[int64]string {
 		for _, event := range events {
 			ids = append(ids, event.CompletionID)
 		}
-		pending[route.ID] = strings.Join(ids, ",")
+		pending[route.ID] = route.FromSession + ":" + strings.Join(ids, ",")
 	}
 	return pending
 }
 
-func TestClaudeMergeRebasesEachRouteOntoTheSurvivorLog(t *testing.T) {
+func TestClaudeMergeWaitsWhileBothRowsFeedRelays(t *testing.T) {
 	r, path, survivor := overlappingClaudeRows(t)
-	blocked, err := r.AddRoute("old", "sink", ".*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "old-1", Events: []surface.Completion{{ID: "consumed", Text: "consumed"}}}); err != nil {
-		t.Fatal(err)
-	}
-	goal, err := r.AddRelayRoute("old", "target", ".*", false, HandoffGoalCompleted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CaptureRelayCompletions("survivor", "", surface.CompletionBatch{Cursor: "survivor-1", Events: []surface.Completion{{ID: "shared", Text: "shared"}}}); err != nil {
-		t.Fatal(err)
-	}
 	own, err := r.AddRoute("survivor", "observer", ".*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CaptureRelayCompletions("old", "old-1", surface.CompletionBatch{Cursor: "old-2", Events: []surface.Completion{{ID: "shared", Text: "shared"}}}); err != nil {
+	if err := r.CaptureRelayCompletions("survivor", "", surface.CompletionBatch{Cursor: "survivor-1", Events: []surface.Completion{{ID: "A", Text: "A"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "old-1", Events: []surface.Completion{{ID: "A", Text: "A"}, {ID: "X", Text: "X"}}}); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := r.AddRouteWithOptions("old", "target", ".*", true)
+	if err != nil {
 		t.Fatal(err)
 	}
 	r = mergeAndReopen(t, r, path, survivor)
-	want := map[int64]string{blocked: "shared", goal: "shared", own: ""}
+	want := map[int64]string{own: "survivor:A", fresh: "old:"}
 	if got := pendingCompletions(t, r); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("pending=%v want %v", got, want)
 	}
-	if err := r.CaptureRelayCompletions("survivor", "survivor-1", surface.CompletionBatch{Cursor: "survivor-2", Events: []surface.Completion{{ID: "late", Text: "late"}}}); err != nil {
+	if err := r.CaptureRelayCompletions("survivor", "survivor-1", surface.CompletionBatch{Cursor: "survivor-2", Events: []surface.Completion{{ID: "X", Text: "X"}, {ID: "Y", Text: "Y"}}}); err != nil {
 		t.Fatal(err)
 	}
-	want = map[int64]string{blocked: "shared,late", goal: "shared,late", own: "late"}
+	if err := r.CaptureRelayCompletions("old", "old-1", surface.CompletionBatch{Cursor: "old-2", Events: []surface.Completion{{ID: "Y", Text: "Y"}}}); err != nil {
+		t.Fatal(err)
+	}
+	want = map[int64]string{own: "survivor:A,X,Y", fresh: "old:Y"}
 	if got := pendingCompletions(t, r); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("pending=%v want %v", got, want)
+	}
+	routes, _ := r.ListRoutes()
+	events, _ := r.PendingRelayEvents(routes[1])
+	if _, err := r.ConsumeRelay(routes[1], events[0], "Y", "queue", ""); err != nil {
+		t.Fatal(err)
+	}
+	r = mergeAndReopen(t, r, path, survivor)
+	if _, err := r.Session("old"); err == nil {
+		t.Fatal("exited row was not merged once its relays were spent")
+	}
+	want = map[int64]string{own: "survivor:A,X,Y", fresh: "survivor:"}
+	if got := pendingCompletions(t, r); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pending=%v want %v", got, want)
+	}
+	routes, _ = r.ListRoutes()
+	if routes[1].Active || routes[1].FireCount != 1 || r.QueueCount("target") != 1 {
+		t.Fatalf("spent one-shot=%+v queued=%d", routes[1], r.QueueCount("target"))
 	}
 }
 
