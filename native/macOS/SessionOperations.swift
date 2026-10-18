@@ -36,6 +36,7 @@ struct ActionScope: Hashable {
     let family: String
 
     static func fork(_ sessionID: String) -> ActionScope { ActionScope(sessionID: sessionID, family: "session-fork") }
+    static let creation = ActionScope(sessionID: "", family: "session-create")
 }
 
 private struct SessionOperationResponse<Result: Decodable>: Decodable {
@@ -70,8 +71,7 @@ final class ActionRetryKeys {
         let adding = request.nativeQueue?.queueAction == .add
         if adding { request.nativeQueue?.clientUserMessageId = nil }
         let identity = try encoder.encode(request)
-        let key = pending[identity]?.key ?? UUID().uuidString
-        pending[identity] = Pending(key: key, scope: request.scope)
+        let key = key(for: identity, scope: request.scope)
         if adding { request.nativeQueue?.clientUserMessageId = key }
         let response: SessionOperationResponse<Result>
         do {
@@ -94,6 +94,12 @@ final class ActionRetryKeys {
             throw AgenthailAPIError.invalidResponse
         }
         throw AgenthailAPIError.outcomeUnknown("Agenthail is still finishing this request.")
+    }
+
+    func key(for identity: Data, scope: ActionScope) -> String {
+        let key = pending[identity]?.key ?? UUID().uuidString
+        pending[identity] = Pending(key: key, scope: scope)
+        return key
     }
 
     func abandon(_ scope: ActionScope) {

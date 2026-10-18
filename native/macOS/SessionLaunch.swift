@@ -4,30 +4,23 @@ enum SessionLaunchOutcome: Equatable {
     case opened
     case submitted(String)
     case starting(String)
+    case unconfirmed(String)
     case halted(String)
     case uncertain(String)
     case failed(String)
 
     var keepsRetryKey: Bool {
         switch self {
-        case .starting, .halted, .uncertain: return true
+        case .starting, .unconfirmed, .halted, .uncertain: return true
         case .opened, .submitted, .failed: return false
         }
     }
-}
 
-struct SessionLaunchKey {
-    private var pending: (body: Data, key: String)?
-
-    mutating func key(for body: Data) -> String {
-        if let pending, pending.body == body { return pending.key }
-        let key = UUID().uuidString
-        pending = (body, key)
-        return key
-    }
-
-    mutating func record(_ outcome: SessionLaunchOutcome) {
-        if !outcome.keepsRetryKey { pending = nil }
+    var offersStartAgain: Bool {
+        switch self {
+        case .unconfirmed, .halted: return true
+        default: return false
+        }
     }
 }
 
@@ -39,7 +32,7 @@ enum SessionLaunchDecision: Equatable {
     case halted(String)
     case failed(String)
 
-    init(_ receipt: SessionCreationReceipt, agent: String) {
+    init(_ receipt: SessionCreationReceipt, launcher: String?, agent: String) {
         if receipt.unknown == true {
             self = .unconfirmed(receipt.id)
             return
@@ -60,7 +53,7 @@ enum SessionLaunchDecision: Equatable {
             self = .starting
             return
         }
-        let target = receipt.launcher ?? agent
+        let target = receipt.launcher ?? launcher ?? agent
         let note = "Submitted to \(target). It appears in the sidebar once it starts."
         self = .submitted([note, receipt.warning].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"))
     }
@@ -68,6 +61,7 @@ enum SessionLaunchDecision: Equatable {
 
 struct SessionLaunchForm: Equatable {
     var agent = "claude"
+    var launcher: String?
     var folder = ""
     var model = ""
     var effort = ""
@@ -75,6 +69,7 @@ struct SessionLaunchForm: Equatable {
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
+    var setsEffort: Bool { listsModels && launcher == nil }
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
     var isComplete: Bool { !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) }
@@ -90,14 +85,19 @@ struct SessionLaunchForm: Equatable {
         effort = ""
     }
 
+    mutating func selectLauncher(_ next: String?) {
+        launcher = next
+        if next != nil { effort = "" }
+    }
+
     var cwd: String { usesFolder ? folder : "" }
     var modelID: String { listsModels ? model : "" }
 
     func creationBody() throws -> Data {
-        let effort = listsModels ? effort : ""
+        let effort = setsEffort ? effort : ""
         let turnSettings = agent == "codex" && !effort.isEmpty ? TurnSettings(effort: effort) : TurnSettings()
         let claude = agent == "claude" ? ClaudeCreationSettings(effort: effort) : ClaudeCreationSettings()
-        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude)
+        return try AgenthailAPI.creationBody(surface: agent, message: trimmedMessage, cwd: cwd, model: modelID, turnSettings: turnSettings, claude: claude, launcher: launcher)
     }
 
     func efforts(models: [ModelOption]) -> [String] {

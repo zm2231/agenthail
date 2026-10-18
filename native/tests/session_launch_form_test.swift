@@ -33,6 +33,16 @@ struct SessionLaunchFormTest {
         form.effort = "high"
         form.selectModel("other-model")
         check(form.model == "other-model" && form.effort.isEmpty, "changing the model clears effort")
+
+        form.effort = "high"
+        form.selectLauncher("tmux")
+        check(form.launcher == "tmux" && form.effort.isEmpty && !form.setsEffort, "a terminal launcher clears effort and sets none")
+        check(form.model == "other-model", "a terminal launcher keeps the model")
+        form.selectLauncher(nil)
+        check(form.setsEffort, "the default launcher sets effort")
+        form.selectLauncher("tmux")
+        form.switchAgent(to: "claude")
+        check(form.launcher == nil, "switching agents returns to the default launcher")
     }
 
     private static func checkEfforts() {
@@ -69,6 +79,12 @@ struct SessionLaunchFormTest {
 
         let plain = try await send(SessionLaunchForm(agent: "claude", folder: "/work/sample", message: "Review"), api)
         check(Set(plain.keys) == ["action", "surface", "message", "cwd", "model"], "no effort is sent when none is chosen")
+
+        var terminal = SessionLaunchForm(agent: "claude", folder: "/work/sample", model: "sample-model", effort: "high", message: "Review")
+        terminal.selectLauncher("tmux")
+        let terminalBody = try await send(terminal, api)
+        check(terminalBody["launcher"] as? String == "tmux" && terminalBody["model"] as? String == "sample-model", "a terminal launch sends its launcher and model")
+        check(Set(terminalBody.keys) == ["action", "surface", "message", "cwd", "model", "launcher"], "a terminal launch sends no effort")
 
         let notion = try await send(SessionLaunchForm(agent: "notion", folder: "/work/sample", model: "ignored", effort: "high", message: "Outline"), api)
         check(notion["action"] as? String == "notion-create", "Notion uses notion-create")

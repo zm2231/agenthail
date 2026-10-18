@@ -15,6 +15,9 @@ struct SessionLaunchTest {
         let pending = try decide(#"{"ok":true,"launcher":"tmux","location":{"session":"agents","pane":"%1"}}"#)
         check(pending == .submitted("Submitted to tmux. It appears in the sidebar once it starts."), "a pending terminal launch reads as submitted, not as a replay")
 
+        let chosen = try decide(#"{"ok":true,"status":"submitted","accepted":true}"#, launcher: "tmux")
+        check(chosen == .submitted("Submitted to tmux. It appears in the sidebar once it starts."), "an unnamed target falls back to the chosen launcher")
+
         let fallback = try decide(#"{"ok":true,"status":"submitted","accepted":true}"#)
         check(fallback == .submitted("Submitted to claude. It appears in the sidebar once it starts."), "an unnamed target falls back to the agent")
 
@@ -40,9 +43,9 @@ struct SessionLaunchTest {
         check(failed == .failed("no such folder"), "a failure shows the daemon's error")
     }
 
-    private static func decide(_ json: String) throws -> SessionLaunchDecision {
+    private static func decide(_ json: String, launcher: String? = nil) throws -> SessionLaunchDecision {
         let receipt = try JSONDecoder().decode(SessionCreationReceipt.self, from: Data(json.utf8))
-        return SessionLaunchDecision(receipt, agent: "claude")
+        return SessionLaunchDecision(receipt, launcher: launcher, agent: "claude")
     }
 
     private static func check(_ condition: Bool, _ message: String) {

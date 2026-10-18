@@ -10,6 +10,11 @@ struct NewSessionSheet: View {
     @State private var starting = false
     @State private var error: String?
     @State private var submitted: String?
+    @State private var canStartAgain = false
+
+    private var launchers: [LauncherOption] {
+        (model.creationOptions?.launchers ?? []).filter { $0.agents.contains(form.agent) }
+    }
 
     private var agents: [String] {
         let supported = (model.creationOptions?.surfaces ?? []).map(\.id)
@@ -28,9 +33,12 @@ struct NewSessionSheet: View {
 
     private var agentModels: [ModelOption] { models[form.agent] ?? [] }
     private var listedDefault: ModelOption? { agentModels.first { $0.default == true } }
-    private var efforts: [String] { form.efforts(models: agentModels) }
+    private var efforts: [String] { form.setsEffort ? form.efforts(models: agentModels) : [] }
 
-    private var canStart: Bool { !starting && submitted == nil && form.isComplete }
+    private var canStart: Bool {
+        !starting && submitted == nil && form.isComplete
+            && (form.launcher == nil || launchers.contains { $0.id == form.launcher && $0.available })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -40,6 +48,18 @@ struct NewSessionSheet: View {
                 Section {
                     Picker("Agent", selection: Binding(get: { form.agent }, set: { form.switchAgent(to: $0) })) {
                         ForEach(agents, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    if !launchers.isEmpty {
+                        Picker("Runs in", selection: Binding(get: { form.launcher }, set: { form.selectLauncher($0) })) {
+                            Text("Default").tag(nil as String?)
+                                .help("Starts the agent in the background on this Mac.")
+                            ForEach(launchers) { option in
+                                Text(option.available ? option.label : "\(option.label) (unavailable)")
+                                    .tag(Optional(option.id))
+                                    .selectionDisabled(!option.available)
+                                    .help(option.detail ?? "")
+                            }
+                        }
                     }
                     if form.usesFolder {
                         HStack {
@@ -78,6 +98,10 @@ struct NewSessionSheet: View {
             HStack {
                 Spacer()
                 if submitted != nil {
+                    if canStartAgain {
+                        Button("Start again", action: startAgain)
+                            .help("Starts a new session even if the first one started.")
+                    }
                     Button("Done") { dismiss() }
                         .keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
@@ -180,12 +204,20 @@ struct NewSessionSheet: View {
             starting = false
             switch outcome {
             case .opened: dismiss()
-            case .submitted(let note), .starting(let note): submitted = note
+            case .submitted(let note), .starting(let note), .unconfirmed(let note): submitted = note
             case .halted(let failure):
                 error = failure
                 submitted = "Check the sidebar before starting it again."
             case .uncertain(let failure), .failed(let failure): error = failure
             }
+            canStartAgain = outcome.offersStartAgain
         }
+    }
+
+    private func startAgain() {
+        model.startNewLaunch()
+        submitted = nil
+        canStartAgain = false
+        start()
     }
 }

@@ -46,7 +46,6 @@ final class AgenthailModel: ObservableObject {
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
 
     private(set) var api: AgenthailAPI?
-    private var creationKey = SessionLaunchKey()
     let actionKeys = ActionRetryKeys()
     private(set) var mainPane: SessionPane!
     private var panes: [SessionPane] = []
@@ -273,16 +272,20 @@ final class AgenthailModel: ObservableObject {
 
     func launchSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
         let outcome = await createSession(form)
-        creationKey.record(outcome)
+        if !outcome.keepsRetryKey { actionKeys.abandon(.creation) }
         return outcome
+    }
+
+    func startNewLaunch() {
+        actionKeys.abandon(.creation)
     }
 
     private func createSession(_ form: SessionLaunchForm) async -> SessionLaunchOutcome {
         guard let api else { return .failed("Agenthail isn't connected.") }
         do {
             let body = try form.creationBody()
-            let receipt = try await api.createSession(body: body, idempotencyKey: creationKey.key(for: body), failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, agent: form.agent)
+            let receipt = try await api.createSession(body: body, idempotencyKey: actionKeys.key(for: body, scope: .creation), failureReceipts: true)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
             switch decision {
             case .open(let id):
                 operationError = nil
@@ -295,7 +298,7 @@ final class AgenthailModel: ObservableObject {
                 return .starting("Agenthail is still starting this session. It appears in the sidebar once it starts.")
             case .unconfirmed(let id):
                 if let id { await openCreatedSession(id) }
-                return .starting("This session may still be starting. It will appear in the sidebar when ready.")
+                return .unconfirmed("This session may still be starting. It will appear in the sidebar when ready.")
             case .halted(let message):
                 return .halted(message)
             case .failed(let message):

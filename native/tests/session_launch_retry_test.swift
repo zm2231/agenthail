@@ -16,14 +16,23 @@ struct SessionLaunchRetryTest {
         model = makeModel([.unknown, .unknown])
         let unknown = await model.launchSession(a)
         _ = await model.launchSession(a)
-        check(unknown == .starting("This session may still be starting. It will appear in the sidebar when ready."), "an unknown receipt says the session may still be starting")
+        check(unknown == .unconfirmed("This session may still be starting. It will appear in the sidebar when ready."), "an unknown receipt says the session may still be starting")
+        check(unknown.offersStartAgain, "an unknown receipt offers Start again")
         check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after an unknown receipt reuses the key")
+
+        model = makeModel([.unknown, .unknown, .accepted])
+        _ = await model.launchSession(a)
+        _ = await model.launchSession(a)
+        model.startNewLaunch()
+        _ = await model.launchSession(a)
+        check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1] && ScriptedProtocol.keys[1] != ScriptedProtocol.keys[2], "Start again after a replayed unknown receipt is new work")
 
         model = makeModel([.lost, .lost, .lost])
         _ = await model.launchSession(a)
         _ = await model.launchSession(b)
         _ = await model.launchSession(a)
-        check(Set(ScriptedProtocol.keys).count == 3, "changing the request mints a new key, and changing it back does too")
+        check(ScriptedProtocol.keys[0] != ScriptedProtocol.keys[1], "changing the request mints a new key")
+        check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[2], "changing it back reuses the first request's key")
 
         var spelled = a
         spelled.message = "  Synthetic task A\n"
@@ -50,10 +59,18 @@ struct SessionLaunchRetryTest {
         check(created == .halted("synthetic first turn failure"), "a created session whose first turn failed halts")
         check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after a created session reuses the key")
 
+        model = makeModel([.createdFailure, .accepted])
+        let halted = await model.launchSession(a)
+        model.startNewLaunch()
+        _ = await model.launchSession(a)
+        check(halted.offersStartAgain, "a halted launch offers Start again")
+        check(ScriptedProtocol.keys[0] != ScriptedProtocol.keys[1], "Start again after a halted launch is new work")
+
         model = makeModel([.replayedSubmission, .lost])
         let replayed = await model.launchSession(a)
         _ = await model.launchSession(a)
         check(replayed == .starting("Agenthail is still starting this session. It appears in the sidebar once it starts."), "a replayed in-flight create shows it is still starting")
+        check(!replayed.offersStartAgain, "a create still in flight does not offer Start again")
         check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry while the first create is still starting reuses the key")
 
         model = makeModel([.accepted, .lost])
