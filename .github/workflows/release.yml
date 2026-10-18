@@ -78,6 +78,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-host/package-lock.json
       - name: Import Developer ID certificates
         env:
           APPLICATION_P12: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
@@ -110,6 +115,10 @@ jobs:
           : "${NOTARY_KEY:?missing APPLE_NOTARY_KEY_BASE64}"
           printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           xcrun notarytool store-credentials agenthail-ci --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID"
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Test source
         run: |
           go test ./... -race -count=1
@@ -165,6 +174,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-host/package-lock.json
+      - name: Claude host tests
+        if: matrix.arch == 'amd64'
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Test source on Linux
         if: matrix.arch == 'amd64'
         run: |
@@ -191,6 +210,7 @@ jobs:
           tar -xzf "dist/$name.tar.gz" -C "$RUNNER_TEMP/inspect"
           test -x "$RUNNER_TEMP/inspect/$name/agenthail"
           test -f "$RUNNER_TEMP/inspect/$name/skills/agenthail-operations/SKILL.md"
+          test -f "$RUNNER_TEMP/inspect/$name/claude-host/node_modules/@anthropic-ai/claude-agent-sdk/package.json"
           file "$RUNNER_TEMP/inspect/$name/agenthail" | grep -q "ELF 64-bit"
           if [ "$ARCH" = "amd64" ]; then
             "$RUNNER_TEMP/inspect/$name/agenthail" version --json | jq -e --arg version "$AGENTHAIL_VERSION" '.version == $version'

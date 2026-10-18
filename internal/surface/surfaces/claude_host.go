@@ -110,6 +110,9 @@ func ClaudeHostLaunch(home, version string) (claudehost.Launch, error) {
 	script := strings.TrimSpace(os.Getenv("AGENTHAIL_CLAUDE_HOST"))
 	if script == "" {
 		executable, err := os.Executable()
+		if err == nil {
+			executable, err = filepath.EvalSymlinks(executable)
+		}
 		if err != nil {
 			return claudehost.Launch{}, err
 		}

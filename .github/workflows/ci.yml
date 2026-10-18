@@ -46,7 +46,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: push-relay/package-lock.json
+          cache-dependency-path: |
+            push-relay/package-lock.json
+            claude-host/package-lock.json
       - name: Build
         run: go build ./...
       - name: Vet
@@ -60,6 +62,10 @@ jobs:
           node scripts/test-dashboard-rekeys.mjs
       - name: Public copy check
         run: scripts/check-public-copy.sh
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Race tests
         run: go test ./... -race -count=1
       - name: Push relay tests
@@ -159,8 +165,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: claude-host/package-lock.json
       - name: Vet
         run: go vet ./...
+      - name: Claude host tests
+        run: |
+          npm ci --prefix claude-host --omit=optional --ignore-scripts --no-audit --no-fund
+          npm test --prefix claude-host
       - name: Race tests
         run: go test ./... -race -count=1
       - name: Build Linux archives
