@@ -146,6 +146,17 @@ struct SessionPaneTest {
         check(restored.selectedSessionID == "conversation-a", "a window restored with a retired id opens the conversation")
         let lateReply = await rekeyed.reply("late answer", to: "session_old", connectionTimeout: .milliseconds(50))
         check(!lateReply && rekeyed.draft(for: "conversation-a").text.contains("late answer"), "a notification reply to a retired id goes to the conversation")
+        let cold = AgenthailModel(connecting: false)
+        cold.openSession(reference: "session_old")
+        let coldReply = Task { await cold.reply("cold answer", to: "session_old", connectionTimeout: .seconds(5)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        let conversation = SessionState(id: "conversation-a", surface: "claude", name: "worker", alias: "worker", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        var hydrated = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [conversation], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        hydrated.rekeyed = ["session_old": "conversation-a"]
+        cold.adopt(hydrated)
+        check(cold.mainPane.selectedSessionID == "conversation-a", "a notification opened before the first snapshot opens the rekeyed conversation")
+        let coldDelivered = await coldReply.value
+        check(!coldDelivered && cold.draft(for: "conversation-a").text.contains("cold answer") && cold.draft(for: "session_old").text.isEmpty, "a reply sent before the first snapshot resolves the rekey once it loads")
         let disconnected = AgenthailModel(connecting: false)
         var rejected: Bool?
         disconnected.send("look", attachments: [picture], to: "Z") { rejected = !$0 }

@@ -166,15 +166,11 @@ final class AgenthailModel: ObservableObject {
         setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            if snapshot?.hasSamePresentation(as: loaded) != true {
-                snapshot = loaded
-            }
-            snapshotLoadedAt = Date()
+            adopt(loaded)
             if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
                 startCatalogStream()
             }
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
-            rekeys.record(loaded.rekeyed ?? [:])
             clearConnectionError()
             reconcilePanes()
         } catch {
@@ -184,6 +180,16 @@ final class AgenthailModel: ObservableObject {
         }
         setLoading(false)
         return true
+    }
+
+    // Rekeys are recorded before the snapshot is published, because publishing
+    // opens a pending notification target and wakes a waiting reply.
+    func adopt(_ loaded: DashboardSnapshot) {
+        rekeys.record(loaded.rekeyed ?? [:])
+        if snapshot?.hasSamePresentation(as: loaded) != true {
+            snapshot = loaded
+        }
+        snapshotLoadedAt = Date()
     }
 
     func refreshNow(_ pane: SessionPane? = nil) {
@@ -356,11 +362,11 @@ final class AgenthailModel: ObservableObject {
     }
 
     func openSession(reference: String) {
-        let reference = rekeys.resolve(reference)
         guard snapshot != nil else {
             pendingSessionReference = reference
             return
         }
+        let reference = rekeys.resolve(reference)
         if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: reference) }) {
             mainPane.select(session.id)
         } else {
@@ -517,13 +523,13 @@ final class AgenthailModel: ObservableObject {
     }
 
     func reply(_ message: String, to sessionID: String, connectionTimeout: Duration = .seconds(20)) async -> Bool {
-        let sessionID = rekeys.resolve(sessionID)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return true }
         guard await awaitConnection(timeout: connectionTimeout) else {
-            restoreToComposer(text, sessionID: sessionID)
+            restoreToComposer(text, sessionID: rekeys.resolve(sessionID))
             return false
         }
+        let sessionID = rekeys.resolve(sessionID)
         return await withCheckedContinuation { continuation in
             send(text, to: sessionID) { continuation.resume(returning: $0) }
         }

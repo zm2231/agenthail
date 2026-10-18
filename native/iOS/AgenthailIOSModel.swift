@@ -393,8 +393,8 @@ final class AgenthailIOSModel: ObservableObject {
         guard let api else { return false }
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            snapshot = loaded
             followRekeys(loaded.rekeyed ?? [:])
+            snapshot = loaded
             lastEventID = max(lastEventID, loaded.eventCursor ?? lastEventID)
             if catalogHostEpoch != loaded.hostEpoch {
                 catalogHostEpoch = loaded.hostEpoch
@@ -579,7 +579,9 @@ final class AgenthailIOSModel: ObservableObject {
         _ = rekeys.carry(&pendingSendRequests)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
-        if let selected = selectedSessionID, rekeys.resolve(selected) != selected {
+        if let requested = requestedSessionID, rekeys.resolve(requested) != requested {
+            requestedSessionID = rekeys.resolve(requested)
+        } else if let selected = selectedSessionID, rekeys.resolve(selected) != selected {
             requestedSessionID = rekeys.resolve(selected)
         }
     }

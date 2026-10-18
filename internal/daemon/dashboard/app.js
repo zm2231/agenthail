@@ -35,6 +35,7 @@ const app = {
   startModels: {},
   launchers: [],
   codexSearch: { query: "", results: [], loading: false, error: "", timer: null, controller: null },
+  rekeyed: {},
   voice: { state: null, attemptId: "", localAudio: false, connection: false, channel: false, script: null, requestedTarget: null, poll: null, appliedSDP: "" },
 };
 const labels = { claude: "Claude Code", codex: "Codex", notion: "Notion" };
@@ -879,11 +880,7 @@ async function load(fresh = false) {
       : "daemon-presence offline";
     app.hasState = true;
     const rekeyed = state.rekeyed || {};
-    for (const [retired, current] of Object.entries(rekeyed)) {
-      if (!app.drafts.has(retired)) continue;
-      if (!app.drafts.has(current)) app.drafts.set(current, app.drafts.get(retired));
-      app.drafts.delete(retired);
-    }
+    applyRekeys(rekeyed);
     let followSelection = null;
     if (app.selected) {
       const replacement = app.state.sessions.find(
@@ -1359,6 +1356,20 @@ async function ensureVoicePeer() {
   }
   await app.voice.script;
 }
+function currentSessionID(id) {
+  return app.rekeyed[id] || id;
+}
+function applyRekeys(rekeyed) {
+  app.rekeyed = rekeyed;
+  for (const [retired, current] of Object.entries(rekeyed)) {
+    if (!app.drafts.has(retired)) continue;
+    if (!app.drafts.has(current)) app.drafts.set(current, app.drafts.get(retired));
+    app.drafts.delete(retired);
+  }
+  if (app.voice.requestedTarget) app.voice.requestedTarget = currentSessionID(app.voice.requestedTarget);
+  const target = $("#voice-target");
+  if (target?.value.trim()) target.value = currentSessionID(target.value.trim());
+}
 async function openVoice(targetID = "") {
   const dialog = $("#voice-dialog");
   app.voice.requestedTarget = targetID;
@@ -1371,7 +1382,7 @@ async function openVoice(targetID = "") {
   } catch (error) { toast(error.message); }
 }
 async function startVoice() {
-  const targetID = $("#voice-target").value.trim();
+  const targetID = currentSessionID($("#voice-target").value.trim());
   try {
     await voiceRequest("select", { targetId: targetID });
     app.voice.requestedTarget = null;
@@ -1389,7 +1400,7 @@ async function startVoice() {
   }
 }
 async function transferVoice() {
-  try { await voiceRequest("transfer", { targetId: $("#voice-target").value.trim() }); }
+  try { await voiceRequest("transfer", { targetId: currentSessionID($("#voice-target").value.trim()) }); }
   catch (error) { toast(error.message); }
 }
 async function interruptVoiceTarget() {
