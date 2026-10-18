@@ -5,7 +5,7 @@ struct QueueItemActions: View {
     let item: QueueState
 
     var body: some View {
-        if QueueFacts.canRetry(item) {
+        if QueueFacts.canRetry(item, target: model.knownSessions.first { $0.id == item.sessionId }) {
             Button("Retry") { model.perform(action: "queue-retry", queueID: item.id) }
         }
         if QueueFacts.canCancel(item) {
@@ -66,6 +66,12 @@ struct AttentionBanner: View {
                     Text(PeerEnvelope(item.message).body)
                         .lineLimit(2)
                         .foregroundStyle(DesktopPalette.text2)
+                    if let error = QueueFacts.lastError(item) {
+                        Text(error)
+                            .lineLimit(3)
+                            .foregroundStyle(DesktopPalette.red)
+                            .textSelection(.enabled)
+                    }
                     HStack(spacing: 14) {
                         QueueItemActions(model: model, item: item)
                     }

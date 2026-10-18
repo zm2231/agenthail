@@ -27,7 +27,11 @@ enum QueueFacts {
         return target?.status == "busy" ? "Waiting for this agent to finish" : "Waiting for delivery"
     }
 
-    static func canRetry(_ item: QueueState) -> Bool { item.status == "dead" }
+    static func canRetry(_ item: QueueState, target: SessionState?) -> Bool {
+        guard let target, !target.isReadOnly else { return false }
+        return item.status == "dead"
+    }
+
     static func canCancel(_ item: QueueState) -> Bool { item.status == "pending" || item.status == "dead" }
 
     static func lastError(_ item: QueueState) -> String? {

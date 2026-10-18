@@ -1201,6 +1201,10 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            ForEach(QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)) { attention in
+                AttentionBanner(model: model, attention: attention)
+                    .padding(.bottom, 8)
+            }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
                     .font(.system(size: 13))
@@ -1216,10 +1220,6 @@ struct ComposerView: View {
                     VStack(spacing: 0) {
                         ForEach(model.deliveryProblems.filter { $0.sessionId == session.id }) { problem in
                             DeliveryProblemBanner(problem: problem, model: model)
-                                .padding(.bottom, 8)
-                        }
-                        ForEach(QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)) { attention in
-                            AttentionBanner(model: model, attention: attention)
                                 .padding(.bottom, 8)
                         }
                         if !queued.isEmpty {
