@@ -208,7 +208,7 @@ test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_tabl
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('routes') WHERE name='once_only'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='evidence'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('message_queue') WHERE name='operation'")" = "1"
-test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "13"
+test "$(sqlite3 "$HOME/.agenthail/registry.db" 'PRAGMA user_version')" = "$(/usr/local/bin/agenthail version --json | jq -r .schemaVersion)"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_status'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_seq'")" = "1"
 test "$(sqlite3 "$HOME/.agenthail/registry.db" "SELECT COUNT(*) FROM pragma_table_info('session_journal_state') WHERE name='seed_identity'")" = "1"

@@ -36,9 +36,9 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if c.reachableAsIs(ctx, sess) {
 		return false, nil
 	}
-	conversation := c.conversationOf(sess)
+	conversation := sess.ID
 	if conversation == "" || strings.ContainsAny(conversation, `/\`) || strings.HasPrefix(conversation, ".") {
-		return false, surface.DeliveryTerminal(fmt.Errorf("Claude session %s has no process and no known conversation to resume", sess.ID), surface.DeliveryTargetMissing)
+		return false, surface.DeliveryTerminal(fmt.Errorf("Claude session %q is not a conversation id", sess.ID), surface.DeliveryTargetMissing)
 	}
 	unlock, err := c.lockConversation(ctx, conversation)
 	if err != nil {
@@ -66,7 +66,7 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 	if cwd == "" {
 		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
-	resumed, err := c.resume(ctx, conversation, cwd, state.job, claudeBridgeID(sess.ID))
+	resumed, err := c.resume(ctx, conversation, cwd, state.job, sess.Transport != "uds" && !c.localOnly)
 	if err != nil {
 		return false, err
 	}
@@ -80,54 +80,25 @@ func (c *Claude) NeedsWake(ctx context.Context, sess *surface.Session) bool {
 	return !c.reachableAsIs(ctx, sess)
 }
 
-// reachableAsIs reports whether sess already names a live process that owns
-// it and offers the transport sess would use.
+// reachableAsIs reports whether sess is attached to a live process that
+// still holds its conversation and offers the transport sess would use. It
+// refreshes the Remote Control attachment from that process's record.
 func (c *Claude) reachableAsIs(ctx context.Context, sess *surface.Session) bool {
 	if !claudeProcessAlive(sess.PID) {
 		return false
 	}
 	record, ok := c.peerRecord(sess.PID)
-	if !ok || (str(record, "sessionId") != sess.ID && str(record, "bridgeSessionId") != sess.ID) {
+	if !ok || str(record, "sessionId") != sess.ID {
 		return false
+	}
+	sess.Bridge = ""
+	if !c.localOnly {
+		sess.Bridge = str(record, "bridgeSessionId")
 	}
 	if sess.Transport == "uds" {
 		return c.peerSocket(ctx, record) != ""
 	}
-	return str(record, "bridgeSessionId") != ""
-}
-
-// conversationOf returns the id Claude Code keys the conversation by: the
-// transcript name, the session id itself, or for a bridge id the background
-// job that registered it.
-func (c *Claude) conversationOf(sess *surface.Session) string {
-	if sess.Transcript != "" {
-		return strings.TrimSuffix(filepath.Base(sess.Transcript), ".jsonl")
-	}
-	if record, ok := c.peerRecord(sess.PID); ok && claudeProcessAlive(sess.PID) && (str(record, "sessionId") == sess.ID || str(record, "bridgeSessionId") == sess.ID) {
-		return str(record, "sessionId")
-	}
-	if !claudeBridgeID(sess.ID) {
-		return sess.ID
-	}
-	bridge := toCse(sess.ID)
-	entries, err := os.ReadDir(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs"))
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		raw, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "jobs", entry.Name(), "state.json"))
-		if err != nil {
-			continue
-		}
-		var job struct {
-			SessionID       string `json:"sessionId"`
-			BridgeSessionID string `json:"bridgeSessionId"`
-		}
-		if json.Unmarshal(raw, &job) == nil && job.BridgeSessionID != "" && toCse(job.BridgeSessionID) == bridge {
-			return job.SessionID
-		}
-	}
-	return ""
+	return sess.Bridge != ""
 }
 
 // conversation reads which processes hold a conversation. Session records
@@ -227,9 +198,8 @@ func (c *Claude) stopCopy(conversation, id string) error {
 // prints its backgrounded line before the session initializes, and the job
 // state is not evidence: a resumed idle job keeps reporting done. A failure
 // counts only when this resume wrote it, since Claude records updatedAt to the
-// millisecond. A session addressed by its Remote Control ID is reached only
-// once the process registers Remote Control again, so its identity does not
-// pass through the socket-only ID; the socket is used if it never does.
+// millisecond. A session reached through Remote Control waits for the process
+// to register Remote Control again; the socket is used if it never does.
 func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, started time.Time, bridged bool) (*surface.Session, error) {
 	started = started.Truncate(time.Millisecond)
 	deadline := time.NewTimer(claudeResumeSettleTimeout)
@@ -240,7 +210,7 @@ func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, st
 	for {
 		process, alive, err := c.conversationProcess(ctx, conversation)
 		if err == nil && process != nil {
-			if !bridged || claudeBridgeID(process.ID) {
+			if !bridged || process.Bridge != "" {
 				return process, nil
 			}
 			socketOnly = process
@@ -265,14 +235,14 @@ func (c *Claude) awaitReachable(ctx context.Context, conversation, id string, st
 	}
 }
 
-// adoptClaudeProcess points sess at process, keeping the Remote Control
+// adoptClaudeProcess attaches process to sess, keeping the Remote Control
 // transport a session was addressed through while the process still offers it,
 // so a send stays correlated with its transcript turn.
 func adoptClaudeProcess(sess, process *surface.Session) {
-	if sess.Transport != "" || !claudeBridgeID(process.ID) {
+	if sess.Transport != "" || process.Bridge == "" {
 		sess.Transport = process.Transport
 	}
-	sess.ID = process.ID
+	sess.Bridge = process.Bridge
 	sess.PID = process.PID
 	sess.Status = process.Status
 	sess.Cwd = process.Cwd
@@ -316,16 +286,8 @@ func (c *Claude) lockConversation(ctx context.Context, conversation string) (fun
 // atRest reports whether a session whose process exited belongs to a
 // conversation no other process holds, so a message would resume it.
 func (c *Claude) atRest(ctx context.Context, sess *surface.Session) bool {
-	conversation := c.conversationOf(sess)
-	if conversation == "" {
-		return true
-	}
-	state, err := c.conversation(ctx, conversation)
+	state, err := c.conversation(ctx, sess.ID)
 	return err == nil && !state.alive
-}
-
-func claudeBridgeID(id string) bool {
-	return strings.HasPrefix(id, "session_") || strings.HasPrefix(id, "cse_")
 }
 
 func claudeTranscriptCwd(path string) string {

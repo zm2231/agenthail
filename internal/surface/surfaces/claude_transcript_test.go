@@ -29,8 +29,8 @@ func TestClaudeListOmitsDeadBridgeProcesses(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	active := `{"bridgeSessionId":"active","pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
-	stale := `{"bridgeSessionId":"stale","pid":2147483647,"status":"idle"}`
+	active := `{"sessionId":"active","bridgeSessionId":"session_active","pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
+	stale := `{"sessionId":"stale","bridgeSessionId":"session_stale","pid":2147483647,"status":"idle"}`
 	if err := os.WriteFile(filepath.Join(dir, "active.json"), []byte(active), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,8 +49,8 @@ func TestClaudeListKeepsTheFirstProcessOnASharedSessionID(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	original := `{"bridgeSessionId":"shared","pid":` + fmt.Sprint(os.Getpid()) + `,"startedAt":100,"name":"original","status":"idle"}`
-	resumed := `{"bridgeSessionId":"shared","pid":` + fmt.Sprint(os.Getppid()) + `,"startedAt":200,"name":"resumed","status":"idle"}`
+	original := `{"sessionId":"shared","bridgeSessionId":"session_shared","pid":` + fmt.Sprint(os.Getpid()) + `,"startedAt":100,"name":"original","status":"idle"}`
+	resumed := `{"sessionId":"shared","bridgeSessionId":"session_shared","pid":` + fmt.Sprint(os.Getppid()) + `,"startedAt":200,"name":"resumed","status":"idle"}`
 	if err := os.WriteFile(filepath.Join(dir, "a.json"), []byte(resumed), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestClaudeListUsesTranscriptTurnState(t *testing.T) {
 	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	bridge := `{"bridgeSessionId":"bridge","sessionId":"local","cwd":` + fmt.Sprintf("%q", cwd) + `,"pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
+	bridge := `{"bridgeSessionId":"session_bridge","sessionId":"local","cwd":` + fmt.Sprintf("%q", cwd) + `,"pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
 	if err := os.WriteFile(filepath.Join(sessionsDir, "bridge.json"), []byte(bridge), 0600); err != nil {
 		t.Fatal(err)
 	}

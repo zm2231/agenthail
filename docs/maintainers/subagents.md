@@ -19,9 +19,8 @@ Claude Code subagents are read-only observations. Claude Code writes them
 beside the parent transcript: `<project>/<transcript-id>.jsonl` and
 `<project>/<transcript-id>/subagents/agent-<agent-id>.jsonl`, with
 `agent-<agent-id>.meta.json` holding `agentType`, `description`, `toolUseId`,
-and `spawnDepth`. The transcript ID is not the Agenthail session ID for bridge
-sessions (`session_...`), so the directory is derived from the session's
-transcript path, never from its ID. Each transcript's first identifying record
+and `spawnDepth`. The directory is derived from the session's transcript path,
+never from its ID, which also covers a resumed transcript in another project. Each transcript's first identifying record
 must name the same transcript ID and agent ID as its path.
 
 A Claude subagent is working while its last assistant record has no terminal

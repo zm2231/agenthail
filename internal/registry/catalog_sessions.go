@@ -296,10 +296,10 @@ func (p catalogSessionPrior) unchangedBy(q catalogQuerier, state CatalogSessionS
 // stored session and runtime rows unchanged, so an unchanged catalog
 // observation needs no write.
 func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
-	var kind, name, cwd, status, transcript, source, transport, model string
+	var kind, name, cwd, status, transcript, source, transport, model, bridge, forkedFrom string
 	var pid, hasLocal int
 	var lastActiveMS int64
-	err := tx.QueryRow(`SELECT surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,last_active_ms FROM sessions WHERE id=?`, s.ID).Scan(&kind, &name, &cwd, &pid, &status, &transcript, &hasLocal, &source, &transport, &model, &lastActiveMS)
+	err := tx.QueryRow(`SELECT surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,bridge,forked_from,last_active_ms FROM sessions WHERE id=?`, s.ID).Scan(&kind, &name, &cwd, &pid, &status, &transcript, &hasLocal, &source, &transport, &model, &bridge, &forkedFrom, &lastActiveMS)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -310,7 +310,7 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 	if !s.LastActive.IsZero() {
 		wantLastActive = s.LastActive.UnixMilli()
 	}
-	if kind != string(s.Surface) || name != s.Name || cwd != s.Cwd || pid != s.PID || status != string(s.Status) || transcript != s.Transcript || hasLocal != b2i(s.HasLocal) || source != s.Source || transport != s.Transport || (s.ConfiguredModel != "" && model != s.ConfiguredModel) || lastActiveMS != wantLastActive {
+	if kind != string(s.Surface) || name != s.Name || cwd != s.Cwd || pid != s.PID || status != string(s.Status) || transcript != s.Transcript || hasLocal != b2i(s.HasLocal) || source != s.Source || transport != s.Transport || (s.ConfiguredModel != "" && model != s.ConfiguredModel) || bridge != s.Bridge || (forkedFrom == "" && s.ForkedFrom != "") || lastActiveMS != wantLastActive {
 		return false, nil
 	}
 	if s.Runtime != nil {
@@ -332,9 +332,9 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 			return false, nil
 		}
 	}
-	if s.Surface == surface.KindClaude && s.Transcript != "" {
-		exited, err := claudeExitedDuplicates(tx, s)
-		if err != nil || len(exited) > 0 {
+	if s.Surface == surface.KindClaude && s.PID > 0 {
+		var attachedElsewhere bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sessions WHERE surface=? AND pid=? AND id<>?)`, string(surface.KindClaude), s.PID, s.ID).Scan(&attachedElsewhere); err != nil || attachedElsewhere {
 			return false, err
 		}
 	}
@@ -590,7 +590,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := tx.QueryRow(`SELECT MAX(seq) FROM catalog_events`).Scan(&latest); err != nil {
 		return CatalogSnapshot{}, err
 	}
-	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,
+	rows, err := tx.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
 		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
@@ -615,7 +615,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&state.Session.ID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return CatalogSnapshot{}, err
 		}
 		subagent.apply(&state.Session)

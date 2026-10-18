@@ -8,10 +8,10 @@ snapshots and voice delivery are later layers. Their plans follow below.
 
 `Claude.SendHumanTurn` submits a `type: user` event whose message has
 `role: user` through the existing authenticated web request. It requires a
-Remote Control identity. That identity is the session ID itself:
-[`Claude.List`](../../internal/surface/surfaces/claude.go) uses
-`bridgeSessionId` as the ID whenever a record has one. Registry-loaded sessions
-therefore keep it, and no extra session field is needed. `CanSendHumanTurn`
+Remote Control attachment: `Session.Bridge`, the `bridgeSessionId` of the live
+process record whose `sessionId` is the session ID
+([`Claude.List`](../../internal/surface/surfaces/claude.go)). It is cleared when
+that process moves to another conversation. `CanSendHumanTurn`
 reports whether that identity exists, matching the controls that already use it
 (`EffectiveCapabilities`). Busy sessions return an unaccepted result without
 posting. `Claude.Send` stays native-peer-first for UDS sessions.
@@ -32,7 +32,7 @@ whatever the author.
 
 [`delivery.RouteFor`](../../internal/delivery/route.go) is the one place that
 picks a message's transport. A person's message to an adapter that implements
-`surface.HumanTurnSender` and has a Remote Control identity
+`surface.HumanTurnSender` and has a Remote Control attachment
 (`CanSendHumanTurn`) takes `RouteHumanTurn`. A Claude UDS session otherwise
 takes `RoutePeer`. Everything else takes `RouteSend`. `Dispatcher.deliver` and
 [`drainClaimedMessage`](../../internal/daemon/outbox.go) both call it, and so do
@@ -53,7 +53,7 @@ and this layer adds no UI for the difference.
 
 A busy target follows the existing busy-delivery policy. A steer from a
 composer, whether chosen directly or by the `steer` policy, goes through
-`Claude.Steer`, which posts through the Remote Control identity, so it is also
+`Claude.Steer`, which posts through the Remote Control attachment, so it is also
 the person's turn. With `queue`, the author persists as `message_queue.author`,
 and the drain replays a person's message through `SendHumanTurn` once the
 session is idle. `Claude.Send`'s bridge branch and `SendHumanTurn` share
@@ -161,7 +161,7 @@ and 4, the voice part of step 5 and the two-account live acceptance remain.
   sign-in drift cannot change the identity of queued or in-flight work.
 - Native-only sessions cannot emit web human turns. Agent-originated traffic
   remains native. Forged human provenance is rejected at the producer boundary.
-- Session binding and queue replay survive restart, ID merge and alias changes.
+- Session binding and queue replay survive restart, a Remote Control change and alias changes.
   Unbound or mismatched targets fail before POST. Unknown outcomes never resend
   automatically; rebinding or removing a profile leaves pending work explicit.
 - Each promised field follows config/storage -> load -> runtime -> API/CLI ->
