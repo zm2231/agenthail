@@ -285,6 +285,17 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+
+    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        agents = try container.decodeIfPresent([String].self, forKey: .agents) ?? []
+        available = try container.decode(Bool.self, forKey: .available)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
 }
 
 struct HostProjectIdentity: Codable, Hashable {
