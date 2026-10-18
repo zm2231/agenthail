@@ -132,7 +132,7 @@ agenthail relay add @investigator @builder 'FAIL|NO-SHIP|root cause'
 agenthail relay add @investigator @builder 'READY' --once
 ```
 
-When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. Closed Claude Code sessions stop receiving handoffs, rebind if the same conversation resumes, and remove the rule after one hour without a resume.
+When the investigation finishes with something the builder needs, Agenthail passes it across. If the builder is busy, the handoff waits. You can see every handoff and cancel anything that should not go out. A handoff to a closed Claude Code session resumes it and delivers once; a rule whose Claude Code source stays closed for an hour is removed.
 
 For a group that needs the same update:
 
