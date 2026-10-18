@@ -914,6 +914,9 @@ func (s *sessionSource) normalizeLocked(event surface.StreamEvent) (sessionJourn
 	return sessionJournalPayload{ItemID: itemID, ProviderKey: providerKey, Version: event.Version, Op: op, Kind: event.Kind, TurnID: event.TurnID, CallID: event.CallID, Final: event.Final, TS: at.UTC().Format(time.RFC3339Nano), Body: body, Role: event.Role, Origin: event.Origin, Sender: event.Sender, Title: event.Title, Status: event.Status, Context: event.Context, Goal: event.Goal, Attachment: event.Attachment, Truncated: event.Truncated, TruncationReason: event.TruncationReason}, bodyKey
 }
 
+// prepareStream waits under ctx for the session journal to be seeded, then
+// returns a subscription that lives until its Cancel, not until ctx ends, so
+// a reply can be followed after the request that prepared it returns.
 func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surface.Session, adapter surface.Surface) (sessionstream.Subscription, error) {
 	subscription, err := m.subscribeContext(ctx, session, adapter)
 	if err != nil {
@@ -942,11 +945,17 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 		return sessionstream.Subscription{}, fmt.Errorf("capture session journal cursor: %w", err)
 	}
 	events := make(chan sessionstream.Event, 64)
+	done := make(chan struct{})
+	var once sync.Once
+	cancel := func() {
+		once.Do(func() { close(done) })
+		subscription.Cancel()
+	}
 	go func() {
 		defer close(events)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-done:
 				return
 			case entry, ok := <-subscription.Entries:
 				if !ok {
@@ -959,17 +968,17 @@ func (m *sessionSourceManager) prepareStream(ctx context.Context, session *surfa
 				if decodeErr != nil {
 					select {
 					case events <- sessionstream.Event{Seq: entry.Seq, Kind: "source-error", Reason: decodeErr.Error()}:
-					case <-ctx.Done():
+					case <-done:
 					}
 					return
 				}
 				select {
 				case events <- event:
-				case <-ctx.Done():
+				case <-done:
 					return
 				}
 			}
 		}
 	}()
-	return sessionstream.Subscription{Cursor: window.LatestSeq, Events: events, Cancel: subscription.Cancel}, nil
+	return sessionstream.Subscription{Cursor: window.LatestSeq, Events: events, Cancel: cancel}, nil
 }
