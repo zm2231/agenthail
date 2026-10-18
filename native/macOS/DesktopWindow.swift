@@ -1856,7 +1856,7 @@ struct DeliveryTab: View {
                 SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
                     VStack(alignment: .leading, spacing: 4) {
-                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.detail(item, target: session, attention: model.snapshot?.attention ?? []).joined(separator: " · "), problem: item.status == "dead")
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: (QueueFacts.detail(item, target: session, attention: model.snapshot?.attention ?? []) + ["Queued \(relativeAge(item.queuedAt))"]).joined(separator: " · "), problem: item.status == "dead")
                         HStack { QueueItemActions(model: model, item: item) }
                             .controlSize(.small)
                     }

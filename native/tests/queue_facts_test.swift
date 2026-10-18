@@ -4,9 +4,10 @@ import Foundation
 struct QueueFactsTest {
     static func main() {
         let caps = Capabilities()
-        func queue(_ id: Int64, status: String, evidence: String = "queued", lastError: String? = nil, session: String = "s1") -> QueueState {
+        func queue(_ id: Int64, status: String, evidence: String = "queued", lastError: String? = nil, session: String = "s1", heldBy: String? = nil) -> QueueState {
             var fields: [String: Any] = ["id": id, "sessionId": session, "target": "@builder", "message": "check the build", "status": status, "attempts": 1, "queuedAt": "2026-10-18 06:00:00", "evidence": evidence]
             if let lastError { fields["lastError"] = lastError }
+            if let heldBy { fields["heldBy"] = heldBy }
             return try! JSONDecoder().decode(QueueState.self, from: JSONSerialization.data(withJSONObject: fields))
         }
         func session(_ id: String, surface: String = "claude", status: String = "idle", readOnly: Bool? = nil, reason: String? = nil, transport: String? = nil) -> SessionState {
@@ -27,9 +28,12 @@ struct QueueFactsTest {
         expect(!QueueFacts.canRetry(dead, target: nil), "an unknown target offers no Retry")
         expect(!QueueFacts.canRetry(canceled, target: writable) && !QueueFacts.canCancel(canceled), "canceled offers nothing")
 
-        expect(QueueFacts.reason(pending, target: session("s1", status: "busy")) == "Waiting for this agent to finish", "busy target waits")
-        expect(QueueFacts.reason(pending, target: session("s1")) == "Waiting for delivery", "idle target waits for delivery")
-        expect(QueueFacts.reason(pending, target: nil) == "Waiting for delivery", "unknown target waits for delivery")
+        expect(QueueFacts.reason(queue(1, status: "pending", heldBy: "busy"), target: session("s1", status: "busy")) == "Held: this agent is working", "a busy target holds the message")
+        expect(QueueFacts.reason(queue(1, status: "pending", heldBy: "waiting"), target: session("s1", status: "busy")) == "Held: this agent is waiting on you", "a target waiting on its user holds the message")
+        expect(QueueFacts.reason(queue(1, status: "pending", heldBy: "offline"), target: nil) == "Held: this agent is offline", "an offline target holds the message")
+        expect(QueueFacts.reason(queue(1, status: "pending", heldBy: "retrying"), target: session("s1")) == "Held: waiting to retry", "a refused attempt waits to retry")
+        expect(QueueFacts.reason(pending, target: session("s1")) == "Delivers on the next scan", "nothing holds an unheld message")
+        expect(pending.queuedDate == Date(timeIntervalSince1970: 1_792_303_200), "queuedAt parses as UTC")
         expect(QueueFacts.reason(pending, target: session("s1", readOnly: true, reason: "Closed in Claude")) == "Closed in Claude", "read-only target gives its reason")
         expect(QueueFacts.reason(pending, target: session("s1", readOnly: true)) == "Target is not writable", "read-only target without a reason")
         expect(QueueFacts.reason(pending, target: session("s1", surface: "codex", status: "notLoaded", transport: "desktop")) == "Loading this Codex conversation before delivery", "desktop Codex loads first")
@@ -43,7 +47,7 @@ struct QueueFactsTest {
         expect(QueueFacts.lastError(queue(4, status: "dead", lastError: "  ")) == nil, "blank last error is hidden")
 
         expect(QueueFacts.detail(dead, target: nil, attention: attention) == ["Claude needs to reconnect", "Reconnect Claude, then retry or cancel this message", "delivery rejected [authentication needed]: 401"], "a dead item with attention shows reason, requested action and last error")
-        expect(QueueFacts.detail(pending, target: session("s1", status: "busy"), attention: attention) == ["Waiting for this agent to finish"], "an item without attention shows its wait reason")
+        expect(QueueFacts.detail(queue(1, status: "pending", heldBy: "busy"), target: session("s1", status: "busy"), attention: attention) == ["Held: this agent is working"], "an item without attention shows its hold reason")
         expect(QueueFacts.attention(attention, for: "s1").count == 1 && QueueFacts.attention(attention, for: "s2").isEmpty, "attention filters by session")
         expect(QueueFacts.undelivered([pending, dead, queue(5, status: "delivered"), queue(6, status: "pending", session: "s2")], for: "s1").map(\.id) == [1, 7], "undelivered keeps this session's non-delivered items")
 

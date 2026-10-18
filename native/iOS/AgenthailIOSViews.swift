@@ -952,8 +952,8 @@ struct SessionSummary: View {
         .accessibilityHint("Open session details, context, model and controls")
     }
     private var status: some View {
-        Label(detail.session.status == "busy" ? "Working" : detail.session.status.capitalized,
-              systemImage: detail.session.status == "busy" ? "waveform" : "circle")
+        Label(detail.session.waitingOn != nil ? "Waiting on you" : detail.session.status == "busy" ? "Working" : detail.session.status.capitalized,
+              systemImage: detail.session.waitingOn != nil ? "questionmark.bubble" : detail.session.status == "busy" ? "waveform" : "circle")
         .font(.subheadline)
         .foregroundStyle(detail.session.status == "busy" ? SessionStyle.accent : .secondary)
     }
@@ -1170,7 +1170,9 @@ struct IOSSessionRow: View {
                         .foregroundStyle(SessionStyle.accent)
                         .accessibilityLabel(SharedConversation.badgeLabel(session))
                 }
-                if session.isWorking {
+                if session.isWaitingOnYou {
+                    Label("Waiting on you", systemImage: "questionmark.bubble").font(.caption).foregroundStyle(SessionStyle.accent)
+                } else if session.isWorking {
                     Label("Working", systemImage: "waveform").font(.caption).foregroundStyle(SessionStyle.accent)
                 }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }

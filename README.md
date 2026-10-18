@@ -129,6 +129,8 @@ advertise that capability; unsupported targets remain queued. Use `steer` when y
 want an explicit active-turn control.
 If Agenthail cannot reach a Codex session before starting a turn, it keeps that message pending and retries safely. A timeout after a turn has started is kept as an explicit unknown outcome instead, so Agenthail never guesses whether to send duplicate work. A queued message never expires: it stays pending until it is delivered, you cancel it, or delivery fails in a way Agenthail can prove. `queue list` shows how long each message has waited and why it is held.
 
+An agent that has asked you something is **waiting on you**, not working. That covers a Claude question (`AskUserQuestion`) or plan approval (`ExitPlanMode`), and a Codex approval or input request. `list`, the dashboard and the apps show "Waiting on you". Your Mac and paired iPhone get one notification per question. Messages to the agent wait until you answer, even a steer, so nothing lands in the middle of the question. A steer then goes into the turn you answered; an ordinary message waits for the turn to finish. Claude permission prompts are not detected yet.
+
 Agenthail keeps current work fast by using Codex's bounded local state. To find an older Codex conversation, use the dashboard search box or `agenthail search codex <query>`; selected results are saved locally for later use.
 
 ## Let agents hand work to each other
@@ -188,7 +190,7 @@ The iPhone companion is distributed through TestFlight. [Request an iPhone invit
 
 After installing the iPhone app, install Tailscale on your Mac and iPhone, sign both into the same account, then open **Operations** in Agenthail on the Mac.
 
-Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes. Your Mac is not opened to the public internet.
+Turn on **Private phone access** and choose **Pair an iPhone**. The iPhone app can then show current work, open conversations, send or steer messages, and notify you when an agent finishes or is waiting on you. Your Mac is not opened to the public internet.
 
 Matching voice-enabled builds also offer **Talk to orchestrator**: a real Codex
 Voice conversation that can inspect agents, delegate work, and read replies through

@@ -23,7 +23,7 @@ enum QueueFacts {
         if target?.surface == "codex" && target?.status == "notLoaded" {
             return target?.transport == "desktop" ? "Loading this Codex conversation before delivery" : "Codex conversation is not available to load"
         }
-        return target?.status == "busy" ? "Waiting for this agent to finish" : "Waiting for delivery"
+        return item.holdLabel
     }
 
     static func canRetry(_ item: QueueState, target: SessionState?) -> Bool {

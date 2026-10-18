@@ -140,7 +140,14 @@ struct QueueListView: View {
                 Text(item.isHistorical && item.evidence == "unknown" ? "Outcome unknown" : item.isHistorical && item.evidence == "failed" ? "Delivery failed" : item.evidence == "transport_accepted" ? "Transport accepted" : item.status == "dead" ? "Delivery needs review" : item.status == "inflight" ? "Sending" : item.status.capitalized)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(item.status == "dead" && !item.isHistorical ? .orange : .secondary)
                 Spacer()
-                Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                if let date = item.queuedDate {
+                    Text(date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated)).font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text(item.queuedAt).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            if item.status == "pending" {
+                Text(item.holdLabel).font(.footnote).foregroundStyle(.secondary)
             }
             Button {
                 if let onOpenSession { onOpenSession(item.sessionId) }
