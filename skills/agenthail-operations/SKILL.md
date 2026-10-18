@@ -41,10 +41,10 @@ agenthail doctor --json
 AgentHail targets macOS. Native Claude messages use local sockets and require
 the daemon. Claude Remote Control and Notion use a signed-in Chrome profile. Codex
 Desktop uses AgentHail's loopback Desktop bridge (`agenthail launch codex`).
-Managed terminals (`agenthail codex`) need the standalone Codex runtime; an
-npm, Homebrew or ChatGPT.app `codex` cannot run its app-server daemon. AgentHail
-finds every Codex automatically, and `doctor --json` reports a typed runtime
-`problem` plus non-failing `notes` with the exact install step
+Without Desktop, AgentHail uses Codex's app-server daemon and starts it when a
+conversation needs it. Codex 0.151 and older can only start that daemon from the
+standalone runtime; `doctor --json` reports a typed runtime `problem` plus
+non-failing `notes` with the exact install step
 (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`). Never run that
 installer on the user's behalf. Relevant overrides are
 `AGENTHAIL_CHROME_PROFILE`, `AGENTHAIL_PYTHON`, `AGENTHAIL_CLAUDE_BIN`,
@@ -106,11 +106,12 @@ interruption, compaction, persistent model changes, or goals on Notion.
 
 Codex sessions have separate read and write boundaries:
 
-| Codex launch path | Read | Send |
+| Codex conversation | Read | Send |
 |---|:---:|:---:|
-| `agenthail codex` | yes | yes |
-| Codex Desktop session Codex reports writable | yes | yes |
-| Plain `codex` terminal | yes | no |
+| Created by AgentHail, `agenthail codex` or another non-Desktop client | yes | yes, through Codex's daemon |
+| Created in Codex Desktop, Desktop bridge reachable | yes | yes, through Desktop |
+| Created in Codex Desktop, Desktop closed | yes | no |
+| Loaded by a plain `codex` terminal that is still running | yes | no (writer conflict) |
 
 Let AgentHail report read-only sessions. Do not claim a send succeeded when the
 target has no writable transport.
@@ -180,9 +181,11 @@ real persisted thread UUID. `notion:new:<name>` also stores `<name>` as a durabl
 AgentHail alias. Keep the UUID or alias for replies and future sends. Notion
 chooses the visible title from the first message.
 
-Start an interactive writable Codex thread with `agenthail codex` in a human
-TTY. It uses the caller's current directory unless `--cd` is provided. The
-enabled AgentHail dashboard can also create one. `agenthail launch codex` starts
+Create a Codex thread with `agenthail thread create codex`; it runs on Codex
+Desktop when its bridge is reachable and on Codex's app-server daemon
+otherwise, so it works on machines without Desktop. Start an interactive
+terminal thread with `agenthail codex` in a human TTY. It uses the caller's
+current directory unless `--cd` is provided. `agenthail launch codex` starts
 Desktop with a writable bridge but does not itself create a thread.
 
 Create Claude background sessions with `agenthail thread create claude "task" --alias worker --json`.
@@ -379,7 +382,8 @@ agenthail launch codex
 agenthail codex
 ```
 
-`thread create codex` starts a managed thread without a TTY. `launch codex`
+`thread create codex` starts a thread without a TTY, on Desktop when its bridge
+is reachable and on Codex's app-server daemon otherwise. `launch codex`
 opens Codex if needed and verifies its local connection. `agenthail codex` starts
 an interactive writable terminal session and requires a human TTY.
 Claude background sessions start with `thread create claude`; Claude authentication
