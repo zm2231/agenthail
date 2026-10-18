@@ -124,6 +124,7 @@ struct SessionState: Codable, Identifiable, Hashable {
     var sharedWith: [SharedProcess]? = nil
     var host: SessionHost? = nil
     var unavailableReason: String? = nil
+    var transport: String? = nil
 
     var displayName: String {
         if let alias, !alias.isEmpty { return "@\(alias)" }
@@ -370,6 +371,17 @@ struct LauncherOption: Decodable, Identifiable, Hashable {
     let agents: [String]
     let available: Bool
     let detail: String?
+
+    enum CodingKeys: String, CodingKey { case id, label, agents, available, detail }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        agents = try container.decodeIfPresent([String].self, forKey: .agents) ?? []
+        available = try container.decode(Bool.self, forKey: .available)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
 }
 
 struct HostProjectIdentity: Codable, Hashable {
@@ -482,6 +494,9 @@ struct ChannelMemberState: Decodable, Identifiable, Equatable {
 }
 
 struct RelayState: Decodable, Identifiable, Equatable {
+    let handoff: String
+    let pendingCount: Int64
+    let lastError: String?
     let id: Int64
     let from: String
     let to: String

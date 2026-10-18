@@ -105,6 +105,13 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 	if err := reg.EnsureCatalogState(); err != nil {
 		d.log.Printf("catalog state: %s", err)
 	}
+	kinds := make([]surface.SurfaceKind, 0, len(surfaces))
+	for _, adapter := range surfaces {
+		kinds = append(kinds, adapter.Name())
+	}
+	if err := reg.RetainCatalogSurfaces(kinds); err != nil {
+		d.log.Printf("catalog surfaces: %s", err)
+	}
 	d.catalog = newCatalogHub(reg)
 	return d
 }

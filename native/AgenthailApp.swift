@@ -523,7 +523,7 @@ private struct AgenthailMenuBarApp: App {
     var body: some Scene {
         Window("Agenthail", id: "main") {
             DesktopWindow(model: model)
-                .frame(minWidth: 900, minHeight: 560)
+                .frame(minHeight: 560)
         }
         .defaultSize(width: 1440, height: 900)
         .windowStyle(.hiddenTitleBar)

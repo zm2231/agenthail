@@ -397,3 +397,20 @@ func containsLine(lines []string, want string) bool {
 	}
 	return false
 }
+
+func TestTMUXFocusWithoutClientNamesAttachCommandOffMac(t *testing.T) {
+	launcher := newTMUX().(*processLauncher)
+	launcher.goos = "linux"
+	var commands []string
+	launcher.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		commands = append(commands, name)
+		return nil, nil
+	}
+	err := launcher.Focus(context.Background(), Location{Session: "build"})
+	if err == nil || !strings.Contains(err.Error(), "attach from a terminal with: tmux attach-session -t 'build'") {
+		t.Fatalf("err=%v", err)
+	}
+	if slices.Contains(commands, "osascript") {
+		t.Fatalf("commands=%q", commands)
+	}
+}

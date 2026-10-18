@@ -24,6 +24,18 @@ enum AgenthailAPIError: LocalizedError {
         case .streamClosed: return "The Agenthail event stream disconnected."
         }
     }
+
+    static let disconnectedGuidance = "Agenthail is not connected. Restart it from the menu bar, then refresh."
+
+    static func userMessage(_ error: Error) -> String {
+        guard let urlError = error as? URLError else { return error.localizedDescription }
+        switch urlError.code {
+        case .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .cannotFindHost, .dnsLookupFailed, .timedOut:
+            return disconnectedGuidance
+        default:
+            return error.localizedDescription
+        }
+    }
 }
 
 final class AgenthailAPI: @unchecked Sendable {
@@ -144,23 +156,30 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil) throws -> Data {
         if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
-        let payload: Data
+        var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
+        if let launcher { body["launcher"] = launcher }
         if surface == "codex" {
-            payload = try JSONEncoder().encode(SessionCreateRequest(action: "session-create", surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, launcher: launcher))
-        } else {
-            var body = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-            if surface == "claude" { body.merge(claude.fields) { _, value in value } }
-            if let launcher { body["launcher"] = launcher }
-            payload = try JSONSerialization.data(withJSONObject: body)
+            if let effort = turnSettings.effort { body["effort"] = effort }
+            if let mode = turnSettings.mode { body["mode"] = mode.rawValue }
+        } else if surface == "claude" {
+            body.merge(claude.fields) { _, value in value }
         }
+        return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+    }
+
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+        try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
+    }
+
+    func createSession(body: Data, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
         var request = authorizedRequest(path: "/api/v1/actions")
         request.httpMethod = "POST"
         request.timeoutInterval = 65
-        request.httpBody = payload
+        request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setIdempotencyHeader(on: &request, path: "/api/v1/actions", method: "POST", key: idempotencyKey)
         let (data, response) = try await session.data(for: request)
@@ -245,7 +264,7 @@ final class AgenthailAPI: @unchecked Sendable {
         let _: EmptyResponse = try await request("/api/v1/device", method: "DELETE", body: nil)
     }
 
-    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
+    func action(_ action: String, sessionID: String? = nil, message: String? = nil, model: String? = nil, queueID: Int64? = nil, deliveryID: Int64? = nil, channel: String? = nil, targetID: String? = nil, fromID: String? = nil, toID: String? = nil, pattern: String? = nil, once: Bool? = nil, handoff: String? = nil, relayID: Int64? = nil, idempotencyKey: String? = nil) async throws {
         var body: [String: Any] = ["action": action]
         if let sessionID { body["sessionId"] = sessionID }
         if let message { body["message"] = message }
@@ -258,6 +277,7 @@ final class AgenthailAPI: @unchecked Sendable {
         if let toID { body["toId"] = toID }
         if let pattern { body["pattern"] = pattern }
         if let once { body["once"] = once }
+        if let handoff { body["handoff"] = handoff }
         if let relayID { body["relayId"] = relayID }
         let _: EmptyResponse = try await post("/api/v1/actions", body: body, idempotencyKey: idempotencyKey)
     }
@@ -476,30 +496,6 @@ private struct InstructionRequest: Encodable {
             try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
             try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
         }
-    }
-}
-
-private struct SessionCreateRequest: Encodable {
-    let action: String
-    let surface: String
-    let message: String
-    let cwd: String
-    let model: String
-    let turnSettings: TurnSettings
-    let launcher: String?
-
-    enum CodingKeys: String, CodingKey { case action; case surface; case message; case cwd; case model; case effort; case mode; case launcher }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(action, forKey: .action)
-        try container.encode(surface, forKey: .surface)
-        try container.encode(message, forKey: .message)
-        try container.encode(cwd, forKey: .cwd)
-        try container.encode(model, forKey: .model)
-        try container.encodeIfPresent(turnSettings.effort, forKey: .effort)
-        try container.encodeIfPresent(turnSettings.mode, forKey: .mode)
-        try container.encodeIfPresent(launcher, forKey: .launcher)
     }
 }
 

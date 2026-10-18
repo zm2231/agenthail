@@ -178,7 +178,7 @@ func cliFixture(t *testing.T, fake *cliSurface) (*App, *registry.Registry) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }}, r
+	return &App{Registry: r, Surfaces: []SurfaceEntry{{Name: string(fake.kind), Surface: fake}}, DefaultTimeout: time.Second, catalogDaemonRunning: func() bool { return false }, daemonService: &fakeService{}}, r
 }
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -272,7 +272,7 @@ func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail launch codex"}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
-	app.daemonServiceLoaded = func() bool { return false }
+	app.daemonService = &fakeService{}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	if err == nil || !strings.Contains(err.Error(), "unhealthy") {
 		t.Fatalf("err=%v output=%s", err, output)
@@ -297,7 +297,7 @@ func TestDoctorRecognizesAgenthailSupervisionAsDurable(t *testing.T) {
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Problem: surface.RuntimeUnsupervised}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
-	app.daemonServiceLoaded = func() bool { return true }
+	app.daemonService = &fakeService{loaded: true}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
 	if err != nil {
 		t.Fatalf("err=%v output=%s", err, output)

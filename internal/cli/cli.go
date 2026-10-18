@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -42,7 +41,7 @@ type App struct {
 	Revision                  string
 	BuiltAt                   string
 	catalogDaemonRunning      func() bool
-	daemonServiceLoaded       func() bool
+	daemonService             daemonService
 	update                    *updateDeps
 	daemonSessionPageReader   func() (sessionPageReader, error)
 	daemonSessionStreamReader func() (sessionStreamReader, error)
@@ -178,7 +177,7 @@ Channels:
   channel send <name> "msg"     Broadcast to all members (--from <name>)
 
 Automatic handoffs:
-  relay add <from> <to> [regex] [--once]  Send-to-on-completion rule
+  relay add <from> <to> [regex] [--once] [--when turn_finished|goal_completed]
   relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
@@ -474,7 +473,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true}
+	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -524,6 +523,7 @@ func validateCommandFlags(command string, args []string) error {
 		spec.bools = map[string]bool{"--all": true, "--mine": true, "--json": true, "--help": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "add" {
+		spec.values = map[string]bool{"--when": true}
 		spec.bools = map[string]bool{"--once": true}
 	}
 	if command == "relay" && len(args) > 0 && args[0] == "list" {
@@ -2455,11 +2455,27 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		results = append(results, result)
 	}
+	home, _ := os.UserHomeDir()
+	claudeConfigDir := surface.ClaudeConfigDir(home)
+	service := a.service()
+	serviceProblems := service.Problems()
+	if serviceProblems == nil {
+		serviceProblems = []serviceProblem{}
+	}
 	if hasFlag(args, "--json") {
-		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": failures == 0, "surfaces": results}); err != nil {
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDir": claudeConfigDir}
+		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 			return err
 		}
 	} else {
+		fmt.Printf("claude config: %s\n", claudeConfigDir)
+		if len(serviceProblems) > 0 {
+			fmt.Printf("[daemon] supervisor: %s\n", service.Name())
+			for _, problem := range serviceProblems {
+				fmt.Printf("  problem: %s\n", problem.Detail)
+				fmt.Printf("  fix: %s\n", problem.Fix)
+			}
+		}
 		for _, result := range results {
 			fmt.Printf("[%s] capabilities: %s\n", result.Surface, strings.Join(result.Capabilities, ", "))
 			if result.Runtime != nil {
@@ -2495,6 +2511,9 @@ func (a *App) cmdDoctor(args []string) error {
 			}
 		}
 	}
+	if len(serviceProblems) > 0 {
+		return fmt.Errorf("doctor found %d unhealthy surface(s) and %d daemon problem(s)", failures, len(serviceProblems))
+	}
 	if failures > 0 {
 		return fmt.Errorf("doctor found %d unhealthy surface(s)", failures)
 	}
@@ -2502,33 +2521,7 @@ func (a *App) cmdDoctor(args []string) error {
 }
 
 func (a *App) isDaemonServiceLoaded() bool {
-	if a.daemonServiceLoaded != nil {
-		return a.daemonServiceLoaded()
-	}
-	return daemonServiceLoaded() || homebrewDaemonServiceLoaded()
-}
-
-func homebrewDaemonServiceLoaded() bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
-	target := fmt.Sprintf("gui/%d/%s", os.Getuid(), homebrewDaemonLaunchdLabel)
-	return exec.Command("launchctl", "print", target).Run() == nil
-}
-
-func homebrewDaemonManaged() bool {
-	if homebrewDaemonServiceLoaded() {
-		return true
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	return homebrewManagedExecutable(exe)
-}
-
-func homebrewManagedExecutable(exe string) bool {
-	return strings.Contains(filepath.Clean(exe), string(filepath.Separator)+"Cellar"+string(filepath.Separator)+"agenthail"+string(filepath.Separator))
+	return a.service().Loaded()
 }
 
 func (a *App) cmdLaunch(args []string) error {

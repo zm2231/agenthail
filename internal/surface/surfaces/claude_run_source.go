@@ -73,7 +73,7 @@ func ObserveClaudeRuns(ctx context.Context, home string) ([]ClaudeRunObservation
 			return nil, fmt.Errorf("resolve home: %w", err)
 		}
 	}
-	paths, err := filepath.Glob(filepath.Join(home, ".claude", "jobs", "*", "state.json"))
+	paths, err := filepath.Glob(filepath.Join(surface.ClaudeConfigDir(home), "jobs", "*", "state.json"))
 	if err != nil {
 		return nil, fmt.Errorf("discover Claude job records: %w", err)
 	}

@@ -19,6 +19,7 @@ struct DesktopWindow: View {
             ConversationPane(model: model, pane: pane)
                 .opacity(model.isConnected || model.snapshot == nil ? 1 : 0.6)
                 .ignoresSafeArea(.container, edges: .top)
+                .navigationSplitViewColumnWidth(min: 340, ideal: 892)
                 .inspector(isPresented: $pane.inspectorVisible) {
                     SessionInspector(model: model, pane: pane)
                         .ignoresSafeArea(.container, edges: .top)
@@ -82,7 +83,7 @@ struct SessionSidebar: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(model.sessionFilter == filter ? .isSelected : [])
-                    .help(shortcuts.help(filter.rawValue, filter.command))
+                    .help(shortcuts.help("\(SessionFacts.filterSummary(filter, codexRecentHours: model.snapshot?.codexRecentHours ?? 5)).", filter.command))
                 }
                 Spacer()
                 SessionRefinementMenu(model: model)
@@ -470,6 +471,11 @@ struct SessionRowView: View {
                     .accessibilityLabel(SharedConversation.badgeLabel(session))
                     .help(SharedConversation.badgeLabel(session))
             }
+            if session.queueCount > 0 {
+                Text(SessionFacts.queuedLabel(session.queueCount))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DesktopPalette.amber)
+            }
             Text(relativeAge(session.lastActive))
                 .font(.system(size: 11))
                 .foregroundStyle(DesktopPalette.text2)
@@ -477,13 +483,8 @@ struct SessionRowView: View {
         .font(.system(size: 13))
         .padding(.leading, 6)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(SessionRowView.accessibilityValue(session, needsYou: needsYou))
-    }
-
-    static func accessibilityValue(_ session: SessionState, needsYou: Bool) -> String {
-        let state = needsYou ? "Needs you" : session.isWorking ? "Working" : "Idle"
-        guard let host = session.remoteHostName else { return state }
-        return session.isUnavailable ? "Unavailable on \(host)" : "\(state) on \(host)"
+        .accessibilityValue(needsYou ? "Needs you · \(SessionFacts.rowDetail(session))" : SessionFacts.rowDetail(session))
+        .help(SessionFacts.rowDetail(session))
     }
 }
 
@@ -512,12 +513,19 @@ struct StatusIndicator: View {
 
 struct ConnectionFooter: View {
     @ObservedObject var model: AgenthailModel
+    @ObservedObject private var shortcuts = ShortcutStore.shared
 
     private var offlineLabel: String {
         if model.daemonSlow { return "Agenthail is slow to respond" }
         if model.loading && model.connectionError == nil { return "Loading sessions…" }
         guard model.snapshot != nil, let loadedAt = model.snapshotLoadedAt else { return "Agenthail isn't running" }
         return "Offline · as of \(relativeAge(loadedAt.formatted(.iso8601)))"
+    }
+
+    private var syncedLabel: String {
+        let age = model.snapshotLoadedAt.map { relativeAge($0.formatted(.iso8601)) } ?? ""
+        let synced = age.isEmpty ? "Not synced yet" : age == "now" ? "Synced just now" : "Synced \(age) ago"
+        return "\(synced). \(shortcuts.help("Refresh", .refresh))"
     }
 
     var body: some View {
@@ -533,6 +541,15 @@ struct ConnectionFooter: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(DesktopPalette.accentText)
                     .help("Start the Agenthail daemon")
+            }
+            if model.isConnected {
+                Button { model.refreshNow() } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.plain)
+                .help(syncedLabel)
+                .accessibilityLabel("Refresh")
+                .accessibilityValue(syncedLabel)
             }
             SettingsLink {
                 Image(systemName: "slider.horizontal.3")
@@ -656,9 +673,13 @@ struct ConversationHeader: View {
             }
             .font(.system(size: 12))
             .foregroundStyle(DesktopPalette.text2)
-            Text(([session.surface.capitalized, model] + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · "))
+            let meta = ([session.surface.capitalized, model] + SessionFacts.headerFacts(session, age: relativeAge(session.lastActive)) + [context?.headerLabel]).compactMap { $0 }.joined(separator: " · ")
+            Text(meta)
                 .font(.system(size: 12))
                 .foregroundStyle(DesktopPalette.text2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(meta)
             if session.runtime?.focusable == true, let host = session.runtime?.hostName {
                 Button("Open in \(host)") { onFocusTerminal() }
                     .buttonStyle(.plain)
@@ -709,8 +730,20 @@ struct TranscriptView: View {
                         .font(.system(size: 12.5))
                         .foregroundStyle(DesktopPalette.text2)
                 }
+                if blocks.isEmpty && sends.isEmpty && !session.isWorking && pane.detail != nil && (pane.olderCursor ?? 0) == 0 {
+                    VStack(spacing: 6) {
+                        Text("No saved exchanges yet")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Send a message to start this conversation from Agenthail.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(DesktopPalette.text2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
+                }
                 ForEach(blocks) { block in
                     TranscriptBlockView(block: block)
+                        .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
                     UserBubble(text: send.text, receipt: send.status)
@@ -858,11 +891,7 @@ struct TranscriptBlockView: View {
         case .user(let text):
             UserBubble(text: text, receipt: nil)
         case .assistant(let text):
-            StructuredText(markdown: text)
-                .font(.system(size: 15.5, design: .serif))
-                .lineSpacing(4)
-                .foregroundStyle(DesktopPalette.text)
-                .textSelection(.enabled)
+            AssistantReply(text: text)
         case .peer(let sender, let text):
             UserBubble(text: text, receipt: nil, sender: sender)
         case .tools(let items):
@@ -988,6 +1017,34 @@ struct UserBubble: View {
     }
 }
 
+struct AssistantReply: View {
+    let text: String
+    @State private var expanded = false
+
+    var body: some View {
+        let long = LongReply.isLong(text)
+        VStack(alignment: .leading, spacing: 8) {
+            StructuredText(markdown: text)
+                .font(.system(size: 15.5, design: .serif))
+                .lineSpacing(4)
+                .foregroundStyle(DesktopPalette.text)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxHeight: long && !expanded ? 420 : nil, alignment: .top)
+                .clipped()
+                .overlay(alignment: .bottom) {
+                    if long && !expanded { Rectangle().fill(DesktopPalette.line2).frame(height: 1) }
+                }
+            if long {
+                Button(expanded ? "Show less" : "Show full message") { expanded.toggle() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(DesktopPalette.accentText)
+            }
+        }
+    }
+}
+
 struct ToolRunView: View {
     let items: [TimelineItem]
     @Binding var expanded: Bool
@@ -1094,6 +1151,7 @@ struct ToolCallRow: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
+                    TimelineMetaLine(item: call)
                     if results.isEmpty {
                         Text("No result yet")
                             .font(.system(size: 11.5))
@@ -1141,11 +1199,14 @@ struct ReasoningRow: View {
             .buttonStyle(.plain)
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             if expanded {
-                StructuredText(markdown: item.text)
-                    .font(.system(size: 13, design: .serif))
-                    .foregroundStyle(DesktopPalette.text2)
-                    .textSelection(.enabled)
-                    .padding(.leading, 21)
+                VStack(alignment: .leading, spacing: 4) {
+                    StructuredText(markdown: item.text)
+                        .font(.system(size: 13, design: .serif))
+                        .foregroundStyle(DesktopPalette.text2)
+                        .textSelection(.enabled)
+                    TimelineMetaLine(item: item)
+                }
+                .padding(.leading, 21)
             }
         }
     }
@@ -1179,11 +1240,33 @@ struct ToolOutputBlock: View {
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
-            if result.truncated {
-                Label("Output shortened by the host", systemImage: "text.badge.ellipsis")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DesktopPalette.muted)
-            }
+            TimelineMetaLine(item: result)
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder func timelineDetails(_ item: TimelineItem?) -> some View {
+        let fields = item.map(TimelineMetadata.fields) ?? []
+        if fields.isEmpty {
+            self
+        } else {
+            self.help(fields.joined(separator: " · "))
+                .accessibilityHint(fields.joined(separator: ", "))
+        }
+    }
+}
+
+struct TimelineMetaLine: View {
+    let item: TimelineItem
+
+    var body: some View {
+        let fields = TimelineMetadata.fields(item)
+        if !fields.isEmpty {
+            Text(fields.joined(separator: " · "))
+                .font(.system(size: 11))
+                .foregroundStyle(DesktopPalette.muted)
+                .textSelection(.enabled)
         }
     }
 }
@@ -1216,6 +1299,14 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            let attention = QueueFacts.attention(model.snapshot?.attention ?? [], for: session.id)
+            if !attention.isEmpty {
+                BoundedDock {
+                    VStack(spacing: 0) {
+                        ForEach(attention) { AttentionBanner(model: model, attention: $0).padding(.bottom, 8) }
+                    }
+                }
+            }
             if session.isReadOnly || !session.capabilities.send {
                 Text(session.readOnlyReason ?? "This session is closed. You can read it, but not message it.")
                     .font(.system(size: 13))
@@ -1699,6 +1790,9 @@ struct DetailsTab: View {
                     }
                 }
                 detailRow("Surface", session.surface.capitalized)
+                if let detail = pane.detail {
+                    detailRow("Exchanges", SessionFacts.exchangeLabel(detail.timeline.map { SessionFacts.exchangeCount($0.items) } ?? detail.exchanges.count))
+                }
                 let modelName = pane.detail?.model
                 if canControl && session.capabilities.model, case let options = modelOptions, !options.isEmpty {
                     GridRow {
@@ -1757,7 +1851,7 @@ struct DeliveryTab: View {
     let session: SessionState
 
     var body: some View {
-        let queued = model.snapshot?.queue.filter { $0.sessionId == session.id && $0.status != "delivered" } ?? []
+        let queued = QueueFacts.undelivered(model.snapshot?.queue ?? [], for: session.id)
         let history = model.snapshot?.history.filter { $0.sessionId == session.id || $0.sourceSessionId == session.id } ?? []
         let problems = model.deliveryProblems(for: session.id)
         VStack(alignment: .leading, spacing: 8) {
@@ -1768,9 +1862,13 @@ struct DeliveryTab: View {
                 }
             }
             if !queued.isEmpty {
-                SidebarCaption("Queued").padding(.horizontal, -8)
+                SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
-                    deliveryCard(title: item.target, status: "Queued", text: item.message, problem: false)
+                    VStack(alignment: .leading, spacing: 4) {
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.detail(item, target: session, attention: model.snapshot?.attention ?? []).joined(separator: " · "), problem: item.status == "dead")
+                        HStack { QueueItemActions(model: model, item: item) }
+                            .controlSize(.small)
+                    }
                 }
             }
             if history.isEmpty && queued.isEmpty && problems.isEmpty {
@@ -1779,13 +1877,17 @@ struct DeliveryTab: View {
             } else if !history.isEmpty {
                 SidebarCaption("Recent").padding(.horizontal, -8)
                 ForEach(history) { entry in
-                    deliveryCard(title: entry.sourceSessionId == session.id ? "To \(entry.target ?? "session")" : "From \(entry.source ?? "you")", status: entry.error == nil ? (entry.result ?? entry.kind).capitalized : "Not delivered", text: entry.message ?? "", problem: entry.error != nil)
+                    AuditEventRow(entry: entry)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .background(DesktopPalette.window, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(DesktopPalette.line2))
                 }
             }
         }
     }
 
-    private func deliveryCard(title: String, status: String, text: String, problem: Bool) -> some View {
+    private func deliveryCard(title: String, status: String, text: String, detail: String? = nil, problem: Bool) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(title)
@@ -1797,6 +1899,12 @@ struct DeliveryTab: View {
             Text(text)
                 .lineLimit(1)
                 .foregroundStyle(DesktopPalette.text2)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(problem ? DesktopPalette.amber : DesktopPalette.text2)
+                    .lineLimit(3)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)

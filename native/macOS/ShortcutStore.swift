@@ -32,6 +32,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
     case stop
     case rename
     case openInNewWindow
+    case refresh
 
     var id: String { rawValue }
 
@@ -52,6 +53,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .stop: "Stop"
         case .rename: "Rename session"
         case .openInNewWindow: "Open session in new window"
+        case .refresh: "Refresh"
         }
     }
 
@@ -70,6 +72,7 @@ enum AppCommand: String, CaseIterable, Identifiable {
         case .send: StoredShortcut(kVK_Return, cmdKey)
         case .sendAlternate: StoredShortcut(kVK_Return, cmdKey | optionKey)
         case .stop: StoredShortcut(kVK_ANSI_Period, cmdKey)
+        case .refresh: StoredShortcut(kVK_ANSI_R, cmdKey)
         case .rename, .openInNewWindow: nil
         }
     }

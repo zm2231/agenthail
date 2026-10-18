@@ -26,6 +26,7 @@ func timelineFixture(t *testing.T, data string) string {
 }
 
 func TestMain(m *testing.M) {
+	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	transcriptPollInterval = 20 * time.Millisecond
 	os.Exit(m.Run())
 }

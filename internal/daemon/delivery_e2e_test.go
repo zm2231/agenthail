@@ -151,6 +151,23 @@ func (a *scriptedAgent) Observe(_ context.Context, session *surface.Session) (*s
 	return observation, nil
 }
 
+func (a *scriptedAgent) ReadCompletions(_ context.Context, session *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	state, ok := a.sessions[session.ID]
+	if !ok {
+		return surface.CompletionBatch{}, fmt.Errorf("session %s not found", session.ID)
+	}
+	var events []surface.Completion
+	if cursor != "" && state.completed != "" && cursor != state.completed {
+		events = append(events, surface.Completion{CompletedAt: time.Now(), ID: state.completed, Text: state.reply})
+	}
+	if state.completed == "" {
+		return surface.CompletionBatch{Cursor: "baseline", Events: events}, nil
+	}
+	return surface.CompletionBatch{Cursor: state.completed, Events: events}, nil
+}
+
 func (a *scriptedAgent) accept(sessionID, message string, options surface.SendOptions, steered bool) (*surface.SendResult, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

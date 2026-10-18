@@ -119,8 +119,7 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	addressed := *session
 	err := adapter.Compact(operationCtx, session)
 	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
-		*session = addressed
-		d.finishReachedHostOwned(item, session, "compact", ownedErr)
+		d.finishReachedHostOwned(item, &addressed, "compact", ownedErr)
 		return
 	}
 	if err != nil {

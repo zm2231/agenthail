@@ -31,6 +31,7 @@ private struct SurfaceCard: View {
     @ObservedObject var model: AgenthailModel
     let overview: SurfaceOverview
     @State private var repairing = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -52,6 +53,8 @@ private struct SurfaceCard: View {
                     }
                     .disabled(repairing)
                 }
+                Button("Show Sessions") { showSessions() }
+                    .help("Show every \(overview.name) session in the main window")
             }
             HStack(alignment: .top, spacing: 22) {
                 stat("Working", overview.working, note: nil)
@@ -73,6 +76,14 @@ private struct SurfaceCard: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func showSessions() {
+        model.search("")
+        model.sessionFilter = .all
+        model.sessionRefinement.surface = overview.surface.name
+        NSApplication.shared.activate()
+        openWindow(id: "main")
     }
 
     private var color: Color {
@@ -117,17 +128,17 @@ struct RecentOutcomesSection: View {
                     HStack {
                         Text("\(outcome.label) · \(outcome.target)")
                             .foregroundStyle(outcome.tone == .problem ? DesktopPalette.red : DesktopPalette.text)
-                            .lineLimit(1)
+                            .textSelection(.enabled)
                         Spacer()
                         Text(relativeAge(outcome.createdAt))
                             .font(.system(size: 11))
                             .foregroundStyle(DesktopPalette.text2)
                             .help(outcome.createdAt)
                     }
-                    Text(outcome.isError ? outcome.detail : PeerEnvelope(outcome.detail).summary)
+                    Text(outcome.detail)
                         .font(.system(size: 12))
                         .foregroundStyle(outcome.isError ? DesktopPalette.red : DesktopPalette.text2)
-                        .lineLimit(2)
+                        .textSelection(.enabled)
                 }
             }
         }

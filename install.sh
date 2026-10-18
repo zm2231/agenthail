@@ -10,8 +10,9 @@ for arg in "$@"; do
 			cat <<'USAGE'
 usage: ./install.sh [--no-skill]
 
-  --no-skill   do not link the agenthail-operations skill into ~/.claude/skills,
-               ~/.codex/skills, or ~/.hermes/skills
+  --no-skill   do not link the agenthail-operations skill into the skills
+               directory of $CLAUDE_CONFIG_DIR (~/.claude), $CODEX_HOME
+               (~/.codex), or ~/.hermes
                (they are only touched if they already exist)
 
 environment:
@@ -367,7 +368,7 @@ rm -f "$INSTALL_DIR/claude-worker" 2>/dev/null || true
 SKILL_SOURCE="$DATA_DIR/skills/agenthail-operations"
 SKILL_LINKS=()
 if [ "$INSTALL_SKILL" -eq 1 ] && [ -f "$SKILL_SOURCE/SKILL.md" ]; then
-	for runtime_dir in "$HOME/.claude" "$HOME/.codex" "$HOME/.hermes"; do
+	for runtime_dir in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CODEX_HOME:-$HOME/.codex}" "$HOME/.hermes"; do
 		[ -d "$runtime_dir" ] || continue
 		link="$runtime_dir/skills/agenthail-operations"
 		if [ -e "$link" ] && [ "$(readlink "$link" 2>/dev/null)" != "$SKILL_SOURCE" ]; then
@@ -399,8 +400,9 @@ echo "verify:    agenthail doctor"
 echo ""
 echo "Claude Code:"
 CLAUDE_REMOTE_CONTROL=""
-if [ -f "$HOME/.claude/settings.json" ]; then
-	CLAUDE_REMOTE_CONTROL="$("$PYTHON_BIN" - "$HOME/.claude/settings.json" <<'PY' 2>/dev/null || true
+CLAUDE_SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+if [ -f "$CLAUDE_SETTINGS" ]; then
+	CLAUDE_REMOTE_CONTROL="$("$PYTHON_BIN" - "$CLAUDE_SETTINGS" <<'PY' 2>/dev/null || true
 import json
 import sys
 

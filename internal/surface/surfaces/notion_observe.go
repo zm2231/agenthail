@@ -47,11 +47,44 @@ func (n *Notion) threadExists(ctx context.Context, threadID string) (bool, error
 }
 
 func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (string, *surface.ReplyResult, error) {
+	events, err := n.agentCompletions(ctx, sess, "", false)
+	if err != nil || len(events) == 0 {
+		return "", nil, err
+	}
+	last := events[len(events)-1]
+	return last.ID, &surface.ReplyResult{Text: last.Text, Done: true}, nil
+}
+
+func (n *Notion) ReadCompletions(ctx context.Context, sess *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	var after string
+	if cursor != "" {
+		if err := json.Unmarshal([]byte(cursor), &after); err != nil {
+			return surface.CompletionBatch{}, err
+		}
+	}
+	events, err := n.agentCompletions(ctx, sess, after, cursor != "")
+	if err != nil {
+		return surface.CompletionBatch{}, err
+	}
+	last := after
+	if len(events) > 0 {
+		last = events[len(events)-1].ID
+	}
+	encoded, _ := json.Marshal(last)
+	batch := surface.CompletionBatch{Cursor: string(encoded)}
+	if cursor == "" {
+		return batch, nil
+	}
+	batch.Events = events
+	return batch, nil
+}
+
+func (n *Notion) agentCompletions(ctx context.Context, sess *surface.Session, after string, requireComplete bool) ([]surface.Completion, error) {
 	if sess.ID == "" || strings.HasPrefix(sess.ID, "new") {
-		return "", nil, nil
+		return nil, nil
 	}
 	if err := n.ensureContext(ctx); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	body, _ := json.Marshal(map[string]any{
 		"requests": []map[string]any{{"pointer": map[string]any{"table": "thread", "id": sess.ID}, "version": -1}},
@@ -59,10 +92,10 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 	status, responseBody, err := notionRecordRequest(ctx,
 		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
-		return "", nil, fmt.Errorf("notion reply: %w", err)
+		return nil, fmt.Errorf("notion reply: %w", err)
 	}
 	if status != 200 {
-		return "", nil, fmt.Errorf("notion reply (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return nil, fmt.Errorf("notion reply (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
 	}
 	var threadResponse struct {
 		RecordMap struct {
@@ -76,13 +109,29 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 		} `json:"recordMap"`
 	}
 	if err := json.Unmarshal([]byte(responseBody), &threadResponse); err != nil {
-		return "", nil, fmt.Errorf("parse Notion thread: %w", err)
+		return nil, fmt.Errorf("parse Notion thread: %w", err)
 	}
 	record, ok := threadResponse.RecordMap.Thread[sess.ID]
-	if !ok || len(record.Value.Value.Messages) == 0 {
-		return "", nil, nil
+	if !ok {
+		return nil, fmt.Errorf("Notion thread is missing from provider response")
 	}
 	messageIDs := record.Value.Value.Messages
+	if after != "" {
+		boundary := -1
+		for i, id := range messageIDs {
+			if id == after {
+				boundary = i
+				break
+			}
+		}
+		if boundary < 0 {
+			return nil, fmt.Errorf("saved relay message is missing from Notion history")
+		}
+		messageIDs = messageIDs[boundary+1:]
+	}
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
 	requests := make([]map[string]any, len(messageIDs))
 	for i, id := range messageIDs {
 		requests[i] = map[string]any{"pointer": map[string]any{"table": "thread_message", "id": id}, "version": -1}
@@ -91,10 +140,10 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 	status, responseBody, err = notionRecordRequest(ctx,
 		"POST", n.inferenceURL("syncRecordValues"), n.headers(), string(body), n.bridge(), "https://app.notion.com/", 15*time.Second)
 	if err != nil {
-		return "", nil, fmt.Errorf("notion reply messages: %w", err)
+		return nil, fmt.Errorf("notion reply messages: %w", err)
 	}
 	if status != 200 {
-		return "", nil, fmt.Errorf("notion reply messages (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
+		return nil, fmt.Errorf("notion reply messages (HTTP %d): %s", status, diagnosticExcerpt(responseBody))
 	}
 	var messageResponse struct {
 		RecordMap struct {
@@ -111,12 +160,34 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 		} `json:"recordMap"`
 	}
 	if err := json.Unmarshal([]byte(responseBody), &messageResponse); err != nil {
-		return "", nil, fmt.Errorf("parse Notion messages: %w", err)
+		return nil, fmt.Errorf("parse Notion messages: %w", err)
 	}
-	for i := len(messageIDs) - 1; i >= 0; i-- {
+	var completions []surface.Completion
+	inputID, user := "", ""
+	for i := 0; i < len(messageIDs); i++ {
 		id := messageIDs[i]
 		message, ok := messageResponse.RecordMap.ThreadMessage[id]
-		if !ok || message.Value.Value.Step.Type != "agent-inference" {
+		if !ok {
+			if requireComplete {
+				return nil, fmt.Errorf("Notion relay message %s is missing from provider response", id)
+			}
+			continue
+		}
+		if message.Value.Value.Step.Type == "user" {
+			var parts [][]string
+			if err := json.Unmarshal(message.Value.Value.Step.Value, &parts); err != nil {
+				if requireComplete {
+					return nil, err
+				}
+				continue
+			}
+			inputID, user = id, ""
+			if len(parts) > 0 && len(parts[0]) > 0 {
+				user = parts[0][0]
+			}
+			continue
+		}
+		if message.Value.Value.Step.Type != "agent-inference" {
 			continue
 		}
 		var items []struct {
@@ -124,14 +195,21 @@ func (n *Notion) latestAgentReply(ctx context.Context, sess *surface.Session) (s
 			Content string `json:"content"`
 		}
 		if err := json.Unmarshal(message.Value.Value.Step.Value, &items); err != nil {
+			if requireComplete {
+				return nil, err
+			}
 			continue
 		}
+		var parts []string
 		for _, item := range items {
-			if item.Type == "text" && strings.TrimSpace(item.Content) != "" {
-				text := strings.TrimSpace(langTagRe.ReplaceAllString(item.Content, ""))
-				return id, &surface.ReplyResult{Text: text, Done: true}, nil
+			if item.Type == "text" {
+				parts = append(parts, strings.TrimSpace(langTagRe.ReplaceAllString(item.Content, "")))
 			}
 		}
+		text := strings.TrimSpace(strings.Join(parts, "\n"))
+		if text != "" {
+			completions = append(completions, surface.Completion{ID: id, InputID: inputID, User: user, Text: text})
+		}
 	}
-	return "", nil, nil
+	return completions, nil
 }

@@ -59,7 +59,7 @@ final class NativeQueueController: ObservableObject {
             error = nil
         } catch {
             guard generation == started, !error.isCancellation else { return }
-            self.error = error.localizedDescription
+            self.error = AgenthailAPIError.userMessage(error)
         }
     }
 
@@ -99,7 +99,7 @@ final class NativeQueueController: ObservableObject {
         } catch {
             guard generation == started else { return false }
             busy = false
-            self.error = error.localizedDescription
+            self.error = AgenthailAPIError.userMessage(error)
             return false
         }
     }
@@ -150,7 +150,7 @@ final class BackgroundSessionController: ObservableObject {
             return true
         } catch {
             guard generation == started else { return false }
-            self.error = error.localizedDescription
+            self.error = AgenthailAPIError.userMessage(error)
             return false
         }
     }

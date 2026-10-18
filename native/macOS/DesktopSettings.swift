@@ -285,6 +285,7 @@ struct DeliverySettings: View {
     @State private var relayTo = ""
     @State private var relayPattern = ".*"
     @State private var relayOnce = false
+    @State private var relayHandoff = "turn_finished"
     @State private var channelName = ""
     @State private var selectedChannel = ""
     @State private var channelTarget = ""
@@ -295,32 +296,17 @@ struct DeliverySettings: View {
 
     var body: some View {
         Form {
-            Section("Waiting to go out") {
+            Section("Waiting to go out · \(model.snapshot?.queue.count ?? 0)") {
                 if (model.snapshot?.queue ?? []).isEmpty {
-                    Text("No messages are waiting.").foregroundStyle(DesktopPalette.text2)
+                    Text("Nothing is waiting to be delivered.").foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(model.snapshot?.queue ?? []) { item in
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.target)
-                            Text(PeerEnvelope(item.message).summary)
-                                .font(.system(size: 12))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Text(item.status.capitalized)
-                            .font(.system(size: 11))
-                            .foregroundStyle(item.status == "dead" ? DesktopPalette.red : DesktopPalette.text2)
-                        if item.status == "dead" {
-                            Button("Retry") { model.perform(action: "queue-retry", queueID: item.id) }
-                        }
-                        Button("Cancel") { model.perform(action: "queue-cancel", queueID: item.id) }
-                    }
-                }
+                ForEach(model.snapshot?.queue ?? []) { QueueItemRow(model: model, item: $0) }
             }
             RecentOutcomesSection(history: model.snapshot?.history ?? [])
             Section {
+                if (model.snapshot?.relays ?? []).isEmpty {
+                    Text("No automatic handoffs yet.").foregroundStyle(DesktopPalette.text2)
+                }
                 ForEach(model.snapshot?.relays ?? []) { relay in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -332,6 +318,9 @@ struct DeliverySettings: View {
                             Text(relayState(relay))
                                 .font(.system(size: 11))
                                 .foregroundStyle(DesktopPalette.text2)
+                            if let error = relay.lastError, !error.isEmpty {
+                                Text(error).font(.system(size: 11)).foregroundStyle(DesktopPalette.text2)
+                            }
                         }
                         Spacer()
                         Button("Remove") { model.performOperation(action: "relay-remove", relayID: relay.id) }
@@ -341,6 +330,10 @@ struct DeliverySettings: View {
                     Text("Choose a session").tag("")
                     ForEach(sessions) { Text($0.displayName).tag($0.id) }
                 }
+                Picker("hand off when", selection: $relayHandoff) {
+                    Text("Turn finished").tag("turn_finished")
+                    Text("Goal completed").tag("goal_completed")
+                }
                 TextField("finishes with text matching", text: $relayPattern)
                 Picker("hand off to", selection: $relayTo) {
                     Text("Choose a session").tag("")
@@ -348,17 +341,20 @@ struct DeliverySettings: View {
                 }
                 Toggle("Run this handoff once", isOn: $relayOnce)
                 Button("Add Handoff") {
-                    model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, once: relayOnce)
+                    model.performOperation(action: "relay-add", fromID: relayFrom, toID: relayTo, pattern: relayPattern, once: relayOnce, handoff: relayHandoff)
                 }
                 .disabled(relayFrom.isEmpty || relayTo.isEmpty)
             } header: {
-                Text("Automatic handoffs")
+                Text("Automatic handoffs · \(model.snapshot?.relays.count ?? 0)")
             } footer: {
                 Text("When one session finishes with matching text, Agenthail sends its reply to another.")
                     .font(.system(size: 12))
                     .foregroundStyle(DesktopPalette.text2)
             }
             Section("Channels") {
+                if (model.snapshot?.channels ?? []).isEmpty {
+                    Text("No shared channels yet.").foregroundStyle(DesktopPalette.text2)
+                }
                 HStack {
                     TextField("New channel", text: $channelName)
                     Button("Create") {
@@ -410,7 +406,7 @@ struct DeliverySettings: View {
     }
 
     private func relayState(_ relay: RelayState) -> String {
-        var parts = [relay.once ? "Once" : "Every time", relay.active ? "active" : "complete", relay.fireCount == 1 ? "fired once" : "fired \(relay.fireCount) times"]
+        var parts = [relay.handoff == "goal_completed" ? "Goal completed" : "Turn finished", relay.once ? "Once" : "Every time", "\(relay.pendingCount) pending", relay.active ? "active" : "complete", relay.fireCount == 1 ? "fired once" : "fired \(relay.fireCount) times"]
         if let last = relay.lastFiredAt, case let age = relativeAge(last), !age.isEmpty {
             parts.append(age == "now" ? "last just now" : "last \(age) ago")
         }
@@ -428,39 +424,19 @@ struct ActivitySettings: View {
                     TextField("Search activity", text: $model.auditQuery)
                         .onSubmit { Task { await model.loadAudit(reset: true) } }
                     Picker("", selection: $model.auditKind) {
-                        Text("All activity").tag("")
-                        ForEach(model.auditKinds, id: \.self) { Text(label($0)).tag($0) }
+                        Text("All events").tag("")
+                        ForEach(model.auditKinds, id: \.self) { Text(AuditFacts.kindLabel($0)).tag($0) }
                     }
                     .labelsHidden()
                     .frame(maxWidth: 170)
                     .onChange(of: model.auditKind) { Task { await model.loadAudit(reset: true) } }
                 }
             }
-            Section {
+            Section("Recent activity · \(SettingsCounts.history(model.snapshot?.history.count ?? 0))") {
                 if model.audit.isEmpty {
-                    Text("No matching activity.").foregroundStyle(DesktopPalette.text2)
+                    Text("No activity matches these filters.").foregroundStyle(DesktopPalette.text2)
                 }
-                ForEach(model.audit) { entry in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(label(entry.kind))
-                            Spacer()
-                            Text(relativeAge(entry.createdAt))
-                                .font(.system(size: 11))
-                                .foregroundStyle(DesktopPalette.text2)
-                                .help(entry.createdAt)
-                        }
-                        if let target = entry.target, !target.isEmpty {
-                            Text(target).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2)
-                        }
-                        if let message = entry.message, !message.isEmpty {
-                            Text(PeerEnvelope(message).summary).font(.system(size: 12)).foregroundStyle(DesktopPalette.text2).lineLimit(2)
-                        }
-                        if let error = entry.error, !error.isEmpty {
-                            Text(error).font(.system(size: 12)).foregroundStyle(DesktopPalette.red).lineLimit(3)
-                        }
-                    }
-                }
+                ForEach(model.audit) { AuditEventRow(entry: $0) }
                 if model.auditHasMore {
                     Button("Load More") { Task { await model.loadAudit(reset: false) } }
                 }
@@ -470,9 +446,5 @@ struct ActivitySettings: View {
         .formStyle(.grouped)
         .onAppear { model.operationsVisible = true }
         .onDisappear { model.operationsVisible = false }
-    }
-
-    private func label(_ kind: String) -> String {
-        kind.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }
