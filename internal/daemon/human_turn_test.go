@@ -1,0 +1,194 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces"
+)
+
+const (
+	idleClaudeTranscript = `{"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+`
+	busyClaudeTranscript = `{"type":"user","uuid":"u2","timestamp":"2026-07-19T01:00:02Z","message":{"content":"running"}}
+`
+)
+
+type nativeRecordingClaude struct {
+	*surfaces.Claude
+	native []string
+}
+
+func (c *nativeRecordingClaude) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+	c.native = append(c.native, message)
+	return &surface.SendResult{UUID: "peer", Accepted: true}, nil
+}
+
+type humanTurnFixture struct {
+	d       *Daemon
+	r       *registry.Registry
+	claude  *nativeRecordingClaude
+	posts   []string
+	bridged surface.Session
+	native  surface.Session
+}
+
+func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
+	t.Helper()
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	f := &humanTurnFixture{r: r}
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest("Default", t.TempDir(), func(_ context.Context, method, url string, _ map[string]string, body string, _ string, _ string, _ time.Duration) (int, string, error) {
+		if method != http.MethodPost {
+			t.Fatalf("method=%s", method)
+		}
+		f.posts = append(f.posts, url+" "+body)
+		return http.StatusOK, `{}`, nil
+	})}
+	dir := t.TempDir()
+	f.bridged = surface.Session{ID: "session_bridge", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
+	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
+	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle}
+	for _, session := range []surface.Session{f.bridged, f.native, agent} {
+		if err := r.RegisterSession(session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.transcript(t, f.bridged, idleClaudeTranscript)
+	f.transcript(t, f.native, idleClaudeTranscript)
+	f.d = New(r, []surface.Surface{f.claude})
+	return f
+}
+
+func (f *humanTurnFixture) transcript(t *testing.T, session surface.Session, content string) {
+	t.Helper()
+	if err := os.WriteFile(session.Transcript, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *humanTurnFixture) send(t *testing.T, body string) map[string]any {
+	t.Helper()
+	response := serveDashboardRequest(dashboardRouter(f.d), http.MethodPost, "/api/action", body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	var receipt struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	return receipt.Result
+}
+
+func assertHumanTurnPost(t *testing.T, post, message string) {
+	t.Helper()
+	url, body, _ := strings.Cut(post, " ")
+	if !strings.Contains(url, "/v1/code/sessions/cse_bridge/events") {
+		t.Fatalf("url=%q", url)
+	}
+	var envelope struct {
+		Events []struct {
+			Payload struct {
+				Type    string `json:"type"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"payload"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Events) != 1 || envelope.Events[0].Payload.Type != "user" || envelope.Events[0].Payload.Message.Role != "user" || envelope.Events[0].Payload.Message.Content != message {
+		t.Fatalf("body=%s", body)
+	}
+}
+
+func TestComposerSendToBridgedClaudeIsHumanTurn(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","message":"Please inspect the failure."}`)
+	if len(f.claude.native) != 0 || len(f.posts) != 1 {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+	assertHumanTurnPost(t, f.posts[0], "Please inspect the failure.")
+	if receipt["evidence"] != string(surface.EvidenceDelivered) {
+		t.Fatalf("receipt=%v", receipt)
+	}
+}
+
+func TestAgentSendToBridgedClaudeStaysNative(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","sourceSessionId":"agent","message":"peer note"}`)
+	if len(f.posts) != 0 || len(f.claude.native) != 1 || f.claude.native[0] != "peer note" {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) {
+		t.Fatalf("receipt=%v", receipt)
+	}
+}
+
+func TestComposerSendWithoutBridgeUsesNativeTransport(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	receipt := f.send(t, `{"action":"send","sessionId":"native-only","message":"hello"}`)
+	if len(f.posts) != 0 || len(f.claude.native) != 1 || f.claude.native[0] != "hello" {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+	if receipt["evidence"] != string(surface.EvidenceTransportAccepted) {
+		t.Fatalf("receipt=%v", receipt)
+	}
+}
+
+func TestComposerSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	f.transcript(t, f.bridged, idleClaudeTranscript+busyClaudeTranscript)
+	receipt := f.send(t, `{"action":"send","sessionId":"session_bridge","busyDelivery":"queue","message":"after this turn"}`)
+	if receipt["evidence"] != string(surface.EvidenceQueued) || len(f.posts) != 0 || len(f.claude.native) != 0 {
+		t.Fatalf("receipt=%v native=%q posts=%q", receipt, f.claude.native, f.posts)
+	}
+	queueID := int64(receipt["queueId"].(float64))
+	f.transcript(t, f.bridged, idleClaudeTranscript)
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	if len(f.claude.native) != 0 || len(f.posts) != 1 {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+	assertHumanTurnPost(t, f.posts[0], "after this turn")
+	item, err := f.r.QueueItem(queueID)
+	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+func TestQueuedAgentMessageToBridgedClaudeStaysNative(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	if _, err := f.r.QueueMessageWithOptions(f.bridged.ID, "relayed", "", surface.SendOptions{SourceSessionID: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	if len(f.posts) != 0 || len(f.claude.native) != 1 || f.claude.native[0] != "relayed" {
+		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
+	}
+}
+
+func TestNativeAppComposerSendToBridgedClaudeIsHumanTurn(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	response := serveV1Action(dashboardRouter(f.d), `{"action":"send","sessionId":"session_bridge","message":"from the app"}`, "app-send", pairedControlToken(t, f.r))
+	if response.Code != http.StatusOK || len(f.claude.native) != 0 || len(f.posts) != 1 {
+		t.Fatalf("status=%d body=%s native=%q posts=%q", response.Code, response.Body, f.claude.native, f.posts)
+	}
+	assertHumanTurnPost(t, f.posts[0], "from the app")
+}

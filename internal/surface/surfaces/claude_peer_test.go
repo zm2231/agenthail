@@ -65,7 +65,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	record["bridgeSessionId"] = "session_bridge"
 	write(record)
 	resolved, err := adapter.Resolve(context.Background(), "local-id")
-	if err != nil || resolved.ID != "session_bridge" || resolved.BridgeSessionID != "session_bridge" {
+	if err != nil || resolved.ID != "session_bridge" {
 		t.Fatalf("local sender id resolve=%+v err=%v", resolved, err)
 	}
 	record["agenthail"] = "peer-worker"

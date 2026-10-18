@@ -52,6 +52,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var result *surface.SendResult
 	var sendErr error
 	steered := false
+	humanSender, humanTurn := adapter.(surface.HumanTurnSender)
+	humanTurn = humanTurn && item.HumanTurn && item.Model == "" && item.TurnOptions.Empty() && humanSender.CanSendHumanTurn(session)
+	peerTransport := session.Surface == surface.KindClaude && session.Transport == "uds" && !humanTurn
 	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
@@ -64,6 +67,8 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		} else {
 			sendErr = fmt.Errorf("%s does not support per-message model selection", adapter.Name())
 		}
+	} else if humanTurn {
+		result, sendErr = humanSender.SendHumanTurn(operationCtx, session, item.Message)
 	} else {
 		result, sendErr = adapter.Send(operationCtx, session, item.Message)
 	}
@@ -88,14 +93,14 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return
 	}
-	if !steered && (session.Surface != surface.KindClaude || session.Transport != "uds") {
+	if !steered && !peerTransport {
 		if err := d.Registry.MarkDeliveryStarted(session.ID, result.UUID, ""); err != nil {
 			d.log.Printf("record queue delivery %d start: %s", item.ID, err)
 		}
 	}
 	evidence := surface.EvidenceDelivered
 	historyKind := "delivered"
-	if session.Surface == surface.KindClaude && session.Transport == "uds" {
+	if peerTransport {
 		evidence = surface.EvidenceTransportAccepted
 		historyKind = "transport-accepted"
 	}

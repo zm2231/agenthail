@@ -36,7 +36,6 @@ type Session struct {
 	HasLocal              bool            `json:"hasLocal"`
 	Source                string          `json:"source,omitempty"`
 	Transport             string          `json:"transport,omitempty"`
-	BridgeSessionID       string          `json:"-"`
 	ConfiguredModel       string          `json:"configuredModel,omitempty"`
 	LastActive            time.Time       `json:"lastActive"`
 	StartedAt             time.Time       `json:"startedAt,omitzero"`
@@ -246,6 +245,16 @@ type SendOptions struct {
 	Model           string `json:"model,omitempty"`
 	SourceSessionID string `json:"sourceSessionId,omitempty"`
 	BusyDelivery    string `json:"busyDelivery,omitempty"`
+	// HumanTurn is set by the daemon for a person's own composer message and
+	// is never decoded from a request body.
+	HumanTurn bool `json:"-"`
+}
+
+// HumanTurnSender delivers a person's message as that session's own user
+// turn, separate from the peer transport agents use to message each other.
+type HumanTurnSender interface {
+	CanSendHumanTurn(sess *Session) bool
+	SendHumanTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
 }
 
 type sourceSessionIDContextKey struct{}

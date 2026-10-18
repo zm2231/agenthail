@@ -111,7 +111,10 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	if target == "" {
 		target = session.ID
 	}
-	claudePeer := session.Surface == surface.KindClaude && session.Transport == "uds"
+	humanSender, humanTurn := adapter.(surface.HumanTurnSender)
+	humanTurn = humanTurn && options.HumanTurn && options.Model == "" && options.TurnOptions.Empty() && humanSender.CanSendHumanTurn(session)
+	options.HumanTurn = humanTurn
+	claudePeer := session.Surface == surface.KindClaude && session.Transport == "uds" && !humanTurn
 	syntheticNotion := session.Surface == surface.KindNotion && (session.ID == "new" || strings.HasPrefix(session.ID, "new:"))
 	if err := options.TurnOptions.Validate(adapter.Name()); err != nil {
 		return nil, surface.DeliveryTerminal(err, surface.DeliveryInvalidRequest)
@@ -177,7 +180,9 @@ func (d Dispatcher) deliver(ctx context.Context, adapter surface.Surface, sessio
 	}
 	var result *surface.SendResult
 	var err error
-	if optionSender != nil {
+	if humanTurn {
+		result, err = humanSender.SendHumanTurn(ctx, session, message)
+	} else if optionSender != nil {
 		result, err = optionSender.SendWithOptions(ctx, session, message, options)
 	} else {
 		result, err = adapter.Send(ctx, session, message)
