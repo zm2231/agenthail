@@ -244,3 +244,41 @@ func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewritten(t *testing.
 		t.Fatalf("stale closing turn finished after rewrite: err=%v done=%v", err, done)
 	}
 }
+
+func TestClaudeSourceStreamDropsClosingTurnWhenTranscriptIsRewrittenMidWindow(t *testing.T) {
+	path := writeTranscript(t, closedTurnRecords)
+	session := seededClaudeStreamSession(t, path, "")
+	appendRecords(t, path, promptRecord, thinkingRecord, textRecord)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rewritten strings.Builder
+	for rewritten.Len() <= int(info.Size()) {
+		rewritten.WriteString(`{"type":"user","uuid":"v1","message":{"content":"new generation"}}` + "\n")
+	}
+	rewritten.WriteString(`{"type":"user","uuid":"v2","message":{"content":"after the old offset"}}` + "\n")
+	var mu sync.Mutex
+	done := map[string]int{}
+	closingSeen := make(chan struct{})
+	go func() {
+		<-closingSeen
+		os.WriteFile(path, []byte(rewritten.String()), 0600)
+	}()
+	var once sync.Once
+	err = NewClaude("", t.TempDir()).Stream(context.Background(), session, "", func(event surface.StreamEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		if event.Text == "ONE" {
+			once.Do(func() { close(closingSeen) })
+		}
+		if event.Kind == "done" {
+			done[event.TurnID]++
+		}
+	}, 400*time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if !errors.Is(err, surface.ErrStreamWindow) || len(done) != 0 {
+		t.Fatalf("stale closing turn finished after mid-window rewrite: err=%v done=%v", err, done)
+	}
+}

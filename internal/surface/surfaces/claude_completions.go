@@ -86,8 +86,8 @@ func (c *Claude) ReadCompletions(ctx context.Context, sess *surface.Session, cur
 	return batch, err
 }
 
-// transcriptAnchor is completionAnchor for callers that treat an unreadable
-// anchor as a mismatch.
+// transcriptAnchor is completionAnchor with an unreadable anchor reported as
+// empty, which never matches a recorded anchor.
 func transcriptAnchor(path string, offset int64) string {
 	anchor, err := completionAnchor(path, offset)
 	if err != nil {

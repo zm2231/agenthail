@@ -851,9 +851,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		// The session source resumes at its seed or previous window boundary, so records written
 		// in between are delivered once without replaying history the seed bounded away.
 		offset = sess.TranscriptOffset
-		if sess.ClaudeClosingTurn.TurnID != "" && sess.ClaudeClosingTurn.Anchor == transcriptAnchor(path, offset) {
-			closing = sess.ClaudeClosingTurn
-		}
+		closing = sess.ClaudeClosingTurn
 	}
 	if uuid != "" && offset > 0 {
 		file, openErr := os.Open(path)
@@ -896,6 +894,10 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 		}
 	}
 	for time.Now().Before(deadline) {
+		// A closing turn belongs to the bytes before offset; a rewritten transcript drops it.
+		if anchor := transcriptAnchor(path, offset); closing.TurnID != "" && (anchor == "" || anchor != closing.Anchor) {
+			closing = surface.ClaudeClosingTurn{}
+		}
 		lineOffset := offset
 		next, scanErr := scanAppendedJSONL(ctx, path, offset, maxClaudeTranscriptRecordBytes, func(line []byte) error {
 			recordOffset := lineOffset
@@ -962,17 +964,14 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
+		if closing.TurnID != "" {
+			closing.Anchor = transcriptAnchor(path, offset)
+		}
 		if uuid == "" {
 			sess.TranscriptOffset = offset
 			sess.TranscriptOffsetSet = true
 			sess.TranscriptIdentity = identity
-			sess.ClaudeClosingTurn = surface.ClaudeClosingTurn{}
-			if closing.TurnID != "" {
-				if closing.Anchor, err = completionAnchor(path, offset); err != nil {
-					return err
-				}
-				sess.ClaudeClosingTurn = closing
-			}
+			sess.ClaudeClosingTurn = closing
 		}
 		if completed {
 			return nil
