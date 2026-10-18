@@ -879,3 +879,30 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestValidateTargetSocketAcceptsClaudeRuntimeDirNamespace(t *testing.T) {
+	runtimeDir := shortTempDir(t, "cp-xdg-")
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	namespace := filepath.Join(runtimeDir, "cc-socks")
+	other := filepath.Join(runtimeDir, "elsewhere")
+	for _, dir := range []string{namespace, other} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name := strconv.Itoa(os.Getpid()) + ".sock"
+	for _, dir := range []string{namespace, other} {
+		listener, err := net.Listen("unix", filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+	}
+	configured := filepath.Join(runtimeDir, "configured")
+	if err := validateTargetSocket(configured, filepath.Join(namespace, name)); err != nil {
+		t.Fatalf("Claude runtime-dir socket rejected: %v", err)
+	}
+	if err := validateTargetSocket(configured, filepath.Join(other, name)); err == nil {
+		t.Fatal("socket outside every Claude namespace accepted")
+	}
+}

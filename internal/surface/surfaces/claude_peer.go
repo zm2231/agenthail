@@ -52,13 +52,11 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 
 const claudeProcessStartLayout = "Mon Jan 2 15:04:05 2006"
 
-// Claude Code puts peer sockets in $XDG_RUNTIME_DIR/cc-socks on Linux and
-// /tmp/cc-socks elsewhere.
 func claudeSocketPaths(pid int) []string {
 	name := strconv.Itoa(pid) + ".sock"
-	paths := []string{filepath.Join("/tmp/cc-socks", name)}
-	if runtimeDir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); runtimeDir != "" {
-		paths = append(paths, filepath.Join(runtimeDir, "cc-socks", name))
+	var paths []string
+	for _, dir := range claudepeer.ClaudeSocketDirs() {
+		paths = append(paths, filepath.Join(dir, name))
 	}
 	return paths
 }

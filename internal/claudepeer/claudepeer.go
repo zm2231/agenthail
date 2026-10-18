@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1111,13 +1113,30 @@ func classifyControlError(err error) *controlError {
 	return &controlError{Class: "unknown", Error: err.Error()}
 }
 
+// ClaudeSocketDirs returns the directories Claude Code binds peer sockets in:
+// /tmp/cc-socks, and on Linux $XDG_RUNTIME_DIR/cc-socks or the default
+// /run/user/<uid>/cc-socks, matching Claude Code's own default namespaces.
+func ClaudeSocketDirs() []string {
+	dirs := []string{DefaultSocketDir}
+	if runtimeDir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); runtimeDir != "" {
+		dirs = append(dirs, filepath.Join(runtimeDir, "cc-socks"))
+	}
+	if runtime.GOOS == "linux" {
+		if dir := filepath.Join("/run/user", strconv.Itoa(os.Getuid()), "cc-socks"); !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
 func validateTargetSocket(dir, target string) error {
 	if dir == "" {
 		dir = defaultSocketDir
 	}
 	cleanDir, _ := filepath.Abs(dir)
 	cleanTarget, _ := filepath.Abs(target)
-	if filepath.Dir(cleanTarget) != cleanDir || !strings.HasSuffix(filepath.Base(cleanTarget), ".sock") {
+	targetDir := filepath.Dir(cleanTarget)
+	if (targetDir != cleanDir && !slices.Contains(ClaudeSocketDirs(), targetDir)) || !strings.HasSuffix(filepath.Base(cleanTarget), ".sock") {
 		return surface.DeliveryTerminal(errors.New("target socket is outside the Claude socket namespace"), surface.DeliveryInvalidRequest)
 	}
 	st, err := os.Lstat(cleanTarget)
