@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,17 +148,23 @@ func connectVoice(t *testing.T, f *orphanFixture, target string) (*voice.Service
 	return service, call
 }
 
+// delegate posts a delegation through the public voice handler, whose request
+// context ends when it returns.
 func delegate(t *testing.T, service *voice.Service, text string) voice.State {
 	t.Helper()
-	state, err := service.Apply(context.Background(), "phone", voice.Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-" + text, Text: text})
-	if err != nil {
-		t.Fatalf("delegate: %v state=%+v", err, state)
+	body, _ := json.Marshal(voice.Action{Action: "delegate", AttemptID: "call-a", MessageID: "voice-" + text, Text: text})
+	response := httptest.NewRecorder()
+	voiceActionHandler(service, "phone", response, httptest.NewRequest(http.MethodPost, "/api/v1/voice", bytes.NewReader(body)), true)
+	var state voice.State
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &state) != nil {
+		t.Fatalf("delegate: status=%d body=%s", response.Code, response.Body)
 	}
 	return state
 }
 
-// answerTurns makes each posted message a transcript turn that Claude answers.
-func (f *orphanFixture) answerTurns(t *testing.T, answer string) {
+// recordTurns makes each posted message a transcript turn Claude has not
+// answered yet.
+func (f *orphanFixture) recordTurns(t *testing.T) {
 	t.Helper()
 	f.posts.onPost = func(body string) {
 		var envelope struct {
@@ -171,24 +180,36 @@ func (f *orphanFixture) answerTurns(t *testing.T, answer string) {
 		if json.Unmarshal([]byte(body), &envelope) != nil || len(envelope.Events) != 1 {
 			return
 		}
-		at := time.Now().UTC().Format(time.RFC3339Nano)
-		user, _ := json.Marshal(map[string]any{"type": "user", "uuid": envelope.Events[0].Payload.UUID, "timestamp": at, "message": map[string]any{"role": "user", "content": envelope.Events[0].Payload.Message.Content}})
-		reply, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "answer-" + envelope.Events[0].Payload.UUID, "parentUuid": envelope.Events[0].Payload.UUID, "timestamp": at, "message": map[string]any{"id": "answer-message", "role": "assistant", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": answer}}}})
-		file, err := os.OpenFile(f.session.Transcript, os.O_APPEND|os.O_WRONLY, 0)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		defer file.Close()
-		_, _ = file.Write(append(append(append(user, '\n'), reply...), '\n'))
+		f.appendTranscript(t, map[string]any{"type": "user", "uuid": envelope.Events[0].Payload.UUID, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": envelope.Events[0].Payload.Message.Content}})
 	}
+}
+
+func (f *orphanFixture) appendTranscript(t *testing.T, record map[string]any) {
+	t.Helper()
+	line, _ := json.Marshal(record)
+	file, err := os.OpenFile(f.session.Transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer file.Close()
+	if _, err := file.Write(append(line, '\n')); err != nil {
+		t.Error(err)
+	}
+}
+
+func (f *orphanFixture) answer(t *testing.T, text string) {
+	t.Helper()
+	f.appendTranscript(t, map[string]any{"type": "assistant", "uuid": "fixture-reply", "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "message": map[string]any{"id": "fixture-reply-message", "role": "assistant", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": text}}}})
 }
 
 func TestVoiceDelegationToEndedBackgroundJobResumesItAndSpeaksTheReply(t *testing.T) {
 	f := newOrphanFixtureOn(t, "")
-	f.answerTurns(t, "fixture reply")
+	f.recordTurns(t)
 	service, call := connectVoice(t, f, "orphan")
 	delegate(t, service, "hello")
+	time.Sleep(200 * time.Millisecond)
+	f.answer(t, "fixture reply")
 	deadline := time.Now().Add(5 * time.Second)
 	for !call.said("fixture reply") {
 		if time.Now().After(deadline) {
@@ -201,7 +222,7 @@ func TestVoiceDelegationToEndedBackgroundJobResumesItAndSpeaksTheReply(t *testin
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if f.resumes() != 1 || f.posts.count("hello") != 1 || !strings.Contains(service.View("phone").Message, "Woke orphan") {
+	if f.resumes() != 1 || f.posts.count("hello") != 1 || !strings.Contains(service.View("phone").Message, "Woke orphan") || failed(service.View("phone")) {
 		t.Fatalf("resumes=%d posts=%d message=%q", f.resumes(), f.posts.count("hello"), service.View("phone").Message)
 	}
 }
@@ -250,5 +271,29 @@ func TestVoiceDelegationToLiveSocketOnlySessionDeliversInsteadOfRejecting(t *tes
 	state := delegate(t, service, "hello")
 	if !strings.Contains(state.Message, "cannot follow this session's reply") || f.resumes() != 0 || manager.count("hello") != 1 {
 		t.Fatalf("message=%q resumes=%d peer=%d", state.Message, f.resumes(), manager.count("hello"))
+	}
+}
+
+func failed(state voice.State) bool {
+	for _, event := range state.Events {
+		if event.Method == "voice/delegation/failed" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestVoiceTargetTakesTheLiveSessionForItsExactIDAndOnlyWakingSurfacesTakeAClosedRow(t *testing.T) {
+	d, _, fake, _, registered := daemonFixture(t)
+	live := registered
+	live.Source, live.Transport = "agenthail", "managed"
+	fake.sessions[registered.ID] = live
+	target, err := d.resolveVoiceTarget(context.Background(), registered.ID)
+	if err != nil || target.Session.Transport != "managed" {
+		t.Fatalf("target=%+v err=%v", target, err)
+	}
+	delete(fake.sessions, registered.ID)
+	if _, err := d.resolveVoiceTarget(context.Background(), registered.ID); err == nil {
+		t.Fatal("a surface that cannot wake a session accepted its closed row")
 	}
 }

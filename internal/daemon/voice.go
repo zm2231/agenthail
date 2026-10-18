@@ -59,8 +59,10 @@ func (p daemonVoiceStreamProvider) PrepareSessionStream(ctx context.Context, ses
 	return p.daemon.sources.prepareStream(ctx, session, adapter)
 }
 
-// resolveVoiceTarget selects a registered session by alias or exact ID, as
-// daemon delivery does, so a closed session can be selected and a send wakes it.
+// resolveVoiceTarget selects a registered session by alias or exact ID and
+// refreshes it from its surface's live view of that exact ID. A surface whose
+// sends wake a closed session takes the registered row when the session is
+// not live, so the send wakes it.
 func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voice.Target, error) {
 	if d.Registry == nil {
 		return nil, fmt.Errorf("session-bound voice requires the Agenthail registry")
@@ -77,7 +79,17 @@ func (d *Daemon) resolveVoiceTarget(ctx context.Context, requested string) (*voi
 	if err != nil {
 		return nil, err
 	}
-	return &voice.Target{Session: session, Adapter: adapter}, nil
+	resolved, err := adapter.Resolve(ctx, session.ID)
+	if err == nil && resolved != nil && resolved.ID == session.ID {
+		return &voice.Target{Session: resolved, Adapter: adapter}, nil
+	}
+	if _, wakes := adapter.(surface.Waker); wakes {
+		return &voice.Target{Session: session, Adapter: adapter}, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("live session did not retain exact identity %s", session.ID)
+	}
+	return nil, fmt.Errorf("verify voice target: %w", err)
 }
 
 func (d *Daemon) voiceBearerGuard(dashboard *dashboardServer, next http.HandlerFunc) http.HandlerFunc {
