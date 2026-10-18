@@ -13,7 +13,7 @@ notifications or from a readable transcript; otherwise the state is unknown.
 
 `agenthail list --cwd <path>` retains sessions whose normalized workspace is that
 directory or a descendant. Existing symlinks resolve before comparison, and path
-components—not string prefixes—define ancestry. `--wide` prints each full normalized
+components, not string prefixes, define ancestry. `--wide` prints each full normalized
 workspace; ordinary table output also uses the full path when multiple sessions share
 a workspace basename. JSON always retains the complete `cwd` field. CWD narrows
 discovery; it never selects a caller identity.
@@ -70,7 +70,7 @@ Use `@alias` or `claude:<session-id>` as a target. The `claude/name` transcript 
 
 For native messaging, Agenthail resolves the session first, then reads its PID registration and selects `messagingSocketPath`. It verifies session identity, a live PID, the expected `/tmp/cc-socks/<pid>.sock` path, socket ownership, and the process-start identity. Agenthail's verifier and peer registrations use `LC_ALL=C TZ=UTC`; native Claude records from 2.1.267 onward use UTC, while older records use local time. A stale process identity is rejected. Relays store canonical session IDs and use the shared queue and adapter delivery path; they do not retain a socket path across process changes.
 
-Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control identity can use those typed controls even when ordinary messages use the native socket. Controls are never encoded as queued slash-text messages. Background status, logs, stop and resume use the Claude CLI lifecycle interface. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message. Composer messages from the web dashboard and native apps declare `"author": "person"` and use the Remote Control identity when the session has one, so they arrive as the user's own turn with `delivered` rather than `transport_accepted` evidence.
+Socket messaging and Remote Control have different capabilities. Native socket-only sessions support messages and transcript inspection, but not compact, model switching, interrupt or steering. Sessions with a Remote Control attachment can use those typed controls even when ordinary messages use the native socket. Controls are never encoded as queued slash-text messages. Background status, logs, stop and resume use the Claude CLI lifecycle interface. Socket delivery is not evidence that a Remote Control operation works, and queue acceptance is not proof that Claude consumed the message. Composer messages from the web dashboard and native apps declare `"author": "person"` and use the Remote Control attachment when the session has one, so they arrive as the user's own turn with `delivered` rather than `transport_accepted` evidence.
 
 Claude compact requests are stored as typed queue operations. The daemon waits
 for the target to become idle, invokes `/compact` through Remote Control, and

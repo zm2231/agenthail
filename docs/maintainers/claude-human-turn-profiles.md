@@ -32,7 +32,7 @@ whatever the author.
 
 [`delivery.RouteFor`](../../internal/delivery/route.go) is the one place that
 picks a message's transport. A person's message to an adapter that implements
-`surface.HumanTurnSender` and has a Remote Control identity
+`surface.HumanTurnSender` and has a Remote Control attachment
 (`CanSendHumanTurn`) takes `RouteHumanTurn`. A Claude UDS session otherwise
 takes `RoutePeer`. Everything else takes `RouteSend`. `Dispatcher.deliver` and
 [`drainClaimedMessage`](../../internal/daemon/outbox.go) both call it, and so do
@@ -53,7 +53,7 @@ and this layer adds no UI for the difference.
 
 A busy target follows the existing busy-delivery policy. A steer from a
 composer, whether chosen directly or by the `steer` policy, goes through
-`Claude.Steer`, which posts through the Remote Control identity, so it is also
+`Claude.Steer`, which posts through the Remote Control attachment, so it is also
 the person's turn. With `queue`, the author persists as `message_queue.author`,
 and the drain replays a person's message through `SendHumanTurn` once the
 session is idle. `Claude.Send`'s bridge branch and `SendHumanTurn` share
