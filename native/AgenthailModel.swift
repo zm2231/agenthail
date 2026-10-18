@@ -308,6 +308,8 @@ final class AgenthailModel: ObservableObject {
             return .failed(message)
         } catch AgenthailAPIError.unavailable(let message) {
             return .failed(message)
+        } catch let error as URLError where ActionRetryKeys.notSent.contains(error.code) {
+            return .failed(error.localizedDescription)
         } catch {
             return .uncertain(error.localizedDescription)
         }

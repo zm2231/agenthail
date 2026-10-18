@@ -41,6 +41,18 @@ struct SessionLaunchRetryTest {
         _ = await model.launchSession(spelled)
         check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "edits that send the same request keep the key")
 
+        model = makeModel([.unreachable, .unreachable])
+        let unreachable = await model.launchSession(a)
+        _ = await model.launchSession(a)
+        if case .failed = unreachable {} else { check(false, "a request that never reached the daemon is a definite failure") }
+        check(ScriptedProtocol.keys[0] != ScriptedProtocol.keys[1], "a retry after an unsent request uses a new key")
+
+        model = makeModel([.timedOut, .timedOut])
+        let timedOut = await model.launchSession(a)
+        _ = await model.launchSession(a)
+        if case .uncertain = timedOut {} else { check(false, "a timeout is uncertain") }
+        check(ScriptedProtocol.keys[0] == ScriptedProtocol.keys[1], "a retry after a timeout reuses the key")
+
         model = makeModel([.refused, .lost])
         let refused = await model.launchSession(a)
         _ = await model.launchSession(a)
@@ -101,6 +113,8 @@ struct SessionLaunchRetryTest {
 final class ScriptedProtocol: URLProtocol {
     enum Reply {
         case lost
+        case unreachable
+        case timedOut
         case unknown
         case refused
         case failedReceipt
@@ -120,6 +134,10 @@ final class ScriptedProtocol: URLProtocol {
         switch Self.script.removeFirst() {
         case .lost:
             client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+        case .unreachable:
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+        case .timedOut:
+            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
         case .unknown:
             reply(502, #"{"ok":false,"status":"failed","retryable":false,"unknown":true,"error":"synthetic ambiguous start"}"#)
         case .refused:

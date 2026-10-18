@@ -58,7 +58,7 @@ final class ActionRetryKeys {
         encoder.outputFormatting = .sortedKeys
         return encoder
     }()
-    private static let notSent: Set<URLError.Code> = [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .badURL, .unsupportedURL, .userAuthenticationRequired]
+    static let notSent: Set<URLError.Code> = [.cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .badURL, .unsupportedURL, .userAuthenticationRequired]
 
     func post<Result: Decodable>(_ request: SessionOperationRequest, api: AgenthailAPI) async throws -> Result {
         guard request.mutates else {
