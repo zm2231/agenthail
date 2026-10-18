@@ -274,6 +274,7 @@ func (s *systemdService) Problems() []serviceProblem {
 		}
 		if data, err := os.ReadFile(s.unitPath); err == nil {
 			environment = systemdUnitEnvironment(string(data))
+			problems = append(problems, environmentDrift(environment, serviceEnvironment(), s.home)...)
 		}
 	}
 	if _, err := claudeExecutable(environment, s.home); err != nil {
@@ -426,4 +427,29 @@ func systemdUnitEnvironment(unit string) map[string]string {
 		}
 	}
 	return environment
+}
+
+func environmentDrift(daemonEnvironment, shellEnvironment map[string]string, home string) []serviceProblem {
+	var problems []serviceProblem
+	resolved := map[string]func(map[string]string) string{
+		"CODEX_HOME": codexHomeFrom,
+		"CLAUDE_CONFIG_DIR": func(environment map[string]string) string {
+			if value := strings.TrimSpace(environment["CLAUDE_CONFIG_DIR"]); value != "" {
+				return value
+			}
+			return filepath.Join(home, ".claude")
+		},
+	}
+	for _, key := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR"} {
+		daemonValue, shellValue := resolved[key](daemonEnvironment), resolved[key](shellEnvironment)
+		if daemonValue == shellValue {
+			continue
+		}
+		problems = append(problems, serviceProblem{
+			Problem: strings.ToLower(strings.ReplaceAll(key, "_", "-")) + "-drift",
+			Detail:  fmt.Sprintf("the daemon uses %s=%s but this shell uses %s", key, daemonValue, shellValue),
+			Fix:     fmt.Sprintf("rerun 'agenthail daemon install' from a shell where %s is the directory the daemon should use", key),
+		})
+	}
+	return problems
 }

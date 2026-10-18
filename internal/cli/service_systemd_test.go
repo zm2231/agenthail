@@ -360,3 +360,61 @@ func TestDoctorFailsOnDaemonServiceProblems(t *testing.T) {
 		t.Fatalf("err=%v text=%s", err, text)
 	}
 }
+
+func TestDoctorReportsDaemonUnhealthyWhileLingerIsOff(t *testing.T) {
+	fake, service := newFakeSystemctl(t)
+	fake.lingerRefused = true
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "claude"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := captureStdout(t, service.Install); err != nil {
+		t.Fatal(err)
+	}
+	app, _ := cliFixture(t, &cliSurface{kind: "claude"})
+	app.daemonService = service
+	output, err := captureStdout(t, func() error { return app.Run([]string{"doctor"}) })
+	if err == nil || !strings.Contains(err.Error(), "1 daemon problem") {
+		t.Fatalf("doctor accepted a daemon that stops at logout: err=%v output=%s", err, output)
+	}
+	if !strings.Contains(output, "linger is off for agent") || !strings.Contains(output, "run 'sudo loginctl enable-linger agent'") {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestSystemdUnitRecordsClaudeConfigDirAndDoctorFlagsDrift(t *testing.T) {
+	fake, service := newFakeSystemctl(t)
+	fake.linger = true
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "claude"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", claudeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	configured := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configured)
+	if _, err := captureStdout(t, service.Install); err != nil {
+		t.Fatal(err)
+	}
+	unit, err := os.ReadFile(fake.unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if systemdUnitEnvironment(string(unit))["CLAUDE_CONFIG_DIR"] != configured {
+		t.Fatalf("unit=%s", unit)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	problems := service.Problems()
+	if len(problems) != 1 || problems[0].Problem != "claude-config-dir-drift" || !strings.Contains(problems[0].Detail, "CLAUDE_CONFIG_DIR="+configured) {
+		t.Fatalf("problems=%+v", problems)
+	}
+	app, _ := cliFixture(t, &cliSurface{kind: "claude"})
+	t.Setenv("CLAUDE_CONFIG_DIR", configured)
+	output, _ := captureStdout(t, func() error { return app.Run([]string{"doctor", "--json"}) })
+	var payload struct {
+		ClaudeConfigDir string `json:"claudeConfigDir"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || payload.ClaudeConfigDir != configured {
+		t.Fatalf("payload=%+v err=%v output=%s", payload, err, output)
+	}
+}

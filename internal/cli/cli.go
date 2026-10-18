@@ -2359,17 +2359,20 @@ func (a *App) cmdDoctor(args []string) error {
 		}
 		results = append(results, result)
 	}
+	home, _ := os.UserHomeDir()
+	claudeConfigDir := surface.ClaudeConfigDir(home)
 	service := a.service()
 	serviceProblems := service.Problems()
 	if serviceProblems == nil {
 		serviceProblems = []serviceProblem{}
 	}
 	if hasFlag(args, "--json") {
-		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}}
+		report := map[string]any{"ok": failures == 0 && len(serviceProblems) == 0, "surfaces": results, "daemon": map[string]any{"supervisor": service.Name(), "problems": serviceProblems}, "claudeConfigDir": claudeConfigDir}
 		if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 			return err
 		}
 	} else {
+		fmt.Printf("claude config: %s\n", claudeConfigDir)
 		if len(serviceProblems) > 0 {
 			fmt.Printf("[daemon] supervisor: %s\n", service.Name())
 			for _, problem := range serviceProblems {
