@@ -60,6 +60,7 @@ final class AgenthailModel: ObservableObject {
     private var detailCache: [String: SessionDetail] = [:]
     private var detailCacheOrder: [String] = []
     private var drafts: [String: ComposerDraft] = [:]
+    private var rekeys = SessionRekeys()
     private var pendingSessionReference: String?
     private let attachmentCache: NSCache<NSString, NSData> = {
         let cache = NSCache<NSString, NSData>()
@@ -164,10 +165,7 @@ final class AgenthailModel: ObservableObject {
         setLoading(snapshot == nil)
         do {
             let loaded = try await api.snapshot(fresh: fresh)
-            if snapshot?.hasSamePresentation(as: loaded) != true {
-                snapshot = loaded
-            }
-            snapshotLoadedAt = Date()
+            adopt(loaded)
             if catalogPosition.adopt(snapshotEpoch: loaded.hostEpoch, snapshotSeq: loaded.catalogSeq), catalogStreamTask != nil {
                 startCatalogStream()
             }
@@ -181,6 +179,16 @@ final class AgenthailModel: ObservableObject {
         }
         setLoading(false)
         return true
+    }
+
+    // Rekeys are recorded before the snapshot is published, because publishing
+    // opens a pending notification target and wakes a waiting reply.
+    func adopt(_ loaded: DashboardSnapshot) {
+        rekeys.record(loaded.rekeyed ?? [:])
+        if snapshot?.hasSamePresentation(as: loaded) != true {
+            snapshot = loaded
+        }
+        snapshotLoadedAt = Date()
     }
 
     func refreshNow(_ pane: SessionPane? = nil) {
@@ -374,6 +382,7 @@ final class AgenthailModel: ObservableObject {
             pendingSessionReference = reference
             return
         }
+        let reference = rekeys.resolve(reference)
         if let session = knownSessions.first(where: { AgenthailLink.matches($0, reference: reference) }) {
             mainPane.select(session.id)
         } else {
@@ -533,9 +542,10 @@ final class AgenthailModel: ObservableObject {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return true }
         guard await awaitConnection(timeout: connectionTimeout) else {
-            restoreToComposer(text, sessionID: sessionID)
+            restoreToComposer(text, sessionID: rekeys.resolve(sessionID))
             return false
         }
+        let sessionID = rekeys.resolve(sessionID)
         return await withCheckedContinuation { continuation in
             send(text, to: sessionID) { continuation.resume(returning: $0) }
         }
@@ -765,6 +775,7 @@ final class AgenthailModel: ObservableObject {
         case "session.removed":
             guard let id = event.data.sessionId else { return }
             current.sessions.removeAll { $0.id == id }
+            if let next = event.data.rekeyedTo { rekeys.record([id: next]) }
         case "delivery.problem":
             guard let deliveryID = event.data.deliveryId, let sessionID = event.data.sessionId else { return }
             let problem = DeliveryProblem(deliveryId: deliveryID, sessionId: sessionID, sourceSessionId: event.data.sourceSessionId, message: event.data.message ?? "", reason: event.data.reason ?? "", status: event.data.status, at: event.data.at ?? "")
@@ -866,7 +877,19 @@ final class AgenthailModel: ObservableObject {
         clearConnectionError()
     }
 
+    func resolveSessionID(_ id: String) -> String {
+        rekeys.resolve(id)
+    }
+
     private func reconcilePanes() {
+        if !rekeys.isEmpty {
+            _ = rekeys.carry(&drafts)
+            _ = rekeys.carry(&pendingSendRequests)
+            var sends = localSends
+            if rekeys.carry(&sends) { localSends = sends }
+            var settings = turnSettingsDrafts
+            if rekeys.carry(&settings) { turnSettingsDrafts = settings }
+        }
         panes.forEach { $0.reconcile() }
     }
 

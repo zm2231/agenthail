@@ -56,27 +56,3 @@ func TestQueuePreservesSourceSessionIDAcrossReopenClaimAndExports(t *testing.T) 
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
 }
-
-func TestClaudeMergePreservesQueuedSenderIdentity(t *testing.T) {
-	r, err := Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	for _, s := range []surface.Session{{ID: "target", Surface: surface.KindNotion}, {ID: "local", Surface: surface.KindClaude, Transcript: "/fixture/session.jsonl"}} {
-		if err := r.RegisterSession(s); err != nil {
-			t.Fatal(err)
-		}
-	}
-	id, err := r.QueueMessageWithOptions("target", "hello", "", surface.SendOptions{SourceSessionID: "local"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.RegisterSession(surface.Session{ID: "bridge", Surface: surface.KindClaude, Transcript: "/fixture/session.jsonl"}); err != nil {
-		t.Fatal(err)
-	}
-	queued, err := r.QueueItem(id)
-	if err != nil || queued.SourceSessionID != "bridge" {
-		t.Fatalf("queued=%+v err=%v", queued, err)
-	}
-}

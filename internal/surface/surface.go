@@ -25,6 +25,11 @@ const (
 	StatusUnknown SessionStatus = "unknown"
 )
 
+// Session is one conversation. ID is the provider's native conversation id
+// (Claude session id, Codex thread id) and never changes. PID, Transport and
+// Bridge (the Claude Remote Control id) describe the process currently
+// attached to the conversation and can come and go. ForkedFrom is the
+// conversation this one was branched from.
 type Session struct {
 	ID                    string            `json:"id"`
 	Surface               SurfaceKind       `json:"surface"`
@@ -37,6 +42,8 @@ type Session struct {
 	Source                string            `json:"source,omitempty"`
 	Transport             string            `json:"transport,omitempty"`
 	ConfiguredModel       string            `json:"configuredModel,omitempty"`
+	Bridge                string            `json:"bridge,omitempty"`
+	ForkedFrom            string            `json:"forkedFrom,omitempty"`
 	LastActive            time.Time         `json:"lastActive"`
 	StartedAt             time.Time         `json:"startedAt,omitzero"`
 	Runtime               *Runtime          `json:"runtime,omitempty"`
@@ -539,7 +546,7 @@ type SessionCapabilities struct {
 func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
 	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
 		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
-		if !strings.HasPrefix(session.ID, "session_") && !strings.HasPrefix(session.ID, "cse_") {
+		if session.Bridge == "" {
 			capabilities.Steer = false
 			capabilities.Compact = false
 			capabilities.Model = false

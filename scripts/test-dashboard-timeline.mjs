@@ -46,7 +46,6 @@ const context = {
   syncComposerAction: () => {},
   renderSlashMenu: () => {},
   conversationMeta: () => "Claude Code",
-  renderSharedNote: () => {},
   renderContextUsage: () => {},
   startLiveStream: () => {},
   renderGoalAttention: () => "",

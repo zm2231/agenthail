@@ -59,7 +59,9 @@ func runCodexDaemon(ctx context.Context, action string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action).Output()
+	command := exec.CommandContext(commandCtx, binary, "app-server", "daemon", action)
+	command.Env = surface.AgentEnv(os.Environ())
+	output, err := command.Output()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		var exitErr *exec.ExitError

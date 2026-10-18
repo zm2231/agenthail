@@ -14,7 +14,7 @@ func writeClaudeSessionRecord(t *testing.T, dir, id string) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	record := `{"bridgeSessionId":"` + id + `","pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
+	record := `{"sessionId":"` + id + `","bridgeSessionId":"session_` + id + `","pid":` + fmt.Sprint(os.Getpid()) + `,"status":"idle"}`
 	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(record), 0600); err != nil {
 		t.Fatal(err)
 	}

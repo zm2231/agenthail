@@ -29,7 +29,7 @@ func (a *App) cmdWhoami(args []string) error {
 		return a.writeWhoami(result, hasFlag(args, "--json"))
 	}
 	if id == "" {
-		result.Reason = "no caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_SESSION_ID"
+		result.Reason = "no caller session binding; set AGENTHAIL_SESSION_ID, CODEX_THREAD_ID, or CLAUDE_CODE_SESSION_ID"
 		return a.writeWhoami(result, hasFlag(args, "--json"))
 	}
 	if a.Registry == nil {

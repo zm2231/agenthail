@@ -132,6 +132,31 @@ struct SessionPaneTest {
         let healthEvent = try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"surface.health","data":{"surface":"codex","health":"degraded","detail":"bridge closed","runtime":{"name":"Codex Desktop bridge","reachable":false,"durable":false,"problem":"bridge-unavailable","detail":"bridge closed","remediation":"run the launch command"}}}"#.utf8))
         catalog.applyCatalogEvent(healthEvent)
         check(catalog.snapshot?.surfaces.first?.runtime?.advice.isEmpty == false && catalog.snapshot?.surfaces.first?.health == "degraded", "a streamed surface health change keeps its runtime advice")
+        let rekeyed = AgenthailModel(connecting: false)
+        let retired = SessionState(id: "session_old", surface: "claude", name: "worker", alias: "worker", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        rekeyed.snapshot = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [retired], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        let following = rekeyed.openPane()
+        following.select("session_old")
+        rekeyed.draft(for: "session_old").text = "unsent"
+        rekeyed.applyCatalogEvent(try! JSONDecoder().decode(CatalogStreamEvent.self, from: Data(#"{"stream":"catalog","seq":2,"type":"session.removed","data":{"sessionId":"session_old","surface":"claude","reason":"rekeyed","rekeyedTo":"conversation-a"}}"#.utf8)))
+        check(following.selectedSessionID == "conversation-a" && following.removedSession == nil, "a pane on a rekeyed session follows it to its conversation id")
+        check(rekeyed.draft(for: "conversation-a").text == "unsent", "a rekeyed session keeps its draft")
+        let restored = rekeyed.openPane()
+        restored.select("session_old")
+        check(restored.selectedSessionID == "conversation-a", "a window restored with a retired id opens the conversation")
+        let lateReply = await rekeyed.reply("late answer", to: "session_old", connectionTimeout: .milliseconds(50))
+        check(!lateReply && rekeyed.draft(for: "conversation-a").text.contains("late answer"), "a notification reply to a retired id goes to the conversation")
+        let cold = AgenthailModel(connecting: false)
+        cold.openSession(reference: "session_old")
+        let coldReply = Task { await cold.reply("cold answer", to: "session_old", connectionTimeout: .seconds(5)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        let conversation = SessionState(id: "conversation-a", surface: "claude", name: "worker", alias: "worker", status: "idle", lastActive: nil, queueCount: 0, open: true, current: true, currentReason: nil, capabilities: Capabilities(), readOnly: nil, readOnlyReason: nil)
+        var hydrated = DashboardSnapshot(updatedAt: "2026-10-18T12:00:00Z", eventCursor: 1, hostEpoch: "h", catalogSeq: 1, daemon: DaemonState(running: true, pid: 1, stale: false, refreshError: nil), surfaces: [], sessions: [conversation], totalSessions: 1, queue: [], channels: [], relays: [], history: [], attention: [], deliveryProblems: nil, codexRecentHours: 5, busyDelivery: "queue")
+        hydrated.rekeyed = ["session_old": "conversation-a"]
+        cold.adopt(hydrated)
+        check(cold.mainPane.selectedSessionID == "conversation-a", "a notification opened before the first snapshot opens the rekeyed conversation")
+        let coldDelivered = await coldReply.value
+        check(!coldDelivered && cold.draft(for: "conversation-a").text.contains("cold answer") && cold.draft(for: "session_old").text.isEmpty, "a reply sent before the first snapshot resolves the rekey once it loads")
         let disconnected = AgenthailModel(connecting: false)
         var rejected: Bool?
         disconnected.send("look", attachments: [picture], to: "Z") { rejected = !$0 }
