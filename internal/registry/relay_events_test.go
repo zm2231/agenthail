@@ -367,8 +367,8 @@ func TestClaudeRowsOfOneTranscriptShareOneRelayLog(t *testing.T) {
 	if cursor, err := r.RelaySourceCursor("old"); err != nil || cursor != "c1" {
 		t.Fatalf("old row cursor=%q err=%v", cursor, err)
 	}
-	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "stale", Events: []surface.Completion{{ID: "A", Text: "A"}, {ID: "S", Text: "S"}}}); err != nil {
-		t.Fatal(err)
+	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "stale", Events: []surface.Completion{{ID: "A", Text: "A"}, {ID: "S", Text: "S"}}}); !errors.Is(err, ErrRelayCursorMoved) {
+		t.Fatalf("stale capture err=%v", err)
 	}
 	if err := r.CaptureRelayCompletions("old", "c1", surface.CompletionBatch{Cursor: "c2", Events: []surface.Completion{{ID: "X", Text: "X"}}}); err != nil {
 		t.Fatal(err)

@@ -25,6 +25,11 @@ const relaySourceKey = `CASE WHEN s.surface='claude' THEN CASE WHEN s.transcript
 
 var errNoRelayTranscript = errors.New("relay source has no transcript yet")
 
+// ErrRelayCursorMoved means another capture of the same conversation committed
+// first. Its batch may end before this one, so the caller must read again from
+// the new cursor to cover what it observed.
+var ErrRelayCursorMoved = errors.New("relay source cursor moved; read again")
+
 func relaySourceKeyOf(q catalogQuerier, sessionID string) (string, error) {
 	var key sql.NullString
 	if err := q.QueryRow(`SELECT `+relaySourceKey+` FROM sessions s WHERE s.id=?`, sessionID).Scan(&key); err != nil {
@@ -62,15 +67,20 @@ func (r *Registry) PrepareRelaySource(ctx context.Context, adapter surface.Surfa
 	if !ok {
 		return fmt.Errorf("source does not support replayable completions")
 	}
-	cursor, err := r.RelaySourceCursor(session.ID)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		cursor, err := r.RelaySourceCursor(session.ID)
+		if err != nil {
+			return err
+		}
+		batch, err := reader.ReadCompletions(ctx, session, cursor)
+		if err != nil {
+			return err
+		}
+		err = r.CaptureRelayCompletions(session.ID, cursor, batch)
+		if !errors.Is(err, ErrRelayCursorMoved) || attempt == 4 {
+			return err
+		}
 	}
-	batch, err := reader.ReadCompletions(ctx, session, cursor)
-	if err != nil {
-		return err
-	}
-	return r.CaptureRelayCompletions(session.ID, cursor, batch)
 }
 
 func (r *Registry) RelaySourceCursor(sessionID string) (string, error) {
@@ -114,8 +124,7 @@ func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch sur
 		return err
 	}
 	if n != 1 {
-		// Another row of the same conversation captured this span first.
-		return nil
+		return ErrRelayCursorMoved
 	}
 	for _, event := range batch.Events {
 		if event.ID == "" {

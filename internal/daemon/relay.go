@@ -68,6 +68,9 @@ func (d *Daemon) syncRelays(ctx context.Context, adapter surface.Surface, sessio
 				if err == nil && len(batch.Events) > 0 {
 					d.publishEvent("state.changed", session.ID, map[string]string{"source": "relay-capture"})
 				}
+				if errors.Is(err, registry.ErrRelayCursorMoved) {
+					err = nil
+				}
 			}
 		}
 		captureErr = err

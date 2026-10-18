@@ -289,3 +289,72 @@ func TestRelayUserPrefixCannotSpoofHopLimit(t *testing.T) {
 		}
 	}
 }
+
+type racingClaudeReader struct {
+	*surfaces.Claude
+	race func()
+}
+
+func (r *racingClaudeReader) ReadCompletions(ctx context.Context, session *surface.Session, cursor string) (surface.CompletionBatch, error) {
+	if race := r.race; race != nil {
+		r.race = nil
+		race()
+	}
+	return r.Claude.ReadCompletions(ctx, session, cursor)
+}
+
+func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	appendTurn := func(id string) {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		fmt.Fprintf(f, "{\"type\":\"user\",\"uuid\":\"input-%s\",\"message\":{\"content\":\"request\"}}\n", id)
+		fmt.Fprintf(f, "{\"type\":\"assistant\",\"message\":{\"id\":\"%s\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"answer %s\"}]}}\n", id, id)
+	}
+	appendTurn("baseline")
+	d, r, _, source, to := daemonFixture(t)
+	source.Surface = surface.KindClaude
+	source.Transcript = path
+	if err := r.RegisterSession(source); err != nil {
+		t.Fatal(err)
+	}
+	reader := &racingClaudeReader{Claude: surfaces.NewClaude("", t.TempDir())}
+	if err := r.PrepareRelaySource(context.Background(), reader, &source, registry.HandoffTurnFinished); err != nil {
+		t.Fatal(err)
+	}
+	appendTurn("A")
+	reader.race = func() {
+		cursor, err := r.RelaySourceCursor(source.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		batch, err := reader.Claude.ReadCompletions(context.Background(), &source, cursor)
+		if err != nil || len(batch.Events) != 1 {
+			t.Fatalf("scan batch=%+v err=%v", batch, err)
+		}
+		appendTurn("B")
+		if err := r.CaptureRelayCompletions(source.ID, cursor, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.PrepareRelaySource(context.Background(), reader, &source, registry.HandoffTurnFinished); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddRoute(source.ID, to.ID, ".*"); err != nil {
+		t.Fatal(err)
+	}
+	appendTurn("C")
+	d.syncRelays(context.Background(), reader, &source)
+	routes, _ := r.ListRoutes()
+	if len(routes) != 1 || routes[0].FireCount != 1 || routes[0].PendingCount != 0 || routes[0].LastError != "" || r.QueueCount(to.ID) != 1 {
+		t.Fatalf("routes=%+v queued=%d", routes, r.QueueCount(to.ID))
+	}
+	items, err := r.ListQueue(false)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Message, "answer C") {
+		t.Fatalf("queue=%+v err=%v", items, err)
+	}
+}
