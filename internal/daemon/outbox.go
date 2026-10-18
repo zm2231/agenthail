@@ -52,9 +52,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	operationCtx = surface.WithSourceSessionID(operationCtx, item.SourceSessionID)
 	var result *surface.SendResult
 	var sendErr error
+	addressed := *session
 	steered := false
 	route := delivery.RouteFor(adapter, session, item.Author)
-	peerTransport := route.TransportOnly()
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
 	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
@@ -66,6 +66,8 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
 	}
 	cancel()
+	d.dispatcher().RegisterReached(&addressed, session)
+	peerTransport := delivery.RouteFor(adapter, session, item.Author).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
 		return

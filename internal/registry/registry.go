@@ -914,12 +914,10 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
 		return r.resolveSubagentPath(path)
 	}
-	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
+	if sid, err := r.ExactTarget(target); err == nil {
 		return sid, nil
-	}
-	var exact string
-	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
-		return exact, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
 	}
 	prefix := escapeLike(target) + "%"
 	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' ORDER BY updated_at DESC, id LIMIT 2`, prefix); err != nil {
@@ -941,6 +939,21 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("ambiguous session target %q matches %s", target, strings.Join(ids, ", "))
 	}
 	return ids[0], nil
+}
+
+// ExactTarget resolves only targets that name one session exactly: an alias,
+// a session ID, or the conversation ID a Claude transcript is named after.
+func (r *Registry) ExactTarget(target string) (string, error) {
+	if sid, err := r.LookupAlias(strings.TrimPrefix(target, "@")); err == nil {
+		return sid, nil
+	}
+	var exact string
+	err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact)
+	if err == nil || !errors.Is(err, sql.ErrNoRows) || target == "" {
+		return exact, err
+	}
+	err = r.read.QueryRow(`SELECT id FROM sessions WHERE surface=? AND transcript LIKE ? ESCAPE '\' ORDER BY updated_at DESC, rowid DESC LIMIT 1`, string(surface.KindClaude), "%/"+escapeLike(target)+".jsonl").Scan(&exact)
+	return exact, err
 }
 
 func (r *Registry) resolveSubagentPath(path string) (string, error) {

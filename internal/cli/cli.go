@@ -1009,28 +1009,26 @@ func relTime(t time.Time) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
-// registeredSessionUnavailable explains a registered session with no live
-// process: when its surface still knows the session as a job, the caller needs
-// that state, and the resume command when the job has ended, not a match error.
-func (a *App) registeredSessionUnavailable(ctx context.Context, sid, target string, adapter surface.Surface, resolveErr error) error {
+// registeredSession falls back to the registry row of a session its surface
+// no longer lists, such as a Claude session whose process exited, so a send
+// can still reach it. Only a target naming the session exactly falls back: a
+// name or folder fragment must not resolve to historical sessions.
+func (a *App) registeredSession(sid, target string, adapter surface.Surface, resolveErr error) (*surface.Session, error) {
 	err := fmt.Errorf("resolve registered %s session: %w", adapter.Name(), resolveErr)
-	lifecycle, ok := adapter.(surface.SessionLifecycle)
-	if !ok || !errors.Is(resolveErr, surface.ErrSessionNotFound) {
-		return err
+	if !errors.Is(resolveErr, surface.ErrSessionNotFound) {
+		return nil, err
 	}
-	registered, lookupErr := a.Registry.Session(sid)
-	if lookupErr != nil {
-		return err
+	if exact, exactErr := a.Registry.ExactTarget(target); exactErr != nil || exact != sid {
+		return nil, err
 	}
-	status, statusErr := lifecycle.SessionAction(ctx, registered, "status")
-	if statusErr != nil {
-		return err
+	session, lookupErr := a.Registry.Session(sid)
+	if lookupErr != nil || session.Surface != adapter.Name() {
+		return nil, err
 	}
-	switch status["state"] {
-	case "failed", "crashed", "stopped", "done":
-		return fmt.Errorf("%s session %s is not running: background job %v is %v; resume it with: agenthail thread resume %s", adapter.Name(), sid, status["id"], status["state"], target)
+	if validateErr := surface.ValidateRuntimeTransport(session); validateErr != nil {
+		return nil, validateErr
 	}
-	return fmt.Errorf("%s session %s is not reachable yet: background job %v is %v", adapter.Name(), sid, status["id"], status["state"])
+	return session, nil
 }
 
 func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
@@ -1041,6 +1039,13 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 			return nil, nil, fmt.Errorf("unknown surface %q", kindText)
 		}
 		session, err := adapter.Resolve(ctx, selector)
+		if err != nil && a.Registry != nil {
+			if sid, exactErr := a.Registry.ExactTarget(selector); exactErr == nil {
+				if registered, registeredErr := a.registeredSession(sid, selector, adapter, err); registeredErr == nil {
+					return registered, adapter, nil
+				}
+			}
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s target: %w", kind, err)
 		}
@@ -1076,7 +1081,11 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 				}
 				session, resolveErr := adapter.Resolve(ctx, sid)
 				if resolveErr != nil {
-					return nil, nil, a.registeredSessionUnavailable(ctx, sid, target, adapter, resolveErr)
+					registered, registeredErr := a.registeredSession(sid, target, adapter, resolveErr)
+					if registeredErr != nil {
+						return nil, nil, registeredErr
+					}
+					return registered, adapter, nil
 				}
 				if err := a.Registry.RegisterSession(*session); err != nil {
 					return nil, nil, fmt.Errorf("register %s session: %w", adapter.Name(), err)
