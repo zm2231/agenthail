@@ -21,12 +21,12 @@ func TestRelayProvenanceBindsQueueRecipientAndInputAcrossRestart(t *testing.T) {
 	}
 	routes, _ := r.ListRoutes()
 	events, _ := r.PendingRelayEvents(routes[0])
-	queueID, err := r.ConsumeRelay(routes[0], events[0], "[agenthail relay hops=1 id=1 source=@source turn=one] reply", "steer", "")
+	queueID, err := r.ConsumeRelay(routes[0], events[0], "[agenthail relay hops=1 id=1 turn=one source=@source] reply", "steer", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	item, err := r.QueueItem(queueID)
-	if err != nil || item.Message != "[agenthail relay hops=1 id=1 source=@source turn=one] reply" {
+	if err != nil || item.Message != "[agenthail relay hops=1 id=1 turn=one source=@source] reply" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 	path := r.Path()
@@ -61,7 +61,7 @@ func TestRelayProvenanceBindsQueueRecipientAndInputAcrossRestart(t *testing.T) {
 	batch = surface.CompletionBatch{Cursor: "more", Events: []surface.Completion{
 		{ID: "copied", InputID: "another-input", User: item.Message, Text: "copied"},
 		{ID: "same-input", InputID: "input", User: item.Message, Text: "same input"},
-		{ID: "unknown", User: "[agenthail relay hops=99 id=1 source=@source turn=missing] unknown", Text: "unknown"},
+		{ID: "unknown", User: "[agenthail relay hops=99 id=1 turn=missing source=@source] unknown", Text: "unknown"},
 	}}
 	if err := r.CaptureRelayCompletions("target", "received", batch); err != nil {
 		t.Fatal(err)
@@ -331,51 +331,26 @@ func TestRelayMigrationMarksExistingQueuedRelayIntents(t *testing.T) {
 	}
 }
 
-func TestClaudeMergeKeepsEachRoutesPendingCompletionsAcrossOverlappingCaptures(t *testing.T) {
+func overlappingClaudeRows(t *testing.T) (*Registry, string, surface.Session) {
+	t.Helper()
 	stubLiveProcesses(t, 101, 202)
 	path := filepath.Join(t.TempDir(), "registry.db")
 	r, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := surface.Session{ID: "old", Surface: surface.KindClaude, PID: 101, Transcript: "/tmp/shared.jsonl"}
 	survivor := surface.Session{ID: "survivor", Surface: surface.KindClaude, PID: 202, Transcript: "/tmp/shared.jsonl"}
-	for _, s := range []surface.Session{old, survivor} {
+	for _, s := range []surface.Session{{ID: "old", Surface: surface.KindClaude, PID: 101, Transcript: "/tmp/shared.jsonl"}, survivor} {
 		if err := r.RegisterSession(s); err != nil {
 			t.Fatal(err)
 		}
 	}
-	register(t, r, "target", "observer")
-	oldRoute, err := r.AddRoute("old", "target", ".*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "old-1", Events: []surface.Completion{{ID: "early", Text: "early"}}}); err != nil {
-		t.Fatal(err)
-	}
-	routes, _ := r.ListRoutes()
-	events, _ := r.PendingRelayEvents(routes[0])
-	if _, err := r.ConsumeRelay(routes[0], events[0], "early", "queue", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CaptureRelayCompletions("survivor", "", surface.CompletionBatch{Cursor: "survivor-1", Events: []surface.Completion{{ID: "shared", Text: "shared"}}}); err != nil {
-		t.Fatal(err)
-	}
-	survivorRoute, err := r.AddRoute("survivor", "observer", ".*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CaptureRelayCompletions("old", "old-1", surface.CompletionBatch{Cursor: "old-2", Events: []surface.Completion{{ID: "consumed", Text: "consumed"}}}); err != nil {
-		t.Fatal(err)
-	}
-	routes, _ = r.ListRoutes()
-	events, _ = r.PendingRelayEvents(routes[0])
-	if _, err := r.ConsumeRelay(routes[0], events[0], "consumed", "queue", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CaptureRelayCompletions("old", "old-2", surface.CompletionBatch{Cursor: "old-3", Events: []surface.Completion{{ID: "shared", Text: "shared"}, {ID: "late", Text: "late"}}}); err != nil {
-		t.Fatal(err)
-	}
+	register(t, r, "target", "observer", "sink")
+	return r, path, survivor
+}
+
+func mergeAndReopen(t *testing.T, r *Registry, path string, survivor surface.Session) *Registry {
+	t.Helper()
 	stubLiveProcesses(t, 202)
 	if err := r.RegisterSession(survivor); err != nil {
 		t.Fatal(err)
@@ -383,16 +358,21 @@ func TestClaudeMergeKeepsEachRoutesPendingCompletionsAcrossOverlappingCaptures(t
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	r, err = Open(path)
+	r, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	routes, err = r.ListRoutes()
-	if err != nil || len(routes) != 2 {
-		t.Fatalf("routes=%+v err=%v", routes, err)
+	t.Cleanup(func() { r.Close() })
+	return r
+}
+
+func pendingCompletions(t *testing.T, r *Registry) map[int64]string {
+	t.Helper()
+	routes, err := r.ListRoutes()
+	if err != nil {
+		t.Fatal(err)
 	}
-	pending := map[int64][]string{}
+	pending := map[int64]string{}
 	for _, route := range routes {
 		if route.FromSession != "survivor" {
 			t.Fatalf("route was not rebound: %+v", route)
@@ -401,55 +381,138 @@ func TestClaudeMergeKeepsEachRoutesPendingCompletionsAcrossOverlappingCaptures(t
 		if err != nil {
 			t.Fatal(err)
 		}
+		var ids []string
 		for _, event := range events {
-			pending[route.ID] = append(pending[route.ID], event.CompletionID)
+			ids = append(ids, event.CompletionID)
 		}
+		pending[route.ID] = strings.Join(ids, ",")
 	}
-	if got := strings.Join(pending[oldRoute], ","); got != "shared,late" {
-		t.Fatalf("moved route pending=%q", got)
+	return pending
+}
+
+func TestClaudeMergeRebasesEachRouteOntoTheSurvivorLog(t *testing.T) {
+	r, path, survivor := overlappingClaudeRows(t)
+	blocked, err := r.AddRoute("old", "sink", ".*")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := strings.Join(pending[survivorRoute], ","); got != "late" {
-		t.Fatalf("survivor route pending=%q", got)
+	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "old-1", Events: []surface.Completion{{ID: "consumed", Text: "consumed"}}}); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := r.AddRelayRoute("old", "target", ".*", false, HandoffGoalCompleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("survivor", "", surface.CompletionBatch{Cursor: "survivor-1", Events: []surface.Completion{{ID: "shared", Text: "shared"}}}); err != nil {
+		t.Fatal(err)
+	}
+	own, err := r.AddRoute("survivor", "observer", ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("old", "old-1", surface.CompletionBatch{Cursor: "old-2", Events: []surface.Completion{{ID: "shared", Text: "shared"}}}); err != nil {
+		t.Fatal(err)
+	}
+	r = mergeAndReopen(t, r, path, survivor)
+	want := map[int64]string{blocked: "shared", goal: "shared", own: ""}
+	if got := pendingCompletions(t, r); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pending=%v want %v", got, want)
+	}
+	if err := r.CaptureRelayCompletions("survivor", "survivor-1", surface.CompletionBatch{Cursor: "survivor-2", Events: []surface.Completion{{ID: "late", Text: "late"}}}); err != nil {
+		t.Fatal(err)
+	}
+	want = map[int64]string{blocked: "shared,late", goal: "shared,late", own: "late"}
+	if got := pendingCompletions(t, r); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pending=%v want %v", got, want)
+	}
+}
+
+func TestClaudeMergeKeepsAFreshOneShotBesideASpentOne(t *testing.T) {
+	r, path, survivor := overlappingClaudeRows(t)
+	spent, err := r.AddRouteWithOptions("old", "observer", ".*", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("old", "", surface.CompletionBatch{Cursor: "old-1", Events: []surface.Completion{{ID: "first", Text: "first"}}}); err != nil {
+		t.Fatal(err)
+	}
+	routes, _ := r.ListRoutes()
+	events, _ := r.PendingRelayEvents(routes[0])
+	if _, err := r.ConsumeRelay(routes[0], events[0], "first", "queue", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CaptureRelayCompletions("survivor", "", surface.CompletionBatch{Cursor: "survivor-1", Events: []surface.Completion{{ID: "first", Text: "first"}}}); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := r.AddRouteWithOptions("survivor", "observer", ".*", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = mergeAndReopen(t, r, path, survivor)
+	routes, err = r.ListRoutes()
+	if err != nil || len(routes) != 2 || routes[0].ID != spent || routes[0].Active || routes[1].ID != fresh || !routes[1].Active {
+		t.Fatalf("routes=%+v err=%v", routes, err)
+	}
+	if err := r.CaptureRelayCompletions("survivor", "survivor-1", surface.CompletionBatch{Cursor: "survivor-2", Events: []surface.Completion{{ID: "next", Text: "next"}}}); err != nil {
+		t.Fatal(err)
+	}
+	events, err = r.PendingRelayEvents(routes[1])
+	if err != nil || len(events) != 1 || events[0].CompletionID != "next" {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	if _, err := r.ConsumeRelay(routes[1], events[0], "next", "queue", ""); err != nil {
+		t.Fatal(err)
+	}
+	routes, _ = r.ListRoutes()
+	if routes[1].Active || routes[1].FireCount != 1 {
+		t.Fatalf("fresh one-shot=%+v", routes[1])
 	}
 }
 
 func TestQuotedRelayEnvelopeKeepsTheQueuedHopCount(t *testing.T) {
+	payloads := map[string]string{
+		"quoted body":   "[agenthail relay hops=8 id=1 turn=completion-42 source=worker one] Quoted input: [agenthail relay hops=1 id=1 turn=completion-41 source=previous] prompt",
+		"crafted alias": "[agenthail relay hops=8 id=1 turn=completion-42 source=@worker turn=missing] turn=real] answer",
+	}
 	for name, wrap := range map[string]func(string) string{
 		"plain": func(message string) string { return message },
-		"peer":  func(message string) string { return "<cross-session-message from=\"uds:sender\">\n" + message + "\n</cross-session-message>" },
+		"peer": func(message string) string {
+			return "<cross-session-message from=\"uds:sender\">\n" + message + "\n</cross-session-message>"
+		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			r := openTestRegistry(t)
-			register(t, r, "source", "target", "sink")
-			if _, err := r.AddRoute("source", "target", ".*"); err != nil {
-				t.Fatal(err)
-			}
-			if err := r.CaptureRelayCompletions("source", "", surface.CompletionBatch{Cursor: "one", Events: []surface.Completion{{ID: "completion-42", Text: "reply"}}}); err != nil {
-				t.Fatal(err)
-			}
-			routes, _ := r.ListRoutes()
-			events, _ := r.PendingRelayEvents(routes[0])
-			events[0].RelayHops = 7
-			payload := "[agenthail relay hops=8 id=1 source=worker one turn=completion-42] Quoted input: [agenthail relay hops=1 id=1 source=previous turn=completion-41] prompt"
-			queueID, err := r.ConsumeRelay(routes[0], events[0], payload, "queue", "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			var hops int
-			if err := r.db.QueryRow(`SELECT relay_hops FROM message_queue WHERE id=?`, queueID).Scan(&hops); err != nil || hops != 8 {
-				t.Fatalf("hops=%d err=%v", hops, err)
-			}
-			if _, err := r.AddRoute("target", "sink", ".*"); err != nil {
-				t.Fatal(err)
-			}
-			if err := r.CaptureRelayCompletions("target", "", surface.CompletionBatch{Cursor: "answered", Events: []surface.Completion{{ID: "answer", InputID: "input", Text: "answer", User: wrap(payload)}}}); err != nil {
-				t.Fatal(err)
-			}
-			routes, _ = r.ListRoutes()
-			events, err = r.PendingRelayEvents(routes[1])
-			if err != nil || len(events) != 1 || events[0].RelayHops != 8 {
-				t.Fatalf("events=%+v err=%v", events, err)
-			}
-		})
+		for label, payload := range payloads {
+			t.Run(name+"/"+label, func(t *testing.T) {
+				r := openTestRegistry(t)
+				register(t, r, "source", "target", "sink")
+				if _, err := r.AddRoute("source", "target", ".*"); err != nil {
+					t.Fatal(err)
+				}
+				if err := r.CaptureRelayCompletions("source", "", surface.CompletionBatch{Cursor: "one", Events: []surface.Completion{{ID: "completion-42", Text: "reply"}}}); err != nil {
+					t.Fatal(err)
+				}
+				routes, _ := r.ListRoutes()
+				events, _ := r.PendingRelayEvents(routes[0])
+				events[0].RelayHops = 7
+				queueID, err := r.ConsumeRelay(routes[0], events[0], payload, "queue", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var hops int
+				if err := r.db.QueryRow(`SELECT relay_hops FROM message_queue WHERE id=?`, queueID).Scan(&hops); err != nil || hops != 8 {
+					t.Fatalf("hops=%d err=%v", hops, err)
+				}
+				if _, err := r.AddRoute("target", "sink", ".*"); err != nil {
+					t.Fatal(err)
+				}
+				if err := r.CaptureRelayCompletions("target", "", surface.CompletionBatch{Cursor: "answered", Events: []surface.Completion{{ID: "answer", InputID: "input", Text: "answer", User: wrap(payload)}}}); err != nil {
+					t.Fatal(err)
+				}
+				routes, _ = r.ListRoutes()
+				events, err = r.PendingRelayEvents(routes[1])
+				if err != nil || len(events) != 1 || events[0].RelayHops != 8 {
+					t.Fatalf("events=%+v err=%v", events, err)
+				}
+			})
+		}
 	}
 }

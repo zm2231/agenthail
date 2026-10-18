@@ -142,7 +142,7 @@ func (d *Daemon) consumeRelays(ctx context.Context, adapter surface.Surface, fro
 					if len(text) > maxRelayText {
 						text = text[:maxRelayText] + "\n[relay text truncated by agenthail]"
 					}
-					payload = fmt.Sprintf("[agenthail relay hops=%d id=%d source=%s turn=%s] %s", event.RelayHops+1, route.ID, d.resolveDisplay(from.ID), event.CompletionID, text)
+					payload = fmt.Sprintf("[agenthail relay hops=%d id=%d turn=%s source=%s] %s", event.RelayHops+1, route.ID, event.CompletionID, d.resolveDisplay(from.ID), text)
 				}
 				_, err = d.Registry.ConsumeRelay(route, event, payload, busy, goalKey)
 				if err != nil {

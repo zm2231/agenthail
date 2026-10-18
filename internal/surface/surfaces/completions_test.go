@@ -188,7 +188,7 @@ func TestNotionCompletionReplayPreservesBurstAndInputProvenance(t *testing.T) {
 			}
 			if strings.HasPrefix(id, "user") {
 				kind = "user"
-				value = [][]string{{"[agenthail relay hops=3 id=7 source=upstream turn=input] request"}}
+				value = [][]string{{"[agenthail relay hops=3 id=7 turn=input source=upstream] request"}}
 			}
 			records[id] = map[string]any{"value": map[string]any{"value": map[string]any{"step": map[string]any{"type": kind, "value": value}}}}
 		}

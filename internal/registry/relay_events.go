@@ -15,7 +15,7 @@ const (
 	HandoffGoalCompleted = "goal_completed"
 )
 
-var relayEnvelope = regexp.MustCompile(`(?m)^\[agenthail relay hops=\d+ id=(\d+) source=.*? turn=([^\]\s]+)\]`)
+var relayEnvelope = regexp.MustCompile(`(?m)^\[agenthail relay hops=\d+ id=(\d+) turn=([^\]\s]+) source=`)
 
 type RelayEvent struct {
 	CompletedAt     time.Time
@@ -107,7 +107,8 @@ func (r *Registry) CaptureRelayCompletions(sessionID, previous string, batch sur
 
 // relayCompletionHops inherits hops only for the first input that carried a
 // queued relay envelope into this session. The envelope names the route and
-// source completion, which identify the queue row by its delivery key.
+// source completion ahead of the free-text source label; together they
+// identify the queue row by its delivery key.
 func relayCompletionHops(tx *sql.Tx, sessionID string, event surface.Completion) (int, error) {
 	match := relayEnvelope.FindStringSubmatch(event.User)
 	if len(match) != 3 {

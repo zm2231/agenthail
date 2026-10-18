@@ -793,28 +793,20 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO channel_members(channel_id,session_id) SELECT channel_id,? FROM channel_members WHERE session_id=?`, currentID, oldID); err != nil {
 		return err
 	}
+	if err := rebaseMergedRelayRoutesTx(tx, oldID, currentID); err != nil {
+		return err
+	}
 	statements := []struct {
 		query string
 		args  []any
 	}{
 		{`DELETE FROM channel_members WHERE session_id=?`, []any{oldID}},
 		{`INSERT INTO relay_sources(session_id,cursor) SELECT ?,cursor FROM relay_sources WHERE session_id=? ON CONFLICT(session_id) DO NOTHING`, []any{currentID, oldID}},
-		{`DELETE FROM relay_events WHERE source_session_id=? AND EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=?)
-			AND NOT EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=? AND s.completion_id=relay_events.completion_id)
-			AND NOT EXISTS(SELECT 1 FROM routes r WHERE r.from_session=? AND r.active=1 AND relay_events.id>r.event_cursor)`, []any{oldID, currentID, currentID, oldID}},
-		{`UPDATE routes SET event_cursor=COALESCE(
-				(SELECT MIN(COALESCE(p.survivor,p.unique_id),COALESCE(p.unique_id,p.survivor))-1 FROM (SELECT
-					(SELECT MIN(s.id) FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id>routes.event_cursor) AS survivor,
-					(SELECT MIN(o.id) FROM relay_events o WHERE o.source_session_id=?2 AND o.id>routes.event_cursor AND NOT EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=?1 AND s.completion_id=o.completion_id)) AS unique_id) p
-					WHERE p.survivor IS NOT NULL OR p.unique_id IS NOT NULL),
-				(SELECT MAX(s.id) FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id<=routes.event_cursor),
-				event_cursor)
-			WHERE from_session=?2 AND EXISTS(SELECT 1 FROM relay_events s WHERE s.source_session_id=?1)`, []any{currentID, oldID}},
 		{`UPDATE OR IGNORE relay_events SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET from_session=? WHERE from_session=?`, []any{currentID, oldID}},
 		{`UPDATE routes SET to_session=? WHERE to_session=?`, []any{currentID, oldID}},
 		{`DELETE FROM routes WHERE from_session=to_session`, nil},
-		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern,handoff,once_only,event_cursor,last_goal_key) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
+		{`DELETE FROM routes WHERE id NOT IN (SELECT MIN(id) FROM routes GROUP BY from_session,to_session,IFNULL(channel_id,''),pattern,handoff,once_only,active,event_cursor,last_goal_key) AND (from_session=? OR to_session=?)`, []any{currentID, currentID}},
 		{`UPDATE message_queue SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
 		{`UPDATE message_queue SET source_session_id=? WHERE source_session_id=?`, []any{currentID, oldID}},
 		{`UPDATE attention_items SET session_id=? WHERE session_id=?`, []any{currentID, oldID}},
@@ -839,6 +831,29 @@ func mergeSessionTx(tx *sql.Tx, oldID, currentID string) error {
 		return err
 	}
 	_, err := tx.Exec(`DELETE FROM sessions WHERE id=?`, oldID)
+	return err
+}
+
+// rebaseMergedRelayRoutesTx moves the old row's active relay routes onto the
+// survivor's completion log when the survivor already captures the same
+// transcript. Both logs follow transcript order, so each route resumes after
+// the last completion it consumed, found by completion identity. The old log
+// is then dropped; interleaving two logs would put events out of order and
+// expose the old row's history to the survivor's own routes.
+func rebaseMergedRelayRoutesTx(tx *sql.Tx, oldID, currentID string) error {
+	var survivorEvents bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM relay_events WHERE source_session_id=?)`, currentID).Scan(&survivorEvents); err != nil || !survivorEvents {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE routes SET event_cursor=COALESCE(
+			(SELECT MAX(s.id) FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id<=routes.event_cursor),
+			(SELECT MIN(s.id)-1 FROM relay_events s JOIN relay_events o ON o.completion_id=s.completion_id WHERE s.source_session_id=?1 AND o.source_session_id=?2 AND o.id>routes.event_cursor),
+			(SELECT CASE WHEN MAX(s.id)<(SELECT MIN(o.id) FROM relay_events o WHERE o.source_session_id=?2) THEN MAX(s.id) ELSE MIN(s.id)-1 END FROM relay_events s WHERE s.source_session_id=?1 AND EXISTS(SELECT 1 FROM relay_events o WHERE o.source_session_id=?2)),
+			(SELECT COALESCE(MAX(s.id),0) FROM relay_events s WHERE s.source_session_id=?1 AND s.captured_at<=routes.created_at))
+		WHERE from_session=?2 AND active=1`, currentID, oldID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM relay_events WHERE source_session_id=?`, oldID)
 	return err
 }
 
