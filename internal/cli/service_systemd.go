@@ -192,6 +192,7 @@ func (s *systemdService) Install() error {
 	}
 	fmt.Printf("installed and started systemd user service %s (pid %d)\n", systemdUnitName, pid)
 	s.ensureLinger()
+	printCodexSetupNote()
 	return nil
 }
 
