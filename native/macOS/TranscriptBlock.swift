@@ -13,6 +13,7 @@ struct TranscriptBlock: Identifiable, Equatable {
 
     let id: String
     let kind: Kind
+    var source: TimelineItem? = nil
 
     static func build(_ items: [TimelineItem]) -> [TranscriptBlock] {
         var blocks: [TranscriptBlock] = []
@@ -29,32 +30,32 @@ struct TranscriptBlock: Identifiable, Equatable {
                 guard !item.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 if item.role == "user" {
                     let (text, images) = stripImageMarkers(item.text)
-                    if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text))) }
-                    if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"))) }
+                    if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .user(text), source: item)) }
+                    if images > 0 { blocks.append(TranscriptBlock(id: item.id + "#images", kind: .annotation(images == 1 ? "Image attached" : "\(images) images attached"), source: item)) }
                 } else if item.isPeerMessage {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .peer(sender: item.peerSender, text: item.text), source: item))
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .assistant(item.text), source: item))
                 }
             case "attachment":
                 flushTools()
                 if let attachment = item.attachment, attachment.isImage {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .image(attachment)))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .image(attachment), source: item))
                 } else {
-                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached")))
+                    blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Image attached"), source: item))
                 }
             case "notice":
                 flushTools()
                 let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text))) }
+                if !text.isEmpty { blocks.append(TranscriptBlock(id: item.id, kind: .notice(text), source: item)) }
             case "event" where item.title == "Turn duration":
                 flushTools()
-                blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)")))
+                blocks.append(TranscriptBlock(id: item.id, kind: .annotation("Worked for \(item.text)"), source: item))
             case "event":
                 flushTools()
                 let title = [item.title, item.status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(title) : .notice("\(title): \(text)")))
+                blocks.append(TranscriptBlock(id: item.id, kind: text.isEmpty ? .annotation(title) : .notice("\(title): \(text)"), source: item))
             case "context", "goal", "done", "phase":
                 continue
             default:

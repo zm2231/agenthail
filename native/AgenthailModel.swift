@@ -864,7 +864,7 @@ final class AgenthailModel: ObservableObject {
     }
 
     private func connectionFailed(_ error: Error) {
-        connectionError = error.localizedDescription
+        connectionError = AgenthailAPIError.userMessage(error)
         daemonSlow = error.isTimeout
     }
 }

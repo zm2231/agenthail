@@ -733,6 +733,7 @@ struct TranscriptView: View {
                 }
                 ForEach(blocks) { block in
                     TranscriptBlockView(block: block)
+                        .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
                     UserBubble(text: send.text, receipt: send.status)
@@ -1230,6 +1231,18 @@ struct ToolOutputBlock: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesktopPalette.bubble, in: RoundedRectangle(cornerRadius: 6))
             TimelineMetaLine(item: result)
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder func timelineDetails(_ item: TimelineItem?) -> some View {
+        let fields = item.map(TimelineMetadata.fields) ?? []
+        if fields.isEmpty {
+            self
+        } else {
+            self.help(fields.joined(separator: " · "))
+                .accessibilityHint(fields.joined(separator: ", "))
         }
     }
 }

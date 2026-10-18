@@ -38,6 +38,12 @@ struct SessionFactsTest {
 
         expect(AgenthailAPIError.userMessage(URLError(.cannotConnectToHost)) == AgenthailAPIError.disconnectedGuidance, "connection failures become reconnect guidance")
         expect(AgenthailAPIError.userMessage(AgenthailAPIError.request(409, "synthetic conflict")) == "synthetic conflict", "other errors keep their message")
+        let unknown = AgenthailAPIError.outcomeUnknown(AgenthailAPIError.userMessage(URLError(.networkConnectionLost)))
+        expect((unknown.errorDescription ?? "").contains(AgenthailAPIError.disconnectedGuidance) && (unknown.errorDescription ?? "").contains("outcome is unknown"), "an uncertain action keeps reconnect guidance and unknown-outcome safety")
+
+        let sourced = [item("message", role: "user", timestamp: "t1"), item("message", role: "assistant", timestamp: "t2"), item("event", title: "Compacted", status: "done"), item("notice", timestamp: "t3"), item("attachment", timestamp: "t4")]
+        let blocks = TranscriptBlock.build(sourced)
+        expect(blocks.count == sourced.count && zip(blocks, sourced).allSatisfy { $0.source == $1 }, "every non-tool block keeps its timeline item for details")
         print("session facts tests passed")
     }
 
