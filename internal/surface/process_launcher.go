@@ -122,7 +122,7 @@ func (l *processLauncher) Launch(ctx context.Context, request LaunchRequest) (La
 	}
 	// tmux executes multiple shell-command arguments directly; do not collapse
 	// the target program and its user data into a shell command string.
-	args = append(args, argv...)
+	args = append(args, AgentEnvArgv(argv)...)
 	out, err := l.run(ctx, l.command, args...)
 	if err != nil {
 		if launchCommandStarted(err) {

@@ -30,3 +30,15 @@ func AgentEnv(env []string) []string {
 	}
 	return out
 }
+
+// AgentEnvArgv prefixes argv so the agent starts without the caller identity
+// variables even when another process, such as a tmux server started
+// earlier, supplies its environment.
+func AgentEnvArgv(argv []string) []string {
+	args := make([]string, 0, 1+2*len(callerIdentityVariables)+len(argv))
+	args = append(args, "env")
+	for _, variable := range callerIdentityVariables {
+		args = append(args, "-u", variable)
+	}
+	return append(args, argv...)
+}
