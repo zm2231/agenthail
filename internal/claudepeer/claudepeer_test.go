@@ -631,6 +631,40 @@ func TestReconcilePreservesReplacementSocketAtReusedPIDPath(t *testing.T) {
 	}
 }
 
+func TestReconcilePreservesListeningSocketThatReusedTheStaleInode(t *testing.T) {
+	home := shortTempDir(t, "cp-reused-")
+	socketDir := filepath.Join(home, "socks")
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pid := 999998
+	generation := "stale"
+	manifestPath := WorkerManifestPath(home, generation, pid)
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	peerPath := filepath.Join(socketDir, strconv.Itoa(pid)+".sock")
+	replacement, err := net.Listen("unix", peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	device, inode, err := socketIdentity(peerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := OwnershipManifest{Agenthail: "peer-relay", State: "ready", Generation: generation, SourceID: "source", PID: pid, ProcStart: "dead", SocketPath: peerPath, SocketDevice: device, SocketInode: inode}
+	if err := writeExclusiveJSON(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(home, socketDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(peerPath); err != nil {
+		t.Fatalf("listening socket with the stale identity was removed: %v", err)
+	}
+}
+
 func TestReconcileRequiresLaunchTokenBeforeSignallingAProcess(t *testing.T) {
 	home := shortTempDir(t, "cp-token-")
 	socketDir := filepath.Join(home, "socks")
