@@ -180,9 +180,7 @@ func assertMigratedRegistryAcceptsCurrentWrites(t *testing.T, r *Registry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expired, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil || expired == 0 {
-		t.Fatalf("expired=%d err=%v", expired, err)
-	}
+	failQueued(t, r, relayID)
 	problems, err := r.ListDeliveryProblems()
 	if err != nil {
 		t.Fatal(err)
@@ -225,9 +223,7 @@ func assertMigratedRouteRelaysDurably(t *testing.T, r *Registry) {
 		t.Fatalf("queueID=%d err=%v", queueID, err)
 	}
 	before := r.QueueCount("sender")
-	if _, err := r.ExpireMessages(time.Now().Add(2 * queueMessageTTL)); err != nil {
-		t.Fatal(err)
-	}
+	failQueued(t, r, queueID)
 	if after := r.QueueCount("sender"); after != before {
 		t.Fatalf("relay source notices before=%d after=%d", before, after)
 	}
@@ -294,5 +290,70 @@ func assertV11SeedCheckpointMigrated(t *testing.T, r *Registry) {
 	status, seq, identity, err := r.SessionJournalSeedCheckpoint("target")
 	if err != nil || status != SessionJournalSeeded || seq != 1 || identity != "" {
 		t.Fatalf("checkpoint status=%q seq=%d identity=%q err=%v", status, seq, identity, err)
+	}
+}
+
+func TestOpenRetiresQueueExpiry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.db")
+	r, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	register(t, r, "sender", "target")
+	expiredID, deliveryID, err := r.QueueDeliveryWithIntent("target", "old report", "old-report", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingID, err := r.QueueMessageWithKey("target", "still waiting", "still-waiting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadID, err := r.QueueMessageWithKey("target", "failed earlier", "failed-earlier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE message_queue ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
+		fmt.Sprintf(`UPDATE message_queue SET status='expired',evidence='expired',last_error='message expired after 1 hour' WHERE id=%d`, expiredID),
+		fmt.Sprintf(`UPDATE delivery_intents SET status='expired',evidence='expired',failure='message expired after 1 hour' WHERE id=%d`, deliveryID),
+		fmt.Sprintf(`UPDATE message_queue SET status='dead',dead_at_ms=0,updated_at='2026-10-18 08:00:00',last_error='delivery failed' WHERE id=%d`, deadID),
+		fmt.Sprintf(`INSERT INTO delivery_history(kind,session_id,queue_id,message,result) VALUES('expired','target',%d,'old report','removed after 1 hour without delivery')`, expiredID),
+		`PRAGMA user_version=13`,
+	} {
+		if _, err := r.db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if exists, err := r.columnExists("message_queue", "expires_at_ms"); err != nil || exists {
+		t.Fatalf("expires_at_ms exists=%v err=%v", exists, err)
+	}
+	if row, err := r.QueueItem(expiredID); err != nil || row.Status != "canceled" || row.Evidence != surface.EvidenceCanceled || row.LastError != "expired before delivery" || !row.Historical {
+		t.Fatalf("expired row=%+v err=%v", row, err)
+	}
+	if row, err := r.QueueItem(pendingID); err != nil || row.Status != "pending" {
+		t.Fatalf("pending row=%+v err=%v", row, err)
+	}
+	if row, err := r.QueueItem(deadID); err != nil || row.DeadAt != time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC).UnixMilli() {
+		t.Fatalf("dead row=%+v err=%v", row, err)
+	}
+	if intent, err := r.DeliveryIntent(deliveryID); err != nil || intent.Status != DeliveryIntentFailed || intent.Evidence != surface.EvidenceFailed || intent.Failure != "expired before delivery" {
+		t.Fatalf("intent=%+v err=%v", intent, err)
+	}
+	history, err := r.ListHistory(10, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range history {
+		if entry.Kind == "expired" {
+			t.Fatalf("history kept expired entry %+v", entry)
+		}
 	}
 }

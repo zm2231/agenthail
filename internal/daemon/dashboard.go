@@ -155,11 +155,14 @@ type dashboardQueue struct {
 	Attempts        int                      `json:"attempts"`
 	LastError       string                   `json:"lastError,omitempty"`
 	QueuedAt        string                   `json:"queuedAt"`
-	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       registry.QueueOperation  `json:"operation"`
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
+}
+
+func (d *Daemon) dashboardQueueItem(item registry.QueueRow) dashboardQueue {
+	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery}
 }
 
 type dashboardChannel struct {
@@ -762,7 +765,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.UpdatedAt = pageRequest[0].Now.UTC()
 	}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
+		state.Queue = append(state.Queue, d.dashboardQueueItem(item))
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))

@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-func TestQueueCountAndQueueCountsFilterExpiredPendingRowsWithoutWriting(t *testing.T) {
+func TestQueueCountAndQueueCountsKeepOldPendingRows(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "session")
-	r.now = func() time.Time { return time.Now().Add(-2 * queueMessageTTL) }
-	expired, err := r.QueueMessageWithKey("session", "expired", "expired")
+	r.now = func() time.Time { return time.Now().Add(-48 * time.Hour) }
+	old, err := r.QueueMessageWithKey("session", "old", "old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,15 +18,15 @@ func TestQueueCountAndQueueCountsFilterExpiredPendingRowsWithoutWriting(t *testi
 		t.Fatal(err)
 	}
 
-	if got := r.QueueCount("session"); got != 1 {
-		t.Fatalf("QueueCount=%d, want only live pending row", got)
+	if got := r.QueueCount("session"); got != 2 {
+		t.Fatalf("QueueCount=%d, want both pending rows", got)
 	}
 	counts, err := r.QueueCounts()
-	if err != nil || counts["session"] != 1 {
+	if err != nil || counts["session"] != 2 {
 		t.Fatalf("QueueCounts=%v err=%v", counts, err)
 	}
-	row, err := r.QueueItem(expired)
-	if err != nil || row.Status != "pending" || row.LastError != "" {
-		t.Fatalf("expired row was mutated: row=%+v err=%v", row, err)
+	row, err := r.QueueItem(old)
+	if err != nil || row.Status != "pending" || row.LastError != "" || row.Historical {
+		t.Fatalf("old row changed: row=%+v err=%v", row, err)
 	}
 }

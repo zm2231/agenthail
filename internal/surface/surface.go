@@ -121,7 +121,6 @@ const (
 	EvidenceReplyObserved     DeliveryEvidence = "reply_observed"
 	EvidenceFailed            DeliveryEvidence = "failed"
 	EvidenceUnknown           DeliveryEvidence = "unknown"
-	EvidenceExpired           DeliveryEvidence = "expired"
 	EvidenceCanceled          DeliveryEvidence = "canceled"
 )
 

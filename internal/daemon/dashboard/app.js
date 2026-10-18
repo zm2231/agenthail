@@ -682,7 +682,6 @@ function renderOperations() {
           reply_observed: "Reply observed",
           failed: "Failed",
           unknown: "Delivery uncertain",
-          expired: "Expired",
           canceled: "Canceled",
         }[entry.evidence] || auditKindLabel(entry.kind);
         const detail = entry.error || entry.message || entry.result || "No details recorded";

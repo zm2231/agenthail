@@ -24,7 +24,7 @@ The [research comparison](../research/mobile-agent-clients-2026-09.md) records p
 | Separate current decisions from history | Persistent queue → all active rows plus latest 100 terminal rows → Inbox Current/History | `mobile_queue_history_test.go` retains older active rows across a terminal flood; native expiry/retry UI test |
 | Start and control sessions | Existing capability/settings contracts → creation sheet, model composer, inspector and action API | Existing Claude/Codex/Notion creation and workflow parity tests |
 
-Sessions, Inbox and Settings have distinct jobs. Sessions groups by reported workspace and offers Running, Recent and All. Recent follows the host’s current-session catalog; it is not a chronological “today” feed. Inbox contains delivery work and history. Past-expiry failed deliveries belong in history even when their outcome was never confirmed. An inflight attempt remains current until it finishes.
+Sessions, Inbox and Settings have distinct jobs. Sessions groups by reported workspace and offers Running, Recent and All. Recent follows the host’s current-session catalog; it is not a chronological “today” feed. Inbox contains delivery work and history. Failed deliveries move to history an hour after they failed, even when their outcome was never confirmed. An inflight attempt remains current until it finishes.
 
 ## September 12 reading and runtime repair
 

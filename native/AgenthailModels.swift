@@ -373,12 +373,11 @@ struct QueueState: Decodable, Identifiable, Equatable {
     let attempts: Int
     let lastError: String?
     let queuedAt: String
-    let expiresAt: Int64?
     let historical: Bool?
     let evidence: String
 
     var isHistorical: Bool {
-        historical == true || status == "expired" || status == "delivered" || status == "canceled"
+        historical == true || status == "delivered" || status == "canceled"
     }
 }
 

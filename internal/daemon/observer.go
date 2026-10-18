@@ -15,18 +15,11 @@ const (
 
 func (d *Daemon) scanAndRelay(ctx context.Context) {
 	defer d.publishCatalogQueueCounts()
-	if expired, err := d.Registry.ExpireMessages(time.Now()); err != nil {
-		d.log.Printf("expire queued messages: %s", err)
-	} else {
-		if err := d.Registry.ReconcileAttentionItems(time.Now()); err != nil {
-			d.log.Printf("reconcile queue attention: %s", err)
-		}
-		if err := d.catalog.flushCommitted(); err != nil {
-			d.log.Printf("publish committed catalog events: %s", err)
-		}
-		if expired > 0 {
-			d.publishEvent("state.changed", "", map[string]any{"source": "queue-expired", "count": expired})
-		}
+	if err := d.Registry.ReconcileAttentionItems(time.Now()); err != nil {
+		d.log.Printf("reconcile queue attention: %s", err)
+	}
+	if err := d.catalog.flushCommitted(); err != nil {
+		d.log.Printf("publish committed catalog events: %s", err)
 	}
 	watched, err := d.Registry.WatchedSessions()
 	if err != nil {

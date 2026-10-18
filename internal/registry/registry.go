@@ -29,21 +29,12 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 13
-	queueMessageTTL = time.Hour
+	schemaVersion   = 15
 	readConnections = 4
+	// deadReviewWindow is how long a failed or uncertain delivery stays a
+	// current decision before it moves to history. Pending work never ages out.
+	deadReviewWindow = time.Hour
 )
-
-func queueMessageTTLLabel() string {
-	hours := queueMessageTTL / time.Hour
-	if queueMessageTTL%time.Hour == 0 {
-		if hours == 1 {
-			return "1 hour"
-		}
-		return fmt.Sprintf("%d hours", hours)
-	}
-	return queueMessageTTL.String()
-}
 
 func Open(path string) (*Registry, error) {
 	private := path == ""
@@ -116,7 +107,7 @@ func (r *Registry) migrate() error {
 		{"source_session_id", `TEXT NOT NULL DEFAULT ''`},
 		{"turn_options", `TEXT NOT NULL DEFAULT '{}'`},
 		{"relay_hops", `INTEGER NOT NULL DEFAULT 0`},
-		{"expires_at_ms", `INTEGER NOT NULL DEFAULT 0`},
+		{"dead_at_ms", `INTEGER NOT NULL DEFAULT 0`},
 		{"updated_at", `TEXT NOT NULL DEFAULT ''`},
 		{"evidence", `TEXT NOT NULL DEFAULT ''`},
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
@@ -214,6 +205,11 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("delivery_intents", "relayed", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if version < 15 {
+		if err := r.dropQueueExpiry(); err != nil {
+			return err
+		}
+	}
 	if version < 13 {
 		if _, err := r.db.Exec(`UPDATE delivery_intents SET relayed=1 WHERE queue_id IN (SELECT id FROM message_queue WHERE relay_hops>0) OR provider_key LIKE 'relay:%'`); err != nil {
 			return err
@@ -241,12 +237,10 @@ func (r *Registry) migrate() error {
 	_, err := r.db.Exec(fmt.Sprintf(`
 		UPDATE message_queue SET status=CASE WHEN delivered=1 THEN 'delivered' ELSE 'pending' END
 		WHERE status='' OR (delivered=1 AND status!='delivered');
-		UPDATE message_queue SET expires_at_ms=(CAST(strftime('%%s',queued_at) AS INTEGER)*1000)+%d
-		WHERE expires_at_ms=0 AND status='pending';
 		DELETE FROM aliases WHERE rowid NOT IN (SELECT MAX(rowid) FROM aliases GROUP BY session_id);
 		CREATE UNIQUE INDEX IF NOT EXISTS message_queue_delivery_key
 		ON message_queue(delivery_key) WHERE delivery_key!='';
-		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`, queueMessageTTL.Milliseconds()))
+		CREATE UNIQUE INDEX IF NOT EXISTS aliases_session_id ON aliases(session_id);`))
 	if err != nil {
 		return err
 	}
@@ -255,6 +249,32 @@ func (r *Registry) migrate() error {
 	}
 	_, err = r.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
 	return err
+}
+
+// dropQueueExpiry retires the old one-hour queue expiry. Rows it had expired
+// become canceled history; dead rows start their review window at their last
+// update.
+func (r *Registry) dropQueueExpiry() error {
+	exists, err := r.columnExists("message_queue", "expires_at_ms")
+	if err != nil || !exists {
+		return err
+	}
+	const reason = "expired before delivery"
+	for _, step := range []struct {
+		query string
+		args  []any
+	}{
+		{`UPDATE message_queue SET dead_at_ms=CAST(strftime('%s',updated_at) AS INTEGER)*1000 WHERE status='dead' AND dead_at_ms=0`, nil},
+		{`UPDATE message_queue SET status='canceled',evidence='canceled',last_error=? WHERE status='expired'`, []any{reason}},
+		{`UPDATE delivery_intents SET status='failed',evidence='failed',failure=? WHERE status='expired'`, []any{reason}},
+		{`UPDATE delivery_history SET kind='canceled' WHERE kind='expired'`, nil},
+		{`ALTER TABLE message_queue DROP COLUMN expires_at_ms`, nil},
+	} {
+		if _, err := r.db.Exec(step.query, step.args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Registry) columnExists(table, name string) (bool, error) {
@@ -336,7 +356,7 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	model TEXT NOT NULL DEFAULT '', relay_hops INTEGER NOT NULL DEFAULT 0,
 	source_session_id TEXT NOT NULL DEFAULT '',
 	turn_options TEXT NOT NULL DEFAULT '{}',
-	expires_at_ms INTEGER NOT NULL DEFAULT 0,
+	dead_at_ms INTEGER NOT NULL DEFAULT 0,
 	evidence TEXT NOT NULL DEFAULT '',
 	operation TEXT NOT NULL DEFAULT 'message',
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1213,8 +1233,7 @@ func (r *Registry) QueueCompact(sessionID string) (int64, error) {
 	if err != sql.ErrNoRows {
 		return 0, err
 	}
-	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,expires_at_ms,status,updated_at) VALUES (?,?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact, expiresAt)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,status,updated_at) VALUES (?,?,?,'pending',datetime('now'))`, sessionID, "/compact", QueueOperationCompact)
 	if err != nil {
 		return 0, err
 	}
@@ -1264,8 +1283,7 @@ func enqueueMessageTx(tx *sql.Tx, now time.Time, sessionID, message, deliveryKey
 	if options.BusyDelivery == "steer" && (options.Model != "" || !options.TurnOptions.Empty()) {
 		options.BusyDelivery = "queue"
 	}
-	expiresAt := now.Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, expiresAt, options.BusyDelivery, options.Author)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, sessionID, message, operation, deliveryKey, options.Model, options.SourceSessionID, options.TurnOptions, relayHops, options.BusyDelivery, options.Author)
 	if err != nil {
 		if deliveryKey != "" && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			var id int64
@@ -1298,61 +1316,9 @@ func (r *Registry) readExists(query string, args ...any) (bool, error) {
 	return exists, err
 }
 
-func (r *Registry) expireMessages(now time.Time) error {
-	if _, err := r.ExpireMessages(now); err != nil {
-		return err
-	}
-	return r.ReconcileAttentionItems(now)
-}
-
-func (r *Registry) ExpireMessages(now time.Time) (int, error) {
-	if due, err := r.readExists(`SELECT EXISTS(SELECT 1 FROM message_queue WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?)`, now.UnixMilli()); err != nil || !due {
-		return 0, err
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT id,session_id,message FROM message_queue WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, now.UnixMilli())
-	if err != nil {
-		return 0, err
-	}
-	var expired []HistoryEntry
-	for rows.Next() {
-		var entry HistoryEntry
-		if err := rows.Scan(&entry.QueueID, &entry.SessionID, &entry.Message); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		entry.Kind = "expired"
-		entry.Result = "removed after " + queueMessageTTLLabel() + " without delivery"
-		expired = append(expired, entry)
-	}
-	if err := rows.Close(); err != nil {
-		return 0, err
-	}
-	failure := "message expired after " + queueMessageTTLLabel()
-	if _, err := tx.Exec(`UPDATE message_queue SET status='expired',last_error=?,updated_at=datetime('now') WHERE status='pending' AND expires_at_ms>0 AND expires_at_ms<=?`, failure, now.UnixMilli()); err != nil {
-		return 0, err
-	}
-	for _, entry := range expired {
-		if _, err := finishQueuedDeliveryIntent(tx, entry.QueueID, DeliveryIntentExpired, failure); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	for _, entry := range expired {
-		_ = r.RecordHistory(entry)
-	}
-	return len(expired), nil
-}
-
 func (r *Registry) QueueCount(sessionID string) int {
 	var n int
-	r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, r.now().UnixMilli()).Scan(&n)
+	r.read.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&n)
 	return n
 }
 
@@ -1363,7 +1329,7 @@ func (r *Registry) PendingSteer(sessionID string) (bool, error) {
 }
 
 func (r *Registry) QueueCounts() (map[string]int, error) {
-	rows, err := r.read.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id`, r.now().UnixMilli())
+	rows, err := r.read.Query(`SELECT session_id,COUNT(*) FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1556,8 +1522,6 @@ func historyEvidence(entry HistoryEntry) surface.DeliveryEvidence {
 		return surface.EvidenceUnknown
 	case "failed", "peer_rejected", "control-failed":
 		return surface.EvidenceFailed
-	case "expired":
-		return surface.EvidenceExpired
 	case "canceled":
 		return surface.EvidenceCanceled
 	default:
@@ -1593,7 +1557,7 @@ type QueueRow struct {
 	Attempts        int                      `json:"attempts"`
 	LastError       string                   `json:"lastError,omitempty"`
 	QueuedAt        string                   `json:"queuedAt"`
-	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
+	DeadAt          int64                    `json:"-"`
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       QueueOperation           `json:"operation"`
@@ -1615,14 +1579,14 @@ const uncertainDeliveryError = "delivery outcome is unknown after daemon interru
 
 func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	now := r.now()
-	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue`
+	query := `SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,dead_at_ms,evidence,operation,busy_delivery FROM message_queue`
 	if !includeDelivered {
-		query += ` WHERE status NOT IN ('delivered','canceled','expired') AND (status!='dead' OR expires_at_ms=0 OR expires_at_ms>?)`
+		query += ` WHERE status NOT IN ('delivered','canceled') AND (status!='dead' OR dead_at_ms>?)`
 	}
 	query += ` ORDER BY id`
 	args := []any{}
 	if !includeDelivered {
-		args = append(args, now.UnixMilli())
+		args = append(args, now.Add(-deadReviewWindow).UnixMilli())
 	}
 	rows, err := r.read.Query(query, args...)
 	if err != nil {
@@ -1633,7 +1597,7 @@ func (r *Registry) ListQueue(includeDelivered bool) ([]QueueRow, error) {
 	for rows.Next() {
 		var row QueueRow
 		var evidence string
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery); err != nil {
+		if err := rows.Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery); err != nil {
 			return nil, err
 		}
 		row.Historical = queueRowIsHistorical(row, now)
@@ -1647,7 +1611,7 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 	now := r.now()
 	var row QueueRow
 	var evidence string
-	err := r.read.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,expires_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.ExpiresAt, &evidence, &row.Operation, &row.BusyDelivery)
+	err := r.read.QueryRow(`SELECT id,session_id,message,model,source_session_id,turn_options,status,attempts,last_error,queued_at,dead_at_ms,evidence,operation,busy_delivery FROM message_queue WHERE id=?`, id).Scan(&row.ID, &row.SessionID, &row.Message, &row.Model, &row.SourceSessionID, &row.TurnOptions, &row.Status, &row.Attempts, &row.LastError, &row.QueuedAt, &row.DeadAt, &evidence, &row.Operation, &row.BusyDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -1657,10 +1621,10 @@ func (r *Registry) QueueItem(id int64) (*QueueRow, error) {
 }
 
 func queueRowIsHistorical(row QueueRow, now time.Time) bool {
-	if row.Status == "delivered" || row.Status == "canceled" || row.Status == "expired" {
+	if row.Status == "delivered" || row.Status == "canceled" {
 		return true
 	}
-	return row.Status == "dead" && row.ExpiresAt > 0 && row.ExpiresAt <= now.UnixMilli()
+	return row.Status == "dead" && row.DeadAt <= now.Add(-deadReviewWindow).UnixMilli()
 }
 
 func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.DeliveryEvidence {
@@ -1672,8 +1636,6 @@ func queueEvidence(row QueueRow, recorded surface.DeliveryEvidence) surface.Deli
 		return surface.EvidenceQueued
 	case "delivered":
 		return surface.EvidenceDelivered
-	case "expired":
-		return surface.EvidenceExpired
 	case "canceled":
 		return surface.EvidenceCanceled
 	case "dead":
@@ -1744,18 +1706,18 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 				WHEN last_error LIKE 'delivery rejected [invalid request]:%' THEN 'Correct this message, then retry or cancel it'
 				ELSE 'Retry or cancel this message'
 			END
-		FROM message_queue WHERE status='dead' AND (expires_at_ms=0 OR expires_at_ms>?)
+		FROM message_queue WHERE status='dead' AND dead_at_ms>?
 		ON CONFLICT(queue_id) DO UPDATE SET
 			reason=excluded.reason,
 			requested_action=excluded.requested_action
-		WHERE attention_items.resolved_at=''`, now.UnixMilli())
+		WHERE attention_items.resolved_at=''`, now.Add(-deadReviewWindow).UnixMilli())
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(`UPDATE attention_items SET
 		resolved_at=datetime('now'),
-		resolution=COALESCE((SELECT CASE WHEN status='dead' AND expires_at_ms>0 AND expires_at_ms<=? THEN 'expired' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
-		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead' AND (expires_at_ms=0 OR expires_at_ms>?))`, now.UnixMilli(), now.UnixMilli())
+		resolution=COALESCE((SELECT CASE WHEN status='dead' AND dead_at_ms<=? THEN 'history' WHEN status='pending' THEN 'retrying' WHEN status='delivered' THEN 'delivered' WHEN status='canceled' THEN 'canceled' ELSE status END FROM message_queue WHERE id=attention_items.queue_id),'removed')
+		WHERE resolved_at='' AND NOT EXISTS (SELECT 1 FROM message_queue WHERE id=attention_items.queue_id AND status='dead' AND dead_at_ms>?)`, now.Add(-deadReviewWindow).UnixMilli(), now.Add(-deadReviewWindow).UnixMilli())
 	if err != nil {
 		return err
 	}
@@ -1768,12 +1730,12 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,expires_at_ms=?,delivered=0,updated_at=datetime('now') WHERE id=? AND status IN ('dead','expired')`, r.now().Add(queueMessageTTL).UnixMilli(), id)
+	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("queue item %d is not dead-lettered or expired", id)
+		return fmt.Errorf("queue item %d is not dead-lettered", id)
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
 	return r.ReconcileAttentionItems(r.now())
@@ -1874,7 +1836,7 @@ func claimNeedsWrite(status string, operation QueueOperation, availableAt, infli
 }
 
 func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDelivery string) (*QueuedMessage, error) {
-	if err := r.expireMessages(now); err != nil {
+	if err := r.ReconcileAttentionItems(now); err != nil {
 		return nil, err
 	}
 	filter, args := claimCandidateFilter(sessionID, busyDelivery)
@@ -1911,7 +1873,7 @@ func (r *Registry) claimNextMessage(sessionID string, now time.Time, busyDeliver
 		if err := markQueuedDeliveryIntent(tx, item.ID, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, uncertainDeliveryError, item.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), uncertainDeliveryError, item.ID); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -2007,7 +1969,11 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE message_queue SET status=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, message, available.UnixMilli(), id)
+	deadAt := int64(0)
+	if status == "dead" {
+		deadAt = now.UnixMilli()
+	}
+	res, err := tx.Exec(`UPDATE message_queue SET status=?,dead_at_ms=?,last_error=?,available_at_ms=?,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, status, deadAt, message, available.UnixMilli(), id)
 	if err != nil {
 		return err
 	}
@@ -2055,7 +2021,7 @@ func (r *Registry) DeadLetterUnknown(id int64, cause error) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := deadLetterInflight(tx, id, message); err != nil {
+	if err := deadLetterInflight(tx, id, message, r.now()); err != nil {
 		return err
 	}
 	if err := markQueuedDeliveryIntent(tx, id, DeliveryIntentUnknown, surface.EvidenceUnknown, ""); err != nil {
@@ -2077,10 +2043,10 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback()
-	if err := deadLetterInflight(tx, id, message); err != nil {
+	if err := deadLetterInflight(tx, id, message, r.now()); err != nil {
 		return false, err
 	}
-	notified, err := finishQueuedDeliveryIntent(tx, id, DeliveryIntentFailed, message)
+	notified, err := finishQueuedDeliveryIntent(tx, id, message)
 	if err != nil {
 		return false, err
 	}
@@ -2093,8 +2059,8 @@ func (r *Registry) DeadLetterMessage(id int64, cause error) (bool, error) {
 	return notified, nil
 }
 
-func deadLetterInflight(tx *sql.Tx, id int64, message string) error {
-	res, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, id)
+func deadLetterInflight(tx *sql.Tx, id int64, message string, now time.Time) error {
+	res, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, now.UnixMilli(), message, id)
 	if err != nil {
 		return err
 	}
@@ -2113,7 +2079,7 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<?)`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, uncertainDeliveryError, before.UnixMilli())
+	res, err := tx.Exec(`UPDATE message_queue SET status='dead',dead_at_ms=?,last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, r.now().UnixMilli(), uncertainDeliveryError, before.UnixMilli())
 	if err != nil {
 		return 0, err
 	}

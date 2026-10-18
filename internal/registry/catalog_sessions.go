@@ -83,14 +83,14 @@ type catalogQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-func queueCountTx(tx catalogQuerier, sessionID string, now time.Time) (int, error) {
+func queueCountTx(tx catalogQuerier, sessionID string) (int, error) {
 	var count int
-	err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, now.UnixMilli()).Scan(&count)
+	err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&count)
 	return count, err
 }
 
 func validateQueueProjectionTx(tx catalogQuerier, sessionID string, fingerprint, eventPayload []byte) error {
-	count, err := queueCountTx(tx, sessionID, time.Now())
+	count, err := queueCountTx(tx, sessionID)
 	if err != nil {
 		return err
 	}

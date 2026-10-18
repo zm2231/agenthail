@@ -6,7 +6,6 @@ enum QueueFacts {
         case "pending": return "Waiting"
         case "dead": return "Needs a decision"
         case "delivered": return "Delivered"
-        case "expired": return "Expired"
         case "canceled": return "Canceled"
         default: return status.capitalized
         }

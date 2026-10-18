@@ -18,14 +18,14 @@ struct QueueFactsTest {
 
         let pending = queue(1, status: "pending")
         let dead = queue(7, status: "dead", evidence: "failed", lastError: "delivery rejected [authentication needed]: 401")
-        let expired = queue(9, status: "expired", evidence: "expired")
+        let canceled = queue(9, status: "canceled", evidence: "canceled")
 
         let writable = session("s1")
         expect(QueueFacts.canCancel(pending) && !QueueFacts.canRetry(pending, target: writable), "pending offers Cancel only")
         expect(QueueFacts.canRetry(dead, target: writable) && QueueFacts.canCancel(dead), "dead offers Retry and Cancel when the target is writable")
         expect(!QueueFacts.canRetry(dead, target: session("s1", readOnly: true, reason: "Closed in Claude")) && QueueFacts.canCancel(dead), "a read-only target offers Cancel but not Retry, since the API rejects the retry")
         expect(!QueueFacts.canRetry(dead, target: nil), "an unknown target offers no Retry")
-        expect(!QueueFacts.canRetry(expired, target: writable) && !QueueFacts.canCancel(expired), "expired offers nothing")
+        expect(!QueueFacts.canRetry(canceled, target: writable) && !QueueFacts.canCancel(canceled), "canceled offers nothing")
 
         expect(QueueFacts.reason(pending, target: session("s1", status: "busy")) == "Waiting for this agent to finish", "busy target waits")
         expect(QueueFacts.reason(pending, target: session("s1")) == "Waiting for delivery", "idle target waits for delivery")
@@ -37,7 +37,7 @@ struct QueueFactsTest {
         expect(QueueFacts.reason(queue(2, status: "pending", evidence: "transport_accepted"), target: nil) == "Transport accepted; receiver completion is pending", "transport accepted evidence wins")
         expect(QueueFacts.reason(queue(3, status: "dead", evidence: "unknown"), target: nil) == "Delivery outcome is unknown", "unknown evidence")
         expect(QueueFacts.reason(dead, target: nil) == "Delivery failed", "failed evidence")
-        expect(QueueFacts.reason(expired, target: nil) == "Expired", "non-pending status uses its label")
+        expect(QueueFacts.reason(canceled, target: nil) == "Canceled", "non-pending status uses its label")
 
         expect(QueueFacts.statusLabel("dead") == "Needs a decision" && QueueFacts.statusLabel("pending") == "Waiting", "status labels are by real status")
         expect(QueueFacts.lastError(queue(4, status: "dead", lastError: "  ")) == nil, "blank last error is hidden")

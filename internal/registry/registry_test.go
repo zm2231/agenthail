@@ -545,30 +545,29 @@ func TestQueueLifecycleAndIdempotency(t *testing.T) {
 	}
 }
 
-func TestQueuedMessageExpiresAndStopsWatchingSession(t *testing.T) {
+func TestOldQueuedMessageStaysPendingAndClaimable(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	id, err := r.QueueMessageWithKey("s", "old", "expires")
+	id, err := r.QueueMessageWithKey("s", "old", "old")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item, err := r.ClaimNextMessage("s", time.Now().Add(2*queueMessageTTL)); err != nil || item != nil {
-		t.Fatalf("expired claim=%+v err=%v", item, err)
-	}
-	row, err := r.QueueItem(id)
-	if err != nil || row.Status != "expired" || row.Evidence != surface.EvidenceExpired || row.LastError == "" {
-		t.Fatalf("row=%+v err=%v", row, err)
-	}
+	later := time.Now().Add(72 * time.Hour)
+	r.now = func() time.Time { return later }
 	watched, err := r.WatchedSessions()
-	if err != nil || len(watched) != 0 {
+	if err != nil || len(watched) != 1 {
 		t.Fatalf("watched=%+v err=%v", watched, err)
+	}
+	item, err := r.ClaimNextMessage("s", later)
+	if err != nil || item == nil || item.ID != id {
+		t.Fatalf("claim=%+v err=%v", item, err)
 	}
 }
 
-func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
+func TestDeadDeliveryMovesToHistoryAfterReviewWindow(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
-	if _, err := r.QueueMessageWithKey("s", "uncertain old delivery", "expired-unknown"); err != nil {
+	if _, err := r.QueueMessageWithKey("s", "uncertain old delivery", "old-unknown"); err != nil {
 		t.Fatal(err)
 	}
 	item, err := r.ClaimNextMessage("s", time.Now())
@@ -578,15 +577,16 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 	if err := r.DeadLetterUnknown(item.ID, errors.New("daemon stopped")); err != nil {
 		t.Fatal(err)
 	}
-	afterTTL := time.Now().Add(2 * queueMessageTTL)
-	r.now = func() time.Time { return afterTTL }
-	if _, err := r.ExpireMessages(afterTTL); err != nil {
-		t.Fatal(err)
+	rows, err := r.ListQueue(false)
+	if err != nil || len(rows) != 1 || rows[0].Historical {
+		t.Fatalf("fresh dead rows=%+v err=%v", rows, err)
 	}
+	afterTTL := time.Now().Add(2 * deadReviewWindow)
+	r.now = func() time.Time { return afterTTL }
 	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := r.ListQueue(false)
+	rows, err = r.ListQueue(false)
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
 	}
@@ -599,12 +599,12 @@ func TestExpiredUnknownDeliveryLeavesHistoryWithoutAttention(t *testing.T) {
 		t.Fatalf("open attention=%+v err=%v", attention, err)
 	}
 	allAttention, err := r.ListAttentionItems(true)
-	if err != nil || len(allAttention) != 1 || allAttention[0].Resolution != "expired" || allAttention[0].ResolvedAt == "" {
+	if err != nil || len(allAttention) != 1 || allAttention[0].Resolution != "history" || allAttention[0].ResolvedAt == "" {
 		t.Fatalf("historical attention=%+v err=%v", allAttention, err)
 	}
 }
 
-func TestInflightPastExpiryRemainsCurrentUntilFinalized(t *testing.T) {
+func TestInflightRemainsCurrentUntilFinalized(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s")
 	if err := r.QueueMessage("s", "still sending"); err != nil {
@@ -615,7 +615,7 @@ func TestInflightPastExpiryRemainsCurrentUntilFinalized(t *testing.T) {
 	if err != nil || item == nil {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
-	r.now = func() time.Time { return now.Add(2 * queueMessageTTL) }
+	r.now = func() time.Time { return now.Add(2 * deadReviewWindow) }
 	rows, err := r.ListQueue(false)
 	if err != nil || len(rows) != 1 || rows[0].Status != "inflight" || rows[0].Historical {
 		t.Fatalf("current rows=%+v err=%v", rows, err)
@@ -923,14 +923,14 @@ func TestAttentionItemsExplainTerminalDeliveryRecovery(t *testing.T) {
 	}
 }
 
-func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
+func TestQueueSnapshotsAndBackgroundScanKeepOldPendingDelivery(t *testing.T) {
 	r := openTestRegistry(t)
 	register(t, r, "s", "sender")
-	id, deliveryID, err := r.QueueDeliveryWithIntent("s", "expired snapshot", "expired-snapshot", surface.SendOptions{SourceSessionID: "sender"})
+	id, deliveryID, err := r.QueueDeliveryWithIntent("s", "old snapshot", "old-snapshot", surface.SendOptions{SourceSessionID: "sender"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterTTL := time.Now().Add(2 * queueMessageTTL)
+	afterTTL := time.Now().Add(48 * time.Hour)
 	r.now = func() time.Time { return afterTTL }
 	beforeHistory, err := r.ListHistory(20, "")
 	if err != nil {
@@ -945,7 +945,7 @@ func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rows, err := r.ListQueue(false); err != nil || len(rows) != 1 || rows[0].Status != "pending" {
-		t.Fatalf("expired current snapshot=%+v err=%v", rows, err)
+		t.Fatalf("old current snapshot=%+v err=%v", rows, err)
 	}
 	if items, err := r.ListAttentionItems(false); err != nil || len(items) != 0 {
 		t.Fatalf("attention snapshot=%+v err=%v", items, err)
@@ -962,16 +962,16 @@ func TestQueueAndAttentionSnapshotsDoNotMutateExpiredState(t *testing.T) {
 	if err != nil || len(afterHistory) != len(beforeHistory) {
 		t.Fatalf("history changed before=%+v after=%+v err=%v", beforeHistory, afterHistory, err)
 	}
-	if _, err := r.ExpireMessages(afterTTL); err != nil {
+	if err := r.ReconcileAttentionItems(afterTTL); err != nil {
 		t.Fatal(err)
 	}
-	expired, err := r.QueueItem(id)
-	if err != nil || expired.Status != "expired" {
-		t.Fatalf("background expiry row=%+v err=%v", expired, err)
+	scanned, err := r.QueueItem(id)
+	if err != nil || scanned.Status != "pending" {
+		t.Fatalf("background scan row=%+v err=%v", scanned, err)
 	}
 	history, err := r.ListHistory(20, "")
-	if err != nil || len(history) != len(beforeHistory)+1 || history[0].Kind != "expired" {
-		t.Fatalf("background expiry history=%+v err=%v", history, err)
+	if err != nil || len(history) != len(beforeHistory) {
+		t.Fatalf("background scan history=%+v err=%v", history, err)
 	}
 }
 

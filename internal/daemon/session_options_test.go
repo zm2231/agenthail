@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -64,13 +65,16 @@ func TestMobileCreationOptionsAndAuthorizedCreation(t *testing.T) {
 	}
 }
 
-func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
+func TestMobileQueueIncludesFailedRowAndRetriesThroughActionAPI(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
-	id, err := registry.QueueMessageWithKey("from", "Expired instruction", "expiry-probe")
+	id, err := registry.QueueMessageWithKey("from", "Failed instruction", "failure-probe")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.ClaimNextMessage("from", time.Now().Add(2*time.Hour)); err != nil {
+	if _, err := registry.ClaimNextMessage("from", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.DeadLetterMessage(id, errors.New("delivery rejected [invalid request]: bad")); err != nil {
 		t.Fatal(err)
 	}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
@@ -86,9 +90,9 @@ func TestMobileQueueIncludesExpiredAndRetriesThroughActionAPI(t *testing.T) {
 	}
 	found := false
 	for _, item := range page.Items {
-		if item.ID == id && item.Status == "expired" {
-			if !item.Historical || item.Evidence != surface.EvidenceExpired {
-				t.Fatalf("expired row=%+v", item)
+		if item.ID == id && item.Status == "dead" {
+			if item.Historical || item.Evidence != surface.EvidenceFailed {
+				t.Fatalf("failed row=%+v", item)
 			}
 			found = true
 		}

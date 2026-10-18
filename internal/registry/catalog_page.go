@@ -113,9 +113,9 @@ func (r *Registry) CatalogSnapshotPage(request CatalogPageRequest) (CatalogPage,
 func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 	from := `FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id
 		LEFT JOIN aliases a ON a.session_id=s.id
-		LEFT JOIN (SELECT session_id,COUNT(*) AS queue_count FROM message_queue WHERE status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?) GROUP BY session_id) qc ON qc.session_id=s.id
+		LEFT JOIN (SELECT session_id,COUNT(*) AS queue_count FROM message_queue WHERE status IN ('pending','inflight') GROUP BY session_id) qc ON qc.session_id=s.id
 		LEFT JOIN session_runtime sr ON sr.session_id=s.id`
-	args := []any{request.Now.UnixMilli()}
+	args := []any{}
 	conditions := []string{"1=1"}
 	if request.ProjectID != "" {
 		conditions = append(conditions, "json_extract(cs.host_project,'$.id')=?")

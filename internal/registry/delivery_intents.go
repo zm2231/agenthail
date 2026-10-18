@@ -30,7 +30,6 @@ const (
 	DeliveryIntentDelivered DeliveryIntentStatus = "delivered"
 	DeliveryIntentUnknown   DeliveryIntentStatus = "unknown"
 	DeliveryIntentFailed    DeliveryIntentStatus = "failed"
-	DeliveryIntentExpired   DeliveryIntentStatus = "expired"
 )
 
 type DeliveryIntentInput struct {
@@ -72,9 +71,9 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	rows, err := r.read.Query(`
 		SELECT id,target_session_id,sender_session_id,message,failure,status,updated_at
 		FROM delivery_intents
-		WHERE status IN (?,?) AND COALESCE(dismissed_at,'')=''
+		WHERE status=? AND COALESCE(dismissed_at,'')=''
 		ORDER BY updated_at DESC, id DESC
-		LIMIT 50`, DeliveryIntentFailed, DeliveryIntentExpired)
+		LIMIT 50`, DeliveryIntentFailed)
 	if err != nil {
 		return nil, err
 	}
@@ -114,13 +113,13 @@ func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
 		}
 		return false, err
 	}
-	if status != string(DeliveryIntentFailed) && status != string(DeliveryIntentExpired) {
+	if status != string(DeliveryIntentFailed) {
 		return false, fmt.Errorf("delivery %d is not a failure", id)
 	}
 	if dismissedAt.Valid && dismissedAt.String != "" {
 		return false, tx.Commit()
 	}
-	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status IN (?,?) AND COALESCE(dismissed_at,'')=''`, id, DeliveryIntentFailed, DeliveryIntentExpired); err != nil {
+	if _, err := tx.Exec(`UPDATE delivery_intents SET dismissed_at=datetime('now') WHERE id=? AND status=? AND COALESCE(dismissed_at,'')=''`, id, DeliveryIntentFailed); err != nil {
 		return false, err
 	}
 	payload, err := json.Marshal(map[string]any{"deliveryId": id})
@@ -217,8 +216,8 @@ func (r *Registry) ReconcileDeliveryIntent(targetSessionID, providerKey string) 
 	return n == 1, err
 }
 
-func (r *Registry) FailDeliveryIntent(id int64, status DeliveryIntentStatus, failure string) (bool, error) {
-	return failDeliveryIntent(r.db, id, status, failure)
+func (r *Registry) FailDeliveryIntent(id int64, failure string) (bool, error) {
+	return failDeliveryIntent(r.db, id, failure)
 }
 
 // MarkDeliveryIntentSent completes the same logical intent created before a
@@ -265,8 +264,7 @@ func (r *Registry) QueueDeliveryUsingIntent(intentID int64, message, deliveryKey
 	if status != string(DeliveryIntentSubmitted) {
 		return 0, 0, fmt.Errorf("delivery intent %d is not submitted", intentID)
 	}
-	expiresAt := r.now().Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,expires_at_ms,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, expiresAt, options.BusyDelivery, options.Author)
+	res, err := tx.Exec(`INSERT INTO message_queue (session_id,message,operation,delivery_key,model,source_session_id,turn_options,relay_hops,busy_delivery,author,status,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'pending',datetime('now'))`, targetSessionID, message, QueueOperationMessage, deliveryKey, options.Model, senderSessionID, options.TurnOptions, 0, options.BusyDelivery, options.Author)
 	if err != nil {
 		if deliveryKey == "" || !strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return 0, 0, err
@@ -316,7 +314,7 @@ func (r *Registry) FailDeliveryIntentWithNotice(id int64, failure string) (bool,
 	if err != nil {
 		return false, err
 	}
-	changed, err := failDeliveryIntent(tx, id, DeliveryIntentFailed, failure)
+	changed, err := failDeliveryIntent(tx, id, failure)
 	if err != nil || !changed {
 		_ = tx.Rollback()
 		return changed, err
@@ -334,18 +332,11 @@ type deliveryIntentExecutor interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-func failDeliveryIntent(q deliveryIntentExecutor, id int64, status DeliveryIntentStatus, failure string) (bool, error) {
-	if status != DeliveryIntentFailed && status != DeliveryIntentExpired {
-		return false, fmt.Errorf("delivery failure status must be failed or expired")
-	}
+func failDeliveryIntent(q deliveryIntentExecutor, id int64, failure string) (bool, error) {
 	if strings.TrimSpace(failure) == "" {
 		return false, fmt.Errorf("delivery failure reason is required")
 	}
-	evidence := surface.EvidenceFailed
-	if status == DeliveryIntentExpired {
-		evidence = surface.EvidenceExpired
-	}
-	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, status, evidence, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
+	res, err := q.Exec(`UPDATE delivery_intents SET status=?,evidence=?,failure=?,updated_at=datetime('now') WHERE id=? AND status IN (?,?,?,?)`, DeliveryIntentFailed, surface.EvidenceFailed, failure, id, DeliveryIntentSubmitted, DeliveryIntentSent, DeliveryIntentQueued, DeliveryIntentUnknown)
 	if err != nil {
 		return false, err
 	}
@@ -378,12 +369,12 @@ func markQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentSt
 	return err
 }
 
-func finishQueuedDeliveryIntent(tx *sql.Tx, queueID int64, status DeliveryIntentStatus, failure string) (bool, error) {
+func finishQueuedDeliveryIntent(tx *sql.Tx, queueID int64, failure string) (bool, error) {
 	id, err := queuedDeliveryIntentID(tx, queueID)
 	if err != nil || id == 0 {
 		return false, err
 	}
-	changed, err := failDeliveryIntent(tx, id, status, failure)
+	changed, err := failDeliveryIntent(tx, id, failure)
 	if err != nil || !changed {
 		return false, err
 	}
@@ -426,7 +417,7 @@ func (r *Registry) RecordReplyForwardFailure(senderSessionID, targetSessionID, p
 	if err != nil {
 		return false, err
 	}
-	if changed, err := failDeliveryIntent(tx, id, DeliveryIntentFailed, failure); err != nil || !changed {
+	if changed, err := failDeliveryIntent(tx, id, failure); err != nil || !changed {
 		return false, err
 	}
 	_, queued, err := queueDeliveryFailureNotice(tx, id)
@@ -441,7 +432,7 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	if intent.Status != DeliveryIntentFailed && intent.Status != DeliveryIntentExpired {
+	if intent.Status != DeliveryIntentFailed {
 		return 0, false, nil
 	}
 	if intent.NotificationQueueID != 0 {
@@ -455,8 +446,7 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 	}
 	notice := fmt.Sprintf("[agenthail delivery failure id=%d target=%s] %s", intent.ID, intent.TargetSessionID, intent.Failure)
 	key := fmt.Sprintf("delivery-intent-notice:%d", intent.ID)
-	expiresAt := time.Now().Add(queueMessageTTL).UnixMilli()
-	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,expires_at_ms,status,updated_at) VALUES(?,?,?,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key, expiresAt)
+	res, err := tx.Exec(`INSERT INTO message_queue(session_id,message,operation,delivery_key,status,updated_at) VALUES(?,?,?,?,'pending',datetime('now'))`, intent.SenderSessionID, notice, QueueOperationMessage, key)
 	if err != nil {
 		return 0, false, err
 	}
