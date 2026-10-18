@@ -71,6 +71,8 @@ agenthail history @builder 25
 
 A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to advertise a separate Remote Control identity and are never placed in the ordinary message queue.
 
+A message you type in the web dashboard or the Mac or iPhone app goes to a Claude session's Remote Control identity, so Claude records it as your own turn rather than a peer message. Sessions without Remote Control receive it over the native socket. Agent, relay, channel, CLI and voice sends always use the native socket. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
+
 ### Codex
 
 Start a writable Codex terminal conversation from any project folder:

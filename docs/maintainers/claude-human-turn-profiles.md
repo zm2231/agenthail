@@ -1,26 +1,54 @@
 # Claude human turns and authenticated profiles
 
-Status: planned / WIP. This branch implements and tests the isolated human-turn
-primitive. Multiple profiles and delivery from voice or desktop are planned.
-This document describes the remaining contract, not available product controls.
+Status: the first layer, desktop composer delivery through one authenticated
+profile, has shipped. Multiple profiles, account ownership, persisted provenance
+snapshots and voice delivery are later layers. Their plans follow below.
 
-## Implemented primitive
+## Shipped: desktop composer human turns
 
-[`Claude.List`](../../internal/surface/surfaces/claude.go) retains the provider's
-`bridgeSessionId` in `surface.Session.BridgeSessionID`. The field is excluded
-from JSON and is not persisted by the registry.
+`Claude.SendHumanTurn` submits a `type: user` event whose message has
+`role: user` through the existing authenticated web request. It requires a
+Remote Control identity. That identity is the session ID itself:
+[`Claude.List`](../../internal/surface/surfaces/claude.go) uses
+`bridgeSessionId` as the ID whenever a record has one. Registry-loaded sessions
+therefore keep it, and no extra session field is needed. `CanSendHumanTurn`
+reports whether that identity exists, matching the controls that already use it
+(`EffectiveCapabilities`). Busy sessions return an unaccepted result without
+posting. `Claude.Send` stays native-peer-first for UDS sessions.
 
-`Claude.SendHumanTurn` selects that bridge identity, checks transcript readiness,
-and uses the existing authenticated web request to submit a `type: user` event
-whose message has `role: user`. A bridge-only session may use its session ID.
-A native UDS session without a bridge identity returns `DeliveryUnavailable`.
-Busy sessions return an unaccepted result without posting. Ordinary `Claude.Send`
-continues to select native peer delivery for UDS sessions.
+Provenance is set at the entry point. The web dashboard (`/api/action`) and the
+Mac and iPhone apps (`/api/v1/actions`) post composer messages as action `send`
+to [`dashboardActionHandler`](../../internal/daemon/dashboard.go). A request
+without `sourceSessionId` is a person's message, and the handler sets
+`SendOptions.HumanTurn`. The field has no JSON name, so a request body cannot
+set it. Channel broadcasts, the CLI, relays, voice and agent-attributed sends
+never set it.
 
-The primitive does not authenticate the message's human origin. Its caller must
-establish that authority before invocation. There are no voice, desktop, queue,
-CLI or HTTP producers calling this method in this branch. Transport acceptance
-does not prove that Claude completed or accepted the instruction semantically.
+[`Dispatcher.deliver`](../../internal/delivery/delivery.go) routes a human turn
+to `SendHumanTurn` when the adapter implements `surface.HumanTurnSender`, the
+send has no per-message model or turn options, and the target has a Remote
+Control identity. Otherwise it keeps today's path. A target without that
+identity gets the native socket send. The choice is made before sending and is
+never revised after a failure. A human turn records `delivered` evidence and
+arms completion tracking. A native send records `transport_accepted`. The
+path is visible in the API receipt's `evidence` and in history. The dashboard and
+app composers show both as "Sent", and this layer adds no UI for the difference.
+
+A busy target follows the existing busy-delivery policy. With `steer`,
+`Claude.Steer` already posts through the Remote Control identity. With `queue`,
+the intent is queued with `message_queue.human_turn`.
+[`drainClaimedMessage`](../../internal/daemon/outbox.go) replays that item
+through `SendHumanTurn` when the session is idle. Outcome semantics are
+unchanged. An uncertain POST is `unknown` and becomes a submitted intent or a
+dead letter, and it is never retried.
+
+The primitive does not authenticate the person behind a composer. The trust
+boundary is the dashboard's control authority (the dashboard token or a paired
+device with `control` scope). Tests cover the routing through both HTTP routes
+with the real Claude adapter and a fixture web request: human to bridge, agent
+to native, no bridge to native, busy queue replayed as a human turn, and queued
+agent messages staying native. A live authenticated POST through the composer
+path has not been run for this layer.
 
 ## Planned account model
 
@@ -100,9 +128,9 @@ See [shared stream consumers](shared-stream-consumers.md).
    package/config examples, then perform authorized live acceptance with two
    accounts and two sessions.
 
-The current draft contains the primitive and this plan. Every step above remains
-unchecked implementation work. UI, producer wiring, profile configuration,
-schema changes and live authenticated requests are deferred in this draft.
+The shipped layer covers the trusted desktop entry point and queue replay for one
+authenticated profile, without per-intent profile or account bindings. Steps 1, 2
+and 4, the voice part of step 5 and the two-account live acceptance remain.
 
 ## Acceptance gates
 
