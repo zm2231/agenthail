@@ -97,7 +97,10 @@ SWIFT_TARGET="$SWIFT_ARCH-apple-macosx15.0"
 SWIFT_BUILD=(swift build --package-path "$ROOT/native" -c release --triple "$SWIFT_TARGET" -Xswiftc -target -Xswiftc "$SWIFT_TARGET")
 SWIFT_BIN="$("${SWIFT_BUILD[@]}" --show-bin-path)"
 rm -rf "$SWIFT_BIN"/*.bundle
-"${SWIFT_BUILD[@]}" --product AgenthailMac >/dev/null
+if ! SWIFT_LOG="$("${SWIFT_BUILD[@]}" --product AgenthailMac 2>&1)"; then
+	printf '%s\n' "$SWIFT_LOG" >&2
+	exit 1
+fi
 cp "$SWIFT_BIN/AgenthailMac" "$OUTPUT/Contents/MacOS/Agenthail"
 for bundle in "$SWIFT_BIN"/*.bundle; do
 	cp -R "$bundle" "$OUTPUT/Contents/Resources/"
