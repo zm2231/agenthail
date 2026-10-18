@@ -469,7 +469,7 @@ final class AgenthailIOSModel: ObservableObject {
                 }
                 switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
                 case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
-                case "queued": deliveryStatus[sessionID] = "Queued for \(item.target); sends when current turn ends."
+                case "queued": deliveryStatus[sessionID] = item.queuedReceipt
                 case "unknown": deliveryStatus[sessionID] = "Submitted to \(item.target)."
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
                 case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."

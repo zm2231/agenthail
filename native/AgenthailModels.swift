@@ -401,6 +401,13 @@ struct QueueState: Decodable, Identifiable, Equatable {
         return formatter
     }()
 
+    /// The send receipt for a queued message, worded as the daemon words it.
+    var queuedReceipt: String {
+        heldBy == "waiting"
+            ? "Queued for \(target), which is waiting on you; sends after you answer."
+            : "Queued for \(target); sends when current turn ends."
+    }
+
     /// Why a pending message has not been delivered yet.
     var holdLabel: String {
         switch heldBy {
@@ -409,6 +416,7 @@ struct QueueState: Decodable, Identifiable, Equatable {
         case "offline": return "Held: this agent is offline"
         case "unknown": return "Held: this agent's state is unknown"
         case "retrying": return "Held: waiting to retry"
+        case "behind": return "Held: behind an earlier message"
         default: return "Delivers on the next scan"
         }
     }

@@ -1316,7 +1316,7 @@ struct ComposerView: View {
                                 .padding(.bottom, 8)
                         }
                         if !queued.isEmpty {
-                            QueueDock(model: model, items: queued, canSteer: canSteer && session.isWorking)
+                            QueueDock(model: model, items: queued, target: session, canSteer: canSteer && session.isWorking)
                                 .padding(.horizontal, 10)
                         }
                         if !draft.attachments.isEmpty {
@@ -1548,6 +1548,7 @@ struct DeliveryProblemBanner: View {
 struct QueueDock: View {
     @ObservedObject var model: AgenthailModel
     let items: [QueueState]
+    let target: SessionState
     let canSteer: Bool
 
     var body: some View {
@@ -1558,16 +1559,22 @@ struct QueueDock: View {
                     Image(systemName: "text.line.last.and.arrowtriangle.forward")
                         .font(.system(size: 11))
                         .foregroundStyle(DesktopPalette.text2)
-                    HStack(spacing: 6) {
-                        if let sender = envelope.sender {
-                            Text(sender)
-                                .foregroundStyle(DesktopPalette.text2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            if let sender = envelope.sender {
+                                Text(sender)
+                                    .foregroundStyle(DesktopPalette.text2)
+                            }
+                            Text(envelope.body.split(separator: "\n").first.map(String.init) ?? envelope.body)
+                                .foregroundStyle(DesktopPalette.text)
                         }
-                        Text(envelope.body.split(separator: "\n").first.map(String.init) ?? envelope.body)
-                            .foregroundStyle(DesktopPalette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        Text(QueueFacts.summary(item, target: target, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)))
+                            .font(.system(size: 11))
+                            .foregroundStyle(DesktopPalette.text2)
+                            .lineLimit(1)
                     }
-                    .lineLimit(1)
-                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     if canSteer {
                         Button {
@@ -1857,7 +1864,7 @@ struct DeliveryTab: View {
                 SidebarCaption("Undelivered").padding(.horizontal, -8)
                 ForEach(queued) { item in
                     VStack(alignment: .leading, spacing: 4) {
-                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: (QueueFacts.detail(item, target: session, attention: model.snapshot?.attention ?? []) + ["Queued \(relativeAge(item.queuedAt))"]).joined(separator: " · "), problem: item.status == "dead")
+                        deliveryCard(title: item.target, status: QueueFacts.statusLabel(item.status), text: item.message, detail: QueueFacts.summary(item, target: session, attention: model.snapshot?.attention ?? [], age: relativeAge(item.queuedAt)), problem: item.status == "dead")
                         HStack { QueueItemActions(model: model, item: item) }
                             .controlSize(.small)
                     }

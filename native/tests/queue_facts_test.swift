@@ -48,6 +48,10 @@ struct QueueFactsTest {
 
         expect(QueueFacts.detail(dead, target: nil, attention: attention) == ["Claude needs to reconnect", "Reconnect Claude, then retry or cancel this message", "delivery rejected [authentication needed]: 401"], "a dead item with attention shows reason, requested action and last error")
         expect(QueueFacts.detail(queue(1, status: "pending", heldBy: "busy"), target: session("s1", status: "busy"), attention: attention) == ["Held: this agent is working"], "an item without attention shows its hold reason")
+        expect(QueueFacts.reason(queue(2, status: "pending", heldBy: "behind"), target: session("s1")) == "Held: behind an earlier message", "a message behind an earlier one says so")
+        expect(QueueFacts.summary(queue(1, status: "pending", heldBy: "waiting"), target: session("s1", status: "busy"), attention: [], age: "5m") == "Held: this agent is waiting on you · Queued 5m", "the conversation dock shows the hold reason and age")
+        expect(queue(1, status: "pending", heldBy: "waiting").queuedReceipt == "Queued for @builder, which is waiting on you; sends after you answer.", "a refreshed receipt keeps that the target is waiting on you")
+        expect(queue(1, status: "pending", heldBy: "busy").queuedReceipt == "Queued for @builder; sends when current turn ends.", "a refreshed receipt for a busy target sends after the turn")
         expect(QueueFacts.attention(attention, for: "s1").count == 1 && QueueFacts.attention(attention, for: "s2").isEmpty, "attention filters by session")
         expect(QueueFacts.undelivered([pending, dead, queue(5, status: "delivered"), queue(6, status: "pending", session: "s2")], for: "s1").map(\.id) == [1, 7], "undelivered keeps this session's non-delivered items")
 

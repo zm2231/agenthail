@@ -51,6 +51,12 @@ enum QueueFacts {
         return reason + [lastError(item)].compactMap { $0 }
     }
 
+    /// One line for a queued message: why it is held, or its attention, and
+    /// how long it has been queued.
+    static func summary(_ item: QueueState, target: SessionState?, attention: [AttentionState], age: String) -> String {
+        (detail(item, target: target, attention: attention) + ["Queued \(age)"]).joined(separator: " · ")
+    }
+
     static func undelivered(_ queue: [QueueState], for sessionID: String) -> [QueueState] {
         queue.filter { $0.sessionId == sessionID && $0.status != "delivered" }
     }
