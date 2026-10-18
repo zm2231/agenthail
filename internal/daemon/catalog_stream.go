@@ -535,6 +535,9 @@ func (d *Daemon) publishCatalogQueueCounts() {
 	}
 	now := time.Now()
 	for _, record := range snapshot.Sessions {
+		if record.HostID != "" {
+			continue
+		}
 		count := counts[record.Session.ID]
 		for attempt := 0; attempt < 3; attempt++ {
 			var projection dashboardSession
@@ -672,6 +675,7 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 		session.Runtime = &surface.Runtime{Launcher: surface.LauncherExternal, Focusable: false}
 	}
 	current, reason := dashboardSessionPresence(session, queueCount, open, config.CodexRecentHours, observedAt)
+	host := d.localHost()
 	effective := surface.EffectiveCapabilities(&session, adapter.Capabilities())
-	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, Host: &host}
 }

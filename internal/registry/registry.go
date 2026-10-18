@@ -116,6 +116,7 @@ func (r *Registry) migrate() error {
 		{"operation", `TEXT NOT NULL DEFAULT 'message'`},
 		{"busy_delivery", `TEXT NOT NULL DEFAULT ''`},
 		{"author", `TEXT NOT NULL DEFAULT ''`},
+		{"host_request", `BLOB NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("message_queue", column.name, column.decl); err != nil {
 			return err
@@ -134,6 +135,7 @@ func (r *Registry) migrate() error {
 		{"subagent_depth", `INTEGER NOT NULL DEFAULT 0`},
 		{"agent_nickname", `TEXT NOT NULL DEFAULT ''`},
 		{"agent_role", `TEXT NOT NULL DEFAULT ''`},
+		{"host_id", `TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.ensureColumn("sessions", column.name, column.decl); err != nil {
 			return err
@@ -474,16 +476,18 @@ CREATE TABLE IF NOT EXISTS catalog_events (
 	created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS catalog_events_created ON catalog_events(created_at DESC, seq DESC);
-CREATE TRIGGER IF NOT EXISTS message_queue_catalog_insert AFTER INSERT ON message_queue
-WHEN NEW.status IN ('pending','inflight')
+DROP TRIGGER IF EXISTS message_queue_catalog_insert;
+CREATE TRIGGER message_queue_catalog_insert AFTER INSERT ON message_queue
+WHEN NEW.status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=NEW.session_id AND host_id<>'')
 BEGIN
 	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
 	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
 		json_object('sessionId',NEW.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=NEW.session_id AND status IN ('pending','inflight'))),
 		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 END;
-CREATE TRIGGER IF NOT EXISTS message_queue_catalog_update AFTER UPDATE OF status,session_id ON message_queue
-WHEN (OLD.status IN ('pending','inflight')) != (NEW.status IN ('pending','inflight')) OR (OLD.session_id != NEW.session_id AND NEW.status IN ('pending','inflight'))
+DROP TRIGGER IF EXISTS message_queue_catalog_update;
+CREATE TRIGGER message_queue_catalog_update AFTER UPDATE OF status,session_id ON message_queue
+WHEN ((OLD.status IN ('pending','inflight')) != (NEW.status IN ('pending','inflight')) OR (OLD.session_id != NEW.session_id AND NEW.status IN ('pending','inflight'))) AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=NEW.session_id AND host_id<>'')
 BEGIN
 	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
 	VALUES('session.queue:'||NEW.session_id||':'||lower(hex(randomblob(12))),'session.queue',NEW.session_id,
@@ -495,14 +499,33 @@ BEGIN
 		strftime('%Y-%m-%dT%H:%M:%fZ','now')
 	WHERE OLD.session_id != NEW.session_id AND OLD.status IN ('pending','inflight');
 END;
-CREATE TRIGGER IF NOT EXISTS message_queue_catalog_delete AFTER DELETE ON message_queue
-WHEN OLD.status IN ('pending','inflight')
+DROP TRIGGER IF EXISTS message_queue_catalog_delete;
+CREATE TRIGGER message_queue_catalog_delete AFTER DELETE ON message_queue
+WHEN OLD.status IN ('pending','inflight') AND NOT EXISTS(SELECT 1 FROM sessions WHERE id=OLD.session_id AND host_id<>'')
 BEGIN
 	INSERT INTO catalog_events(dedupe_key,type,entity_id,payload,created_at)
 	VALUES('session.queue:'||OLD.session_id||':'||lower(hex(randomblob(12))),'session.queue',OLD.session_id,
 		json_object('sessionId',OLD.session_id,'queueCount',(SELECT COUNT(*) FROM message_queue WHERE session_id=OLD.session_id AND status IN ('pending','inflight'))),
 		strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 END;
+CREATE TABLE IF NOT EXISTS host_identity (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	host_id TEXT NOT NULL,
+	name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS hosts (
+	host_id TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	endpoint TEXT NOT NULL,
+	address TEXT NOT NULL,
+	token TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'connecting',
+	last_error TEXT NOT NULL DEFAULT '',
+	last_contact_at TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	catalog_epoch TEXT NOT NULL DEFAULT '',
+	catalog_seq INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL
@@ -918,11 +941,11 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return sid, nil
 	}
 	var exact string
-	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ?`, target).Scan(&exact); err == nil {
+	if err := r.read.QueryRow(`SELECT id FROM sessions WHERE id = ? AND host_id=''`, target).Scan(&exact); err == nil {
 		return exact, nil
 	}
 	prefix := escapeLike(target) + "%"
-	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\' ORDER BY updated_at DESC, id LIMIT 2`, prefix); err != nil {
+	if ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND id LIKE ? ESCAPE '\' ORDER BY updated_at DESC, id LIMIT 2`, prefix); err != nil {
 		return "", err
 	} else if len(ids) == 1 {
 		return ids[0], nil
@@ -930,7 +953,7 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 		return "", fmt.Errorf("ambiguous session id prefix %q matches %s", target, strings.Join(ids, ", "))
 	}
 	contains := "%" + escapeLike(target) + "%"
-	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') ORDER BY updated_at DESC, id LIMIT 2`, contains, contains)
+	ids, err := r.matchingIDs(`SELECT id FROM sessions WHERE host_id='' AND parent_session_id='' AND (name LIKE ? ESCAPE '\' OR cwd LIKE ? ESCAPE '\') ORDER BY updated_at DESC, id LIMIT 2`, contains, contains)
 	if err != nil {
 		return "", err
 	}
@@ -2022,10 +2045,10 @@ func (r *Registry) RecoverInflight(before time.Time) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<?)`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
+	if _, err := tx.Exec(`UPDATE delivery_intents SET status=?,evidence=?,updated_at=datetime('now') WHERE status=? AND queue_id IN (SELECT id FROM message_queue WHERE status='inflight' AND inflight_at_ms<? AND host_request='')`, DeliveryIntentUnknown, surface.EvidenceUnknown, DeliveryIntentQueued, before.UnixMilli()); err != nil {
 		return 0, err
 	}
-	res, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<?`, uncertainDeliveryError, before.UnixMilli())
+	res, err := tx.Exec(`UPDATE message_queue SET status='dead',last_error=?,inflight_at_ms=0,available_at_ms=0,updated_at=datetime('now') WHERE status='inflight' AND inflight_at_ms<? AND host_request=''`, uncertainDeliveryError, before.UnixMilli())
 	if err != nil {
 		return 0, err
 	}
@@ -2113,7 +2136,7 @@ func (r *Registry) WatchedSessions() ([]WatchedSession, error) {
 	rows, err := r.read.Query(`
 		SELECT DISTINCT s.id,s.surface
 		FROM sessions s
-		WHERE s.id IN (
+		WHERE s.host_id='' AND s.id IN (
 			SELECT from_session FROM routes WHERE active=1
 			UNION SELECT to_session FROM routes WHERE active=1
 			UNION SELECT session_id FROM message_queue WHERE status IN ('pending','inflight')
@@ -2316,7 +2339,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 	pattern := "%" + escapeLike(query) + "%"
 	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
-		WHERE s.surface=? AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
+		WHERE s.surface=? AND s.host_id='' AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err
@@ -2359,7 +2382,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`

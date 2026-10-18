@@ -106,6 +106,7 @@ type dashboardSession struct {
 	Subagent          *surface.Subagent          `json:"subagent,omitempty"`
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
 	SharedWith        []dashboardSharedSession   `json:"sharedWith,omitempty"`
+	Host              *dashboardHost             `json:"host,omitempty"`
 }
 
 type dashboardState struct {
@@ -251,14 +252,14 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/favicon.png", dashboard.asset("image/png", dashboardFavicon))
 	mux.HandleFunc("/favicon.ico", dashboard.asset("image/png", dashboardFavicon))
 	mux.HandleFunc("/api/state", dashboard.guard(func(w http.ResponseWriter, r *http.Request) { d.dashboardStateCached(dashboard, w, r) }))
-	mux.HandleFunc("/api/session", dashboard.guard(d.dashboardSessionHandler))
-	mux.HandleFunc("/api/session-metadata", dashboard.guard(d.dashboardSessionMetadataHandler))
-	mux.HandleFunc("/api/session-attachment", dashboard.guard(d.apiSessionAttachmentHandler))
-	mux.HandleFunc("/api/session-stream", dashboard.guard(d.apiSessionStreamHandler))
-	mux.HandleFunc("/api/models", dashboard.guard(d.dashboardModelsHandler))
+	mux.HandleFunc("/api/session", dashboard.guard(d.hostRouted("id", d.dashboardSessionHandler)))
+	mux.HandleFunc("/api/session-metadata", dashboard.guard(d.hostRouted("id", d.dashboardSessionMetadataHandler)))
+	mux.HandleFunc("/api/session-attachment", dashboard.guard(d.hostRouted("sessionId", d.apiSessionAttachmentHandler)))
+	mux.HandleFunc("/api/session-stream", dashboard.guard(d.hostRouted("id", d.apiSessionStreamHandler)))
+	mux.HandleFunc("/api/models", dashboard.guard(d.hostRouted("id", d.dashboardModelsHandler)))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
 	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
-	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.dashboardActionHandler)))
+	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
 	d.registerAPIV1(mux, dashboard)
@@ -429,7 +430,7 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (d *Daemon) dashboardHistoryEntry(entry registry.HistoryEntry) dashboardHistory {
-	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: entry.SessionID, SourceSessionID: entry.SourceSessionID, Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence}
+	return dashboardHistory{ID: entry.ID, CreatedAt: entry.CreatedAt, Kind: entry.Kind, SessionID: d.publicSessionID(entry.SessionID), SourceSessionID: d.publicSessionID(entry.SourceSessionID), Target: d.resolveDisplay(entry.SessionID), Source: d.resolveDisplay(entry.SourceSessionID), QueueID: entry.QueueID, Message: entry.Message, Result: entry.Result, Error: entry.Error, Evidence: entry.Evidence}
 }
 
 func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.ResponseWriter, r *http.Request) {
@@ -748,7 +749,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read delivery problems: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery)}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query
@@ -758,7 +759,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.UpdatedAt = pageRequest[0].Now.UTC()
 	}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: item.SourceSessionID, Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
+		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: item.SessionID, SourceSessionID: d.publicSessionID(item.SourceSessionID), Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -777,7 +778,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.History = append(state.History, d.dashboardHistoryEntry(entry))
 	}
 	for _, item := range attention {
-		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: item.SessionID, Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
+		state.Attention = append(state.Attention, dashboardAttention{ID: item.ID, SessionID: d.publicSessionID(item.SessionID), Target: d.resolveDisplay(item.SessionID), QueueID: item.QueueID, Reason: item.Reason, RequestedAction: item.RequestedAction, CreatedAt: item.CreatedAt})
 	}
 	adapters := make(map[surface.SurfaceKind]surface.Surface, len(d.Surfaces))
 	catalogSurface := make(map[surface.SurfaceKind]registry.CatalogSurfaceState, len(catalogSnapshot.Surfaces))
@@ -815,6 +816,17 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		}
 	}
 	for _, session := range sessions {
+		if record, found := catalogSessions[session.ID]; found && record.HostID != "" {
+			var mirrored dashboardSession
+			if json.Unmarshal([]byte(record.ProjectionFingerprint), &mirrored) != nil {
+				continue
+			}
+			mirrored.ObservedAt = record.ObservedAt
+			mirrored.Freshness = &record.Freshness
+			mirrored.QueueCount += counts[session.ID]
+			state.Sessions = append(state.Sessions, mirrored)
+			continue
+		}
 		adapter := adapters[session.Surface]
 		if adapter == nil {
 			continue
