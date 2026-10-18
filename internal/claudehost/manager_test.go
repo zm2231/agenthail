@@ -158,12 +158,15 @@ func TestEnsureTakesTheLockWhenItsHolderExitsBeforeItsHostAnswers(t *testing.T) 
 	if err := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
+	taken := make(chan struct{})
+	var once sync.Once
+	t.Cleanup(claudehost.OnLockTaken(func() { once.Do(func() { close(taken) }) }))
 	done := make(chan error, 1)
 	go func() {
 		_, err := f.Manager(t, "test").Ensure(ctx)
 		done <- err
 	}()
-	time.Sleep(300 * time.Millisecond)
+	<-taken
 	holder.Close()
 	select {
 	case err := <-done:

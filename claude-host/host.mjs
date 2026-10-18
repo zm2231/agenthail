@@ -237,12 +237,6 @@ function spawnDetached(s, options, exited) {
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: true,
   });
-  s.pid = child.pid ?? 0;
-  s.started = processStart(s.pid);
-  if (!s.started) {
-    child.kill('SIGKILL');
-    throw new Error(`cannot read the start time of Claude process ${s.pid}, so a later host could not tell it from a reused pid`);
-  }
   child.stderr.on('data', (chunk) => {
     s.stderr = (s.stderr + chunk).slice(-4096);
   });
@@ -251,6 +245,13 @@ function spawnDetached(s, options, exited) {
   options.signal?.addEventListener('abort', () => {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   });
+  if (!child.pid) return child;
+  s.pid = child.pid;
+  s.started = processStart(s.pid);
+  if (!s.started) {
+    child.kill('SIGKILL');
+    throw new Error(`cannot read the start time of Claude process ${s.pid}, so a later host could not tell it from a reused pid`);
+  }
   writeState();
   emit(s.id, 'opened', { pid: s.pid, cwd: s.cwd });
   return child;

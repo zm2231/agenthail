@@ -80,6 +80,7 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return Client{}, err
 		}
+		lockTaken()
 		select {
 		case <-ctx.Done():
 			return Client{}, fmt.Errorf("the Claude host holds its lock but does not answer: %w", ctx.Err())
@@ -87,6 +88,10 @@ func (m *Manager) Ensure(ctx context.Context) (Client, error) {
 		}
 	}
 }
+
+// lockTaken runs each time Ensure finds the host lock held by another
+// process; tests use it to release the lock only once Ensure has seen it held.
+var lockTaken = func() {}
 
 func (m *Manager) start(ctx context.Context, client Client, launch Launch, lock *os.File) (Client, error) {
 	exited, err := m.spawn(launch, lock)

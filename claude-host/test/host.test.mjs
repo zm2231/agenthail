@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -28,9 +28,9 @@ function fixture() {
   return { root, state, claudeDir, cwd, socket: path.join(root, 'h.sock') };
 }
 
-async function startHost(f, { lock = true, version = 'test', env = {} } = {}) {
+async function startHost(f, { lock = true, version = 'test', env = {}, claude = fakeClaude } = {}) {
   const fd = lock ? fs.openSync(path.join(f.state, 'lock'), 'r') : null;
-  const host = spawn(process.execPath, [hostScript, '--socket', f.socket, '--state', f.state, '--claude', fakeClaude, '--version', version], {
+  const host = spawn(process.execPath, [hostScript, '--socket', f.socket, '--state', f.state, '--claude', claude, '--version', version], {
     env: { ...process.env, FAKE_CLAUDE_DIR: f.claudeDir, ...env },
     stdio: lock ? ['ignore', 'ignore', 'pipe', fd] : ['ignore', 'ignore', 'pipe'],
   });
@@ -278,8 +278,27 @@ test('a session whose process start time cannot be read does not open', async ()
   fs.writeFileSync(path.join(bin, 'ps'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   await startHost(f, { env: { PATH: `${bin}:${process.env.PATH}` } });
   const c = new Client(f.socket);
-  await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'open_failed' });
+  const id = randomUUID();
+  const started = Date.now();
+  await assert.rejects(c.call('open', { sessionId: id, cwd: f.cwd }), { code: 'open_failed' });
+  assert.ok(Date.now() - started < 5000, 'the open fails promptly');
   assert.deepEqual((await c.call('list')).sessions, []);
+  const running = () => spawnSync('pgrep', ['-f', id]).status === 0;
+  for (let i = 0; i < 40 && running(); i++) await sleep(25);
+  assert.ok(!running(), 'the Claude process is stopped');
+  c.close();
+});
+
+test('a Claude that cannot be started fails the open and leaves the host running', async () => {
+  const f = fixture();
+  const claude = path.join(f.root, 'claude-bin');
+  fs.writeFileSync(claude, '', { mode: 0o644 });
+  const host = await startHost(f, { claude });
+  const c = new Client(f.socket);
+  await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd: f.cwd }), { code: 'open_failed' });
+  await sleep(200);
+  assert.equal(host.exitCode, null, host.stderrText);
+  assert.equal((await new Client(f.socket).call('hello')).protocol, 1);
   c.close();
 });
 
