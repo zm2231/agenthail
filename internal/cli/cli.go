@@ -1374,14 +1374,11 @@ func (a *App) cmdSend(args []string) error {
 		return fmt.Errorf(`usage: agenthail send <target> "message" [--from <name>] [--stream] [--reply] [--json]`)
 	}
 	target := positional[0]
-	message := strings.Join(positional[1:], " ")
-	if message == "-" {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-		message = string(data)
-	} else if len(message) > 8000 {
+	message, err := messageText(strings.Join(positional[1:], " "))
+	if err != nil {
+		return err
+	}
+	if positional[1] != "-" && len(message) > 8000 {
 		fmt.Fprintf(os.Stderr, "warning: message is %d chars; shell may have truncated it. Use '-' to read from stdin for long messages:\n  echo '...' | agenthail send %s -\n  agenthail send %s - < file.txt\n", len(message), target, target)
 	}
 	if message == "" {
@@ -1966,7 +1963,7 @@ func (a *App) cmdInterrupt(args []string) error {
 func (a *App) cmdSteer(args []string) error {
 	positional := stripFlags(args)
 	if len(positional) < 2 {
-		return fmt.Errorf("usage: agenthail steer <target> \"message\"")
+		return fmt.Errorf("usage: agenthail steer <target> \"message\" ('-' reads stdin)")
 	}
 	ctx := context.Background()
 	sess, surf, err := a.resolveTarget(ctx, positional[0])
@@ -1986,7 +1983,14 @@ func (a *App) cmdSteer(args []string) error {
 	if sourceID != "" {
 		ctx = surface.WithSourceSessionID(ctx, sourceID)
 	}
-	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, strings.Join(positional[1:], " "))
+	message, err := messageText(strings.Join(positional[1:], " "))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("message is empty")
+	}
+	receipt, err := (delivery.Dispatcher{Registry: a.Registry}).Steer(ctx, surf, sess, message)
 	if err != nil {
 		return err
 	}
@@ -2114,14 +2118,11 @@ func (a *App) cmdQueue(args []string) error {
 	if err := a.ensureWritableTarget(ctx, sess, surf); err != nil {
 		return err
 	}
-	message := strings.Join(positional[1:], " ")
-	if message == "-" {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-		message = string(data)
-	} else if len(message) > 8000 {
+	message, err := messageText(strings.Join(positional[1:], " "))
+	if err != nil {
+		return err
+	}
+	if positional[1] != "-" && len(message) > 8000 {
 		fmt.Fprintf(os.Stderr, "warning: message is %d chars; shell may have truncated it. Use '-' to read from stdin for long messages.\n", len(message))
 	}
 	if message == "" {
@@ -2574,4 +2575,16 @@ func truncate(s string, n int) string {
 		return "…"
 	}
 	return string(runes[:n-1]) + "…"
+}
+
+// messageText returns text, or the contents of stdin when text is "-".
+func messageText(text string) (string, error) {
+	if text != "-" {
+		return text, nil
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("read stdin: %w", err)
+	}
+	return string(data), nil
 }
