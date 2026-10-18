@@ -428,9 +428,13 @@ func (c *Claude) records() ([]map[string]any, error) {
 }
 
 // process builds the session for a record Agenthail can deliver to: one with
-// a Remote Control bridge or a validated messaging socket.
+// a Remote Control bridge or a validated messaging socket. Without Remote
+// Control only the socket counts, under the record's native session id.
 func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(string) string) (claudeProcess, bool) {
-	bridge := str(m, "bridgeSessionId")
+	bridge := ""
+	if !c.localOnly {
+		bridge = str(m, "bridgeSessionId")
+	}
 	socket := c.peerSocket(ctx, m)
 	if bridge == "" && socket != "" {
 		bridge = str(m, "sessionId")
@@ -708,7 +712,7 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 // CanSendHumanTurn reports whether the session has a web bridge identity, the
 // only route that records the message as the user's own turn.
 func (c *Claude) CanSendHumanTurn(sess *surface.Session) bool {
-	return sess != nil && sess.Surface == surface.KindClaude && !nativeClaudeOnly(sess)
+	return sess != nil && sess.Surface == surface.KindClaude && !c.localOnly && !nativeClaudeOnly(sess)
 }
 
 // SendHumanTurn submits a message through Claude's authenticated web bridge as
@@ -750,6 +754,9 @@ func claudeBridgeActivityAfterTerminal(sess *surface.Session, turn claudeTurn) b
 var claudeSendRequest = sidecarRequestWithCookies
 
 func (c *Claude) postMessage(ctx context.Context, sess *surface.Session, message string) (*surface.SendResult, error) {
+	if c.localOnly {
+		return nil, surface.DeliveryUnavailable(errors.New("Claude Remote Control is not available on this install; reach the session through its local Claude Code process"))
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -1129,7 +1136,7 @@ func (c *Claude) confirmedCommand(ctx context.Context, sess *surface.Session, co
 }
 
 func (c *Claude) Interrupt(ctx context.Context, sess *surface.Session) error {
-	if nativeClaudeOnly(sess) {
+	if c.localOnly || nativeClaudeOnly(sess) {
 		return surface.ErrUnsupported
 	}
 	current, err := c.Resolve(ctx, sess.ID)
