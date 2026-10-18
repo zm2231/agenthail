@@ -173,7 +173,7 @@ func RunWorker(ctx context.Context, config Config, parent io.Reader, ready io.Wr
 	if err := os.MkdirAll(filepath.Dir(controlPath), 0700); err != nil {
 		return err
 	}
-	recordPath := filepath.Join(c.Home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	recordPath := filepath.Join(surface.ClaudeConfigDir(c.Home), "sessions", strconv.Itoa(pid)+".json")
 	if err := requireAbsent(socketPath, controlPath, recordPath, manifestPath); err != nil {
 		return err
 	}
@@ -717,7 +717,7 @@ func validManifest(root, socketDir, path string, manifest OwnershipManifest) boo
 		return false
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(root)))
-	return manifest.RecordPath == filepath.Join(home, ".claude", "sessions", strconv.Itoa(manifest.PID)+".json")
+	return manifest.RecordPath == filepath.Join(surface.ClaudeConfigDir(home), "sessions", strconv.Itoa(manifest.PID)+".json")
 }
 
 func processMatches(pid int, expected string) bool {
@@ -874,7 +874,7 @@ func validateNativeSender(home, socketDir, from string) error {
 	if err != nil {
 		return errors.New("sender socket has no valid owner pid")
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "sessions", pidText+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(home), "sessions", pidText+".json"))
 	if err != nil {
 		return errors.New("sender has no current native Claude record")
 	}
@@ -1160,7 +1160,7 @@ func sendFrame(target string, payload []byte) error {
 func sendAuthenticatedFrame(home, target string, payload []byte) error {
 	hash := sha256.Sum256([]byte(target))
 	pid := strings.TrimSuffix(filepath.Base(target), ".sock")
-	keyPath := filepath.Join(home, ".claude", "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
+	keyPath := filepath.Join(surface.ClaudeConfigDir(home), "sessions", pid+"."+hex.EncodeToString(hash[:])+".key")
 	if info, err := os.Lstat(keyPath); err == nil {
 		if !info.Mode().IsRegular() {
 			return surface.DeliveryTerminal(errors.New("invalid Claude peer key file"), surface.DeliveryAuthenticationNeeded)

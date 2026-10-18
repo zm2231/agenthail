@@ -158,7 +158,7 @@ func (c *Claude) conversationID(s *surface.Session) string {
 	if s.PID <= 0 {
 		return s.ID
 	}
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(s.PID)+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(s.PID)+".json"))
 	if err != nil {
 		return s.ID
 	}
@@ -196,7 +196,7 @@ type claudeProjectListing struct {
 }
 
 func newClaudeTranscriptIndex(home string) *claudeTranscriptIndex {
-	return &claudeTranscriptIndex{projects: filepath.Join(home, ".claude", "projects"), dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
+	return &claudeTranscriptIndex{projects: filepath.Join(surface.ClaudeConfigDir(home), "projects"), dirs: map[string]claudeProjectListing{}, byID: map[string]map[string]struct{}{}}
 }
 
 // pass brings the index up to date once and returns a lookup over that
@@ -387,7 +387,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 // records returns the session records of Claude processes that are alive,
 // excluding Agenthail's own peer workers.
 func (c *Claude) records() ([]map[string]any, error) {
-	sessionsDir := filepath.Join(c.home, ".claude", "sessions")
+	sessionsDir := filepath.Join(surface.ClaudeConfigDir(c.home), "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -477,7 +477,7 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 }
 
 func (c *Claude) peerRecordPath(pid int) string {
-	return filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(pid)+".json")
+	return filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(pid)+".json")
 }
 
 func (c *Claude) LocalStatusFiles(session surface.Session) []string {

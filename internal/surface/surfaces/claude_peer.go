@@ -65,7 +65,7 @@ func sameClaudeProcessStartInLocation(version, recorded, actual string, localLoc
 }
 
 func (c *Claude) sendPeer(ctx context.Context, session *surface.Session, message string) (*surface.SendResult, error) {
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(session.PID)+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(session.PID)+".json"))
 	if err != nil {
 		return nil, surface.DeliveryUnavailable(err)
 	}
@@ -153,7 +153,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 }
 
 func (c *Claude) peerRecord(pid int) (map[string]any, bool) {
-	data, err := os.ReadFile(filepath.Join(c.home, ".claude", "sessions", strconv.Itoa(pid)+".json"))
+	data, err := os.ReadFile(filepath.Join(surface.ClaudeConfigDir(c.home), "sessions", strconv.Itoa(pid)+".json"))
 	if err != nil {
 		return nil, false
 	}
