@@ -20,7 +20,8 @@ const maxResponseBytes = 4 << 20
 // ErrNotRunning means no host answered on the socket. Nothing was sent.
 var ErrNotRunning = errors.New("the Claude host is not running")
 
-// Error is a request the host refused. Nothing was sent.
+// Error is the host's answer to a failed request. Its Code says what
+// happened: only "unknown" means the message may still reach Claude.
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -160,5 +161,28 @@ func TestAPersonsTurnIsHeldWhileTheHostIsDownAndItsSessionRuns(t *testing.T) {
 	}
 	if turns := fixture.Turns(t, id); len(turns) > 1 {
 		t.Fatalf("turns = %+v, want nothing delivered while held", turns)
+	}
+}
+
+func TestHostErrorsMapToDeliveryOutcomes(t *testing.T) {
+	host := func(code string) error { return &claudehost.Error{Code: code, Message: code} }
+	for _, tc := range []struct {
+		name string
+		err  error
+		want func(error) bool
+	}{
+		{"not running", claudehost.ErrNotRunning, surface.IsDeliveryHeld},
+		{"held", host("held"), surface.IsDeliveryHeld},
+		{"draining", host("draining"), surface.IsDeliveryHeld},
+		{"not open", host("not_open"), func(err error) bool { return surface.IsDeliveryUnavailable(err) && !surface.IsDeliveryHeld(err) }},
+		{"unknown", host("unknown"), surface.IsDeliveryOutcomeUnknown},
+		{"no answer", &claudehost.OutcomeUnknownError{Err: context.DeadlineExceeded}, surface.IsDeliveryOutcomeUnknown},
+		{"invalid", host("invalid"), func(err error) bool {
+			return surface.DeliveryTerminalReason(err) == surface.DeliveryInvalidRequest
+		}},
+	} {
+		if got := claudeHostDeliveryError(tc.err); !tc.want(got) {
+			t.Errorf("%s: %v", tc.name, got)
+		}
 	}
 }

@@ -258,6 +258,19 @@ test('a host restart keeps the running turn and resumes the session afterwards',
   d.close();
 });
 
+test('a recorded pid now used by another process is not an orphan', async () => {
+  const f = fixture();
+  const other = spawn('sleep', ['30'], { stdio: 'ignore' });
+  after(() => other.kill('SIGKILL'));
+  const id = randomUUID();
+  fs.writeFileSync(path.join(f.state, 'state.json'), JSON.stringify({ sessions: { [id]: { pid: other.pid, started: 'Thu Jan  1 00:00:00 1970', cwd: f.cwd } } }));
+  await startHost(f);
+  const c = new Client(f.socket);
+  assert.deepEqual((await c.call('list')).orphans, []);
+  await c.call('open', { resume: id, cwd: f.cwd });
+  c.close();
+});
+
 test('drain closes sessions once idle and exits the host', async () => {
   const f = fixture();
   const host = await startHost(f);

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -84,6 +85,72 @@ func TestEnsureStartsOneHostAndARestartedDaemonAttachesToIt(t *testing.T) {
 		t.Fatalf("send = %+v, %v", result, err)
 	}
 	claudehosttest.WaitFor(t, "the turn", func() bool { return slices.Equal(uuids(f.Turns(t, sessionID)), []string{message}) })
+}
+
+func TestDaemonsEnsuringAtOnceShareOneHost(t *testing.T) {
+	f := claudehosttest.New(t, "")
+	ctx := testContext(t)
+	pids := make(chan int, 8)
+	var wg sync.WaitGroup
+	for range cap(pids) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			client, err := f.Manager(t, "1.0.0").Ensure(ctx)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			hello, err := client.Hello(ctx)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			pids <- hello.PID
+		}()
+	}
+	wg.Wait()
+	close(pids)
+	seen := map[int]bool{}
+	for pid := range pids {
+		seen[pid] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("hosts = %v, want one", seen)
+	}
+	if starts := strings.Count(hostLog(t, f.Home), "listening"); starts != 1 {
+		t.Fatalf("host started %d times", starts)
+	}
+}
+
+func TestEnsureStartsANewHostAfterOneCrashed(t *testing.T) {
+	f := claudehosttest.New(t, "")
+	ctx := testContext(t)
+	client := f.Start(t)
+	first, err := client.Hello(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.KillHost(t)
+	if _, err := os.Stat(claudehost.SocketPath(f.Home)); err != nil {
+		t.Fatalf("a crashed host leaves its socket file: %v", err)
+	}
+	client, err = f.Manager(t, "test").Ensure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := client.Hello(ctx); err != nil || again.PID == first.PID {
+		t.Fatalf("hello after the crash = %+v, %v; want a new host", again, err)
+	}
+}
+
+func hostLog(t *testing.T, home string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".agenthail", "claude-host", "host.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestEnsureReplacesAHostOfAnotherVersionOnceItIsIdle(t *testing.T) {

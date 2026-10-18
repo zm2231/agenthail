@@ -6,7 +6,7 @@
 // ({id, result} or {id, error: {code, message}}); a subscribed connection also
 // receives {event} lines.
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -57,6 +57,7 @@ class Session {
     this.id = id;
     this.cwd = cwd;
     this.pid = 0;
+    this.started = '';
     this.state = 'starting';
     this.openedAt = new Date().toISOString();
     this.accepted = new Set();
@@ -236,6 +237,7 @@ function spawnDetached(s, options, exited) {
     detached: true,
   });
   s.pid = child.pid ?? 0;
+  s.started = processStart(s.pid);
   child.stderr.on('data', (chunk) => {
     s.stderr = (s.stderr + chunk).slice(-4096);
   });
@@ -273,7 +275,7 @@ async function run(s, exit) {
 
 function session(id) {
   const s = sessions.get(id);
-  if (!s) throw new HostError('not_open', `Claude session ${id} is not open in the host`);
+  if (!s || s.ended) throw new HostError('not_open', `Claude session ${id} is not open in the host`);
   return s;
 }
 
@@ -348,24 +350,35 @@ function loadOrphans(statePath) {
   }
   const out = new Map();
   for (const [sessionId, entry] of Object.entries(state.sessions ?? {})) {
-    if (alive(entry.pid)) out.set(sessionId, { sessionId, pid: entry.pid, cwd: entry.cwd, openedAt: entry.openedAt });
+    if (runs(entry)) out.set(sessionId, { sessionId, pid: entry.pid, started: entry.started, cwd: entry.cwd, openedAt: entry.openedAt });
   }
   return out;
 }
 
 function liveOrphans() {
-  for (const [id, orphan] of orphans) if (!alive(orphan.pid)) orphans.delete(id);
+  for (const [id, orphan] of orphans) if (!runs(orphan)) orphans.delete(id);
   return [...orphans.values()];
 }
 
 function writeState() {
   const entries = {};
-  for (const o of liveOrphans()) entries[o.sessionId] = { pid: o.pid, cwd: o.cwd, openedAt: o.openedAt };
-  for (const s of sessions.values()) if (s.pid) entries[s.id] = { pid: s.pid, cwd: s.cwd, openedAt: s.openedAt };
+  for (const o of liveOrphans()) entries[o.sessionId] = { pid: o.pid, started: o.started, cwd: o.cwd, openedAt: o.openedAt };
+  for (const s of sessions.values()) if (s.pid) entries[s.id] = { pid: s.pid, started: s.started, cwd: s.cwd, openedAt: s.openedAt };
   const target = path.join(args.state, 'state.json');
   const temp = `${target}.${process.pid}.tmp`;
   fs.writeFileSync(temp, JSON.stringify({ pid: process.pid, sessions: entries }) + '\n', { mode: 0o600 });
   fs.renameSync(temp, target);
+}
+
+// A recorded Claude process still runs only if its pid has the start time it
+// had when the host spawned it; a reused pid belongs to another process.
+function runs(entry) {
+  return alive(entry.pid) && entry.started !== '' && entry.started === processStart(entry.pid);
+}
+
+function processStart(pid) {
+  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+  return ps.status === 0 ? ps.stdout.trim() : '';
 }
 
 function alive(pid) {
