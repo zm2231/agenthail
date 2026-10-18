@@ -438,7 +438,7 @@ func (c *Codex) resolveID(ctx context.Context, id string) (*surface.Session, err
 	defer runtimes.Close()
 	reader := runtimes.reader(id)
 	if reader == nil {
-		return nil, surface.DeliveryUnavailable(runtimes.unavailable())
+		return nil, runtimes.unavailable()
 	}
 	thread, err := c.readThreadObject(ctx, reader, id)
 	if err != nil {

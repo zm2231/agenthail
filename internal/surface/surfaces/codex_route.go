@@ -83,7 +83,7 @@ func (r *codexRuntimes) ownershipUnknown() error {
 }
 
 func (r *codexRuntimes) unavailable() error {
-	return fmt.Errorf("Codex is unavailable: %s", strings.Join(r.failures, "; "))
+	return surface.DeliveryUnavailable(fmt.Errorf("Codex is unavailable: %s", strings.Join(r.failures, "; ")))
 }
 
 // route decides the one writer route for a thread. The runtime that has the

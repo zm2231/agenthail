@@ -9,6 +9,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/codextest"
 	"github.com/zm2231/agenthail/internal/registry"
+	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
 
@@ -81,5 +82,26 @@ func TestHeadlessCodexCLICreatesListsReadsAndDrivesAThread(t *testing.T) {
 	}
 	if commands := lifecycle.Commands(); len(commands) != 3 {
 		t.Fatalf("lifecycle commands=%v, want a third start", commands)
+	}
+
+	sibling := id[:len(id)-2] + "ff"
+	if err := r.RegisterSession(surface.Session{ID: sibling, Surface: surface.KindCodex, Transport: "managed"}); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle.Crash()
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:" + id[:len(id)-2], "Ambiguous"}) }); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("send by an ambiguous prefix err=%v, want ambiguity", err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:" + id[:len(id)-1], "By prefix"}) }); err != nil {
+		t.Fatalf("send by a unique prefix after the daemon stopped err=%v", err)
+	}
+	if thread, _ := lifecycle.Daemon().Thread(id); len(thread.Turns) != 5 || thread.Turns[4].User != "By prefix" {
+		t.Fatalf("thread=%+v", thread)
+	}
+	if resumes := lifecycle.Daemon().Calls("thread/resume"); len(resumes) != 1 {
+		t.Fatalf("restarted daemon resumes=%v", resumes)
+	}
+	if commands := lifecycle.Commands(); len(commands) != 4 {
+		t.Fatalf("lifecycle commands=%v, want a fourth start", commands)
 	}
 }
