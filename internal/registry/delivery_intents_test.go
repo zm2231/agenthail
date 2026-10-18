@@ -423,3 +423,54 @@ func TestFailedPersistedRelayCompletionDoesNotNotifyTheRelaySource(t *testing.T)
 		t.Fatalf("events=%+v err=%v", window, err)
 	}
 }
+
+func TestRetriedFailedDeliveryIsANewAttempt(t *testing.T) {
+	r := openTestRegistry(t)
+	register(t, r, "sender", "target")
+	queueID, deliveryID, err := r.QueueDeliveryWithIntent("target", "retried body", "direct:retry", surface.SendOptions{SourceSessionID: "sender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failQueued(t, r, queueID)
+	if err := r.RetryMessage(queueID); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := r.DeliveryIntent(deliveryID)
+	if err != nil || intent.Status != DeliveryIntentQueued || intent.Failure != "" || intent.NotificationQueueID != 0 {
+		t.Fatalf("retried intent=%+v err=%v", intent, err)
+	}
+	if problems, err := r.ListDeliveryProblems(); err != nil || len(problems) != 0 {
+		t.Fatalf("a retried failure is still a problem: %+v err=%v", problems, err)
+	}
+	window, err := r.CatalogEventsAfter(0, 50)
+	if err != nil || len(catalogEventsOfType(window, "delivery.dismissed")) != 1 {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+
+	failQueued(t, r, queueID)
+	intent, err = r.DeliveryIntent(deliveryID)
+	if err != nil || intent.Status != DeliveryIntentFailed || intent.NotificationQueueID == 0 {
+		t.Fatalf("refailed intent=%+v err=%v", intent, err)
+	}
+	if count := r.QueueCount("sender"); count != 2 {
+		t.Fatalf("sender notices=%d, want one per failed attempt", count)
+	}
+	window, err = r.CatalogEventsAfter(0, 50)
+	if err != nil || len(catalogEventsOfType(window, "delivery.problem")) != 2 {
+		t.Fatalf("events=%+v err=%v", window, err)
+	}
+
+	if err := r.RetryMessage(queueID); err != nil {
+		t.Fatal(err)
+	}
+	item, err := r.ClaimNextMessage("target", time.Now())
+	if err != nil || item == nil || item.ID != queueID {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	if err := r.AckMessageWithEvidence(queueID, "target", 0, surface.EvidenceDelivered, ""); err != nil {
+		t.Fatal(err)
+	}
+	if intent, err = r.DeliveryIntent(deliveryID); err != nil || intent.Status != DeliveryIntentSent || intent.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("redelivered intent=%+v err=%v", intent, err)
+	}
+}

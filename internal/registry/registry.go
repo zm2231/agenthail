@@ -196,6 +196,9 @@ func (r *Registry) migrate() error {
 	if err := r.ensureColumn("delivery_intents", "dismissed_at", `TEXT`); err != nil {
 		return err
 	}
+	if err := r.ensureColumn("delivery_intents", "retries", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	for _, column := range []struct{ name, decl string }{
 		{"handoff", `TEXT NOT NULL DEFAULT 'turn_finished'`},
 		{"event_cursor", `INTEGER NOT NULL DEFAULT 0`},
@@ -525,6 +528,7 @@ CREATE TABLE IF NOT EXISTS delivery_intents (
 	failure TEXT NOT NULL DEFAULT '',
 	dismissed_at TEXT,
 	notification_queue_id INTEGER REFERENCES message_queue(id) ON DELETE SET NULL,
+	retries INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -1755,15 +1759,29 @@ func (r *Registry) ReconcileAttentionItems(now time.Time) error {
 	return nil
 }
 
+// RetryMessage sends a dead message again. Its delivery intent goes back to
+// queued as a new attempt, so the earlier failure leaves the problem list and
+// a later outcome is reported again.
 func (r *Registry) RetryMessage(id int64) error {
 	var sessionID, message string
 	_ = r.db.QueryRow(`SELECT session_id,message FROM message_queue WHERE id=?`, id).Scan(&sessionID, &message)
-	res, err := r.db.Exec(`UPDATE message_queue SET status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=0,deferrals=0,last_error='',available_at_ms=0,inflight_at_ms=0,dead_at_ms=0,delivered=0,updated_at=datetime('now') WHERE id=? AND status='dead'`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
 		return fmt.Errorf("queue item %d is not dead-lettered", id)
+	}
+	if err := retryQueuedDeliveryIntent(tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	_ = r.RecordHistory(HistoryEntry{Kind: "retry", SessionID: sessionID, QueueID: id, Message: message, Result: "scheduled"})
 	return r.ReconcileAttentionItems(r.now())
