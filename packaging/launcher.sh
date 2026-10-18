@@ -12,7 +12,7 @@ export PYTHONDONTWRITEBYTECODE=1
 
 skill="$AGENTHAIL_ROOT/skills/agenthail-operations"
 if [ -f "$skill/SKILL.md" ]; then
-	for runtime in "$HOME/.claude" "$HOME/.codex" "$HOME/.hermes"; do
+	for runtime in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CODEX_HOME:-$HOME/.codex}" "$HOME/.hermes"; do
 		[ -d "$runtime" ] || continue
 		link="$runtime/skills/agenthail-operations"
 		mkdir -p "$runtime/skills"

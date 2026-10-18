@@ -208,7 +208,7 @@ Your full transcripts remain in the apps that created them. Agenthail keeps only
 
 There is no Agenthail account and no telemetry.
 
-Your conversations and history stay on your Mac. Phone access is private to your Tailscale network. If you enable iPhone notifications, Agenthail sends only the connected app name and a completion or failure status through Apple. It never puts an agent name, conversation title, reply text, or browser sign-in data in a notification.
+Your conversations and history stay on the machine that runs Agenthail. Phone access is private to your Tailscale network. If you enable iPhone notifications, Agenthail sends only the connected app name and a completion or failure status through Apple. It never puts an agent name, conversation title, reply text, or browser sign-in data in a notification.
 
 Read the full [security and privacy model](SECURITY.md).
 
