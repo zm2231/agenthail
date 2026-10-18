@@ -553,7 +553,6 @@ type HostDelivery struct {
 	Key       string
 	Request   []byte
 	Status    string
-	QueuedAt  time.Time
 	ExpiresAt int64
 }
 
@@ -583,7 +582,7 @@ func (r *Registry) QueueHostDelivery(sessionID, message, key string, request []b
 }
 
 func (r *Registry) HostDeliveries(hostID string) ([]HostDelivery, error) {
-	rows, err := r.read.Query(`SELECT q.id,q.session_id,q.delivery_key,q.host_request,q.status,q.queued_at,q.expires_at_ms FROM message_queue q JOIN sessions s ON s.id=q.session_id
+	rows, err := r.read.Query(`SELECT q.id,q.session_id,q.delivery_key,q.host_request,q.status,q.expires_at_ms FROM message_queue q JOIN sessions s ON s.id=q.session_id
 		WHERE s.host_id=? AND q.host_request<>'' AND (q.status='inflight' OR (q.status='pending' AND (q.expires_at_ms=0 OR q.expires_at_ms>?))) ORDER BY q.id`, hostID, r.now().UnixMilli())
 	if err != nil {
 		return nil, err
@@ -592,28 +591,30 @@ func (r *Registry) HostDeliveries(hostID string) ([]HostDelivery, error) {
 	result := []HostDelivery{}
 	for rows.Next() {
 		var item HostDelivery
-		var queuedAt string
-		if err := rows.Scan(&item.ID, &item.SessionID, &item.Key, &item.Request, &item.Status, &queuedAt, &item.ExpiresAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.Key, &item.Request, &item.Status, &item.ExpiresAt); err != nil {
 			return nil, err
 		}
-		item.QueuedAt, _ = time.ParseInLocation("2006-01-02 15:04:05", queuedAt, time.UTC)
 		result = append(result, item)
 	}
 	return result, rows.Err()
 }
 
-// ClaimHostDelivery marks a held delivery inflight before it is replayed. A
-// pending row past its deadline, or one expiry or another drain already
+// ClaimHostDelivery marks a held delivery inflight before it is replayed and
+// returns when it first went inflight, the start of its confirmation window.
+// A pending row past its deadline, or one expiry or another drain already
 // moved, is not claimed and must not be sent.
-func (r *Registry) ClaimHostDelivery(id int64) (bool, error) {
+func (r *Registry) ClaimHostDelivery(id int64) (time.Time, bool, error) {
 	now := r.now().UnixMilli()
-	result, err := r.db.Exec(`UPDATE message_queue SET status='inflight',evidence=?,inflight_at_ms=?,expires_at_ms=0,attempts=attempts+1,updated_at=datetime('now')
-		WHERE id=? AND host_request<>'' AND (status='inflight' OR (status='pending' AND (expires_at_ms=0 OR expires_at_ms>?)))`, surface.EvidenceUnknown, now, id, now)
-	if err != nil {
-		return false, err
+	var inflightAt int64
+	err := r.db.QueryRow(`UPDATE message_queue SET evidence=?,inflight_at_ms=CASE WHEN status='pending' THEN ? ELSE inflight_at_ms END,status='inflight',expires_at_ms=0,attempts=attempts+1,updated_at=datetime('now')
+		WHERE id=? AND host_request<>'' AND (status='inflight' OR (status='pending' AND (expires_at_ms=0 OR expires_at_ms>?))) RETURNING inflight_at_ms`, surface.EvidenceUnknown, now, id, now).Scan(&inflightAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
 	}
-	changed, err := result.RowsAffected()
-	return changed == 1, err
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return time.UnixMilli(inflightAt), true, nil
 }
 
 // ReleaseHostDelivery returns a claimed delivery that provably never left

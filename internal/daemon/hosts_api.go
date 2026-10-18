@@ -220,19 +220,24 @@ func (d *Daemon) removeHostHandler(w http.ResponseWriter, r *http.Request) {
 	d.detachHostLocked(record.ID)
 	d.catalog.mu.Lock()
 	_, err = d.Registry.RemoveHost(record.ID)
+	var flushErr error
 	if err == nil {
-		err = d.catalog.flushCommittedLocked()
+		flushErr = d.catalog.flushCommittedLocked()
 	}
 	d.catalog.mu.Unlock()
 	if err != nil {
 		if attachErr := d.attachHostLocked(record); attachErr != nil {
 			err = errors.Join(err, attachErr)
 		}
-	}
-	d.federation.lifecycle.Unlock()
-	if err != nil {
+		d.federation.lifecycle.Unlock()
 		writeAPIError(w, http.StatusInternalServerError, "host_remove_failed", err.Error())
 		return
+	}
+	d.federation.lifecycle.Unlock()
+	// The removal committed; a publication failure only means catalog
+	// subscribers reconcile from a fresh snapshot.
+	if flushErr != nil {
+		d.logRuntimeError("host "+record.Name+" removal catalog", flushErr)
 	}
 	d.revokeRemoteDevice(record.Token, record.Endpoint, record.Address)
 	d.publishEvent("host.removed", record.ID, map[string]any{"id": record.ID, "name": record.Name})

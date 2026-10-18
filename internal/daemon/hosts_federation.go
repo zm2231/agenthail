@@ -619,7 +619,7 @@ func (d *Daemon) drainHostDeliveries(ctx context.Context, host *pairedHost) {
 }
 
 func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item registry.HostDelivery) {
-	claimed, err := d.Registry.ClaimHostDelivery(item.ID)
+	inflightAt, claimed, err := d.Registry.ClaimHostDelivery(item.ID)
 	if err != nil {
 		d.logRuntimeError("host "+host.record.Name+" delivery", err)
 		return
@@ -647,7 +647,7 @@ func (d *Daemon) replayHostDelivery(ctx context.Context, host *pairedHost, item 
 		_, _ = d.Registry.DeadLetterMessage(item.ID, fmt.Errorf("host %s refused the message: %s", host.record.Name, status.Error()))
 	case readErr != nil:
 	case submitted:
-		if time.Since(item.QueuedAt) > hostDeliveryPatience {
+		if time.Since(inflightAt) > hostDeliveryPatience {
 			_ = d.Registry.DeadLetterUnknown(item.ID, fmt.Errorf("host %s has not confirmed the message", host.record.Name))
 		}
 	default:

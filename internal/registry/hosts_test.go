@@ -313,16 +313,16 @@ func TestHeldHostDeliveryPastItsDeadlineIsNeverClaimed(t *testing.T) {
 	if err != nil || len(pending) != 1 || pending[0].ID != fresh {
 		t.Fatalf("deliveries past the deadline=%+v err=%v", pending, err)
 	}
-	if claimed, err := r.ClaimHostDelivery(stale); err != nil || claimed {
+	if _, claimed, err := r.ClaimHostDelivery(stale); err != nil || claimed {
 		t.Fatalf("claimed an expired delivery: claimed=%v err=%v", claimed, err)
 	}
 	if _, err := r.ExpireMessages(r.now()); err != nil {
 		t.Fatal(err)
 	}
-	if claimed, err := r.ClaimHostDelivery(selected); err != nil || claimed {
+	if _, claimed, err := r.ClaimHostDelivery(selected); err != nil || claimed {
 		t.Fatalf("claimed a delivery expiry already moved: claimed=%v err=%v", claimed, err)
 	}
-	claimed, err := r.ClaimHostDelivery(fresh)
+	_, claimed, err := r.ClaimHostDelivery(fresh)
 	if err != nil || !claimed {
 		t.Fatalf("fresh claim=%v err=%v", claimed, err)
 	}
@@ -336,5 +336,42 @@ func TestHeldHostDeliveryPastItsDeadlineIsNeverClaimed(t *testing.T) {
 	expired, err := r.QueueItem(stale)
 	if err != nil || expired.Status == "pending" || expired.Status == "inflight" {
 		t.Fatalf("stale item=%+v err=%v", expired, err)
+	}
+}
+
+func TestHostDeliveryConfirmationWindowStartsAtFirstSend(t *testing.T) {
+	r := openTestRegistry(t)
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().Truncate(time.Millisecond)
+	r.now = func() time.Time { return start }
+	id, err := r.QueueHostDelivery("remote-thread", "waited offline", "key-wait", []byte(`{"action":"send"}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSend := start.Add(20 * time.Minute)
+	r.now = func() time.Time { return firstSend }
+	inflightAt, claimed, err := r.ClaimHostDelivery(id)
+	if err != nil || !claimed || !inflightAt.Equal(firstSend) {
+		t.Fatalf("first claim at=%v claimed=%v err=%v", inflightAt, claimed, err)
+	}
+	r.now = func() time.Time { return firstSend.Add(5 * time.Minute) }
+	inflightAt, claimed, err = r.ClaimHostDelivery(id)
+	if err != nil || !claimed || !inflightAt.Equal(firstSend) {
+		t.Fatalf("replay claim moved the window: at=%v claimed=%v err=%v", inflightAt, claimed, err)
+	}
+	sent, err := r.QueueHostDelivery("remote-thread", "written once", "key-sent", []byte(`{"action":"send"}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inflightAt, claimed, err = r.ClaimHostDelivery(sent)
+	if err != nil || !claimed || !inflightAt.Equal(firstSend.Add(5*time.Minute)) {
+		t.Fatalf("written delivery window at=%v claimed=%v err=%v", inflightAt, claimed, err)
 	}
 }

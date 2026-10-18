@@ -103,7 +103,8 @@ clients send one; the daemon generates one otherwise):
   deadline is never claimed, so an expired message is not delivered late.
   The remote's action receipts make a replay return the first result instead
   of starting a second turn. A replay the remote still reports as in progress
-  stays unknown, then becomes a dead letter marked unknown after 15 minutes.
+  stays unknown, then becomes a dead letter marked unknown 15 minutes after
+  it was first sent.
 
 `net/http` itself replays a request that carries an `Idempotency-Key` header
 once when a reused connection fails, which is safe for the same reason.

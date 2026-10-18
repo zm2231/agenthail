@@ -895,3 +895,23 @@ func TestFederationAttachAfterRemovalIsRefused(t *testing.T) {
 		t.Fatalf("host loops for an unpaired host=%d", got)
 	}
 }
+
+func TestFederationRemovalCommitsAndRevokesDespiteCatalogGap(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	local.daemon.catalog.mu.Lock()
+	local.daemon.catalog.publishedSeq = 1 << 40
+	local.daemon.catalog.mu.Unlock()
+	response := local.request(t, http.MethodDelete, "/api/v1/hosts", map[string]string{"host": "forge"})
+	if response.Code != http.StatusOK {
+		t.Fatalf("remove status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := local.reg.Host(record.ID); err == nil {
+		t.Fatal("host still paired")
+	}
+	if _, found := local.daemon.pairedHost(record.ID); found {
+		t.Fatal("removed host still routed")
+	}
+	if devices, err := remote.reg.ListDevices(false); err != nil || len(devices) != 0 {
+		t.Fatalf("remote devices after remove=%+v err=%v", devices, err)
+	}
+}
