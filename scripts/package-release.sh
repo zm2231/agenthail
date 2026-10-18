@@ -83,10 +83,14 @@ if [ "$GOOS_VALUE" = "darwin" ] && [ -n "${AGENTHAIL_NOTARY_PROFILE:-}" ]; then
 	xcrun stapler staple "$STAGE/Agenthail.app"
 	rm -f "$NOTARY_ARCHIVE"
 fi
-find "$DIST/.release-stage" -exec touch -t "$STAMP" {} +
+find "$DIST/.release-stage" -exec env TZ=UTC0 touch -t "$STAMP" {} +
 
 ARCHIVE="$DIST/$NAME.tar.gz"
-COPYFILE_DISABLE=1 tar -C "$DIST/.release-stage" -cf - "$NAME" | gzip -n > "$ARCHIVE"
+TAR_FLAGS=()
+if [ "$GOOS_VALUE" = "linux" ]; then
+	TAR_FLAGS=(--no-xattrs)
+fi
+COPYFILE_DISABLE=1 tar ${TAR_FLAGS[@]+"${TAR_FLAGS[@]}"} -C "$DIST/.release-stage" -cf - "$NAME" | gzip -n > "$ARCHIVE"
 if command -v shasum >/dev/null 2>&1; then
 	(cd "$DIST" && shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
 else
