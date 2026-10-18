@@ -231,6 +231,8 @@ ln -s "$custom_codex/skills/unrelated" "$custom_codex/skills/agenthail-other"
 CLAUDE_CONFIG_DIR="$custom_claude" CODEX_HOME="$custom_codex" /usr/local/bin/agenthail version >/dev/null
 test -L "$custom_claude/skills/agenthail-operations"
 test -L "$custom_codex/skills/agenthail-operations"
+test "$(stat -f %Lp "$HOME/.agenthail")" = 700
+test "$(stat -f %Lp "$HOME/.agenthail/skill-links")" = 600
 
 sudo /usr/local/bin/agenthail-uninstall
 test ! -e "$custom_claude/skills/agenthail-operations" && test ! -L "$custom_claude/skills/agenthail-operations"

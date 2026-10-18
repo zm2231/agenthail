@@ -21,8 +21,7 @@ if [ -f "$skill/SKILL.md" ]; then
 		fi
 		# The root uninstaller cannot see this user's CLAUDE_CONFIG_DIR or CODEX_HOME, so it reads the links from here.
 		if [ "$(readlink "$link" 2>/dev/null)" = "$skill" ] && ! grep -Fqx "$link" "$HOME/.agenthail/skill-links" 2>/dev/null; then
-			mkdir -p "$HOME/.agenthail"
-			printf '%s\n' "$link" >>"$HOME/.agenthail/skill-links"
+			(umask 077 && mkdir -p "$HOME/.agenthail" && printf '%s\n' "$link" >>"$HOME/.agenthail/skill-links")
 		fi
 	done
 fi
