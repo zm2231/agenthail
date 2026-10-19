@@ -1147,14 +1147,23 @@ func TestPeerMessageToAClaudeSessionIsStillQueuedAndReceived(t *testing.T) {
 }
 
 func TestNoRouteNoticesStayBoundedAndOncePerSender(t *testing.T) {
+	noRouteNotices.Lock()
+	saved := noRouteNotices.sent
+	noRouteNotices.sent = map[string]time.Time{}
+	noRouteNotices.Unlock()
+	t.Cleanup(func() {
+		noRouteNotices.Lock()
+		noRouteNotices.sent = saved
+		noRouteNotices.Unlock()
+	})
 	now := time.Now()
-	senders := noRouteNoticeSenders + 50
-	for i := 0; i < senders; i++ {
-		from := "uds:/bounded-test/" + strconv.Itoa(i) + ".sock"
-		if !takeNoRouteNotice(from, now.Add(time.Duration(i)*time.Millisecond)) {
-			t.Fatalf("sender %d was not told on its first refusal", i)
+	sender := func(i int) string { return "uds:/bounded-test/" + strconv.Itoa(i) + ".sock" }
+	for i := 0; i < noRouteNoticeSenders+50; i++ {
+		at := now.Add(time.Duration(i) * time.Millisecond)
+		if told := takeNoRouteNotice(sender(i), at); told != (i < noRouteNoticeSenders) {
+			t.Fatalf("sender %d told=%v on its first refusal", i, told)
 		}
-		if takeNoRouteNotice(from, now.Add(time.Duration(i)*time.Millisecond)) {
+		if takeNoRouteNotice(sender(i), at) {
 			t.Fatalf("sender %d was told twice within the interval", i)
 		}
 		noRouteNotices.Lock()
@@ -1164,10 +1173,11 @@ func TestNoRouteNoticesStayBoundedAndOncePerSender(t *testing.T) {
 			t.Fatalf("remembered %d senders, cap is %d", size, noRouteNoticeSenders)
 		}
 	}
-	if !takeNoRouteNotice("uds:/bounded-test/0.sock", now.Add(time.Duration(senders)*time.Millisecond)) {
-		t.Fatal("the oldest sender was not forgotten when the cap was reached")
+	if takeNoRouteNotice(sender(0), now.Add(noRouteNoticeInterval/2)) {
+		t.Fatal("a remembered sender was told again within its interval")
 	}
-	if !takeNoRouteNotice("uds:/bounded-test/late.sock", now.Add(noRouteNoticeInterval)) || takeNoRouteNotice("uds:/bounded-test/late.sock", now.Add(noRouteNoticeInterval)) {
-		t.Fatal("a new sender after the interval was not told exactly once")
+	late := now.Add(noRouteNoticeInterval + time.Second)
+	if !takeNoRouteNotice(sender(0), late) || takeNoRouteNotice(sender(0), late) {
+		t.Fatal("a sender was not told exactly once after its interval passed")
 	}
 }

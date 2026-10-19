@@ -1109,8 +1109,8 @@ func recordRejection(reg *registry.Registry, c Config, f frame, raw []byte, err 
 // noRouteNoticeInterval bounds how often one sender is told why its messages
 // to a session with no reply route are refused, so a model that answers the
 // notice cannot start an endless exchange with it. At most
-// noRouteNoticeSenders senders are remembered; past that the oldest is
-// forgotten and may be told again.
+// noRouteNoticeSenders senders are remembered at once; while that many are,
+// a new sender gets only its refused receipt.
 const (
 	noRouteNoticeInterval = 10 * time.Minute
 	noRouteNoticeSenders  = 256
@@ -1129,16 +1129,13 @@ func takeNoRouteNotice(from string, now time.Time) bool {
 	if last, ok := noRouteNotices.sent[from]; ok && now.Sub(last) < noRouteNoticeInterval {
 		return false
 	}
-	oldest, oldestAt := "", time.Time{}
 	for sender, last := range noRouteNotices.sent {
 		if now.Sub(last) >= noRouteNoticeInterval {
 			delete(noRouteNotices.sent, sender)
-		} else if oldest == "" || last.Before(oldestAt) {
-			oldest, oldestAt = sender, last
 		}
 	}
 	if len(noRouteNotices.sent) >= noRouteNoticeSenders {
-		delete(noRouteNotices.sent, oldest)
+		return false
 	}
 	noRouteNotices.sent[from] = now
 	return true
