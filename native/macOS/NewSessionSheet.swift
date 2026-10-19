@@ -62,7 +62,7 @@ struct NewSessionSheet: View {
                     if !launchers.isEmpty {
                         Picker("Runs in", selection: Binding(get: { form.launcher }, set: { form.selectLauncher($0) })) {
                             Text("Default").tag(nil as String?)
-                                .help("Starts the agent in the background on this Mac.")
+                                .help("Starts the agent in the background on \(startsOnThisMac ? "this Mac" : hosts.selectedHost?.name ?? "the host").")
                             ForEach(launchers) { option in
                                 Text(option.available ? option.label : "\(option.label) (unavailable)")
                                     .tag(Optional(option.id))

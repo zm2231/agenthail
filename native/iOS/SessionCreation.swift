@@ -45,7 +45,7 @@ struct NewSessionSheet: View {
                         if !launchers.isEmpty {
                             Section("Where it runs") {
                                 Picker("Launcher", selection: $selectedLauncher) {
-                                    Text("Use Mac default").tag(String?.none)
+                                    Text("Use \(hostName) default").tag(String?.none)
                                     ForEach(launchers) { launcher in
                                         Text(launcher.available ? launcher.label : "\(launcher.label) (unavailable)")
                                             .tag(Optional(launcher.id))
@@ -75,7 +75,7 @@ struct NewSessionSheet: View {
                             }
                             .accessibilityIdentifier("creation-model-picker")
                             if let modelError { Text(modelError).font(.footnote).foregroundStyle(.secondary) }
-                            Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                            Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on \(hostName).").font(.footnote).foregroundStyle(.secondary)
                         }
                         if selectedSurface == "codex" {
                             TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher == nil)
