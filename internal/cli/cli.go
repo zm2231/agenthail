@@ -101,6 +101,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdThread(rest)
 	case "hosts":
 		return a.cmdHosts(rest)
+	case "project", "projects":
+		return a.cmdProject(rest)
 	case "signin":
 		return a.cmdSignin(rest)
 	case "identify":
@@ -143,9 +145,13 @@ Session commands:
   thread create <codex|claude> "msg"    Create a background conversation
   thread fork <target>         Fork a Codex conversation
   thread <status|stop|resume|logs> <target>  Manage a Claude background session
+  thread <archive|unarchive> <target>  Hide a session until it is active again
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
-  list [--all] [--cwd <path>] [--wide]
-                                 List sessions; --cwd includes that workspace and descendants
+  list [--recent|--all|--archived] [--project <name|id>] [--cwd <path>] [--wide]
+                                 List current sessions (with the daemon: --recent, --all or --archived);
+                                 --cwd includes that workspace and descendants
+  project list|add <path>|archive <name>|unarchive <name>
+                                 List projects, add a non-Git folder, or hide a project
   runs [--json]                  Read verified Claude job and subagent records
   whoami [--json]                Show the caller session bound to this process
   search codex <query>           Search older Codex conversation history on demand
@@ -484,7 +490,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true}
+	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -514,15 +520,16 @@ func validateCommandFlags(command string, args []string) error {
 		bools  map[string]bool
 	}
 	specs := map[string]flagSpec{
-		"list": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true}, bools: map[string]bool{"--all": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
+		"list": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--recent": true, "--all": true, "--archived": true, "--wide": true, "--json": true}}, "ls": {values: map[string]bool{"--cwd": true, "--project": true}, bools: map[string]bool{"--recent": true, "--all": true, "--archived": true, "--wide": true, "--json": true}}, "runs": {bools: map[string]bool{"--json": true}}, "whoami": {bools: map[string]bool{"--json": true}}, "search": {bools: map[string]bool{"--json": true}},
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
 		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
-		"hosts":   {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"signin":  {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
-		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
+		"project": {values: map[string]bool{"--host": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}}, "projects": {values: map[string]bool{"--host": true}, bools: map[string]bool{"--all": true, "--json": true, "--help": true}},
+		"hosts":  {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"doctor": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
@@ -608,8 +615,13 @@ func (a *App) cmdClaudeRuns(args []string) error {
 
 func (a *App) cmdList(args []string) error {
 	if len(stripFlags(args)) != 0 {
-		return fmt.Errorf("usage: agenthail list [--all] [--cwd <path>] [--wide] [--json]")
+		return fmt.Errorf("usage: agenthail list [--recent|--all|--archived] [--project <name|id>] [--cwd <path>] [--wide] [--json]")
 	}
+	scope, err := listScopeFromArgs(args)
+	if err != nil {
+		return err
+	}
+	projectSelector := strings.TrimSpace(flagVal(args, "--project"))
 	jsonOut := hasFlag(args, "--json")
 	rootCwd := flagVal(args, "--cwd")
 	if rootCwd != "" {
@@ -634,6 +646,10 @@ func (a *App) cmdList(args []string) error {
 	}
 	successfulSurfaces := 0
 	remoteRows := map[string]listHostRow{}
+	views := map[string]listCatalogView{}
+	if !catalogBacked && (projectSelector != "" || hasFlag(args, "--recent") || hasFlag(args, "--archived")) {
+		return fmt.Errorf("--project, --recent and --archived need the daemon; start it with: agenthail daemon start")
+	}
 	if catalogBacked {
 		successfulSurfaces = 1
 		for _, record := range catalog.Sessions {
@@ -644,9 +660,11 @@ func (a *App) cmdList(args []string) error {
 				session, row := listRemoteSession(record)
 				session.Subagents = catalogSubagentRollup(record)
 				remoteRows[session.ID] = row
+				views[session.ID] = catalogListView(record)
 				allSessions = append(allSessions, session)
 				continue
 			}
+			views[record.Session.ID] = catalogListView(record)
 			session, err := normalizeSessionCwd(record.Session)
 			if err != nil {
 				surfaceErrors[string(record.Session.Surface)] = fmt.Sprintf("normalize session workspace: %s", err)
@@ -718,7 +736,7 @@ func (a *App) cmdList(args []string) error {
 	}
 
 	showAll := hasFlag(args, "--all")
-	if showAll && a.Registry != nil {
+	if showAll && !catalogBacked && a.Registry != nil {
 		stored, err := a.Registry.ListSessions(0)
 		if err != nil {
 			return fmt.Errorf("list saved sessions: %w", err)
@@ -738,7 +756,7 @@ func (a *App) cmdList(args []string) error {
 			}
 		}
 	}
-	if !showAll {
+	if !showAll && !catalogBacked {
 		cutoff := time.Now().AddDate(0, 0, -7)
 		filtered := allSessions[:0]
 		for _, s := range allSessions {
@@ -773,8 +791,11 @@ func (a *App) cmdList(args []string) error {
 		return allSessions[i].LastActive.After(allSessions[j].LastActive)
 	})
 	families := 15
-	if showAll {
+	if showAll || catalogBacked {
 		families = -1
+	}
+	if catalogBacked {
+		allSessions = filterListScope(allSessions, views, scope, projectSelector)
 	}
 	rows := listFamilies(allSessions, families)
 	rollups := listRollups(allSessions)
@@ -787,18 +808,19 @@ func (a *App) cmdList(args []string) error {
 		allSessions = append(allSessions, session)
 	}
 	if jsonOut {
-		views := make([]listSessionView, 0, len(allSessions))
+		rowsOut := make([]listSessionView, 0, len(allSessions))
 		for _, session := range allSessions {
-			view := listSessionView{Session: session, Host: localHost}
+			view := listSessionView{Session: session, Host: localHost, listCatalogView: views[session.ID]}
 			if row, remote := remoteRows[session.ID]; remote {
 				host := row.Host
 				view.Host, view.UnavailableReason = &host, row.Unavailable
 			}
-			views = append(views, view)
+			rowsOut = append(rowsOut, view)
 		}
-		document := map[string]any{"sessions": views, "errors": surfaceErrors}
+		document := map[string]any{"sessions": rowsOut, "errors": surfaceErrors}
 		if catalogBacked {
 			document["catalog"] = listCatalogMetadata(catalog)
+			document["scope"] = scope
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(document); err != nil {
 			return err
@@ -824,10 +846,9 @@ func (a *App) cmdList(args []string) error {
 	}
 
 	wide := hasFlag(args, "--wide")
-	projectNames := listProjectNameCounts(allSessions)
 	projectHeading := "PROJECT"
 	projectWidth := 20
-	if wide {
+	if wide || !catalogBacked {
 		projectHeading = "CWD"
 		projectWidth = 48
 	}
@@ -869,7 +890,10 @@ func (a *App) cmdList(args []string) error {
 		if alias, ok := aliased[s.ID]; ok {
 			agent = "@" + alias
 		}
-		project := listProjectLabel(s, projectNames, wide)
+		project := listProjectColumn(views[s.ID])
+		if wide || !catalogBacked {
+			project = s.Cwd
+		}
 		last := relTime(s.LastActive)
 		name := listRowName(rows[index])
 		if rows[index].depth > 0 {
@@ -955,28 +979,6 @@ func normalizeSessionCwd(session surface.Session) (surface.Session, error) {
 	}
 	session.Cwd = normalized
 	return session, nil
-}
-
-func listProjectNameCounts(sessions []surface.Session) map[string]int {
-	counts := make(map[string]int, len(sessions))
-	for _, session := range sessions {
-		name := filepath.Base(session.Cwd)
-		if session.Cwd != "" && name != "." {
-			counts[name]++
-		}
-	}
-	return counts
-}
-
-func listProjectLabel(session surface.Session, names map[string]int, wide bool) string {
-	name := filepath.Base(session.Cwd)
-	if session.Cwd == "" || name == "." {
-		return "-"
-	}
-	if wide || names[name] > 1 {
-		return session.Cwd
-	}
-	return name
 }
 
 func (a *App) cmdSearch(args []string) error {

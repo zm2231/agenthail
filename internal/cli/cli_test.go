@@ -856,7 +856,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 		t.Fatal(err)
 	}
 
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", root, "--wide", "--json"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--cwd", root, "--wide", "--json"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,20 +895,86 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	}
 }
 
-func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
+func TestListWithoutDaemonShowsTheWorkingDirectory(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
 		{ID: "one", Surface: surface.KindCodex, Name: "one", Cwd: "/work/one/agenthail"},
-		{ID: "two", Surface: surface.KindCodex, Name: "two", Cwd: "/work/two/agenthail"},
-		{ID: "three", Surface: surface.KindCodex, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
+		{ID: "two", Surface: surface.KindCodex, Name: "two", Cwd: "/work/two/agenthail/.worktrees/task"},
 	}}
 	app, _ := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
-	if err != nil || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail") || strings.Contains(output, "/work/three/other") {
+	if err != nil || !strings.Contains(output, "CWD") || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail/.worktrees/task") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
-	wide, err := captureStdout(t, func() error { return app.Run([]string{"list", "--wide"}) })
-	if err != nil || !strings.Contains(wide, fake.listed[2].Cwd) {
-		t.Fatalf("wide=%q err=%v", wide, err)
+	if err := app.Run([]string{"list", "--project", "agenthail"}); err == nil || !strings.Contains(err.Error(), "need the daemon") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindCodex}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	if err := store.EnsureCatalogState(); err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Now().UTC()
+	widget := `{"id":"project-widget","displayName":"widget","rootPath":"/work/widget","kind":"git"}`
+	for _, row := range []struct {
+		session    surface.Session
+		projection string
+	}{
+		{surface.Session{ID: "working", Surface: surface.KindCodex, Name: "working", Status: surface.StatusBusy, Cwd: "/work/widget/.worktrees/a", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"recent":true}`},
+		{surface.Session{ID: "yesterday", Surface: surface.KindCodex, Name: "yesterday", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-20 * time.Hour)}, `{"project":` + widget + `,"recent":true}`},
+		{surface.Session{ID: "child", Surface: surface.KindCodex, Name: "child", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-30 * time.Hour), Subagent: &surface.Subagent{ParentID: "yesterday", RootID: "yesterday"}}, `{"project":` + widget + `}`},
+		{surface.Session{ID: "scratch", Surface: surface.KindCodex, Name: "scratch", Status: surface.StatusIdle, Cwd: "/tmp/scratch", LastActive: observedAt.Add(-40 * time.Hour)}, `{}`},
+		{surface.Session{ID: "hidden", Surface: surface.KindCodex, Name: "hidden", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"recent":true,"archived":true}`},
+	} {
+		if err := store.RegisterSession(row.session); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: row.session, Project: json.RawMessage(`null`), Checkout: json.RawMessage(`{}`), ObservedAt: observedAt, ProjectionFingerprint: row.projection}, registry.CatalogEvent{DedupeKey: "session:" + row.session.ID, Type: "session.upserted", EntityID: row.session.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed := func(args ...string) []string {
+		t.Helper()
+		output, err := captureStdout(t, func() error { return app.Run(append([]string{"list", "--json"}, args...)) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			Sessions []listSessionView `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(output), &document); err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, session := range document.Sessions {
+			ids = append(ids, session.ID)
+		}
+		return ids
+	}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "working"},
+		{[]string{"--recent"}, "working,yesterday,child"},
+		{[]string{"--all"}, "working,yesterday,child,scratch"},
+		{[]string{"--archived"}, "hidden"},
+		{[]string{"--all", "--project", "WIDGET"}, "working,yesterday,child"},
+		{[]string{"--all", "--project", "project-widget"}, "working,yesterday,child"},
+	} {
+		if got := strings.Join(listed(test.args...), ","); got != test.want {
+			t.Fatalf("list %v = %s, want %s", test.args, got, test.want)
+		}
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || !strings.Contains(text, "PROJECT") || !strings.Contains(text, "widget") || strings.Contains(text, "/work/widget") {
+		t.Fatalf("text=%q err=%v", text, err)
+	}
+	if err := app.Run([]string{"list", "--all", "--recent"}); err == nil {
+		t.Fatal("conflicting scopes were accepted")
 	}
 }
 

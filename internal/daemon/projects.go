@@ -103,16 +103,16 @@ type dashboardProject struct {
 	Archived     bool           `json:"archived"`
 }
 
-// catalogScopes lists the session scopes every client renders. A scope counts
+// CatalogScopes lists the session scopes every client renders. A scope counts
 // session families: a subagent belongs to its root's family when the root is
 // listed.
-var catalogScopes = []string{"running", "current", "recent", "all", "archived"}
+var CatalogScopes = []string{"running", "current", "recent", "all", "archived"}
 
-func validCatalogScope(scope string) bool {
+func ValidScope(scope string) bool {
 	if scope == "" {
 		return true
 	}
-	for _, known := range catalogScopes {
+	for _, known := range CatalogScopes {
 		if scope == known {
 			return true
 		}
@@ -121,17 +121,24 @@ func validCatalogScope(scope string) bool {
 }
 
 func catalogScopeMatches(scope string, row dashboardSession) bool {
+	return ScopeMatches(scope, row.Status == surface.StatusBusy, row.Current, row.Recent, row.Archived)
+}
+
+// ScopeMatches is the one definition of the session scopes, applied to the
+// flags the owning daemon computed for a row. An empty scope matches every
+// row.
+func ScopeMatches(scope string, working, current, recent, archived bool) bool {
 	switch scope {
 	case "running":
-		return !row.Archived && row.Status == surface.StatusBusy
+		return !archived && working
 	case "current":
-		return !row.Archived && row.Current
+		return !archived && current
 	case "recent":
-		return !row.Archived && row.Recent
+		return !archived && recent
 	case "all":
-		return !row.Archived
+		return !archived
 	case "archived":
-		return row.Archived
+		return archived
 	default:
 		return true
 	}
@@ -148,8 +155,8 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 		}
 		return row.ID
 	}
-	counts := make(map[string]int, len(catalogScopes))
-	for _, scope := range catalogScopes {
+	counts := make(map[string]int, len(CatalogScopes))
+	for _, scope := range CatalogScopes {
 		matched := map[string]bool{}
 		for _, row := range rows {
 			if catalogScopeMatches(scope, row) {
