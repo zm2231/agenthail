@@ -5,11 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -297,13 +295,6 @@ func TestHeldSendForRemoteSessionIsLocalQueueData(t *testing.T) {
 	output, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--target", "forge::@builder"}) })
 	if err != nil || !strings.Contains(output, "held for forge") {
 		t.Fatalf("list output=%q err=%v", output, err)
-	}
-	if _, err := reg.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	output, err = captureStdout(t, func() error { return app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}) })
-	if err != nil || !strings.Contains(output, "scheduled for retry") {
-		t.Fatalf("retry of a held send output=%q err=%v", output, err)
 	}
 	output, err = captureStdout(t, func() error { return app.Run([]string{"queue", "clear", "forge::@builder"}) })
 	if err != nil || !strings.Contains(output, "canceled 1 queued message(s)") {

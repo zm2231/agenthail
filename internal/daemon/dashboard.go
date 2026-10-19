@@ -91,6 +91,7 @@ type dashboardSession struct {
 	Cwd               string                     `json:"cwd,omitempty"`
 	Alias             string                     `json:"alias,omitempty"`
 	Status            surface.SessionStatus      `json:"status"`
+	WaitingOn         *surface.Waiting           `json:"waitingOn,omitempty"`
 	LastActive        time.Time                  `json:"lastActive,omitempty"`
 	QueueCount        int                        `json:"queueCount"`
 	Open              bool                       `json:"open"`
@@ -161,11 +162,15 @@ type dashboardQueue struct {
 	Attempts        int                      `json:"attempts"`
 	LastError       string                   `json:"lastError,omitempty"`
 	QueuedAt        string                   `json:"queuedAt"`
-	ExpiresAt       int64                    `json:"expiresAt,omitempty"`
+	HeldBy          registry.QueueHold       `json:"heldBy,omitempty"`
 	Historical      bool                     `json:"historical"`
 	Evidence        surface.DeliveryEvidence `json:"evidence"`
 	Operation       registry.QueueOperation  `json:"operation"`
 	BusyDelivery    string                   `json:"busyDelivery,omitempty"`
+}
+
+func (d *Daemon) dashboardQueueItem(item registry.QueueRow) dashboardQueue {
+	return dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: d.publicSessionID(item.SessionID), SourceSessionID: d.publicSessionID(item.SourceSessionID), Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, HeldBy: item.HeldBy, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery}
 }
 
 type dashboardChannel struct {
@@ -350,7 +355,7 @@ func (d *Daemon) dashboardSettingsHandler(w http.ResponseWriter, r *http.Request
 		if !GetNotificationStatus().Enabled {
 			err = fmt.Errorf("desktop notifications are not enabled")
 		} else {
-			err = Notify("Agenthail", "Notifications are working", "")
+			err = Notify("Agenthail", "Notifications are working", "", "")
 		}
 	default:
 		http.Error(w, "unsupported settings action", http.StatusBadRequest)
@@ -751,7 +756,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	for _, alias := range aliases {
 		aliasByID[alias.SessionID] = alias.Name
 	}
-	queue, err := d.Registry.ListQueue(false)
+	queue, err := d.Registry.ListQueue(false, d.adapters())
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read queue: %w", err)
 	}
@@ -793,7 +798,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 		state.UpdatedAt = pageRequest[0].Now.UTC()
 	}
 	for _, item := range queue {
-		state.Queue = append(state.Queue, dashboardQueue{TurnOptions: item.TurnOptions, ID: item.ID, SessionID: d.publicSessionID(item.SessionID), SourceSessionID: d.publicSessionID(item.SourceSessionID), Target: d.resolveDisplay(item.SessionID), Message: item.Message, Model: item.Model, Status: item.Status, Attempts: item.Attempts, LastError: item.LastError, QueuedAt: item.QueuedAt, ExpiresAt: item.ExpiresAt, Historical: item.Historical, Evidence: item.Evidence, Operation: item.Operation, BusyDelivery: item.BusyDelivery})
+		state.Queue = append(state.Queue, d.dashboardQueueItem(item))
 	}
 	for _, channel := range channels {
 		members := make([]string, 0, len(channel.Members))
@@ -1247,7 +1252,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "queueId is required", http.StatusBadRequest)
 			return
 		}
-		item, itemErr := d.Registry.QueueItem(request.QueueID)
+		item, itemErr := d.Registry.QueueItem(request.QueueID, d.adapters())
 		if itemErr != nil {
 			http.Error(w, itemErr.Error(), http.StatusBadRequest)
 			return
@@ -1257,9 +1262,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, targetErr.Error(), http.StatusBadRequest)
 			return
 		}
-		// A held send for a paired host's session is replayed to that host,
-		// which decides whether the session takes it.
-		if owner, _ := d.Registry.SessionHost(target.ID); owner == "" {
+		// A paired host's session is retried by replaying the held request
+		// with its original key; the host decides whether it can take it.
+		if owner, ownerErr := d.Registry.SessionHost(target.ID); ownerErr != nil || owner == "" {
 			adapter, adapterErr := d.adapters().For(target)
 			if adapterErr != nil {
 				http.Error(w, "target surface is not configured", http.StatusConflict)

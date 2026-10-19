@@ -542,4 +542,5 @@ struct DeliveryReceipt: Decodable {
     let status: String?
     let queueId: Int64?
     let detail: String?
+    var waitingOn: WaitingState? = nil
 }

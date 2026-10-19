@@ -358,7 +358,7 @@ func (d *Daemon) discoverCatalog(ctx context.Context) {
 			identityCancel()
 			open := openSessions[session.ID]
 			alias := aliasByID[session.ID]
-			if !d.publishCatalogSession(adapter, session, identity, alias, counts[session.ID], open, config, observedAt) {
+			if !d.publishCatalogSession(ctx, adapter, session, identity, alias, counts[session.ID], open, config, observedAt) {
 				delete(d.catalogLive, session.ID)
 				continue
 			}
@@ -419,7 +419,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 		statusCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		refreshed, err := source.LocalStatus(statusCtx, live.session)
 		cancel()
-		if err != nil || refreshed.Status == live.session.Status {
+		if err != nil || refreshed.Status == live.session.Status && surface.SameWaiting(refreshed.WaitingOn, live.session.WaitingOn) {
 			continue
 		}
 		if config == nil {
@@ -434,7 +434,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 				return
 			}
 		}
-		if d.publishCatalogSession(live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, time.Now().UTC()) {
+		if d.publishCatalogSession(ctx, live.adapter, refreshed, live.identity, live.alias, counts[id], live.open, *config, time.Now().UTC()) {
 			live.session = refreshed
 		} else {
 			live.stamps = nil
@@ -444,7 +444,7 @@ func (d *Daemon) refreshCatalogStatus(ctx context.Context) {
 
 // publishCatalogSession records one session row, rebuilding the projection
 // when the queue count changed under it. It reports whether the row committed.
-func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, observedAt time.Time) bool {
+func (d *Daemon) publishCatalogSession(ctx context.Context, adapter surface.Surface, session surface.Session, identity catalogIdentity, alias string, queueCount int, open bool, config DashboardConfig, observedAt time.Time) bool {
 	hostProject, err := json.Marshal(identity.HostProject)
 	if err != nil {
 		return false
@@ -452,6 +452,11 @@ func (d *Daemon) publishCatalogSession(adapter surface.Surface, session surface.
 	checkout, err := json.Marshal(identity.Checkout)
 	if err != nil {
 		return false
+	}
+	defer d.lockWaiting(session.ID)()
+	session.WaitingOn = d.catalogWaiting(ctx, adapter, session)
+	if d.catalogSelected != nil {
+		d.catalogSelected(session.ID)
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		row := d.catalogSessionProjection(adapter, session, identity, observedAt, alias, queueCount, open, config)
@@ -675,5 +680,5 @@ func (d *Daemon) catalogSessionProjection(adapter surface.Surface, session surfa
 	current, reason := surface.PresenceFor(adapter, session, surface.PresenceInput{QueueCount: queueCount, Open: open, Now: observedAt, CodexRecentHours: config.CodexRecentHours})
 	host := d.localHost()
 	effective := surface.EffectiveCapabilities(adapter, &session)
-	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, Host: &host}
+	return dashboardSession{ID: session.ID, Surface: session.Surface, RuntimeKind: session.RuntimeKind, ConfiguredModel: session.ConfiguredModel, Name: session.Name, Cwd: session.Cwd, Alias: alias, Status: session.Status, WaitingOn: session.WaitingOn, LastActive: session.LastActive, QueueCount: queueCount, Open: open, Current: current, CurrentReason: reason, Capabilities: effective.Capabilities, ReadOnly: effective.ReadOnly, ReadOnlyReason: effective.ReadOnlyReason, Source: session.Source, Transport: session.Transport, ForkedFrom: session.ForkedFrom, HostProject: &identity.HostProject, Checkout: &identity.Checkout, ObservedAt: observedAt, UnavailableReason: identity.UnavailableReason, Runtime: session.Runtime, Subagent: session.Subagent, Subagents: session.Subagents, Host: &host}
 }

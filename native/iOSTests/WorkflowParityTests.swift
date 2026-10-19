@@ -121,16 +121,15 @@ final class WorkflowParityTests: XCTestCase {
         func entry(_ status: String) throws -> QueueState {
             try JSONDecoder().decode(QueueState.self, from: Data(#"{"id":9,"sessionId":"demo","target":"demo","message":"m","status":"\#(status)","evidence":"queued","attempts":0,"queuedAt":"now"}"#.utf8))
         }
-        for status in ["expired", "delivered", "canceled"] { XCTAssertTrue(try entry(status).isHistorical, status) }
+        for status in ["delivered", "canceled"] { XCTAssertTrue(try entry(status).isHistorical, status) }
         for status in ["pending", "inflight", "dead"] { XCTAssertFalse(try entry(status).isHistorical, status) }
     }
 
-    func testQueuePreservesExpiredUnknownOutcomeAsHistory() throws {
-        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"now","expiresAt":1,"historical":true}"#.utf8)
+    func testQueuePreservesHistoricalUnknownOutcome() throws {
+        let data = Data(#"{"id":8,"sessionId":"demo","target":"demo","message":"uncertain","status":"dead","evidence":"unknown","attempts":1,"queuedAt":"now","historical":true}"#.utf8)
         let queue = try JSONDecoder().decode(QueueState.self, from: data)
         XCTAssertTrue(queue.isHistorical)
         XCTAssertEqual(queue.evidence, "unknown")
-        XCTAssertEqual(queue.expiresAt, 1)
     }
 
     func testCompactGroupingPreservesOrderErrorsAndStableAnchor() throws {

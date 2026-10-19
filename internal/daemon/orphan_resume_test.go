@@ -208,7 +208,7 @@ func TestQueuedRelayToExitedSessionWithUncertainResumeIsNotRetried(t *testing.T)
 	for range 3 {
 		f.daemon.scanAndRelay(context.Background())
 	}
-	item, err := f.r.QueueItem(id)
+	item, err := f.r.QueueItem(id, nil)
 	if err != nil || item.Status != "dead" || f.resumes() != 1 || f.posts.count("relayed") != 0 {
 		t.Fatalf("item=%+v err=%v resumes=%d posts=%d", item, err, f.resumes(), f.posts.count("relayed"))
 	}

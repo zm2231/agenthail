@@ -206,15 +206,18 @@ export async function send(request, env) {
     sessionId: clean(body?.sessionId, 240),
     eventType: clean(body?.eventType, 80)
   }
+  const headers = {
+    authorization: `bearer ${providerToken}`,
+    "apns-topic": env.APNS_TOPIC,
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "content-type": "application/json"
+  }
+  const collapseID = clean(body?.collapseId, 64)
+  if (collapseID) headers["apns-collapse-id"] = collapseID
   const response = await fetch(`https://${host}/3/device/${stored.token}`, {
     method: "POST",
-    headers: {
-      authorization: `bearer ${providerToken}`,
-      "apns-topic": env.APNS_TOPIC,
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-      "content-type": "application/json"
-    },
+    headers,
     body: JSON.stringify(payload)
   })
   if (response.ok) {

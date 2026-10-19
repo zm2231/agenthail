@@ -113,24 +113,6 @@ func TestFederationRoutesEverySessionActionToTheOwningHost(t *testing.T) {
 	}
 }
 
-func TestFederationRetriesAHeldSendWithoutALocalWritabilityCheck(t *testing.T) {
-	local, _, _ := pairedFederation(t)
-	id, err := local.reg.QueueHostDelivery("remote-a", "held", "fwd-synthetic", []byte(`{"action":"send","sessionId":"remote-a","message":"held"}`), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := local.reg.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "queue-retry", "queueId": id})
-	if response.Code != http.StatusOK {
-		t.Fatalf("retry status=%d body=%s", response.Code, response.Body.String())
-	}
-	if item, err := local.reg.QueueItem(id); err != nil || (item.Status != "pending" && item.Status != "inflight" && item.Status != "done") {
-		t.Fatalf("retried item=%+v err=%v", item, err)
-	}
-}
-
 func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	remote.fake.modelOptions = []surface.ModelOption{{ID: "remote-model", SupportedReasoningEfforts: []string{"low", "high"}}}
@@ -315,7 +297,7 @@ func TestFederationStopsReplayingHeldSendsOnceTheHostIsIncompatible(t *testing.T
 	if got := remote.fake.delivered(); strings.Join(got, "|") != "first" {
 		t.Fatalf("host received %v after it became incompatible", got)
 	}
-	if item, err := local.reg.QueueItem(ids[1]); err != nil || item.Status != "pending" {
+	if item, err := local.reg.QueueItem(ids[1], nil); err != nil || item.Status != "pending" {
 		t.Fatalf("second held send item=%+v err=%v", item, err)
 	}
 }
