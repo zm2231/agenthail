@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/deliverypolicy"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
@@ -1047,11 +1048,15 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if request.Action == "session-create" {
+		approval := strings.TrimSpace(request.Approval)
+		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
+			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
+			return
+		}
+		startOptions := func(cwd string) surface.SessionStartOptions {
+			return surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode}
+		}
 		if request.Launcher != "" {
-			if request.Worktree != "" || request.PermissionMode != "" || request.Approval != "" || !request.TurnOptions.Empty() {
-				http.Error(w, "launcher does not support advanced session options", http.StatusBadRequest)
-				return
-			}
 			if strings.TrimSpace(request.Message) == "" {
 				http.Error(w, "message is required", http.StatusBadRequest)
 				return
@@ -1096,11 +1101,16 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 			defer cancel()
-			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Agent: surface.SurfaceKind(request.Surface), Cwd: cwd, Message: request.Message, Model: request.Model, Name: request.Name})
+			messageUUID := uuid.NewString()
+			ctx = surface.WithMessageUUID(ctx, messageUUID)
+			launchResult, launchErr := launcher.Launch(ctx, surface.LaunchRequest{Surface: surface.SurfaceKind(request.Surface), Options: startOptions(cwd)})
 			startErr := launchErr
 			if launchErr != nil && launchResult.Session == nil {
 				var acceptedErr surface.LaunchAcceptedError
 				switch {
+				case errors.Is(launchErr, surface.ErrLaunchOptionUnsupported):
+					http.Error(w, launchErr.Error(), http.StatusBadRequest)
+					return
 				case errors.As(launchErr, &acceptedErr):
 					d.writeAcceptedLaunch(w, request.Launcher, launchResult.Location, launchErr.Error())
 					return
@@ -1146,7 +1156,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			launchFields := map[string]any{"launcher": request.Launcher, "location": location, "sessionId": session.ID}
 			if launchResult.Session != nil {
-				d.writeStartedSessionOutcome(w, session, alias, request.Message, launchResult.Sent, startErr, launchFields)
+				d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, launchResult.Sent, startErr, launchFields)
 				return
 			}
 			launchFields["ok"] = true
@@ -1178,14 +1188,11 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			}
 			return
 		}
-		approval := strings.TrimSpace(request.Approval)
-		if approval != "" && approval != "untrusted" && approval != "on-request" && approval != "never" {
-			http.Error(w, "approval policy is invalid", http.StatusBadRequest)
-			return
-		}
 		ctx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
 		defer cancel()
-		session, sent, startErr := starter.StartSession(ctx, surface.SessionStartOptions{Message: request.Message, Cwd: cwd, Model: strings.TrimSpace(request.Model), ApprovalPolicy: approval, TurnOptions: request.TurnOptions, Name: request.Name, Worktree: request.Worktree, Agent: request.Agent, PermissionMode: request.PermissionMode})
+		messageUUID := uuid.NewString()
+		ctx = surface.WithMessageUUID(ctx, messageUUID)
+		session, sent, startErr := starter.StartSession(ctx, startOptions(cwd))
 		if session != nil {
 			session.Runtime = &surface.Runtime{Launcher: defaultLauncherForSurface(surface.SurfaceKind(request.Surface)), Focusable: false}
 			if registerErr := d.Registry.RegisterSession(*session); registerErr != nil {
@@ -1198,7 +1205,7 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 					return
 				}
 			}
-			d.writeStartedSessionOutcome(w, session, alias, request.Message, sent, startErr, nil)
+			d.writeStartedSessionOutcome(w, session, alias, messageUUID, request.Message, sent, startErr, nil)
 			return
 		}
 		if startErr == nil {
@@ -2062,9 +2069,9 @@ func writeDashboardJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
+func (d *Daemon) writeStartedSessionOutcome(w http.ResponseWriter, session *surface.Session, alias, messageUUID, message string, sent *surface.SendResult, startErr error, extra map[string]any) {
 	if startErr != nil {
-		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, message)
+		intent, intentErr := d.Registry.RecordSessionCreationIntent(session.ID, messageUUID, message)
 		if intentErr != nil {
 			_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "failed", SessionID: session.ID, Message: message, Error: fmt.Sprintf("%s; durable delivery intent failed: %s", startErr, intentErr)})
 			writeCreateStorageFailure(w, session, fmt.Sprintf("session was created, but its delivery intent could not be persisted: %s; do not retry automatically", intentErr), extra)

@@ -73,6 +73,7 @@ if [ "$GOOS_VALUE" = "darwin" ]; then
 	cp install.sh "$STAGE/"
 	cp sidecar/sidecar.py sidecar/cookie.mjs sidecar/package.json sidecar/package-lock.json "$STAGE/sidecar/"
 fi
+"$ROOT/scripts/stage-claude-host.sh" "$STAGE/claude-host"
 cp -R skills "$STAGE/"
 find "$STAGE/skills" -name .DS_Store -delete
 test -f "$STAGE/skills/agenthail-operations/SKILL.md"

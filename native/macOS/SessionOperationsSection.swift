@@ -222,7 +222,7 @@ struct BackgroundSessionSection: View {
                         .foregroundStyle(DesktopPalette.text2)
                 }
             } else {
-                Text("For Claude sessions running in the background.")
+                Text("For Claude sessions Agenthail runs and Claude Code background jobs.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(DesktopPalette.text2)
             }

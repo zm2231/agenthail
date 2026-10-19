@@ -4,6 +4,7 @@ These notes cover Agenthail's implementation, packaging, release automation, and
 
 - [Packaging and releases](../packaging.md)
 - [Linux daemon: systemd service, updates and doctor](linux-daemon.md)
+- [Claude session host](claude-host.md)
 - [Codex integration decisions](../codex-protocol.md)
 - [Codex Voice orchestrator: setup, flow, limits, and verification](codex-voice.md)
 - [Push notification service](push-relay.md)

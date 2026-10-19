@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
 )
@@ -71,6 +72,14 @@ func (a *App) daemonRun() error {
 		_ = e
 	}
 	d := daemon.New(a.Registry, a.allSurfaces())
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	hostVersion := a.Version + "+" + a.Revision
+	d.SetClaudeHost(&claudehost.Manager{Home: home, Launch: func() (claudehost.Launch, error) {
+		return surfaces.ClaudeHostLaunch(home, hostVersion)
+	}})
 	return d.RunWithSignal()
 }
 

@@ -26,18 +26,25 @@ func (c *Claude) Presence(sess surface.Session, input surface.PresenceInput) (bo
 	return true, "open"
 }
 
-// OpenSessions reports the sessions whose pid is a running claude process.
+// OpenSessions reports the sessions the host lists and the CLI sessions whose
+// pid is a running claude process.
 func (c *Claude) OpenSessions(ctx context.Context, sessions []surface.Session) map[string]bool {
+	open := map[string]bool{}
+	hosted := c.host.listing(ctx)
+	for _, session := range sessions {
+		if _, ok := hosted[session.ID]; ok && claudeHosted(&session) {
+			open[session.ID] = true
+		}
+	}
 	processCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	output, err := exec.CommandContext(processCtx, "ps", "-axo", "pid=,comm=").Output()
 	if err != nil {
-		return nil
+		return open
 	}
 	processes := parseClaudeOpenProcesses(string(output))
-	open := map[string]bool{}
 	for _, session := range sessions {
-		if processes[session.PID] {
+		if !claudeHosted(&session) && processes[session.PID] {
 			open[session.ID] = true
 		}
 	}

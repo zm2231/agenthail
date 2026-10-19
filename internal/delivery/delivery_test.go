@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfacetest"
@@ -29,6 +30,7 @@ type fakeSurface struct {
 	beforeSend   func()
 	capabilities surface.Capabilities
 	compactCalls int
+	messageUUIDs []string
 }
 
 func (f *fakeSurface) Name() surface.SurfaceKind {
@@ -54,8 +56,9 @@ func (*fakeSurface) Resolve(context.Context, string) (*surface.Session, error) {
 func (f *fakeSurface) Observe(context.Context, *surface.Session) (*surface.TurnObservation, error) {
 	return f.observe, f.observeErr
 }
-func (f *fakeSurface) Send(_ context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
+func (f *fakeSurface) Send(ctx context.Context, _ *surface.Session, message string) (*surface.SendResult, error) {
 	f.sent = append(f.sent, message)
+	f.messageUUIDs = append(f.messageUUIDs, surface.MessageUUID(ctx))
 	if f.beforeSend != nil {
 		f.beforeSend()
 	}
@@ -84,8 +87,9 @@ func (f *fakeSurface) Compact(context.Context, *surface.Session) error {
 }
 func (*fakeSurface) Model(context.Context, *surface.Session, string) (string, error) { return "", nil }
 func (*fakeSurface) Interrupt(context.Context, *surface.Session) error               { return nil }
-func (f *fakeSurface) Steer(_ context.Context, _ *surface.Session, message string) error {
+func (f *fakeSurface) Steer(ctx context.Context, _ *surface.Session, message string) error {
 	f.steered = append(f.steered, message)
+	f.messageUUIDs = append(f.messageUUIDs, surface.MessageUUID(ctx))
 	if f.beforeSteer != nil {
 		f.beforeSteer()
 	}
@@ -661,6 +665,44 @@ func TestDispatcherCompactReportsTypedControlFailure(t *testing.T) {
 	receipt, err := (Dispatcher{}).Compact(context.Background(), adapter, session)
 	if err == nil || !strings.Contains(err.Error(), "control unavailable") || receipt != nil || len(adapter.sent) != 0 || adapter.compactCalls != 1 {
 		t.Fatalf("receipt=%+v sent=%v err=%v", receipt, adapter.sent, err)
+	}
+}
+
+func TestDispatcherSendsEachIntentUnderItsOwnUUID(t *testing.T) {
+	r, err := registry.Open(filepath.Join(t.TempDir(), "registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	session := &surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "builder", Status: surface.StatusBusy}
+	if err := r.RegisterSession(*session); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := Dispatcher{Registry: r}
+	adapter := &fakeSurface{result: &surface.SendResult{UUID: "turn", Accepted: true}, capabilities: surface.Capabilities{Steer: true}}
+	var receipts []*Receipt
+	for _, message := range []string{"one", "two"} {
+		receipt, err := dispatcher.Deliver(context.Background(), adapter, session, message, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipts = append(receipts, receipt)
+	}
+	steered, err := dispatcher.Steer(context.Background(), adapter, session, "three")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts = append(receipts, steered)
+	seen := map[string]bool{}
+	for i, receipt := range receipts {
+		intent, err := r.DeliveryIntent(receipt.DeliveryID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := uuid.Parse(intent.UUID); err != nil || seen[intent.UUID] || adapter.messageUUIDs[i] != intent.UUID {
+			t.Fatalf("delivery %d: intent uuid %q, surface saw %q, seen before %v", i, intent.UUID, adapter.messageUUIDs[i], seen[intent.UUID])
+		}
+		seen[intent.UUID] = true
 	}
 }
 

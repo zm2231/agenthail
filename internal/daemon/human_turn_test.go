@@ -71,7 +71,7 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	})}
 	dir := t.TempDir()
 	f.bridged = surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
-	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
+	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: os.Getpid(), Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
 	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle}
 	for _, session := range []surface.Session{f.bridged, f.native, agent} {
 		if err := r.RegisterSession(session); err != nil {

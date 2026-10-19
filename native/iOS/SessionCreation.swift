@@ -13,7 +13,7 @@ struct NewSessionSheet: View {
     @State private var modelError: String?
     @State private var loading = false
     @State private var claude = ClaudeCreationSettings()
-    @State private var selectedLauncher: String?
+    @State private var selectedLauncher: LauncherOption?
     @State private var showingModels = false
     @State private var turnSettings = TurnSettings()
 
@@ -30,16 +30,16 @@ struct NewSessionSheet: View {
                             Picker("Run with", selection: $selectedSurface) {
                                 ForEach(options.surfaces) { Text($0.id.capitalized).tag($0.id) }
                             }
-                            Text(selectedSurface == "claude" ? "Starts a native background Claude session on your Mac." : "Uses the runtime configured on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                            Text(selectedSurface != "claude" ? "Uses the runtime configured on your Mac." : selectedLauncher?.id == "claude-bg" ? "Starts a Claude Code background job on your Mac." : "Starts a Claude session on your Mac, run by Agenthail.").font(.footnote).foregroundStyle(.secondary)
                         }
                         let launchers = launchers(for: selectedSurface, options: options)
                         if !launchers.isEmpty {
                             Section("Where it runs") {
                                 Picker("Launcher", selection: $selectedLauncher) {
-                                    Text("Use Mac default").tag(String?.none)
+                                    Text("Use Mac default").tag(LauncherOption?.none)
                                     ForEach(launchers) { launcher in
                                         Text(launcher.available ? launcher.label : "\(launcher.label) (unavailable)")
-                                            .tag(Optional(launcher.id))
+                                            .tag(Optional(launcher))
                                             .disabled(!launcher.available)
                                     }
                                 }
@@ -69,7 +69,7 @@ struct NewSessionSheet: View {
                             Text("Uses the runtime’s existing permission settings. Requests requiring approval may need attention on your Mac.").font(.footnote).foregroundStyle(.secondary)
                         }
                         if selectedSurface == "codex" {
-                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher == nil)
+                            TurnSettingsView(settings: $turnSettings, modelOption: selectedModelOption, enabled: selectedLauncher?.isTerminal != true)
                         }
                         Section("First instruction") {
                             TextField("What would you like the agent to do?", text: $message, axis: .vertical).lineLimit(4...12)
@@ -95,7 +95,7 @@ struct NewSessionSheet: View {
                                     }
                                     Text("Worktrees require a Git repository or configured worktree hooks. Named agents must exist in Claude’s configuration.").font(.footnote).foregroundStyle(.secondary)
                                 }
-                            }.disabled(selectedLauncher != nil)
+                            }.disabled(selectedLauncher?.isTerminal == true)
                         }
                     }
                 }
@@ -137,7 +137,7 @@ struct NewSessionSheet: View {
                 catch is CancellationError {} catch { modelError = "Models unavailable. You can still use the runtime default." }
             }
             .onChange(of: selectedLauncher) { _, launcher in
-                guard launcher != nil else { return }
+                guard launcher?.isTerminal == true else { return }
                 turnSettings = .init()
                 claude = .init()
             }

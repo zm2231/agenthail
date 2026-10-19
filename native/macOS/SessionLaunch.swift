@@ -61,7 +61,7 @@ enum SessionLaunchDecision: Equatable {
 
 struct SessionLaunchForm: Equatable {
     var agent = "claude"
-    var launcher: String?
+    var launcher: LauncherOption?
     var folder = ""
     var model = ""
     var effort = ""
@@ -69,7 +69,7 @@ struct SessionLaunchForm: Equatable {
 
     var usesFolder: Bool { agent != "notion" }
     var listsModels: Bool { agent != "notion" }
-    var setsEffort: Bool { listsModels && launcher == nil }
+    var setsEffort: Bool { listsModels && launcher?.isTerminal != true }
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
     var isComplete: Bool { !trimmedMessage.isEmpty && (!usesFolder || !folder.isEmpty) }
@@ -85,9 +85,9 @@ struct SessionLaunchForm: Equatable {
         effort = ""
     }
 
-    mutating func selectLauncher(_ next: String?) {
+    mutating func selectLauncher(_ next: LauncherOption?) {
         launcher = next
-        if next != nil { effort = "" }
+        if next?.isTerminal == true { effort = "" }
     }
 
     var cwd: String { usesFolder ? folder : "" }

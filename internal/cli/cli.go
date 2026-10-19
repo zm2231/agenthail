@@ -140,9 +140,9 @@ Usage:
 Session commands:
   codex [args]                  Start a writable Codex terminal session
   codex --repair-managed-runtime Restart a stale managed Codex runtime
-  thread create <codex|claude> "msg"    Create a background conversation
+  thread create <codex|claude> "msg"    Create a conversation
   thread fork <target>         Fork a Codex conversation
-  thread <status|stop|resume|logs> <target>  Manage a Claude background session
+  thread <status|stop|resume|logs> <target>  Manage a Claude session (logs: claude-bg jobs)
   thread queue <target> <list|add|update|delete|reorder|start>  Manage Codex native input
   list [--all] [--cwd <path>] [--wide]
                                  List sessions; --cwd includes that workspace and descendants

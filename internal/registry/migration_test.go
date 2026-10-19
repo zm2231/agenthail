@@ -526,7 +526,7 @@ func TestOpenRetiresQueueExpiryLeftOnARegistryAtTheVersionBefore(t *testing.T) {
 	for _, statement := range []string{
 		`ALTER TABLE message_queue ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
 		`INSERT INTO message_queue(id,session_id,message,queued_at,status,evidence,last_error,expires_at_ms,updated_at) VALUES(60,'target','old report','2026-10-18 08:08:00','expired','expired','message expired after 1 hour',1,'2026-10-18 09:08:00')`,
-		fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion-1),
+		`PRAGMA user_version=16`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatal(err)
