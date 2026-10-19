@@ -6,7 +6,7 @@ import (
 )
 
 const projectsSnapshot = `{"projects":[
-{"id":"project-widget","displayName":"widget","rootPath":"/work/widget","kind":"git","sessionCount":2},
+{"id":"project-widget","displayName":"widget","rootPath":"/work/widget","kind":"git","sessionCount":2,"coordinator":{"name":"widget-lead","surface":"claude","sessionId":"s1"}},
 {"id":"h0123456789ab::project-widget","displayName":"widget","rootPath":"/home/remote/widget","kind":"git","host":{"id":"h0123456789ab","name":"forge"},"sessionCount":1},
 {"id":"project-notes","displayName":"notes","rootPath":"/work/notes","kind":"folder","archived":true}]}`
 
@@ -14,7 +14,7 @@ func TestProjectListHidesArchivedUnlessAll(t *testing.T) {
 	app, _, _, api := federatedCLIFixture(t, true)
 	api.snapshot = projectsSnapshot
 	output, err := captureStdout(t, func() error { return app.Run([]string{"project", "list"}) })
-	if err != nil || !strings.Contains(output, "/work/widget") || !strings.Contains(output, "forge") || strings.Contains(output, "notes") {
+	if err != nil || !strings.Contains(output, "/work/widget") || !strings.Contains(output, "forge") || !strings.Contains(output, "@widget-lead") || strings.Contains(output, "notes") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	output, err = captureStdout(t, func() error { return app.Run([]string{"project", "list", "--all"}) })

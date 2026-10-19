@@ -279,3 +279,37 @@ func TestFederationProjectsStayOnTheirHostAndArchiveRoutesThere(t *testing.T) {
 		return project != nil && project.Archived && len(rows) == 2 && rows[0].Archived && rows[1].Archived
 	})
 }
+
+func TestSnapshotNamesEachProjectsCoordinatorAndTheSessionItIs(t *testing.T) {
+	d, r, _, repo := projectsFixture(t)
+	other := filepath.Join(t.TempDir(), "unstarted")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	widget := state.Projects[0].ID
+	if err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: widget, ProjectRoot: repo, Name: "widget-lead", Surface: "claude", Cwd: repo}, "to"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetCoordinator(registry.CoordinatorSpec{ProjectID: "project-unstarted", ProjectRoot: other, Name: "unstarted-lead", Surface: "codex", Cwd: other}, ""); err != nil {
+		t.Fatal(err)
+	}
+	state, err = d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]dashboardProject{}
+	for _, found := range state.Projects {
+		byID[found.ID] = found
+	}
+	if lead := byID[widget].Coordinator; lead == nil || lead.Name != "widget-lead" || lead.SessionID != "to" || lead.Surface != "claude" {
+		t.Fatalf("widget coordinator=%+v", lead)
+	}
+	unstarted := byID["project-unstarted"]
+	if lead := unstarted.Coordinator; lead == nil || lead.Name != "unstarted-lead" || lead.SessionID != "" || unstarted.DisplayName != "unstarted" || unstarted.SessionCount != 0 {
+		t.Fatalf("unstarted project=%+v coordinator=%+v", unstarted, lead)
+	}
+}

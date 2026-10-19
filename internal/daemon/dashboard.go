@@ -949,7 +949,11 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	} else {
 		state.TotalSessions = len(state.Sessions)
 		state.Counts = catalogScopeCounts(state.Sessions)
-		state.Projects = catalogProjects(state.Sessions, projectRecords, d.localHost())
+		coordinators, err := d.projectCoordinators()
+		if err != nil {
+			return dashboardState{}, err
+		}
+		state.Projects = catalogProjects(state.Sessions, projectRecords, coordinators, d.localHost())
 	}
 	return state, nil
 }

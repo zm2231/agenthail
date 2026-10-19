@@ -561,7 +561,13 @@ function projectSection(project, sessions) {
   const hidden = ordered.length - shown.length;
   const host = project.host && project.host.state !== "local" ? `<span class="host-badge" title="On ${escape(project.host.name)}">${escape(shortHostName(project.host.name))}</span>` : "";
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}${coordinatorChip(project.coordinator)}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+}
+function coordinatorChip(coordinator) {
+  if (!coordinator) return "";
+  const name = `@${coordinator.name}`;
+  if (!coordinator.sessionId) return `<span class="lead-chip idle" title="${escape(`${name} starts on its first message`)}">${escape(name)}</span>`;
+  return `<button class="lead-chip" type="button" data-session="${escape(coordinator.sessionId)}" title="${escape(`Open ${name}, the project coordinator`)}">${escape(name)}</button>`;
 }
 function renderProjects(query) {
   const byProject = new Map();

@@ -100,6 +100,37 @@ type dashboardProject struct {
 	LastActive   time.Time      `json:"lastActive,omitempty"`
 	SessionCount int            `json:"sessionCount"`
 	Archived     bool           `json:"archived"`
+	// Coordinator is the project's coordinator on this host. SessionID is
+	// empty until its first message starts it.
+	Coordinator *dashboardCoordinator `json:"coordinator,omitempty"`
+}
+
+type dashboardCoordinator struct {
+	Name      string `json:"name"`
+	Surface   string `json:"surface"`
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// projectCoordinator is a coordinator spec with the session its name points at.
+type projectCoordinator struct {
+	spec      registry.CoordinatorSpec
+	sessionID string
+}
+
+func (d *Daemon) projectCoordinators() ([]projectCoordinator, error) {
+	specs, err := d.Registry.Coordinators()
+	if err != nil {
+		return nil, err
+	}
+	coordinators := make([]projectCoordinator, 0, len(specs))
+	for _, spec := range specs {
+		sessionID, err := d.Registry.CoordinatorSessionID(spec)
+		if err != nil {
+			return nil, err
+		}
+		coordinators = append(coordinators, projectCoordinator{spec: spec, sessionID: sessionID})
+	}
+	return coordinators, nil
 }
 
 // catalogScopes lists the session scopes every client renders. A scope counts
@@ -171,8 +202,9 @@ func catalogScopeCounts(rows []dashboardSession) map[string]int {
 	return counts
 }
 
-// catalogProjects adds registered folder projects that have no sessions yet.
-func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, local dashboardHost) []dashboardProject {
+// catalogProjects adds registered folder projects and projects with a
+// coordinator that have no sessions yet, and names each project's coordinator.
+func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, coordinators []projectCoordinator, local dashboardHost) []dashboardProject {
 	byID := map[string]*dashboardProject{}
 	order := []string{}
 	for _, row := range rows {
@@ -203,6 +235,17 @@ func catalogProjects(rows []dashboardSession, records []registry.ProjectRecord, 
 		host := local
 		byID[record.ID] = &dashboardProject{ID: record.ID, DisplayName: record.DisplayName, RootPath: record.RootPath, Kind: record.Kind, Host: &host, Archived: !record.ArchivedAt.IsZero()}
 		order = append(order, record.ID)
+	}
+	for _, coordinator := range coordinators {
+		spec := coordinator.spec
+		found, ok := byID[spec.ProjectID]
+		if !ok {
+			host := local
+			found = &dashboardProject{ID: spec.ProjectID, DisplayName: project.Name(spec.ProjectRoot), RootPath: spec.ProjectRoot, Kind: project.KindGit, Host: &host}
+			byID[spec.ProjectID] = found
+			order = append(order, spec.ProjectID)
+		}
+		found.Coordinator = &dashboardCoordinator{Name: spec.Name, Surface: spec.Surface, SessionID: coordinator.sessionID}
 	}
 	projects := make([]dashboardProject, 0, len(order))
 	for _, id := range order {

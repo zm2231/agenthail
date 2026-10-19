@@ -35,6 +35,9 @@ type projectRow struct {
 	LastActive   time.Time    `json:"lastActive,omitempty"`
 	SessionCount int          `json:"sessionCount"`
 	Archived     bool         `json:"archived"`
+	Coordinator  *struct {
+		Name string `json:"name"`
+	} `json:"coordinator,omitempty"`
 }
 
 func (p projectRow) hostName() string {
@@ -79,13 +82,17 @@ func (a *App) cmdProject(args []string) error {
 			fmt.Println("no projects found")
 			return nil
 		}
-		fmt.Printf("%-24s %-12s %-8s %-10s %s\n", "PROJECT", "HOST", "SESSIONS", "LAST", "ROOT")
+		fmt.Printf("%-24s %-12s %-8s %-10s %-24s %s\n", "PROJECT", "HOST", "SESSIONS", "LAST", "LEAD", "ROOT")
 		for _, project := range projects {
 			name := project.DisplayName
 			if project.Archived {
 				name += " (archived)"
 			}
-			fmt.Printf("%-24s %-12s %-8d %-10s %s\n", truncate(name, 24), truncate(project.hostName(), 12), project.SessionCount, relTime(project.LastActive), project.RootPath)
+			lead := "-"
+			if project.Coordinator != nil {
+				lead = "@" + project.Coordinator.Name
+			}
+			fmt.Printf("%-24s %-12s %-8d %-10s %-24s %s\n", truncate(name, 24), truncate(project.hostName(), 12), project.SessionCount, relTime(project.LastActive), truncate(lead, 24), project.RootPath)
 		}
 		return nil
 	case "add":

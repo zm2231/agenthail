@@ -25,7 +25,8 @@ saved session; `--project` and `--archived` need
 the daemon.
 
 `agenthail project list [--all]`, `project add <path>`, and
-`project <archive|unarchive> <name|id>` manage projects.
+`project <archive|unarchive> <name|id>` manage projects. `project list` names
+each project's coordinator in its LEAD column.
 `agenthail thread <archive|unarchive> <target>` archives one session. Both route
 to the host that owns the project or session.
 
