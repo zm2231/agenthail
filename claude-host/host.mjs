@@ -56,6 +56,17 @@ class HostError extends Error {
   }
 }
 
+// StartError is a Claude process that ended before it initialized. One that
+// ran and exited with an error code refused the conversation, such as a
+// workspace it does not trust; one that could not be spawned or was killed
+// did not get to decide.
+class StartError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.refused = status.code !== null && status.code !== 0 && !status.error;
+  }
+}
+
 class Session {
   constructor(id, cwd) {
     this.id = id;
@@ -196,14 +207,14 @@ async function open(params) {
     s.done = run(s, exit);
     await Promise.race([
       s.query.initializationResult(),
-      exit.then(() => Promise.reject(new Error(`Claude exited while starting: ${s.stderr.trim() || 'no output'}`))),
+      exit.then((status) => Promise.reject(new StartError(`Claude exited while starting: ${s.stderr.trim() || 'no output'}`, status))),
       timeout(OPEN_TIMEOUT_MS, 'Claude did not start'),
     ]);
   } catch (error) {
     s.end();
     s.query?.close();
     if (!s.done) sessions.delete(id);
-    throw new HostError('open_failed', error.message);
+    throw new HostError(error instanceof StartError && error.refused ? 'refused' : 'open_failed', error.message);
   }
   s.setState('idle');
   return s.describe();

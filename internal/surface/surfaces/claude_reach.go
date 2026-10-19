@@ -213,9 +213,16 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string) (*surface
 	}
 }
 
+// claudeHostResumeError says why the host did not open a conversation. A
+// Claude that exited with an error before it started refused it, which only a
+// person can fix; a Claude that could not be started or did not start in time
+// is unavailable and retried.
 func claudeHostResumeError(conversation string, err error) error {
-	if claudehost.IsCode(err, "open_failed") {
-		return surface.DeliveryUnavailable(fmt.Errorf("Claude refused to resume %s: %s", conversation, err))
+	switch {
+	case claudehost.IsCode(err, "refused"):
+		return surface.DeliveryRefused(fmt.Errorf("Claude refused to resume %s: %s", conversation, err))
+	case claudehost.IsCode(err, "open_failed"):
+		return surface.DeliveryUnavailable(fmt.Errorf("Claude did not resume %s: %s", conversation, err))
 	}
 	return claudeHostDeliveryError(err)
 }

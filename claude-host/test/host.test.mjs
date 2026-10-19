@@ -353,6 +353,17 @@ test('a Claude that cannot be started fails the open and leaves the host running
   c.close();
 });
 
+test('a Claude that exits with an error before it starts refuses the open with its output', async () => {
+  const f = fixture();
+  const id = randomUUID();
+  fs.writeFileSync(path.join(f.claudeDir, `refuse-${id}`), 'Workspace not trusted');
+  await startHost(f);
+  const c = new Client(f.socket);
+  await assert.rejects(c.call('open', { resume: id, cwd: f.cwd }), (error) => error.code === 'refused' && error.message.includes('Workspace not trusted'));
+  assert.deepEqual((await c.call('list')).sessions, []);
+  c.close();
+});
+
 test('drain closes sessions once idle and exits the host', async () => {
   const f = fixture();
   const host = await startHost(f);

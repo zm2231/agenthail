@@ -48,6 +48,8 @@ buffer has moved past it. A failed request returns `{code, message}`:
 | `draining` | the host is being replaced | held, retried |
 | `unknown` | the SDK had not taken the message within ten seconds | unknown, never retried |
 | `invalid` | malformed request | terminal |
+| `refused` | `open`: Claude exited with an error before it started, such as a workspace it does not trust | refused, held until a person fixes the cause |
+| `open_failed` | `open`: Claude could not be spawned, was killed, or did not start in time | unavailable, retried |
 
 A `send` is answered only after the SDK has taken the message for Claude's
 input, so a success means the message has left the host's queue.
@@ -95,9 +97,12 @@ Without a running host nothing is created.
 `Claude.reach` resumes a conversation no process holds with `open({resume})`
 and waits until the host lists the process. When the conversation lives in a
 Claude config root other than the primary one, the open carries
-`configDir`, and the host runs that Claude with it as `CLAUDE_CONFIG_DIR`. The host's `held` answer holds the
-delivery; `open_failed` means Claude refused the conversation and fails it with
-Claude's output.
+`configDir`, and the host runs that Claude with it as `CLAUDE_CONFIG_DIR`. The
+host's `held` answer holds the delivery. `refused` means Claude refused the
+conversation: a queued message waits as `refused` with Claude's output as its
+last error, and a direct send fails with it. `open_failed` is a Claude that
+never got to decide, and the delivery is retried like any other unavailable
+target.
 
 `thread status` reads the host's listing, `thread stop` closes the session in
 the host, and `thread resume` reopens it. The host keeps no background log.
