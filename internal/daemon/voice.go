@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/surface/surfaces"
@@ -31,7 +32,7 @@ func (d *Daemon) registerVoiceAPI(mux *http.ServeMux, dashboard *dashboardServer
 	if err != nil {
 		provider = nil
 	}
-	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, d.dispatcher(), func(session *surface.Session, active bool) {
+	s := voice.NewWithTargetsAndOperatorSourceAndStream(filepath.Join(filepath.Dir(d.Registry.Path()), "voice", "operator.json"), provider, d.Registry.RegisterSession, commandPath, d.resolveVoiceTarget, coordinator.Sender{Service: d.coordinator()}, func(session *surface.Session, active bool) {
 		d.setSessionSourceHold(session, active, "voice")
 	}, daemonVoiceStreamProvider{daemon: d})
 	if dashboard.voice != nil {

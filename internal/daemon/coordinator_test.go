@@ -240,3 +240,52 @@ func TestFilesAttachedToAMessageThatStartsTheCoordinatorAreNamedInItsFirstTurn(t
 		t.Fatalf("first turn=%q", turns[0].Text)
 	}
 }
+
+func (f *coordinatorFixture) channelSend(t *testing.T, key, channel, source, message string) (int, string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"action": "channel-send", "channel": channel, "sourceSessionId": source, "message": message})
+	response := serveV1Action(f.handler, string(body), key, f.token)
+	return response.Code, response.Body.String()
+}
+
+func TestAChannelMessageForAGoneCoordinatorStartsItInsteadOfResumingBlank(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	if _, err := f.r.CreateChannel("crew"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.AddToChannel("crew", goneCoordinator); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.channelSend(t, "crew-standup", "crew", "", "standup"); code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", code, body)
+	}
+	current := f.current(t)
+	if current == goneCoordinator || f.started(t) != 1 || f.resumedGone(t) {
+		t.Fatalf("current=%s started=%d resumed gone=%v", current, f.started(t), f.resumedGone(t))
+	}
+	f.landed(t, current, "standup")
+}
+
+func TestAChannelMessageFromAConversationARestartReplacedSkipsTheCoordinator(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	if _, err := f.r.CreateChannel("crew"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.AddToChannel("crew", goneCoordinator); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.send(t, "lead-first", goneCoordinator, "first"); code != http.StatusOK {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	current := f.current(t)
+	f.landed(t, current, "first")
+	code, body := f.channelSend(t, "crew-echo", "crew", goneCoordinator, "from the old composer")
+	if code != http.StatusBadRequest || !strings.Contains(body, "no members other than the sender") {
+		t.Fatalf("status=%d body=%s", code, body)
+	}
+	for _, turn := range f.host.Turns(t, current) {
+		if strings.Contains(turn.Text, "from the old composer") {
+			t.Fatalf("the coordinator received its own channel message: %+v", turn)
+		}
+	}
+}

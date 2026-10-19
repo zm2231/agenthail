@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/zm2231/agenthail/internal/coordinator"
 	"github.com/zm2231/agenthail/internal/daemon"
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -192,6 +192,10 @@ func (a *App) cmdChannel(args []string) error {
 		if err != nil {
 			return err
 		}
+		sender := coordinator.Sender{Service: a.coordinator()}
+		if sourceID != "" {
+			sourceID = sender.Canonical(sourceID)
+		}
 		if fromLabel == "" && sourceID != "" {
 			fromLabel = a.resolveDisplay(sourceID)
 		}
@@ -225,7 +229,7 @@ func (a *App) cmdChannel(args []string) error {
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
 				continue
 			}
-			receipt, err := (delivery.Dispatcher{Registry: a.registry()}).DeliverWithOptions(ctx, surf, sess, payload, "", surface.SendOptions{SourceSessionID: sourceID})
+			receipt, err := sender.DeliverWithOptions(ctx, surf, sess, payload, "", surface.SendOptions{SourceSessionID: sourceID})
 			if err != nil {
 				failed++
 				fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
