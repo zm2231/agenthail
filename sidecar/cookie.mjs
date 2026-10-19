@@ -7,7 +7,7 @@ import { getCookies, toCookieHeader } from "@steipete/sweet-cookie";
 const url = process.argv[2] || "https://claude.ai/";
 
 try {
-  const opts = { url };
+  const opts = { url, browsers: ["chrome"] };
   const profile = process.env.AGENTHAIL_CHROME_PROFILE;
   if (profile) opts.profile = profile;
   const r = await getCookies(opts);
