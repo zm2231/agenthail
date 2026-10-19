@@ -56,7 +56,7 @@ func TestClaudeOpenSessionsFollowTheSessionRecord(t *testing.T) {
 	claude := NewClaude(nil, home)
 	pid := os.Getpid()
 	session := surface.Session{ID: "conversation-1", PID: pid}
-	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "busy", "procStart": testProcessStart(t)}
+	record := map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "busy", "procStart": testProcessStart(t), "version": "2.1.303"}
 	writePeerRecord(t, home, pid, record)
 	if open := claude.OpenSessions(context.Background(), []surface.Session{session, {ID: "none"}}); !open["conversation-1"] || len(open) != 1 {
 		t.Fatalf("live record open=%v, want only conversation-1", open)
