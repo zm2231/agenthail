@@ -52,7 +52,11 @@ func New(t testing.TB, home string) *Fixture {
 			t.Fatal(err)
 		}
 	}
-	t.Cleanup(func() { f.Kill() })
+	t.Cleanup(func() {
+		if left := f.Kill(); len(left) > 0 {
+			t.Errorf("processes for %s outlived the test: %v", f.Home, left)
+		}
+	})
 	return f
 }
 
@@ -143,19 +147,96 @@ func (f *Fixture) KillHost(t testing.TB) {
 	WaitFor(t, "the host to exit", func() bool { return !Alive(hello.PID) })
 }
 
-// Kill stops the host and every fake CLI it started.
-func (f *Fixture) Kill() {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	client := claudehost.NewClient(f.Home)
-	if listing, err := client.List(ctx); err == nil {
-		for _, session := range listing.Sessions {
-			_ = syscall.Kill(session.PID, syscall.SIGKILL)
+// Kill stops every host serving this home and every fake CLI started for it,
+// whether or not a host still answers, since hosts and CLIs run in their own
+// sessions and nothing else stops them. It waits for them to exit and returns
+// any that did not.
+func (f *Fixture) Kill() []int {
+	pids := append(f.HostPIDs(), f.cliPIDs()...)
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+	var left []int
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(25 * time.Millisecond) {
+		left = left[:0]
+		for _, pid := range pids {
+			if f.owns(pid) {
+				left = append(left, pid)
+			}
+		}
+		if len(left) == 0 || time.Now().After(deadline) {
+			break
 		}
 	}
-	if hello, err := client.Hello(ctx); err == nil {
-		_ = syscall.Kill(hello.PID, syscall.SIGKILL)
+	for _, pid := range f.cliPIDs() {
+		if !f.owns(pid) {
+			_ = os.Remove(filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock"))
+		}
 	}
+	return left
+}
+
+// HostPIDs are the running host processes serving this home.
+func (f *Fixture) HostPIDs() []int {
+	var pids []int
+	for pid, command := range processes() {
+		if f.isHost(command) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+func (f *Fixture) isHost(command string) bool {
+	return strings.Contains(command, "host.mjs") && strings.Contains(command, "--socket "+claudehost.SocketPath(f.Home))
+}
+
+// cliPIDs are the fake CLIs started for this home, from the spawn log they
+// write when they start.
+func (f *Fixture) cliPIDs() []int {
+	data, err := os.ReadFile(filepath.Join(f.ClaudeDir, "spawns.jsonl"))
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var spawn struct {
+			PID int `json:"pid"`
+		}
+		if json.Unmarshal([]byte(line), &spawn) == nil && spawn.PID > 0 {
+			pids = append(pids, spawn.PID)
+		}
+	}
+	return pids
+}
+
+// owns reports whether pid is still a live host or fake CLI, so a reused pid
+// is never mistaken for one.
+func (f *Fixture) owns(pid int) bool {
+	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	if err != nil {
+		return false
+	}
+	command := strings.TrimSpace(string(output))
+	return f.isHost(command) || strings.Contains(command, "fake-claude.mjs")
+}
+
+func processes() map[int]string {
+	output, err := exec.Command("ps", "-axo", "pid=,command=").Output()
+	if err != nil {
+		return nil
+	}
+	out := map[int]string{}
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if pid, err := strconv.Atoi(fields[0]); err == nil {
+			out[pid] = strings.Join(fields[1:], " ")
+		}
+	}
+	return out
 }
 
 func WaitFor(t testing.TB, what string, done func() bool) {

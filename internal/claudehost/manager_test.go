@@ -118,6 +118,9 @@ func TestDaemonsEnsuringAtOnceShareOneHost(t *testing.T) {
 	if len(seen) != 1 {
 		t.Fatalf("hosts = %v, want one", seen)
 	}
+	if running := f.HostPIDs(); len(running) != 1 {
+		t.Fatalf("host processes = %v, want one", running)
+	}
 	if starts := strings.Count(hostLog(t, f.Home), "listening"); starts != 1 {
 		t.Fatalf("host started %d times", starts)
 	}

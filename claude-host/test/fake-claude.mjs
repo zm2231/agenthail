@@ -85,6 +85,9 @@ if (process.env.FAKE_CLAUDE_RECORD) {
     }
   };
   process.on('exit', cleanup);
+  // The socket is named by this process's pid, so one already there was left
+  // by an earlier process with the same pid that was killed.
+  fs.rmSync(socket, { force: true });
   net
     .createServer((conn) => {
       readline.createInterface({ input: conn }).on('line', (line) => {

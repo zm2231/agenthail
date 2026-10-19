@@ -146,10 +146,7 @@ func (f *Fixture) RemoveRecord() {
 // resumed records then name.
 func (f *Fixture) Listen() {
 	f.t.Helper()
-	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
-		f.t.Fatal(err)
-	}
-	path := filepath.Join("/tmp/cc-socks", fmt.Sprint(f.PID)+".sock")
+	path := ClaimSocket(f.t, f.PID)
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		f.t.Fatal(err)
@@ -157,6 +154,29 @@ func (f *Fixture) Listen() {
 	f.t.Cleanup(func() { _ = listener.Close() })
 	f.socket = path
 	f.write("resume-socket", path)
+}
+
+// ClaimSocket returns the messaging socket path Claude uses for pid, which
+// the test owns. Claude names the socket by its pid, so a file there that
+// nothing answers was left by an earlier process with the same pid and is
+// removed; one that answers is a live socket the test did not close.
+func ClaimSocket(t testing.TB, pid int) string {
+	t.Helper()
+	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("/tmp/cc-socks", fmt.Sprint(pid)+".sock")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return path
+	}
+	if conn, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		conn.Close()
+		t.Fatalf("a live socket already serves %s", path)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // ResumeBridge sets the Remote Control id the resumed process registers.
