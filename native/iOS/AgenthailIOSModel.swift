@@ -65,6 +65,7 @@ final class AgenthailIOSModel: ObservableObject {
     @Published var creationWarning: String?
     @Published var pendingControls: Set<String> = []
     @Published private(set) var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents: [String: [SessionState]] = [:]
 
     var deliveryProblems: [DeliveryProblem] { snapshot?.deliveryProblems ?? [] }
 
@@ -104,6 +105,19 @@ final class AgenthailIOSModel: ObservableObject {
 
     func clearTurnSettings(for sessionID: String) {
         turnSettingsDrafts.removeValue(forKey: sessionID)
+    }
+
+    /// Fetches every direct subagent of a session that reports any, so the
+    /// subagents the session list only counts can be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard (session.subagents?.count ?? 0) > 0, let api else { return }
+        if let loaded = try? await api.subagents(of: session.id), !Task.isCancelled {
+            fetchedSubagents[session.id] = loaded
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: snapshot?.sessions ?? [], fetched: fetchedSubagents[sessionID] ?? [])
     }
 
     func queuedInstructions() async throws -> [QueueState] {

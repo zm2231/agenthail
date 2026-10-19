@@ -210,6 +210,19 @@ struct SessionFamily: Identifiable, Equatable {
     }
 }
 
+/// Refetches a session's subagents when it changes or its subagent count does.
+struct SubagentFetchKey: Hashable {
+    let sessionID: String
+    let count: Int
+    let working: Int
+
+    init(_ session: SessionState) {
+        sessionID = session.id
+        count = session.subagents?.count ?? 0
+        working = session.subagents?.working ?? 0
+    }
+}
+
 enum SessionFamilies {
     static func build(_ sessions: [SessionState]) -> [SessionFamily] {
         let ids = Set(sessions.map(\.id))
@@ -242,6 +255,14 @@ enum SessionFamilies {
                 workingSubagents: members.filter { $0.session.isWorking }.count + observed.working
             )
         }
+    }
+
+    /// The direct subagents of a session: the fetched page, with any row the
+    /// live session list holds taking the place of its fetched copy.
+    static func children(of parentID: String, listed: [SessionState], fetched: [SessionState]) -> [SessionState] {
+        let live = listed.filter { $0.subagent?.parentId == parentID }
+        let liveIDs = Set(live.map(\.id))
+        return fetched.filter { $0.subagent?.parentId == parentID && !liveIDs.contains($0.id) } + live
     }
 
     static func subagentSummary(_ family: SessionFamily) -> String {
@@ -530,6 +551,7 @@ struct DashboardSnapshot: Decodable {
     var surfaces: [SurfaceState]
     var sessions: [SessionState]
     var totalSessions: Int
+    var nextCursor: String? = nil
     let queue: [QueueState]
     let channels: [ChannelState]
     let relays: [RelayState]

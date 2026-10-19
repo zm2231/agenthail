@@ -46,6 +46,7 @@ final class AgenthailModel: ObservableObject {
     @Published var sessionRefinement = SessionRefinement()
     @Published private(set) var localSends: [String: [LocalSend]] = [:]
     @Published private var turnSettingsDrafts: [String: TurnSettings] = [:]
+    @Published private(set) var fetchedSubagents: [String: [SessionState]] = [:]
 
     private(set) var api: AgenthailAPI?
     let actionKeys = ActionRetryKeys()
@@ -159,6 +160,19 @@ final class AgenthailModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
+    }
+
+    /// Fetches every direct subagent of a session that reports any, so the
+    /// subagents the session list only counts can be shown and opened.
+    func loadSubagents(of session: SessionState) async {
+        guard (session.subagents?.count ?? 0) > 0, let api else { return }
+        if let loaded = try? await api.subagents(of: session.id), !Task.isCancelled {
+            fetchedSubagents[session.id] = loaded
+        }
+    }
+
+    func subagents(of sessionID: String) -> [SessionState] {
+        SessionFamilies.children(of: sessionID, listed: knownSessions, fetched: fetchedSubagents[sessionID] ?? [])
     }
 
     @discardableResult
@@ -395,6 +409,11 @@ final class AgenthailModel: ObservableObject {
     func openSearchResult(_ session: SessionState) {
         pin(session)
         mainPane.select(session.id)
+    }
+
+    func openSubagent(_ session: SessionState, in pane: SessionPane) {
+        pin(session)
+        pane.select(session.id)
     }
 
     private func pin(_ session: SessionState) {

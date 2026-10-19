@@ -8,7 +8,7 @@ struct SubagentsSection: View {
     var body: some View {
         let sessions = model.knownSessions
         let parent = session.subagent.flatMap { identity in sessions.first { $0.id == identity.parentId } }
-        let children = SessionTree.newestFirst(sessions.filter { $0.subagent?.parentId == session.id })
+        let children = SessionTree.newestFirst(model.subagents(of: session.id))
         let observed = pane.detail?.session.id == session.id ? pane.detail?.claudeSubagents ?? [] : []
         if parent != nil || !children.isEmpty || !observed.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
@@ -25,7 +25,7 @@ struct SubagentsSection: View {
                 }
                 ForEach(children) { child in
                     Button {
-                        pane.select(child.id)
+                        model.openSubagent(child, in: pane)
                     } label: {
                         HStack(spacing: 8) {
                             StatusIndicator(session: child, needsYou: false)
