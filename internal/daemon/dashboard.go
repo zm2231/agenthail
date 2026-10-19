@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1381,8 +1382,9 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, membersErr.Error(), http.StatusBadRequest)
 			return
 		}
+		members = slices.DeleteFunc(members, func(member string) bool { return request.SourceSessionID != "" && member == request.SourceSessionID })
 		if len(members) == 0 {
-			http.Error(w, "channel has no members", http.StatusBadRequest)
+			http.Error(w, "channel has no members other than the sender", http.StatusBadRequest)
 			return
 		}
 		operationCtx, cancel := context.WithTimeout(r.Context(), surfaceOperationTimeout)
