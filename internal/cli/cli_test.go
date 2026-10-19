@@ -1307,12 +1307,15 @@ func TestQueueStatusLabelShowsEvidenceBesideADifferentStatus(t *testing.T) {
 		want     string
 	}{
 		{"pending", surface.EvidenceQueued, false, "pending"},
+		{"inflight", surface.EvidenceQueued, false, "inflight"},
 		{"inflight", surface.EvidenceUnknown, true, "inflight (unknown)"},
 		{"delivered", surface.EvidenceDelivered, false, "delivered"},
 		{"delivered", surface.EvidenceTransportAccepted, false, "delivered (transport accepted)"},
 		{"delivered", surface.EvidenceQueued, true, "delivered (remote queued)"},
+		{"dead", surface.EvidenceFailed, false, "dead"},
 		{"dead", surface.EvidenceUnknown, false, "dead (unknown)"},
 		{"canceled", surface.EvidenceCanceled, false, "canceled"},
+		{"canceled", surface.EvidenceQueued, true, "canceled"},
 		{"canceled", "", false, "canceled"},
 	} {
 		got := queueStatusLabel(registry.QueueRow{Status: tc.status, Evidence: tc.evidence}, tc.remote)

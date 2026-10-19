@@ -1098,14 +1098,15 @@ func queuedTime(value string) time.Time {
 }
 
 // queueStatusLabel names the row's status, with its delivery evidence beside
-// it when the evidence says more. A delivered row to a paired host's session
-// carries the host's own receipt, so "delivered (remote queued)" means the
-// host accepted it into its queue.
+// it when the evidence says more than the status. A canceled row's evidence
+// only records how far it got before the cancel. A delivered row to a paired
+// host's session carries the host's own receipt, so "delivered (remote
+// queued)" means the host accepted it into its queue.
 func queueStatusLabel(row registry.QueueRow, remote bool) string {
-	evidence := string(row.Evidence)
-	if evidence == "" || evidence == row.Status || (row.Status == "pending" && row.Evidence == surface.EvidenceQueued) {
+	if row.Evidence == "" || row.Status == "canceled" || row.Evidence == registry.QueueStatusEvidence(row.Status) {
 		return row.Status
 	}
+	evidence := string(row.Evidence)
 	evidence = strings.ReplaceAll(evidence, "_", " ")
 	if remote && row.Status == "delivered" {
 		evidence = "remote " + evidence
