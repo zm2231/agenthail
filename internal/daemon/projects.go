@@ -121,7 +121,13 @@ func validCatalogScope(scope string) bool {
 }
 
 func catalogScopeMatches(scope string, row dashboardSession) bool {
-	return ScopeMatches(scope, row.Status == surface.StatusBusy, row.Current, row.Recent, row.Archived)
+	return ScopeMatches(scope, SessionWorking(row.Status, row.Subagents), row.Current, row.Recent, row.Archived)
+}
+
+// SessionWorking reports whether a session or one of its observed subagents is
+// working.
+func SessionWorking(status surface.SessionStatus, subagents *surface.SubagentRollup) bool {
+	return status == surface.StatusBusy || subagents != nil && subagents.Working > 0
 }
 
 // ScopeMatches is the one definition of the session scopes, applied to the

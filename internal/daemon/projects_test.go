@@ -226,9 +226,10 @@ func TestScopeCountsCountFamiliesNotSubagents(t *testing.T) {
 		{ID: "child", Status: surface.StatusBusy, Current: true, Recent: true, Subagent: &surface.Subagent{ParentID: "root", RootID: "root"}},
 		{ID: "orphan", Status: surface.StatusIdle, Recent: true, Subagent: &surface.Subagent{ParentID: "gone", RootID: "gone"}},
 		{ID: "hidden", Status: surface.StatusIdle, Recent: true, Archived: true},
+		{ID: "lead", Status: surface.StatusIdle, Current: true, Recent: true, Subagents: &surface.SubagentRollup{Count: 2, Working: 1}},
 	}
 	counts := catalogScopeCounts(rows)
-	want := map[string]int{"running": 1, "current": 1, "recent": 2, "all": 2, "archived": 1}
+	want := map[string]int{"running": 2, "current": 2, "recent": 3, "all": 3, "archived": 1}
 	for scope, count := range want {
 		if counts[scope] != count {
 			t.Fatalf("counts=%v want=%v", counts, want)

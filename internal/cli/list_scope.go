@@ -19,10 +19,11 @@ type listProject struct {
 }
 
 type listCatalogView struct {
-	Project  *listProject `json:"project,omitempty"`
-	Current  bool         `json:"current"`
-	Recent   bool         `json:"recent"`
-	Archived bool         `json:"archived,omitempty"`
+	Project   *listProject            `json:"project,omitempty"`
+	Subagents *surface.SubagentRollup `json:"subagents,omitempty"`
+	Current   bool                    `json:"current"`
+	Recent    bool                    `json:"recent"`
+	Archived  bool                    `json:"archived,omitempty"`
 }
 
 func catalogListView(record registry.CatalogSessionState) listCatalogView {
@@ -72,7 +73,7 @@ func filterListScope(sessions []surface.Session, views map[string]listCatalogVie
 		if selector != "" && !listProjectMatches(view.Project, selector) {
 			continue
 		}
-		if daemon.ScopeMatches(scope, session.Status == surface.StatusBusy, view.Current, view.Recent, view.Archived) {
+		if daemon.ScopeMatches(scope, daemon.SessionWorking(session.Status, view.Subagents), view.Current, view.Recent, view.Archived) {
 			matched[family(session)] = true
 		}
 	}

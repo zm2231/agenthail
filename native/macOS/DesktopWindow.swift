@@ -156,7 +156,12 @@ struct SessionSidebar: View {
                         let shown = expanded ? project : project.limited(to: SessionTree.collapsedSessionLimit, keeping: pane.selectedSessionID)
                         let single = project.checkouts.count == 1 ? project.checkouts.first : nil
                         VStack(alignment: .leading, spacing: 1) {
-                            ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false)
+                            ProjectHeaderView(name: project.name, branch: single?.branchLabel, dirty: single?.dirty ?? false, archived: project.archived)
+                                .contextMenu {
+                                    if let identity = project.identity {
+                                        Button(project.archived ? "Unarchive Project" : "Archive Project") { model.setProjectArchived(identity.id, !project.archived) }
+                                    }
+                                }
                             ForEach(shown.checkouts) { checkout in
                                 if single == nil {
                                     CheckoutRowView(checkout: checkout)
@@ -178,7 +183,7 @@ struct SessionSidebar: View {
                         }
                     }
                     if tree.projects.isEmpty {
-                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : "No sessions yet.")
+                        Text(model.sessionRefinement.isActive ? "No sessions match these filters." : model.sessionFilter == .running ? "Nothing is running." : model.sessionFilter == .archived ? "Nothing is archived." : "No sessions yet.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(DesktopPalette.text2)
                             .padding(.horizontal, 8)
@@ -355,6 +360,11 @@ extension SessionSidebar {
         .contextMenu {
             Button("Open in New Window") { openWindow(id: "session", value: session.id) }
             Button("Rename…") { pane.renamingSession = session }
+            Divider()
+            Button(session.archived == true ? "Unarchive" : "Archive") { model.setArchived(sessionID: session.id, session.archived != true) }
+            if session.project == nil, session.remoteHostName == nil, let cwd = session.cwd, !cwd.isEmpty {
+                Button("Add Folder as Project") { model.addProject(path: cwd) }
+            }
         }
     }
 }
@@ -376,6 +386,7 @@ struct ProjectHeaderView: View {
     let name: String
     var branch: String? = nil
     var dirty = false
+    var archived = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -383,7 +394,7 @@ struct ProjectHeaderView: View {
                 .font(.system(size: 10.5, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
-                .background(DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
+                .background(archived ? DesktopPalette.text2 : DesktopPalette.accent, in: RoundedRectangle(cornerRadius: 5))
                 .accessibilityHidden(true)
             Text(name)
                 .font(.system(size: 12.5, weight: .semibold))

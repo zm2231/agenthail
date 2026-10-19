@@ -130,7 +130,7 @@ func catalogPageSQL(request CatalogPageRequest) (string, string, []any) {
 	recentCutoff := request.Now.Add(-CatalogRecentWindow).UnixMilli()
 	switch request.Scope {
 	case "running":
-		conditions = append(conditions, "NOT "+archived, "s.status=?")
+		conditions = append(conditions, "NOT "+archived, "(s.status=? OR COALESCE(json_extract(cs.projection_fingerprint,'$.subagents.working'),0)>0)")
 		args = append(args, string(surface.StatusBusy))
 	case "current":
 		conditions = append(conditions, "NOT "+archived, catalogCurrentSQL)
