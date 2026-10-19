@@ -92,4 +92,9 @@ func TestSessionFromAnotherAgenthailIsRefusedWithRemedies(t *testing.T) {
 			t.Fatalf("whoami reason %q does not contain %q", got.Reason, part)
 		}
 	}
+
+	t.Setenv("CODEX_THREAD_ID", "inherited-thread")
+	if err := app.Run([]string{"send", "worker", "hello"}); err == nil || !strings.Contains(err.Error(), "unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID to send") {
+		t.Fatalf("send error %v does not name every caller variable still set", err)
+	}
 }
