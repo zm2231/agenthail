@@ -1475,11 +1475,11 @@ select {
 .health-state.unavailable {
   color: var(--bad);
 }
-.health-state.not_configured,
-.surface-health-icon.not_configured {
+.health-state.signin_off,
+.surface-health-icon.signin_off {
   color: var(--quiet);
 }
-.connection-line.not_configured i {
+.connection-line.signin_off i {
   background: var(--quiet);
 }
 .signin-card {
@@ -1499,6 +1499,12 @@ select {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+.signin-consumer .signin-resolved {
+  color: var(--ink);
+}
+.signin-consumer .signin-problem {
+  color: var(--bad);
 }
 .signin-consumer .health-state {
   margin-left: 10px;

@@ -3,6 +3,7 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,17 +81,17 @@ type switchableSignin struct{ source signin.Source }
 
 func (s *switchableSignin) ResolveSignin(signin.Target) (signin.Source, error) { return s.source, nil }
 
-func TestNotionWithoutSigninProfileReadsNoCookiesAndSaysHowToSetUp(t *testing.T) {
+func TestNotionWithSigninOffReadsNoCookiesAndSaysHowToTurnItOn(t *testing.T) {
 	fixture := newCookieFixture(t)
 	notion := NewNotion(nil, "", "")
 	notion.cookieBridge = fixture.bridge
 
 	_, err := notion.List(context.Background())
-	if !signin.IsNotConfigured(err) || !strings.Contains(err.Error(), "Notion: choose a browser sign-in profile") || !strings.Contains(err.Error(), "agenthail signin use notion") || !strings.Contains(err.Error(), "Settings > Browser Sign-in") {
+	if !signin.IsOff(err) || !strings.Contains(err.Error(), "Notion: browser sign-in is turned off") || !strings.Contains(err.Error(), "agenthail signin use notion auto") || !strings.Contains(err.Error(), "Settings > Browser Sign-in") {
 		t.Fatalf("list err=%v", err)
 	}
 	_, err = notion.Send(context.Background(), &surface.Session{ID: "thread-1"}, "hello")
-	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninNotConfigured || surface.IsDeliveryOutcomeUnknown(err) {
+	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninOff || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("send err=%v", err)
 	}
 	if lines := readLines(t, fixture.bridgeLog); lines != nil {
@@ -140,14 +141,35 @@ func TestNotionDetectsContextThroughTheBoundProfile(t *testing.T) {
 	}
 }
 
-func TestClaudeRemoteControlWithoutSigninProfileFailsBeforePosting(t *testing.T) {
+type unreadableSignin struct{}
+
+func (unreadableSignin) ResolveSignin(target signin.Target) (signin.Source, error) {
+	return signin.Source{}, signin.ProblemError{Consumer: target.Consumer, Err: errors.New("permission denied reading Safari data at /fixture/Cookies.binarycookies")}
+}
+
+func TestClaudeRemoteControlWithAnUnreadableProfileFailsBeforePosting(t *testing.T) {
+	posted := false
+	claude := NewClaudeWithRequest(unreadableSignin{}, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+		posted = true
+		return 200, "{}", nil
+	})
+	_, err := claude.postMessage(context.Background(), &surface.Session{ID: "conversation", Bridge: "session_fixture"}, "hello")
+	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninUnreadable || !strings.Contains(err.Error(), "permission denied reading Safari data") || surface.IsDeliveryOutcomeUnknown(err) {
+		t.Fatalf("err=%v", err)
+	}
+	if posted {
+		t.Fatal("posted to claude.ai without a readable sign-in profile")
+	}
+}
+
+func TestClaudeRemoteControlWithSigninOffFailsBeforePosting(t *testing.T) {
 	posted := false
 	claude := NewClaudeWithRequest(nil, t.TempDir(), func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		posted = true
 		return 200, "{}", nil
 	})
 	_, err := claude.postMessage(context.Background(), &surface.Session{ID: "conversation", Bridge: "session_fixture"}, "hello")
-	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninNotConfigured || !strings.Contains(err.Error(), "agenthail signin use claude") {
+	if surface.DeliveryTerminalReason(err) != surface.DeliverySigninOff || !strings.Contains(err.Error(), "agenthail signin use claude auto") {
 		t.Fatalf("err=%v", err)
 	}
 	if posted {
