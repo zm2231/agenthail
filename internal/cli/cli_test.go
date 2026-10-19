@@ -1169,6 +1169,32 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	}
 }
 
+func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	app.catalogDaemonRunning = func() bool { return true }
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-asking"
+	mirror := func(projection string) {
+		t.Helper()
+		if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-asking", Name: "remote-asking", Surface: surface.KindCodex, Status: surface.StatusBusy}, EntityID: entity, Projection: json.RawMessage(projection), ObservedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mirror(`{"id":"` + entity + `","status":"busy","waitingOn":{"kind":"question","id":"thread:question","since":"2026-10-19T08:00:00Z"}}`)
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || !strings.Contains(listed, "wait") {
+		t.Fatalf("list while the host's session waits=%s err=%v", listed, err)
+	}
+	mirror(`{"id":"` + entity + `","status":"busy"}`)
+	listed, err = captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || strings.Contains(listed, "wait") {
+		t.Fatalf("list after the host's session was answered=%s err=%v", listed, err)
+	}
+}
+
 func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
 	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_synthetic"}
 	asking := surface.Session{ID: "asking", Name: "asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, WaitingOn: waiting, LastActive: time.Now()}
