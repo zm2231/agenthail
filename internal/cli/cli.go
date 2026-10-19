@@ -1610,6 +1610,9 @@ func (a *App) cmdSend(args []string) error {
 		var outcome *coordinator.Outcome
 		if outcome, err = deliver(ctx, message, options); err == nil {
 			if outcome.Started {
+				if !coord.Names(target) {
+					return printCoordinatorStart(outcome, outcome.Session.ID, jsonOut)
+				}
 				return printCoordinatorStart(outcome, target, jsonOut)
 			}
 			receipt = outcome.Receipt

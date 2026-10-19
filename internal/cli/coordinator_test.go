@@ -241,3 +241,18 @@ func TestQueuedSendToAReplacedCoordinatorConversationNamesTheCurrentOne(t *testi
 		t.Fatalf("output=%q err=%v queued=%d", output, err, r.QueueCount(freshConversation))
 	}
 }
+
+func TestStartFromAReplacedCoordinatorConversationNamesTheNewOne(t *testing.T) {
+	app, r, fixture := goneCoordinatorApp(t)
+	const replacement = "5f4e3d2c-1b0a-4f9e-8d7c-6b5a4f3e2d1c"
+	if err := r.RegisterSession(surface.Session{ID: replacement, Bridge: "session_replacement", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: exitedPID, Status: surface.StatusIdle, Cwd: fixture.Home}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.HandOverCoordinator("lead", goneConversation, replacement); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", goneConversation, "task"}) })
+	if err != nil || fixture.Starts() != 1 || !strings.Contains(output, "agenthail last "+freshConversation) {
+		t.Fatalf("output=%q err=%v starts=%d", output, err, fixture.Starts())
+	}
+}
