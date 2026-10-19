@@ -18,6 +18,15 @@ import (
 
 type apiDeviceTokenContextKey struct{}
 
+type apiHostPrincipalContextKey struct{}
+
+// catalogMirror reports whether the request comes from a paired host, which
+// mirrors every catalog row rather than the session list.
+func catalogMirror(ctx context.Context) bool {
+	mirror, _ := ctx.Value(apiHostPrincipalContextKey{}).(bool)
+	return mirror
+}
+
 const (
 	apiProtocolVersion   = 1
 	pairingLifetime      = 5 * time.Minute
@@ -75,6 +84,7 @@ func (d *Daemon) apiV1Guard(dashboard *dashboardServer, scope string, next http.
 				bearerAuthorized = true
 				ctx := context.WithValue(r.Context(), apiDeviceTokenContextKey{}, token)
 				ctx = context.WithValue(ctx, actionPrincipalContextKey{}, device.ID)
+				ctx = context.WithValue(ctx, apiHostPrincipalContextKey{}, device.IsHost())
 				r = r.WithContext(ctx)
 			}
 		}

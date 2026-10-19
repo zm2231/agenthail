@@ -1068,6 +1068,9 @@ func sessStat(s surface.Session, queued int) string {
 	if queued > 0 {
 		return "queue"
 	}
+	if s.Status == surface.StatusOffline {
+		return "off"
+	}
 	if s.Status == "idle" || s.Status == "shell" || s.Status == "notLoaded" || s.Status == surface.StatusIdle {
 		return "idle"
 	}

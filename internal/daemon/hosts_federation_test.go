@@ -242,7 +242,7 @@ func testRoots(server *httptest.Server) *x509.CertPool {
 
 func (n *federationNode) invite(t *testing.T) string {
 	t.Helper()
-	pairing, err := n.reg.CreateDevicePairing("peer", []string{"read", "control"}, time.Minute)
+	pairing, err := n.reg.CreateDevicePairing("peer", []string{"read", "control", registry.HostScope}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +598,7 @@ func TestFederationQueueCountsCombineHostAndHeldWork(t *testing.T) {
 	if err := remote.reg.QueueMessage("remote-a", "queued on forge"); err != nil {
 		t.Fatal(err)
 	}
-	remote.daemon.publishCatalogQueueCounts()
+	remote.daemon.publishCatalogPresence()
 	awaitFederation(t, "remote queue mirrored", func() bool { return mirroredQueueCount(t, local, qualified) == 1 })
 	remote.stop()
 	awaitFederation(t, "rows marked unavailable", func() bool {

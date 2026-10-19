@@ -18,8 +18,11 @@ it paired with.
 Pairing reuses the device-token model the phone uses.
 
 1. On the remote: `agenthail hosts invite` creates a five-minute, single-use
-   pairing link with the `read` and `control` scopes. It needs remote access
-   (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   pairing link with the `read`, `control` and `host` scopes. It needs remote
+   access (Tailscale Serve), which is what gives the link an HTTPS endpoint.
+   The `host` scope gives the catalog stream every row, so the pairing mirrors
+   subagents the session list hides; a device token without it streams the
+   session list. A host paired without it must be paired again.
 2. On the Mac: `agenthail hosts add '<link>' [--address <tailnet-ip>]`. The
    daemon redeems the secret, receives an `ahd_` device token, checks the
    protocol version and host id, and stores the pairing in `hosts`.
@@ -153,7 +156,7 @@ Every place that treats `host_id = ''` as "this daemon's session":
 - `Dispatcher.RegisterReached`: a send, queued send or compact whose provider
   reports the session under an id a paired host owns ends as an unknown
   outcome naming that host, recorded only under the addressed session.
-- `dashboardState` and `publishCatalogQueueCounts` render mirrored rows from
+- `dashboardState` and `publishCatalogPresence` render mirrored rows from
   their stored projection; `RefreshHostQueueCounts` keeps its queue count.
 - `registerRecentClaudePeers` never advertises a mirrored session as a local
   Claude peer.

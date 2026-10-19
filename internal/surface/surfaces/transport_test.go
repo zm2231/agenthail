@@ -74,9 +74,11 @@ func TestClaudeSendClassifiesDeliveryOutcome(t *testing.T) {
 	}
 }
 
-func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
+func TestClaudeSendWaitsForRecordedIdle(t *testing.T) {
 	calls := 0
-	home, pid := liveBridgeProcess(t)
+	fixture := claudetest.New(t)
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
+	home, pid := fixture.Home, fixture.PID
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		calls++
 		return 200, `{}`, nil
@@ -91,6 +93,7 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 		t.Fatalf("recent result=%+v calls=%d err=%v", result, calls, err)
 	}
 
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
 	completed := writeTranscript(t, `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
@@ -101,15 +104,17 @@ func TestClaudeSendUsesTranscriptReadiness(t *testing.T) {
 		t.Fatalf("completed result=%+v calls=%d err=%v", result, calls, err)
 	}
 
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "busy", "", time.Time{})
 	active := writeTranscript(t, `{"type":"user","uuid":"u2","message":{"content":"running"}}`)
 	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusIdle, Transcript: active}, "too soon")
 	if err != nil || result.Accepted || calls != 1 {
 		t.Fatalf("active result=%+v calls=%d err=%v", result, calls, err)
 	}
 
-	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusIdle}, "unproven")
-	if err != nil || result.Accepted || calls != 1 {
-		t.Fatalf("missing transcript result=%+v calls=%d err=%v", result, calls, err)
+	fixture.RecordStatus("conversation-test", fixture.Home, "session_test", "idle", "", time.Time{})
+	result, err = claude.Send(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Status: surface.StatusBusy}, "recorded idle")
+	if err != nil || !result.Accepted || calls != 2 {
+		t.Fatalf("recorded idle without transcript result=%+v calls=%d err=%v", result, calls, err)
 	}
 }
 
@@ -187,7 +192,10 @@ func TestClaudeSendHumanTurnUsesBridgeOnlySessionID(t *testing.T) {
 }
 
 func TestClaudeSendHumanTurnRetainsIdleGate(t *testing.T) {
-	home, pid := liveHumanTurnProcess(t)
+	fixture := claudetest.New(t)
+	fixture.Listen()
+	fixture.RecordStatus("conversation-bridge", fixture.Home, "session_bridge", "busy", "", time.Time{})
+	home, pid := fixture.Home, fixture.PID
 	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		t.Fatal("human turn bypassed the active-turn gate")
 		return 0, "", nil

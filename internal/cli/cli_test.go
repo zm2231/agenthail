@@ -1166,6 +1166,48 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	}
 }
 
+func TestListAllReportsSessionsOutsideTheCatalogAsOffline(t *testing.T) {
+	fake := &cliSurface{kind: surface.KindClaude}
+	app, store := cliFixture(t, fake)
+	app.catalogDaemonRunning = func() bool { return true }
+	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	live := surface.Session{ID: "catalog-live", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "live", Status: surface.StatusBusy, LastActive: observedAt}
+	if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{Session: live, HostProject: json.RawMessage(`{}`), Checkout: json.RawMessage(`{}`), ObservedAt: observedAt, ProjectionFingerprint: live.ID}, registry.CatalogEvent{DedupeKey: "session:" + live.ID, Type: "session.upserted", EntityID: live.ID, Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	exited := surface.Session{ID: "exited-busy", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "exited", Status: surface.StatusBusy, LastActive: observedAt.Add(-time.Hour)}
+	if err := store.RegisterSession(exited); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Sessions []surface.Session `json:"sessions"`
+	}
+	if err := json.Unmarshal([]byte(output), &document); err != nil {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	statuses := map[string]surface.SessionStatus{}
+	for _, session := range document.Sessions {
+		statuses[session.ID] = session.Status
+	}
+	if statuses["catalog-live"] != surface.StatusBusy || statuses["exited-busy"] != surface.StatusOffline {
+		t.Fatalf("statuses=%v, want live busy and exited offline", statuses)
+	}
+	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "exited") && !strings.Contains(line, " off ") {
+			t.Fatalf("exited row=%q, want STAT off", line)
+		}
+	}
+}
+
 func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
 	app.catalogDaemonRunning = func() bool { return true }

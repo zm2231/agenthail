@@ -423,7 +423,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 }
 
 // records returns the session records of Claude processes that are alive,
-// excluding Agenthail's own peer workers.
+// excluding the records Agenthail writes for its own peer workers and relays.
 func (c *Claude) records() ([]map[string]any, error) {
 	sessionsDir := filepath.Join(surface.ClaudeConfigDir(c.home), "sessions")
 	entries, err := os.ReadDir(sessionsDir)
@@ -443,10 +443,10 @@ func (c *Claude) records() ([]map[string]any, error) {
 			continue
 		}
 		var m map[string]any
-		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") == "peer-worker" {
+		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
 			continue
 		}
-		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeProcessAlive(int(pid)) {
+		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
 			continue
 		}
 		out = append(out, m)
@@ -510,8 +510,8 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 	return claudeProcess{session: sess, startedAt: startedAt}, true
 }
 
-// applyRecordStatus derives status and last activity from the peer record,
-// then lets readable transcript evidence override the peer status.
+// applyRecordStatus takes status and last activity from Claude's session
+// record. The transcript decides only when the record does not report status.
 func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, record map[string]any) {
 	if ts, ok := record["updatedAt"].(float64); ok && ts > 0 {
 		sess.LastActive = time.UnixMilli(int64(ts))
@@ -545,16 +545,9 @@ func (c *Claude) LocalStatus(ctx context.Context, session surface.Session) (surf
 	if session.PID <= 0 {
 		return session, fmt.Errorf("claude session %s has no peer process", session.ID)
 	}
-	raw, err := os.ReadFile(c.peerRecordPath(session.PID))
-	if err != nil {
-		return session, err
-	}
-	var record map[string]any
-	if err := json.Unmarshal(raw, &record); err != nil {
-		return session, err
-	}
-	if str(record, "sessionId") != session.ID {
-		return session, fmt.Errorf("claude peer record for pid %d belongs to another session", session.PID)
+	record, live := c.liveRecord(session)
+	if !live {
+		return session, fmt.Errorf("claude pid %d no longer runs session %s", session.PID, session.ID)
 	}
 	c.applyRecordStatus(ctx, &session, record)
 	return session, nil
@@ -573,15 +566,21 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	}
 }
 
+// claudePeerStatus reads a Claude session record's status. Claude writes
+// "shell" when its prompt is ready but a background shell is still running,
+// and "waiting" while the turn is blocked on the user.
 func claudePeerStatus(record map[string]any) surface.SessionStatus {
-	status := claudeStatus(surface.SessionStatus(str(record, "status")))
-	if status != surface.StatusIdle {
-		return status
+	switch str(record, "status") {
+	case "busy", "waiting":
+		return surface.StatusBusy
+	case "idle", "shell":
+	default:
+		return surface.StatusUnknown
 	}
 	features, _ := record["peerFeatures"].([]any)
 	for _, feature := range features {
 		if feature == "notify_idle" {
-			return status
+			return surface.StatusIdle
 		}
 	}
 	return surface.StatusUnknown
@@ -651,7 +650,11 @@ func (c *Claude) processByPID(ctx context.Context, target string) (*surface.Sess
 // process holds its conversation: then it is at rest, and a message resumes it.
 func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	if sess.PID <= 0 || claudeProcessAlive(sess.PID) {
-		return c.observe(ctx, sess)
+		observation, err := c.observe(ctx, sess)
+		if err == nil {
+			c.applyRecordObservation(sess, observation)
+		}
+		return observation, err
 	}
 	exited := *sess
 	exited.Status = surface.StatusOffline
@@ -661,6 +664,25 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 		observation.ActiveTurnID = ""
 	}
 	return observation, err
+}
+
+// applyRecordObservation makes the live process's own session record decide
+// busy or idle; the transcript still supplies turn and reply evidence, and
+// observe supplies what a waiting record waits on.
+func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surface.TurnObservation) {
+	record, live := c.liveRecord(*sess)
+	if !live {
+		return
+	}
+	status := claudePeerStatus(record)
+	if status == surface.StatusUnknown {
+		return
+	}
+	observation.Status = status
+	if status != surface.StatusBusy {
+		observation.ActiveTurnID = ""
+		observation.WaitingOn = nil
+	}
 }
 
 // observe reads the turn from the transcript and what it waits on from the
@@ -684,18 +706,8 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 // and "permission prompt" for a plan approval or a tool permission.
 // statusUpdatedAt is when it started waiting, so it names one question.
 func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
-	if sess.PID <= 0 {
-		return nil
-	}
-	raw, err := os.ReadFile(c.peerRecordPath(sess.PID))
-	if err != nil {
-		return nil
-	}
-	var record map[string]any
-	if json.Unmarshal(raw, &record) != nil || str(record, "status") != "waiting" {
-		return nil
-	}
-	if str(record, "sessionId") != sess.ID {
+	record, live := c.liveRecord(*sess)
+	if !live || str(record, "status") != "waiting" {
 		return nil
 	}
 	kind := surface.WaitingApproval

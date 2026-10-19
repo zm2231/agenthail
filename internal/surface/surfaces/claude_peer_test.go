@@ -60,11 +60,13 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err != nil || resolved.ID != "local-id" || resolved.Bridge != "session_bridge" {
 		t.Fatalf("conversation with a Remote Control attachment=%+v err=%v", resolved, err)
 	}
-	record["agenthail"] = "peer-worker"
-	write(record)
-	sessions, err = adapter.List(context.Background())
-	if err != nil || len(sessions) != 0 {
-		t.Fatalf("proxy rediscovered=%+v err=%v", sessions, err)
+	for _, role := range []string{"peer-worker", "peer-relay"} {
+		record["agenthail"] = role
+		write(record)
+		sessions, err = adapter.List(context.Background())
+		if err != nil || len(sessions) != 0 {
+			t.Fatalf("%s rediscovered=%+v err=%v", role, sessions, err)
+		}
 	}
 	delete(record, "agenthail")
 	delete(record, "bridgeSessionId")

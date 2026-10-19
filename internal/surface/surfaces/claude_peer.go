@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -21,7 +20,7 @@ import (
 func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	path := str(record, "messagingSocketPath")
 	pid, _ := record["pid"].(float64)
-	if pid <= 0 || !slices.Contains(claudeSocketPaths(int(pid)), path) || !claudeProcessAlive(int(pid)) {
+	if pid <= 0 || !slices.Contains(claudeSocketPaths(int(pid)), path) {
 		return ""
 	}
 	info, err := os.Lstat(path)
@@ -32,20 +31,8 @@ func (c *Claude) peerSocket(ctx context.Context, record map[string]any) string {
 	if !ok || stat.Uid != uint32(os.Getuid()) {
 		return ""
 	}
-	if started := str(record, "procStart"); isClockTicks(started) {
-		actual, err := procStartTicks(int(pid))
-		if err != nil || actual != started {
-			return ""
-		}
-	} else if started != "" {
-		processCtx, cancel := context.WithTimeout(ctx, 500000000)
-		defer cancel()
-		command := exec.CommandContext(processCtx, "ps", "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
-		command.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
-		actual, err := command.Output()
-		if err != nil || !sameClaudeProcessStart(str(record, "version"), started, string(actual)) {
-			return ""
-		}
+	if !claudeRecordLive(record) {
+		return ""
 	}
 	return path
 }
@@ -155,7 +142,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 			continue
 		}
 		candidate, present := c.peerRecord(process.session.PID)
-		if !present || str(candidate, "agenthail") == "peer-worker" {
+		if !present || str(candidate, "agenthail") != "" {
 			continue
 		}
 		if sender != nil {

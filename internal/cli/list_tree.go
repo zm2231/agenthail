@@ -12,7 +12,8 @@ type listRow struct {
 	depth   int
 }
 
-// The limit counts families, not threads.
+// The limit counts families, not threads. A subagent is listed only under its
+// parent, never as a root of its own.
 func listFamilies(sessions []surface.Session, limit int) []listRow {
 	byID := make(map[string]surface.Session, len(sessions))
 	for _, session := range sessions {
@@ -24,8 +25,11 @@ func listFamilies(sessions []surface.Session, limit int) []listRow {
 		if session.Subagent != nil {
 			if _, found := byID[session.Subagent.ParentID]; found && session.Subagent.ParentID != session.ID {
 				children[session.Subagent.ParentID] = append(children[session.Subagent.ParentID], session)
-				continue
 			}
+			continue
+		}
+		if session.Source == "subAgent" {
+			continue
 		}
 		roots = append(roots, session)
 	}

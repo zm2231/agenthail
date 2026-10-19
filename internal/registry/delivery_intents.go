@@ -74,21 +74,24 @@ type DeliveryIntent struct {
 }
 
 type DeliveryProblem struct {
-	DeliveryID      int64                `json:"deliveryId"`
-	SessionID       string               `json:"sessionId"`
-	SourceSessionID string               `json:"sourceSessionId"`
-	Message         string               `json:"message"`
-	Reason          string               `json:"reason"`
-	Status          DeliveryIntentStatus `json:"status"`
-	At              time.Time            `json:"at"`
+	DeliveryID      int64  `json:"deliveryId"`
+	SessionID       string `json:"sessionId"`
+	SourceSessionID string `json:"sourceSessionId"`
+	// AttentionSessionID is the session that needs a person because of this
+	// problem: the agent that sent the message, until it has been told.
+	AttentionSessionID string               `json:"attentionSessionId,omitempty"`
+	Message            string               `json:"message"`
+	Reason             string               `json:"reason"`
+	Status             DeliveryIntentStatus `json:"status"`
+	At                 time.Time            `json:"at"`
 }
 
 func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	rows, err := r.read.Query(`
-		SELECT id,target_session_id,sender_session_id,message,failure,status,updated_at
-		FROM delivery_intents
-		WHERE status=? AND COALESCE(dismissed_at,'')=''
-		ORDER BY updated_at DESC, id DESC
+		SELECT di.id,di.target_session_id,di.sender_session_id,di.message,di.failure,di.status,di.updated_at,COALESCE(mq.status,'')='delivered'
+		FROM delivery_intents di LEFT JOIN message_queue mq ON mq.id=di.notification_queue_id
+		WHERE di.status=? AND COALESCE(di.dismissed_at,'')=''
+		ORDER BY di.updated_at DESC, di.id DESC
 		LIMIT 50`, DeliveryIntentFailed)
 	if err != nil {
 		return nil, err
@@ -98,9 +101,11 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 	for rows.Next() {
 		var problem DeliveryProblem
 		var status, updatedAt string
-		if err := rows.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt); err != nil {
+		var notified bool
+		if err := rows.Scan(&problem.DeliveryID, &problem.SessionID, &problem.SourceSessionID, &problem.Message, &problem.Reason, &status, &updatedAt, &notified); err != nil {
 			return nil, err
 		}
+		problem.AttentionSessionID = deliveryAttentionSession(problem.SourceSessionID, notified)
 		problem.Message = boundedIntentMessage(problem.Message)
 		problem.Status = DeliveryIntentStatus(status)
 		problem.At, err = time.ParseInLocation("2006-01-02 15:04:05", updatedAt, time.UTC)
@@ -113,6 +118,16 @@ func (r *Registry) ListDeliveryProblems() ([]DeliveryProblem, error) {
 		return nil, err
 	}
 	return problems, nil
+}
+
+// deliveryAttentionSession flags the sender of a failed message, never its
+// target. A person's own send has no session to flag; it stays in the problem
+// list. An agent stops being flagged once its failure notice reached it.
+func deliveryAttentionSession(senderSessionID string, notified bool) string {
+	if senderSessionID == OperatorSessionID || notified {
+		return ""
+	}
+	return senderSessionID
 }
 
 func (r *Registry) DismissDeliveryProblem(id int64) (bool, error) {
@@ -533,7 +548,7 @@ func queueDeliveryFailureNotice(tx *sql.Tx, id int64) (int64, bool, error) {
 
 func appendDeliveryProblemEvent(tx *sql.Tx, intent *DeliveryIntent) (bool, error) {
 	at := time.Now().UTC()
-	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})
+	payload, err := json.Marshal(map[string]any{"deliveryId": intent.ID, "sessionId": intent.TargetSessionID, "sourceSessionId": intent.SenderSessionID, "attentionSessionId": deliveryAttentionSession(intent.SenderSessionID, false), "message": boundedIntentMessage(intent.Message), "reason": intent.Failure, "at": at.Format(time.RFC3339Nano)})
 	if err != nil {
 		return false, err
 	}

@@ -133,7 +133,7 @@ func TestHostCatalogRowsStayOwnedAndOutsideLocalResolution(t *testing.T) {
 			t.Fatalf("remote snapshot row=%+v", state)
 		}
 	}
-	page, err := r.CatalogSnapshotPage(CatalogPageRequest{Query: "builder", Limit: 10, Now: time.Now(), CodexRecentHours: 24})
+	page, err := r.CatalogSnapshotPage(CatalogPageRequest{Query: "builder", Limit: 10, Now: time.Now()})
 	if err != nil || len(page.Sessions) != 1 || page.Sessions[0].HostID != hostID {
 		t.Fatalf("remote alias search page=%+v err=%v", page.Sessions, err)
 	}
