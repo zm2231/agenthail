@@ -22,7 +22,6 @@ const app = {
   slashCommands: [],
   drafts: new Map(),
   pendingIdempotency: new Map(),
-  expandedTurns: new Set(),
   transcriptSignature: null,
   pendingEntryScroll: false,
   liveSource: null,
@@ -190,9 +189,9 @@ function handoffMessage(value) {
 }
 function renderMessage(text, kind, label, turnKey) {
   const safeText = String(text || "");
-  const isLong = safeText.length > 2400;
-  const expanded = isLong && app.expandedTurns.has(turnKey);
-  return `<article class="turn ${kind}${isLong ? " long" : ""}${expanded ? " expanded" : ""}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content${isLong ? " turn-crop" : ""}">${markdown(safeText)}</div>${isLong ? `<button class="expand-turn" type="button" data-expand-turn>${expanded ? "Show less" : "Show full message"}</button>` : ""}</article>`;
+  const editable = kind === "user" && label === "Conversation input";
+  const edit = editable ? `<button class="turn-action" type="button" data-edit-message="${escape(safeText)}">Edit</button>` : "";
+  return `<article class="turn ${kind}" data-turn-key="${escape(turnKey)}"><header class="turn-header"><span class="turn-label">${escape(label)}</span></header><div class="turn-content">${markdown(safeText)}</div><div class="turn-actions"><button class="turn-action" type="button" data-copy-text="${escape(safeText)}">Copy</button>${edit}</div></article>`;
 }
 function stopLiveStream(clear = false) {
   if (app.liveSource) app.liveSource.close();
@@ -1606,10 +1605,24 @@ document.addEventListener("click", async (event) => {
   if (copyOutput) {
     try {
       await navigator.clipboard.writeText(copyOutput.dataset.copyText);
-      toast("Output copied.");
+      toast("Copied.");
     } catch (error) {
-      toast("Couldn't copy the output.");
+      toast("Couldn't copy.");
     }
+    return;
+  }
+  const editMessage = event.target.closest("[data-edit-message]");
+  if (editMessage) {
+    const composer = $("#message");
+    if (composer.disabled) {
+      toast("This session is read only.");
+      return;
+    }
+    composer.value = composer.value.trim() ? `${editMessage.dataset.editMessage}\n\n${composer.value}` : editMessage.dataset.editMessage;
+    renderSlashMenu();
+    resizeComposer();
+    syncComposerAction();
+    composer.focus();
     return;
   }
   const modelOption = event.target.closest("[data-model-option]");
@@ -1633,16 +1646,6 @@ document.addEventListener("click", async (event) => {
   if (viewLink?.dataset.view === "conversations" && mobileConversationView()) {
     app.mobileChatOpen = false;
     syncConversationLayout();
-  }
-  const expand = event.target.closest("[data-expand-turn]");
-  if (expand) {
-    const turn = expand.closest(".turn");
-    turn.classList.toggle("expanded");
-    const expanded = turn.classList.contains("expanded");
-    if (expanded) app.expandedTurns.add(turn.dataset.turnKey);
-    else app.expandedTurns.delete(turn.dataset.turnKey);
-    expand.textContent = expanded ? "Show less" : "Show full message";
-    return;
   }
   const mode = event.target.closest("[data-inbox-mode]");
   if (mode) {

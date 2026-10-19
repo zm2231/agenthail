@@ -494,6 +494,7 @@ struct SessionScreen: View {
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
+                .environment(\.editMessage, detail.map { $0.capabilities.send && !$0.readOnly } == true ? { model.editAndResend($0) } : nil)
                 .frame(maxWidth: SessionStyle.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
@@ -745,12 +746,17 @@ struct IOSComposer: View {
 
 }
 
+extension EnvironmentValues {
+    @Entry var editMessage: ((String) -> Void)? = nil
+}
+
 struct IOSMessage: View {
     let label: String
     let text: String
     let color: Color
     var timestamp: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.editMessage) private var editMessage
     @State private var showingFullMessage = false
     private var isUser: Bool { label == "You" }
     private var isLongMessage: Bool { isUser && (text.count > 700 || text.components(separatedBy: .newlines).count > 10) }
@@ -783,6 +789,9 @@ struct IOSMessage: View {
         .padding(.vertical, 4)
         .contextMenu {
             Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }
+            if isUser, let editMessage {
+                Button("Edit and resend", systemImage: "pencil") { editMessage(text) }
+            }
             ShareLink(item: text) { Label("Share text", systemImage: "square.and.arrow.up") }
         }
         .sheet(isPresented: $showingFullMessage) {
