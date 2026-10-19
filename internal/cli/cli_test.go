@@ -933,6 +933,7 @@ func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
 		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "child", Surface: surface.KindCodex, Name: "child", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt.Add(-30 * time.Hour), Subagent: &surface.Subagent{ParentID: "yesterday", RootID: "yesterday"}}, `{"project":` + widget + `}`},
 		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "scratch", Surface: surface.KindCodex, Name: "scratch", Status: surface.StatusIdle, Cwd: "/tmp/scratch", LastActive: observedAt.Add(-40 * time.Hour)}, `{}`},
 		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "hidden", Surface: surface.KindCodex, Name: "hidden", Status: surface.StatusIdle, Cwd: "/work/widget", LastActive: observedAt}, `{"project":` + widget + `,"current":true,"archived":true}`},
+		{surface.Session{RuntimeKind: surface.RuntimeCodexDesktop, ID: "twin", Surface: surface.KindCodex, Name: "twin", Status: surface.StatusIdle, Cwd: "/other/widget", LastActive: observedAt.Add(-50 * time.Hour)}, `{"project":{"id":"project-widget-2","displayName":"widget","rootPath":"/other/widget","kind":"git"}}`},
 	} {
 		if err := store.RegisterSession(row.session); err != nil {
 			t.Fatal(err)
@@ -964,9 +965,8 @@ func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
 		want string
 	}{
 		{nil, "working"},
-		{[]string{"--all"}, "working,yesterday,child,scratch"},
+		{[]string{"--all"}, "working,yesterday,child,scratch,twin"},
 		{[]string{"--archived"}, "hidden"},
-		{[]string{"--all", "--project", "WIDGET"}, "working,yesterday,child"},
 		{[]string{"--all", "--project", "project-widget"}, "working,yesterday,child"},
 	} {
 		if got := strings.Join(listed(test.args...), ","); got != test.want {
@@ -976,6 +976,9 @@ func TestListUsesTheDaemonScopesAndProjects(t *testing.T) {
 	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
 	if err != nil || !strings.Contains(text, "PROJECT") || !strings.Contains(text, "widget") || strings.Contains(text, "/work/widget") {
 		t.Fatalf("text=%q err=%v", text, err)
+	}
+	if err := app.Run([]string{"list", "--all", "--project", "WIDGET"}); err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "project-widget-2") {
+		t.Fatalf("a shared project name was accepted: %v", err)
 	}
 	if err := app.Run([]string{"list", "--all", "--archived"}); err == nil {
 		t.Fatal("conflicting scopes were accepted")

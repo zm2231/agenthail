@@ -121,7 +121,7 @@ struct SessionTree: Equatable {
                 projects.append(Project(id: projectID, name: session.project?.displayName ?? "No project", identity: session.project, host: session.shortRemoteHostName, checkouts: []))
             }
             let projectIndex = projects.firstIndex { $0.id == projectID }!
-            if family.sessions.contains(where: { $0.isWorking || $0.queueCount > 0 || attentionSessionIDs.contains($0.id) }) {
+            if family.isWorking || family.sessions.contains(where: { $0.queueCount > 0 || attentionSessionIDs.contains($0.id) }) {
                 projects[projectIndex].pinned.insert(family.id)
             }
             let checkoutID = session.checkout?.id ?? session.checkout?.path ?? session.cwd ?? projectID

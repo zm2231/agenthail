@@ -701,7 +701,9 @@ select {
 }
 .session-detail {
   display: flex;
+  min-width: 0;
   gap: 8px;
+  white-space: nowrap;
   margin: 4px 0 0 17px;
   color: var(--muted);
   font-size: 12px;
@@ -806,7 +808,12 @@ select {
   gap: 8px;
 }
 .host-badge {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 999px;
   background: var(--raised);

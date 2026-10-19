@@ -145,6 +145,25 @@ func TestCatalogIdentityKeepsTheKnownProjectWhenGitFails(t *testing.T) {
 	}
 }
 
+func TestCatalogIdentityKeepsTheProjectWhenGitRefusesTheRepository(t *testing.T) {
+	repo := catalogTestRepo(t)
+	cache := newCatalogIdentityCache()
+	resolved := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
+	if resolved.Project == nil {
+		t.Fatalf("resolved=%+v", resolved)
+	}
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho 'fatal: detected dubious ownership in repository' >&2\nexit 128\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	refused := cache.identity(context.Background(), surface.Session{Cwd: repo}, time.Now().Add(catalogIdentityTTL), noStoredProject)
+	if refused.UnavailableReason == "" || refused.Project == nil || refused.Project.ID != resolved.Project.ID {
+		t.Fatalf("refused=%+v resolved=%+v", refused, resolved.Project)
+	}
+}
+
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", dir}, args...)...)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -105,7 +106,7 @@ func sameCatalogFolders(left, right []registry.ProjectRecord) bool {
 // last stored for the session; it is used when git fails and this cache has
 // never resolved the path.
 func (c *catalogIdentityCache) identity(ctx context.Context, session surface.Session, now time.Time, prior func() *catalogProject) catalogIdentity {
-	path, err := workspace.NormalizeCWD(session.Cwd)
+	path, err := catalogSessionPath(session.Cwd)
 	if err != nil || path == "" {
 		return catalogIdentity{Project: prior(), UnavailableReason: "workspace path is unavailable"}
 	}
@@ -317,11 +318,30 @@ func catalogProjectName(root string) string {
 
 func catalogGit(ctx context.Context, dir string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command.Env = append(os.Environ(), "LC_ALL=C")
+	var stderr strings.Builder
+	command.Stderr = &stderr
 	output, err := command.Output()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return "", &catalogGitError{args: args, stderr: stderr.String(), err: err}
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSuffix(string(output), "\n"), nil
+}
+
+// catalogSessionPath makes a discovered working directory absolute and
+// canonical. Unlike typed input, its bytes are exact, so nothing is trimmed.
+func catalogSessionPath(cwd string) (string, error) {
+	if cwd == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved), nil
+	}
+	return filepath.Clean(abs), nil
 }
 
 func canonicalCatalogPath(path string) (string, error) {
@@ -343,6 +363,22 @@ func catalogPathID(prefix, path string) string {
 	return prefix + "-" + hex.EncodeToString(digest[:12])
 }
 
+type catalogGitError struct {
+	args   []string
+	stderr string
+	err    error
+}
+
+func (e *catalogGitError) Error() string {
+	return fmt.Sprintf("git %s: %s", strings.Join(e.args, " "), strings.TrimSpace(e.stderr+" "+e.err.Error()))
+}
+
+func (e *catalogGitError) Unwrap() error { return e.err }
+
+// isCatalogNonGit reports git's answer that the folder is outside any
+// repository. Other failures, such as unreadable metadata or a dubious
+// ownership refusal, are transient for identity and keep the last project.
 func isCatalogNonGit(err error) bool {
-	return strings.Contains(err.Error(), "exit status 128")
+	var gitErr *catalogGitError
+	return errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository")
 }

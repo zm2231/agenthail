@@ -118,10 +118,12 @@ struct SessionTreeTest {
         var queued = session("queued", status: "idle", lastActive: "2026-09-01T00:00:00Z", project: "agenthail", checkout: "main", branch: "main")
         queued.queueCount = 1
         let flagged = session("flagged", status: "idle", lastActive: "2026-09-02T00:00:00Z", project: "agenthail", checkout: "main", branch: "main")
-        let crowded = sessions + [queued, flagged] + (0..<6).map { session("filler\($0)", status: "idle", lastActive: "2026-10-04T11:3\($0):00Z", project: "agenthail", checkout: "main", branch: "main") }
+        var rolled = session("rolled", status: "idle", lastActive: "2026-09-03T00:00:00Z", project: "agenthail", checkout: "main", branch: "main")
+        rolled.subagents = SubagentRollup(count: 2, working: 1)
+        let crowded = sessions + [queued, flagged, rolled] + (0..<6).map { session("filler\($0)", status: "idle", lastActive: "2026-10-04T11:3\($0):00Z", project: "agenthail", checkout: "main", branch: "main") }
         let collapsed = SessionTree.build(crowded, filter: .all, attentionSessionIDs: ["flagged"]).projects[0].limited(to: SessionTree.collapsedSessionLimit, keeping: nil)
         let shownIDs = Set(collapsed.checkouts.flatMap(\.sessions).map(\.id))
-        expect(shownIDs.isSuperset(of: ["busy", "queued", "flagged"]) && !shownIDs.contains("old"), "collapsing a project keeps working, queued and attention sessions: \(shownIDs.sorted())")
+        expect(shownIDs.isSuperset(of: ["busy", "queued", "flagged", "rolled"]) && !shownIDs.contains("old"), "collapsing a project keeps working, working-subagent, queued and attention sessions: \(shownIDs.sorted())")
 
         let mixed = [
             session("whole", status: "idle", lastActive: "2026-10-04T15:58:00Z", project: "agenthail", checkout: "main", branch: "main"),

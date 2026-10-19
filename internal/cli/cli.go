@@ -788,7 +788,13 @@ func (a *App) cmdList(args []string) error {
 		families = -1
 	}
 	if catalogBacked {
-		allSessions = filterListScope(allSessions, views, scope, projectSelector)
+		projectID := ""
+		if projectSelector != "" {
+			if projectID, err = resolveListProject(views, projectSelector); err != nil {
+				return err
+			}
+		}
+		allSessions = filterListScope(allSessions, views, scope, projectID)
 	}
 	rows := listFamilies(allSessions, families)
 	rollups := listRollups(allSessions)

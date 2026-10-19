@@ -340,14 +340,16 @@ func TestUnchangedDiscoveryPassWritesNoSessionRows(t *testing.T) {
 }
 
 func TestCatalogIdentityResolvesPathWithNewline(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "line\nbreak")
-	if err := os.Mkdir(repo, 0700); err != nil {
-		t.Fatal(err)
-	}
-	gitRun(t, repo, "init", "-b", "main")
-	identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
-	if identity.UnavailableReason != "" || identity.Project == nil || identity.Project.RootPath != identity.Checkout.Path || filepath.Base(identity.Checkout.Path) != "line\nbreak" {
-		t.Fatalf("identity=%+v", identity)
+	for _, name := range []string{"line\nbreak", "\nleading", "trailing\n"} {
+		repo := filepath.Join(t.TempDir(), name)
+		if err := os.Mkdir(repo, 0700); err != nil {
+			t.Fatal(err)
+		}
+		gitRun(t, repo, "init", "-b", "main")
+		identity := newCatalogIdentityCache().identity(context.Background(), surface.Session{Cwd: repo}, time.Now(), noStoredProject)
+		if identity.UnavailableReason != "" || identity.Project == nil || identity.Project.RootPath != identity.Checkout.Path || filepath.Base(identity.Checkout.Path) != name {
+			t.Fatalf("%q: identity=%+v", name, identity)
+		}
 	}
 }
 

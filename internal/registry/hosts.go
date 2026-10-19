@@ -375,8 +375,8 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	}
 	generation := prior.generation + 1
 	observedAt := row.ObservedAt.UTC()
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count)
-		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET project=excluded.project,checkout=excluded.checkout,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,host_queue_count)
+		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,checkout=excluded.checkout,
 		unavailable_reason=excluded.unavailable_reason,observed_at=excluded.observed_at,misses=0,projection_fingerprint=excluded.projection_fingerprint,
 		projection_generation=excluded.projection_generation,discovery_failures=0,host_queue_count=excluded.host_queue_count`,
 		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, observedAt.Format(time.RFC3339Nano), fingerprint, generation, row.QueueCount); err != nil {
@@ -488,7 +488,7 @@ func (r *Registry) RemoveHostCatalogRow(hostID, sessionID, entityID, reason stri
 }
 
 func (r *Registry) HostCatalogRows(hostID string) ([]CatalogSessionState, error) {
-	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,cs.project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
+	rows, err := r.read.Query(`SELECT s.id,s.surface,s.name,s.cwd,s.status,cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.host_queue_count
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id WHERE s.host_id=? ORDER BY s.id`, hostID)
 	if err != nil {
 		return nil, err

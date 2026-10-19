@@ -15,10 +15,13 @@ With the daemon running, `agenthail list` reads the daemon catalog and applies
 the daemon's scopes: current by default, or `--all` or `--archived`.
 The scopes count session families, so a subagent appears with its root. The
 table's PROJECT column and the JSON `project` field are the daemon's project for
-the session, and `--project <name|id>` keeps one project. See
+the session, and `--project <name|id>` keeps one project; a name shared by several projects
+is an error that lists their ids. See
 [projects](projects.md) for the identity and archive rules. Without the daemon,
-`list` discovers sessions directly, shows every one, and prints the working
-directory in place of the project; `--project` and `--archived` need
+`list` discovers sessions directly and prints the working directory in place
+of the project. It shows the 15 most recently active session families and
+leaves out Notion threads idle for more than seven days; `--all` lists every
+saved session; `--project` and `--archived` need
 the daemon.
 
 `agenthail project list [--all]`, `project add <path>`, and

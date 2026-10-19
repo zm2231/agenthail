@@ -224,8 +224,8 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
-		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET project=excluded.project,
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
+		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
 		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0`,
 		state.Session.ID, []byte(state.Project), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration); err != nil {
@@ -282,7 +282,7 @@ type catalogSessionPrior struct {
 
 func readCatalogSessionPrior(q catalogQuerier, sessionID string) (catalogSessionPrior, error) {
 	var prior catalogSessionPrior
-	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable)
+	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable)
 	if err == sql.ErrNoRows {
 		return catalogSessionPrior{}, nil
 	}
@@ -579,7 +579,7 @@ func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[str
 // nil when the session has no catalog row.
 func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, error) {
 	var project []byte
-	err := r.read.QueryRow(`SELECT project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&project)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -588,7 +588,7 @@ func (r *Registry) CatalogSessionProject(sessionID string) (json.RawMessage, err
 
 func (r *Registry) CatalogProjectByID(projectID string) (json.RawMessage, error) {
 	var project []byte
-	err := r.read.QueryRow(`SELECT project FROM catalog_sessions WHERE json_extract(project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
+	err := r.read.QueryRow(`SELECT host_project FROM catalog_sessions WHERE json_extract(host_project,'$.id')=? LIMIT 1`, projectID).Scan(&project)
 	return project, err
 }
 
@@ -619,7 +619,7 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		return CatalogSnapshot{}, err
 	}
 	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
 	if err != nil {

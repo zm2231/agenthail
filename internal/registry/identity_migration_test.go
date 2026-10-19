@@ -175,12 +175,12 @@ func seedVersion13(t *testing.T, r *Registry) {
 		exec(`INSERT INTO session_journal(session_id,seq,kind,payload,observed_at,bytes,body_ref) VALUES(?,1,'item','{}',?,2,?)`, id, now, "body-"+id)
 		exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES(?,2)`, id)
 		exec(`INSERT INTO session_journal_bodies(ref,session_id,body,created_at) VALUES(?,?,'x',?)`, "body-"+id, id, now)
-		exec(`INSERT INTO catalog_sessions(session_id,project,checkout,observed_at) VALUES(?,'{}','{}',?)`, id, now)
+		exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES(?,'{}','{}',?)`, id, now)
 		exec(`INSERT INTO api_action_reservations(idempotency_key,session_id,action,source_session_id,receipt) VALUES(?,?,'send',?,?)`, "key-"+id, id, id, `{"sessionId":"`+id+`"}`)
 		exec(`INSERT INTO daemon_events(event_type,entity_id,payload,created_at) VALUES('session.status',?,?,?)`, id, []byte(`{"sessionId":"`+id+`"}`), now)
 		exec(`INSERT INTO daemon_event_items(dedupe_key,event_id) VALUES(?,1)`, "status:"+id)
 	}
-	exec(`INSERT INTO catalog_sessions(session_id,project,checkout,observed_at) VALUES('conversation-native','{}','{}',?)`, now)
+	exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,observed_at) VALUES('conversation-native','{}','{}',?)`, now)
 	exec(`INSERT INTO session_journal_state(session_id,next_seq) VALUES('conversation-native',1)`)
 }
 

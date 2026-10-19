@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/zm2231/agenthail/internal/daemon"
@@ -53,14 +54,41 @@ func listScopeFromArgs(args []string) (string, error) {
 	return scope, nil
 }
 
-func listProjectMatches(project *listProject, selector string) bool {
-	return project != nil && (project.ID == selector || strings.EqualFold(project.DisplayName, selector))
+// resolveListProject turns a project id or display name into one project id.
+// A name shared by several projects is an error, never a pick.
+func resolveListProject(views map[string]listCatalogView, selector string) (string, error) {
+	named := map[string]*listProject{}
+	for _, view := range views {
+		if view.Project == nil {
+			continue
+		}
+		if view.Project.ID == selector {
+			return selector, nil
+		}
+		if strings.EqualFold(view.Project.DisplayName, selector) {
+			named[view.Project.ID] = view.Project
+		}
+	}
+	switch len(named) {
+	case 0:
+		return "", fmt.Errorf("no project matched %q; see 'agenthail project list --all'", selector)
+	case 1:
+		for id := range named {
+			return id, nil
+		}
+	}
+	labels := make([]string, 0, len(named))
+	for id, project := range named {
+		labels = append(labels, fmt.Sprintf("%s (%s)", project.RootPath, id))
+	}
+	sort.Strings(labels)
+	return "", fmt.Errorf("project %q is ambiguous: %s; use its id", selector, strings.Join(labels, ", "))
 }
 
 // filterListScope keeps the session families with a member in scope and, when
-// selector is set, in that project. A subagent belongs to its root's family
+// projectID is set, in that project. A subagent belongs to its root's family
 // when the root is listed.
-func filterListScope(sessions []surface.Session, views map[string]listCatalogView, scope, selector string) []surface.Session {
+func filterListScope(sessions []surface.Session, views map[string]listCatalogView, scope, projectID string) []surface.Session {
 	listed := make(map[string]bool, len(sessions))
 	for _, session := range sessions {
 		listed[session.ID] = true
@@ -74,7 +102,7 @@ func filterListScope(sessions []surface.Session, views map[string]listCatalogVie
 	matched := map[string]bool{}
 	for _, session := range sessions {
 		view := views[session.ID]
-		if selector != "" && !listProjectMatches(view.Project, selector) {
+		if projectID != "" && (view.Project == nil || view.Project.ID != projectID) {
 			continue
 		}
 		if daemon.ScopeMatches(scope, daemon.SessionWorking(session.Status, view.Subagents), view.Current, view.Archived) {

@@ -523,7 +523,7 @@ function scopedSessions() {
 }
 const collapsedProjectSessions = 5;
 function sessionNeedsYou(session) {
-  return session.status === "busy" || session.queueCount > 0 || session.currentReason === "attention";
+  return session.status === "busy" || (session.subagents?.working || 0) > 0 || session.queueCount > 0 || (app.state.attention || []).some((item) => item.sessionId === session.id);
 }
 function sessionButton(session) {
   return `<button class="session ${app.selected?.id === session.id ? "selected" : ""}${session.archived ? " archived" : ""}" title="${escape(rawDisplayName(session))}" type="button" data-session="${escape(session.id)}"><div class="session-name"><i class="dot ${escape(presenceTone(session))}"></i><span>${escape(displayName(session))}</span></div><div class="session-detail">${hostBadge(session)}<span>${escape(labels[session.surface] || session.surface)}</span><span>${escape(presenceLabel(session))}</span>${session.queueCount ? `<span>${session.queueCount} queued</span>` : ""}${session.archived ? "<span>Archived</span>" : ""}</div></button>`;
@@ -533,9 +533,9 @@ function projectSection(project, sessions) {
   const ordered = [...sessions].sort((a, b) => Date.parse(b.lastActive || 0) - Date.parse(a.lastActive || 0));
   const shown = expanded ? ordered : ordered.filter((session, index) => index < collapsedProjectSessions || sessionNeedsYou(session));
   const hidden = ordered.length - shown.length;
-  const host = project.host && project.host.state !== "local" ? `<span class="host-badge">${escape(project.host.name)}</span>` : "";
+  const host = project.host && project.host.state !== "local" ? `<span class="host-badge" title="On ${escape(project.host.name)}">${escape(shortHostName(project.host.name))}</span>` : "";
   const toggle = project.archived ? "project-unarchive" : "project-archive";
-  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name" title="${escape(project.rootPath)}">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
+  return `<section class="project-group${project.archived ? " archived" : ""}"><header class="project-header"><span class="project-name">${escape(project.displayName)}</span>${host}<button class="link-button" type="button" data-project-action="${toggle}" data-project-id="${escape(project.id)}">${project.archived ? "Unarchive" : "Archive"}</button></header>${shown.map(sessionButton).join("")}${hidden > 0 || expanded && ordered.length > collapsedProjectSessions ? `<button class="link-button project-more" type="button" data-project-expand="${escape(project.id)}">${expanded ? "Show less" : `Show ${hidden} more`}</button>` : ""}</section>`;
 }
 function renderProjects(query) {
   const byProject = new Map();
@@ -559,11 +559,15 @@ function renderProjects(query) {
 function remoteHostName(session) {
   return session?.host && session.host.state !== "local" ? session.host.name : "";
 }
+function shortHostName(name) {
+  return String(name || "").split(".")[0];
+}
 function hostBadge(session) {
   const host = remoteHostName(session);
   if (!host) return "";
   const unavailable = Boolean(session.unavailableReason);
-  return `<span class="host-badge${unavailable ? " unavailable" : ""}" title="${escape(session.unavailableReason || `On ${host}`)}">${escape(unavailable ? `${host} unavailable` : host)}</span>`;
+  const short = shortHostName(host);
+  return `<span class="host-badge${unavailable ? " unavailable" : ""}" title="${escape(session.unavailableReason || `On ${host}`)}">${escape(unavailable ? `${short} unavailable` : short)}</span>`;
 }
 function renderSessions() {
   const mobileViewport = window.matchMedia("(max-width: 800px)").matches;
