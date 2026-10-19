@@ -765,9 +765,9 @@ struct TranscriptView: View {
                         .timelineDetails(block.source)
                 }
                 ForEach(sends) { send in
-                    UserBubble(text: send.text, receipt: send.status, failure: send.failure, onEdit: canResend ? { text in
+                    UserBubble(text: send.displayText, receipt: send.status, failure: send.failure, onEdit: canResend ? { text in
                         if send.failure != nil { model.discardSend(send, in: session.id) }
-                        resend(text)
+                        resend(text, attachments: send.failure != nil ? send.attachments : [])
                     } : nil, onRetry: send.failure == nil || !canResend ? nil : { model.retrySend(send, in: session.id) })
                 }
                 if session.isWorking {
@@ -898,8 +898,8 @@ struct TranscriptView: View {
         }
     }
 
-    private func resend(_ text: String) {
-        pane.resend(text)
+    private func resend(_ text: String, attachments: [ComposerAttachment] = []) {
+        pane.resend(text, attachments: attachments)
         jumpToLatest()
     }
 
@@ -1401,7 +1401,7 @@ struct ComposerView: View {
                         .padding(.bottom, 4)
                         .onSubmit { submit(alternate: false) }
                     HStack(spacing: 4) {
-                        if session.acceptsLocalFiles {
+                        if session.capabilities.attach {
                             Button(action: chooseAttachments) {
                                 Image(systemName: "paperclip")
                                     .font(.system(size: 13))
@@ -1454,11 +1454,10 @@ struct ComposerView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(dropTargeted ? DesktopPalette.accent : DesktopPalette.line, lineWidth: dropTargeted ? 2 : 1))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
                 .dropDestination(for: URL.self) { urls, _ in
-                    guard session.acceptsLocalFiles, let files = ComposerDrop.files(urls) else { return false }
-                    draft.attachments = ComposerDrop.adding(files, to: draft.attachments)
-                    focused = true
+                    guard session.capabilities.attach, !urls.isEmpty, urls.allSatisfy(\.isFileURL) else { return false }
+                    attach(urls)
                     return true
-                } isTargeted: { dropTargeted = $0 }
+                } isTargeted: { dropTargeted = $0 && session.capabilities.attach }
             }
             if let error = model.operationError {
                 Text(error)
@@ -1513,10 +1512,25 @@ struct ComposerView: View {
     private func chooseAttachments() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = true
+        panel.canChooseDirectories = false
         panel.prompt = "Attach"
         guard panel.runModal() == .OK else { return }
-        draft.attachments = ComposerDrop.adding(panel.urls, to: draft.attachments)
+        attach(panel.urls)
+    }
+
+    private func attach(_ urls: [URL]) {
+        var read: [ComposerAttachment] = []
+        var problem: ComposerAttachmentProblem?
+        for url in urls {
+            do throws(ComposerAttachmentProblem) {
+                read.append(try ComposerAttachments.file(at: url))
+            } catch {
+                problem = problem ?? error
+            }
+        }
+        let added = ComposerAttachments.adding(read, to: draft.attachments)
+        draft.attachments = added.attachments
+        model.operationError = (problem ?? added.problem)?.message
         focused = true
     }
     private var primarySymbol: String {
@@ -1690,36 +1704,31 @@ struct QueueDock: View {
 }
 
 struct AttachmentDock: View {
-    @Binding var attachments: [URL]
+    @Binding var attachments: [ComposerAttachment]
     let roundedTop: Bool
 
     var body: some View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: roundedTop ? 14 : 0, topTrailingRadius: roundedTop ? 14 : 0)
         VStack(spacing: 0) {
-            ForEach(attachments, id: \.self) { url in
+            ForEach(attachments) { attachment in
                 HStack(spacing: 10) {
-                    Image(systemName: ComposerDrop.isImage(url) ? "photo" : url.hasDirectoryPath ? "folder" : "doc")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DesktopPalette.text2)
-                        .frame(width: 14)
+                    AttachmentThumbnail(attachment: attachment)
                     HStack(spacing: 6) {
-                        Text(url.lastPathComponent)
+                        Text(attachment.name)
                             .foregroundStyle(DesktopPalette.text)
-                        Text(url.deletingLastPathComponent().path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.data.count), countStyle: .file))
                             .foregroundStyle(DesktopPalette.text2)
-                            .truncationMode(.head)
                     }
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(url.path)
                     Button {
-                        attachments.removeAll { $0 == url }
+                        attachments.removeAll { $0.id == attachment.id }
                     } label: {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(DesktopPalette.text2)
-                    .accessibilityLabel("Remove \(url.lastPathComponent)")
+                    .accessibilityLabel("Remove \(attachment.name)")
                 }
                 .font(.system(size: 13))
                 .padding(.horizontal, 14)
@@ -1729,6 +1738,26 @@ struct AttachmentDock: View {
         .padding(.vertical, 4)
         .background(DesktopPalette.dock, in: shape)
         .overlay(shape.strokeBorder(DesktopPalette.line))
+    }
+}
+
+struct AttachmentThumbnail: View {
+    let attachment: ComposerAttachment
+
+    var body: some View {
+        if attachment.isImage, let image = NSImage(data: attachment.data) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: "doc")
+                .font(.system(size: 11))
+                .foregroundStyle(DesktopPalette.text2)
+                .frame(width: 28, height: 28)
+        }
     }
 }
 

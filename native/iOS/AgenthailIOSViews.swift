@@ -639,7 +639,7 @@ struct IOSComposer: View {
 
     private var canSend: Bool {
         !sending && !model.pendingControls.contains(session.id)
-            && !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !ComposerAttachments.isEmpty(text: model.composer, attachments: model.composerAttachments)
             && (steering || detail.capabilities.send)
     }
 
@@ -655,6 +655,13 @@ struct IOSComposer: View {
                     .accessibilityIdentifier("latest-instruction")
             }
             VStack(alignment: .leading, spacing: 6) {
+                if !model.composerAttachments.isEmpty {
+                    ComposerAttachmentStrip(model: model)
+                }
+                if let problem = model.attachmentProblem {
+                    Text(problem).font(.footnote).foregroundStyle(.red).padding(.horizontal, 8)
+                        .accessibilityIdentifier("attachment-problem")
+                }
                 TextField(steering ? "Steer this turn…" : "Message this agent…", text: $model.composer, axis: .vertical)
                     .font(.body).lineLimit(1...6).textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.top, 8)
@@ -662,6 +669,10 @@ struct IOSComposer: View {
                     .accessibilityIdentifier("composer-input")
                 let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
                 layout {
+                    if detail.capabilities.attach && detail.capabilities.send {
+                        ComposerAttachmentMenu(model: model)
+                            .disabled(sending)
+                    }
                     if detail.capabilities.model {
                         Button { showingModels = true } label: { modelLabel }
                         .buttonStyle(.plain)

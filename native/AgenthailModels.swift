@@ -141,6 +141,25 @@ struct Capabilities: Codable, Hashable {
     var model = false
     var interrupt = false
     var steer = false
+    var attach = false
+
+    init(send: Bool = false, stream: Bool = false, reply: Bool = false, goal: Bool = false, compact: Bool = false, model: Bool = false, interrupt: Bool = false, steer: Bool = false, attach: Bool = false) {
+        (self.send, self.stream, self.reply, self.goal, self.compact, self.model, self.interrupt, self.steer, self.attach) = (send, stream, reply, goal, compact, model, interrupt, steer, attach)
+    }
+
+    // A paired host on an older release omits attach; it cannot store uploads.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        send = try container.decode(Bool.self, forKey: .send)
+        stream = try container.decode(Bool.self, forKey: .stream)
+        reply = try container.decode(Bool.self, forKey: .reply)
+        goal = try container.decode(Bool.self, forKey: .goal)
+        compact = try container.decode(Bool.self, forKey: .compact)
+        model = try container.decode(Bool.self, forKey: .model)
+        interrupt = try container.decode(Bool.self, forKey: .interrupt)
+        steer = try container.decode(Bool.self, forKey: .steer)
+        attach = try container.decodeIfPresent(Bool.self, forKey: .attach) ?? false
+    }
 }
 
 struct SurfaceState: Decodable, Identifiable, Equatable {
@@ -229,9 +248,6 @@ struct SessionState: Codable, Identifiable, Hashable {
     var remoteHostID: String? { remoteHostName == nil ? nil : host?.id }
     var modelCatalogKey: String { "\(remoteHostID ?? "")/\(surface)" }
     var canCallByVoice: Bool { remoteHostID == nil }
-    /// Attachments are sent as this machine's file paths, which mean nothing
-    /// to an agent on another host.
-    var acceptsLocalFiles: Bool { remoteHostID == nil }
 }
 
 struct SessionHost: Codable, Hashable {

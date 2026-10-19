@@ -28,6 +28,16 @@ struct LocalSendTest {
         let assistant = [TimelineItem(id: "d", kind: "message", role: "assistant", title: "assistant", text: "Run the tests", timestamp: "2026-10-04T12:00:02Z", callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)]
         expect(LocalSend.reconcile([first], with: assistant) == [first], "assistant text never absorbs a user send")
 
+        let withFile = LocalSend(text: "Read this", attachments: [ComposerAttachment(name: "notes.txt", data: Data("n".utf8), mediaType: "text/plain")], sentAt: sentAt, status: "Sent")
+        let delivered = user("g", "Read this\n\nAttached file: /home/agent/.agenthail/uploads/abc/notes.txt", "2026-10-04T12:00:02Z")
+        expect(LocalSend.reconcile([withFile], with: [delivered]).isEmpty, "the daemon's attached-file line does not keep a send pending")
+        expect(LocalSend.reconcile([first], with: [delivered]) == [first], "a send without attachments needs its exact text")
+        let imageOnly = LocalSend(text: "", attachments: [ComposerAttachment(name: "shot.png", data: Data("p".utf8), mediaType: "image/png")], sentAt: sentAt, status: "Sent")
+        let image = TimelineItem(id: "h", kind: "attachment", role: "user", title: "Image", text: "Image attachment", timestamp: "2026-10-04T12:00:02Z", callId: nil, status: nil, truncated: false, truncationReason: nil, bodyRef: nil)
+        expect(LocalSend.reconcile([imageOnly], with: [image]).isEmpty, "an image-only send is absorbed by the image it delivered")
+        expect(LocalSend.reconcile([first], with: [image]) == [first], "an image never absorbs a text send")
+        expect(withFile.displayText == "Read this\n\nAttached: notes.txt" && imageOnly.displayText == "Attached: shot.png", "the local copy names its attachments")
+
         expect(LocalSend.label(for: "queued") == "Queued" && LocalSend.label(for: "submitted") == "Submitted" && LocalSend.label(for: "sent") == "Sent", "receipt labels use the public vocabulary")
         expect(LocalSend.label(for: "queued", waitingOnYou: true) == "Queued · Waiting on you" && LocalSend.label(for: "sent", waitingOnYou: true) == "Sent", "a queued receipt to a session waiting on you says so")
         print("local send tests passed")

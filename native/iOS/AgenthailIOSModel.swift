@@ -36,9 +36,13 @@ final class AgenthailIOSModel: ObservableObject {
     private var searchQuery = ""
     private var sessionRequestID = UUID()
     private var drafts: [String: String] = [:]
+    @Published var composerAttachments: [ComposerAttachment] = []
+    @Published var attachmentProblem: String?
+    private var attachmentDrafts: [String: [ComposerAttachment]] = [:]
     private var rekeys = SessionRekeys()
     private struct PendingSendRequest {
         let message: String
+        let attachments: [ComposerAttachment]
         let turnSettings: TurnSettings
         let idempotencyKey: String
     }
@@ -434,13 +438,18 @@ final class AgenthailIOSModel: ObservableObject {
 
     func loadSession(_ id: String) async {
         let id = rekeys.resolve(id)
-        if let previous = selectedSessionID, previous != id { drafts[previous] = composer }
+        if let previous = selectedSessionID, previous != id {
+            drafts[previous] = composer
+            attachmentDrafts[previous] = composerAttachments
+        }
         if selectedSessionID != id {
             sessionStreamTask?.cancel()
             sessionMetadataTask?.cancel()
             sessionStreamCursor = 0
             sessionStreamMetadataFields.removeAll()
             composer = drafts[id] ?? ""
+            composerAttachments = attachmentDrafts[id] ?? []
+            attachmentProblem = nil
             selectedDetail = nil
             olderActivity = []
             activityCursor = nil
@@ -596,6 +605,7 @@ final class AgenthailIOSModel: ObservableObject {
         rekeys.record(retired)
         guard !rekeys.isEmpty else { return }
         _ = rekeys.carry(&drafts)
+        _ = rekeys.carry(&attachmentDrafts)
         _ = rekeys.carry(&pendingSendRequests)
         var settings = turnSettingsDrafts
         if rekeys.carry(&settings) { turnSettingsDrafts = settings }
@@ -606,6 +616,17 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    func addAttachments(_ new: [ComposerAttachment], problem: ComposerAttachmentProblem? = nil) {
+        let added = ComposerAttachments.adding(new, to: composerAttachments)
+        composerAttachments = added.attachments
+        attachmentProblem = (problem ?? added.problem)?.message
+    }
+
+    func removeAttachment(_ id: UUID) {
+        composerAttachments.removeAll { $0.id == id }
+        attachmentProblem = nil
+    }
+
     func editAndResend(_ text: String) {
         let edited = text.trimmingCharacters(in: .whitespacesAndNewlines)
         composer = composer.isEmpty ? edited : edited + "\n\n" + composer
@@ -613,28 +634,33 @@ final class AgenthailIOSModel: ObservableObject {
 
     func send(to session: SessionState) {
         let message = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, let api,
+        let attachments = composerAttachments
+        guard !ComposerAttachments.isEmpty(text: message, attachments: attachments), let api,
               let detail = selectedDetail, detail.session.id == session.id,
               !detail.readOnly, !sendingSessionIDs.contains(session.id) else { return }
         let action = "send"
         guard detail.capabilities.send else { return }
         let turnSettings = action == "send" && session.surface == "codex" ? turnSettingsDrafts[session.id] ?? TurnSettings() : TurnSettings()
         let idempotencyKey: String
-        if let pending = pendingSendRequests[session.id], pending.message == message, pending.turnSettings == turnSettings {
+        if let pending = pendingSendRequests[session.id], pending.message == message, pending.attachments == attachments, pending.turnSettings == turnSettings {
             idempotencyKey = pending.idempotencyKey
         } else {
             idempotencyKey = UUID().uuidString
-            pendingSendRequests[session.id] = PendingSendRequest(message: message, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
+            pendingSendRequests[session.id] = PendingSendRequest(message: message, attachments: attachments, turnSettings: turnSettings, idempotencyKey: idempotencyKey)
         }
         sendingSessionIDs.insert(session.id)
         deliveryQueueIDs.removeValue(forKey: session.id)
         deliveryStatus[session.id] = "Sending…"
         composer = ""
         drafts[session.id] = ""
+        composerAttachments = []
+        attachmentDrafts[session.id] = []
+        attachmentProblem = nil
         Task {
             defer { sendingSessionIDs.remove(session.id) }
             do {
-                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", idempotencyKey: idempotencyKey)
+                let uploaded = try await api.upload(attachments, sessionID: session.id)
+                let response = try await api.sendInstruction(action: action, sessionID: session.id, message: message, turnSettings: turnSettings, author: "person", attachments: uploaded, idempotencyKey: idempotencyKey)
                 if let deliveryID = response.result?.deliveryId { deliveryIDs[session.id] = deliveryID }
                 deliveryStatus[session.id] = deliveryLabel(response.result?.evidence, detail: response.result?.detail)
                 if response.result?.evidence == "queued", let queueID = response.result?.queueId {
@@ -648,12 +674,14 @@ final class AgenthailIOSModel: ObservableObject {
             } catch {
                 deliveryIDs.removeValue(forKey: session.id)
                 deliveryStatus[session.id] = "Couldn’t complete request. Draft kept."
-                operationError = "Couldn’t complete request."
+                operationError = attachments.isEmpty ? "Couldn’t complete request." : AgenthailAPIError.userMessage(error)
                 if selectedSessionID == session.id {
                     composer = composer.isEmpty ? message : message + "\n\n" + composer
+                    composerAttachments = ComposerAttachments.adding(composerAttachments, to: attachments).attachments
                 } else {
                     let newer = drafts[session.id] ?? ""
                     drafts[session.id] = newer.isEmpty ? message : message + "\n\n" + newer
+                    attachmentDrafts[session.id] = ComposerAttachments.adding(attachmentDrafts[session.id] ?? [], to: attachments).attachments
                 }
             }
         }
@@ -719,6 +747,8 @@ final class AgenthailIOSModel: ObservableObject {
         selectedSessionID = nil
         composer = ""
         drafts = [:]
+        composerAttachments = []
+        attachmentDrafts = [:]
         pendingSendRequests = [:]
         creationRequestIdentity = nil
         creationRequestKey = nil
