@@ -221,7 +221,7 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 	path := writeTranscript(t, `{"type":"user","message":{"content":"ready"}}`)
 	var body string
 	home, pid := liveBridgeProcess(t)
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(_ context.Context, method, url string, _ map[string]string, requestBody string, _ CookieSource, _ time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(_ context.Context, method, url string, _ map[string]string, requestBody string, _ CookieSource, _ time.Duration) (int, string, error) {
 		if method != "POST" || !strings.Contains(url, "/v1/code/sessions/") {
 			t.Fatalf("method=%s url=%s", method, url)
 		}
@@ -248,7 +248,7 @@ func TestClaudeCompactPostsRemoteSlashCommandAndConfirmsBoundary(t *testing.T) {
 			t.Fatal(err)
 		}
 		return 200, `{}`, nil
-	})
+	}))
 	if err := claude.Compact(context.Background(), &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path}); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 	home, pid := liveBridgeProcess(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		defer cancel()
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
@@ -276,7 +276,7 @@ func TestClaudeCompactDoesNotAcceptBoundaryBeforeRequestRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 		return 200, `{}`, nil
-	})
+	}))
 	err := claude.Compact(ctx, &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
@@ -288,10 +288,10 @@ func TestClaudeCompactReportsUnknownAfterAcceptedCommandLosesConfirmation(t *tes
 	home, pid := liveBridgeProcess(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
+	claude := NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, home, connectedRemoteControl(func(context.Context, string, string, map[string]string, string, CookieSource, time.Duration) (int, string, error) {
 		cancel()
 		return 200, `{}`, nil
-	})
+	}))
 	err := claude.Compact(ctx, &surface.Session{ID: "conversation-test", Bridge: "session_test", PID: pid, Transcript: path})
 	if !surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
