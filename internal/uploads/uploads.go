@@ -53,7 +53,24 @@ func (s *Store) Put(name string, body io.Reader) (surface.Upload, error) {
 	}
 	defer os.Remove(temp.Name())
 	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(temp, hash), io.LimitReader(body, MaxFileBytes+1))
+	sink := io.MultiWriter(temp, hash)
+	limited := io.LimitReader(body, MaxFileBytes+1)
+	written, err := io.CopyN(sink, limited, MaxImageBytes+1)
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	if err == nil && written > MaxImageBytes {
+		head, headErr := readHead(temp.Name(), written)
+		if headErr != nil {
+			err = headErr
+		} else if _, _, _, image := surface.DetectImage(head); image {
+			err = ErrTooLarge
+		} else {
+			var rest int64
+			rest, err = io.Copy(sink, limited)
+			written += rest
+		}
+	}
 	if closeErr := temp.Close(); err == nil {
 		err = closeErr
 	}
@@ -111,7 +128,8 @@ func readHead(path string, size int64) ([]byte, error) {
 	return head[:n], nil
 }
 
-// Resolve returns the stored upload an id names.
+// Resolve returns the stored upload an id names and restarts its retention, so
+// a send or queued send never hands a runtime a path Sweep is about to remove.
 func (s *Store) Resolve(id string) (surface.Upload, error) {
 	rest, ok := strings.CutPrefix(id, idPrefix)
 	if !ok {
@@ -124,8 +142,15 @@ func (s *Store) Resolve(id string) (surface.Upload, error) {
 	if _, err := hex.DecodeString(digest); err != nil {
 		return surface.Upload{}, ErrNotFound
 	}
-	path := filepath.Join(s.dir, digest, name)
+	folder := filepath.Join(s.dir, digest)
+	path := filepath.Join(folder, name)
+	s.mu.Lock()
 	info, err := os.Lstat(path)
+	if err == nil && info.Mode().IsRegular() {
+		now := s.now()
+		err = os.Chtimes(folder, now, now)
+	}
+	s.mu.Unlock()
 	if err != nil || !info.Mode().IsRegular() {
 		return surface.Upload{}, ErrNotFound
 	}
@@ -140,8 +165,8 @@ func (s *Store) Resolve(id string) (surface.Upload, error) {
 	return surface.Upload{ID: id, Name: name, Path: path, MediaType: media, Bytes: info.Size(), Width: width, Height: height}, nil
 }
 
-// Sweep removes uploads stored longer ago than Retention. A re-upload of the
-// same bytes refreshes the folder's time.
+// Sweep removes uploads stored or last resolved longer ago than Retention. A
+// re-upload of the same bytes also refreshes the folder's time.
 func (s *Store) Sweep() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
