@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/zm2231/agenthail/internal/surface"
 )
 
 // initialClaudeObservationBytes bounds the transcript tail read when a Claude
@@ -28,7 +30,7 @@ type claudeObservationState struct {
 
 // observeTranscript advances the shared observation of path and returns a copy,
 // so concurrent observers and streams read it without holding observeMu.
-func (c *Claude) observeTranscript(ctx context.Context, path string) (*claudeObservationState, error) {
+func (c *Claude) observeTranscript(ctx context.Context, path string, sess *surface.Session) (*claudeObservationState, error) {
 	c.observeMu.Lock()
 	defer c.observeMu.Unlock()
 	if c.observeState == nil {
@@ -57,6 +59,9 @@ func (c *Claude) observeTranscript(ctx context.Context, path string) (*claudeObs
 	state.fileInfo = info
 	if err != nil {
 		return nil, err
+	}
+	if state.hasCurrent && state.current.Closing && c.settledAfter(sess, state.current.TerminalAt) {
+		state.settle()
 	}
 	snapshot := *state
 	return &snapshot, nil
@@ -91,6 +96,16 @@ func (s *claudeObservationState) applyTurn(record claudeRecord) {
 	}
 	s.current = turns[len(turns)-1]
 	s.hasCurrent = true
+}
+
+// settle completes a closing turn whose process has since gone idle.
+func (s *claudeObservationState) settle() {
+	s.current.Closing = false
+	s.current.Done = true
+	if s.current.MessageID != "" {
+		s.completed = s.current
+		s.hasCompleted = true
+	}
 }
 
 func (s *claudeObservationState) applyCompact(record claudeRecord, at time.Time) {

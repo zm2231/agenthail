@@ -678,7 +678,7 @@ func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.T
 		}
 		return observation, nil
 	}
-	state, err := c.observeTranscript(ctx, path)
+	state, err := c.observeTranscript(ctx, path, sess)
 	if err != nil {
 		return nil, err
 	}
@@ -903,7 +903,7 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 	if path == "" || !fileExists(path) {
 		return fmt.Errorf("no local transcript for streaming")
 	}
-	state, err := c.observeTranscript(ctx, path)
+	state, err := c.observeTranscript(ctx, path, sess)
 	if err != nil {
 		return err
 	}
@@ -1027,7 +1027,8 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			}
 			key := stableTimelineItemID(recordOffset, line, len(items))
 			if ending {
-				closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key}
+				at, _ := time.Parse(time.RFC3339Nano, str(record, "timestamp"))
+				closing = surface.ClaudeClosingTurn{TurnID: turnID, MessageID: messageID, Key: key, At: at}
 			} else if done {
 				finish(turnID, key)
 			}
@@ -1037,6 +1038,10 @@ func (c *Claude) streamTimeline(ctx context.Context, sess *surface.Session, uuid
 			return scanErr
 		}
 		offset = next
+		if closing.TurnID != "" && c.settledAfter(sess, closing.At) {
+			finish(closing.TurnID, closing.Key)
+			closing = surface.ClaudeClosingTurn{}
+		}
 		if closing.TurnID != "" {
 			closing.Anchor = anchorOf(tail)
 		}
