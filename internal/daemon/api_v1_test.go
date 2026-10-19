@@ -347,6 +347,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 		t.Fatal(err)
 	}
 	from.Surface, from.Transcript = surface.KindClaude, transcript
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	if err := registry.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func TestAPIV1DeliveryProblemsSnapshotAndDismiss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := r.FailDeliveryIntent(intent.ID, registry.DeliveryIntentFailed, "delivery failed"); err != nil || !changed {
+	if changed, err := r.FailDeliveryIntent(intent.ID, "delivery failed"); err != nil || !changed {
 		t.Fatalf("changed=%v err=%v", changed, err)
 	}
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})

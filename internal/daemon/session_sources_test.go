@@ -41,7 +41,7 @@ func TestCodexCatchupRejectsReplacementBeforeFirstPageAfterRegistryReopen(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
 	if err := reg.RegisterSession(from); err != nil {
 		reg.Close()
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestLegacySeedCheckpointNeverAcceptsReplacementAcrossRetries(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer reg.Close()
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", Transcript: transcript, HasLocal: true}
 	if err := reg.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}
@@ -539,6 +539,7 @@ liveObserved:
 func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	adapter := &sourceCountingSurface{
 		daemonSurface: fake,
@@ -569,6 +570,7 @@ func TestSessionSourceSeedsWithoutUnsupportedLiveStream(t *testing.T) {
 func TestSessionSourceKeepsUnsupportedTailOpenWithoutRetryNoise(t *testing.T) {
 	_, reg, fake, from, _ := daemonFixture(t)
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	from.Transcript = "/local/transcript.jsonl"
 	from.HasLocal = true
@@ -620,6 +622,7 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transport = "uds"
 	from.Transcript = transcript
 	from.HasLocal = true
@@ -721,6 +724,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 			_, reg, _, from, _ := daemonFixture(t)
 			from.ID = "claude-" + map[string]string{"": "native", "uds": "uds"}[transport]
 			from.Surface = surface.KindClaude
+			from.RuntimeKind = surface.RuntimeClaudeCLI
 			from.Transport = transport
 			from.HasLocal = true
 			transcript := filepath.Join(t.TempDir(), "session.jsonl")
@@ -803,6 +807,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 			_, reg, _, from, _ := daemonFixture(t)
 			from.ID = "claude-interrupted-" + map[string]string{"": "native", "uds": "uds"}[transport]
 			from.Surface = surface.KindClaude
+			from.RuntimeKind = surface.RuntimeClaudeCLI
 			from.Transport = transport
 			from.HasLocal = true
 			transcript := filepath.Join(t.TempDir(), "session.jsonl")
@@ -1216,6 +1221,7 @@ func TestClaudeSessionSourceResumesTurnsWrittenWhileUnheld(t *testing.T) {
 		t.Fatal(err)
 	}
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.Transcript = transcript
 	from.HasLocal = true
 	if err := reg.RegisterSession(from); err != nil {
@@ -1275,6 +1281,7 @@ func TestClaudeSessionSourceJournalsInjectedPromptOrigins(t *testing.T) {
 	_, reg, _, from, _ := daemonFixture(t)
 	from.ID = "claude-injections"
 	from.Surface = surface.KindClaude
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	from.HasLocal = true
 	transcript := filepath.Join(t.TempDir(), "session.jsonl")
 	notification := `<task-notification>\n<task-id>task-9</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<status>completed</status>\n<summary>Synthetic job done</summary>\n</task-notification>`

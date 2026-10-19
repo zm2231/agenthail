@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 const e2eToken = "e2e-token"
@@ -41,12 +43,13 @@ type scriptedAgent struct {
 	sendErr    map[string]error
 	observeErr map[string]error
 	attempts   map[string]int
+	refuse     map[string]bool
 	delivered  []deliveredMessage
 	turn       int
 }
 
 func newScriptedAgent(ids ...string) *scriptedAgent {
-	agent := &scriptedAgent{sessions: map[string]*scriptedSession{}, sendErr: map[string]error{}, observeErr: map[string]error{}, attempts: map[string]int{}}
+	agent := &scriptedAgent{sessions: map[string]*scriptedSession{}, sendErr: map[string]error{}, observeErr: map[string]error{}, attempts: map[string]int{}, refuse: map[string]bool{}}
 	for _, id := range ids {
 		agent.sessions[id] = &scriptedSession{status: surface.StatusIdle}
 	}
@@ -54,7 +57,7 @@ func newScriptedAgent(ids ...string) *scriptedAgent {
 }
 
 func (a *scriptedAgent) session(id string) surface.Session {
-	return surface.Session{ID: id, Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 }
 
 func (a *scriptedAgent) setStatus(id string, status surface.SessionStatus) {
@@ -79,6 +82,14 @@ func (a *scriptedAgent) failSends(id string, err error) {
 		return
 	}
 	a.sendErr[id] = err
+}
+
+// refuseSends makes the provider report the target busy at send time even
+// though observation shows it idle.
+func (a *scriptedAgent) refuseSends(id string, refuse bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.refuse[id] = refuse
 }
 
 func (a *scriptedAgent) failObservation(id string, err error) {
@@ -110,6 +121,10 @@ func (a *scriptedAgent) deliveredTo(id string) []deliveredMessage {
 }
 
 func (a *scriptedAgent) Name() surface.SurfaceKind { return surface.KindCodex }
+
+func (a *scriptedAgent) RuntimeKinds() []surface.RuntimeKind {
+	return surfacetest.RuntimeKinds(a.Name())
+}
 
 func (a *scriptedAgent) List(context.Context) ([]surface.Session, error) {
 	a.mu.Lock()
@@ -181,7 +196,7 @@ func (a *scriptedAgent) accept(sessionID, message string, options surface.SendOp
 	if !ok {
 		return nil, surface.DeliveryTerminal(fmt.Errorf("session %s not found", sessionID), surface.DeliveryTargetMissing)
 	}
-	if state.status != surface.StatusIdle && !steered {
+	if (state.status != surface.StatusIdle || a.refuse[sessionID]) && !steered {
 		return &surface.SendResult{Accepted: false}, nil
 	}
 	a.turn++
@@ -230,6 +245,8 @@ type runningDaemon struct {
 	t      *testing.T
 	agent  *scriptedAgent
 	server *httptest.Server
+	store  *registry.Registry
+	daemon *Daemon
 }
 
 func startRunningDaemon(t *testing.T, agent *scriptedAgent) *runningDaemon {
@@ -259,7 +276,7 @@ func startRunningDaemon(t *testing.T, agent *scriptedAgent) *runningDaemon {
 		server.Close()
 		store.Close()
 	})
-	return &runningDaemon{t: t, agent: agent, server: server}
+	return &runningDaemon{t: t, agent: agent, server: server, store: store}
 }
 
 func (h *runningDaemon) request(method, path string, body any) (int, []byte) {
@@ -354,6 +371,31 @@ func (h *runningDaemon) queueItem(id int64) dashboardQueue {
 	}
 	h.t.Fatalf("queue item %d not listed", id)
 	return dashboardQueue{}
+}
+
+// execStore edits the daemon's registry file directly, standing in for time
+// passing.
+func (h *runningDaemon) execStore(query string, args ...any) {
+	h.t.Helper()
+	db, err := sql.Open("sqlite", h.store.Path()+"?_pragma=busy_timeout(15000)")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(query, args...); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func (h *runningDaemon) ageQueueItem(id int64, age time.Duration) {
+	h.t.Helper()
+	stamp := time.Now().UTC().Add(-age).Format("2006-01-02 15:04:05")
+	h.execStore(`UPDATE message_queue SET queued_at=?,updated_at=? WHERE id=?`, stamp, stamp, id)
+}
+
+func (h *runningDaemon) makeQueueItemAvailable(id int64) {
+	h.t.Helper()
+	h.execStore(`UPDATE message_queue SET available_at_ms=0 WHERE id=? AND status='pending'`, id)
 }
 
 func (h *runningDaemon) openCatalogEvents() *bufio.Reader {
@@ -473,6 +515,69 @@ func TestBusySessionQueuesThenRunLoopDeliversOnceWithOptions(t *testing.T) {
 	}
 }
 
+func TestQueuedMessageToLongBusySessionStaysPendingThenDeliversOnce(t *testing.T) {
+	agent := newScriptedAgent("sender", "target")
+	agent.setStatus("target", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "sourceSessionId": "sender", "message": "report after a long turn"}))
+	h.ageQueueItem(id, 3*time.Hour)
+	settle()
+	item := h.queueItem(id)
+	if item.Status != "pending" || item.Historical || item.Evidence != surface.EvidenceQueued || len(agent.deliveredTo("target")) != 0 {
+		t.Fatalf("held item=%+v delivered=%+v", item, agent.deliveredTo("target"))
+	}
+	if queuedAt, err := time.ParseInLocation("2006-01-02 15:04:05", item.QueuedAt, time.UTC); err != nil || time.Since(queuedAt) < 3*time.Hour {
+		t.Fatalf("queuedAt=%q err=%v", item.QueuedAt, err)
+	}
+	agent.setStatus("target", surface.StatusIdle)
+	eventually(t, "held delivery", func() bool { return len(agent.deliveredTo("target")) > 0 })
+	settle()
+	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != "report after a long turn" {
+		t.Fatalf("delivered=%+v", got)
+	}
+	if item := h.queueItem(id); !item.Historical || item.Evidence != surface.EvidenceDelivered {
+		t.Fatalf("queue item=%+v", item)
+	}
+	if notices := agent.deliveredTo("sender"); len(notices) != 0 {
+		t.Fatalf("sender notices=%+v", notices)
+	}
+}
+
+func TestBusyRefusalNeverExhaustsTheQueuedMessage(t *testing.T) {
+	agent := newScriptedAgent("target")
+	agent.setStatus("target", surface.StatusBusy)
+	h := startRunningDaemon(t, agent)
+	id := queueID(t, h.receipt(map[string]any{"action": "send", "sessionId": "target", "message": "keep trying"}))
+	agent.refuseSends("target", true)
+	agent.setStatus("target", surface.StatusIdle)
+	for attempt := 2; attempt <= maxDeliveryAttempts+3; attempt++ {
+		if attempt > 2 {
+			h.makeQueueItemAvailable(id)
+		}
+		eventually(t, fmt.Sprintf("refused attempt %d", attempt), func() bool { return agent.attemptsFor("target") >= attempt })
+	}
+	settle()
+	if item := h.queueItem(id); item.Status != "pending" || item.Historical || item.Evidence != surface.EvidenceQueued || item.Attempts != 0 {
+		t.Fatalf("refused item=%+v", item)
+	}
+	agent.refuseSends("target", false)
+	agent.failSends("target", errors.New("transport closed"))
+	refused := agent.attemptsFor("target")
+	h.makeQueueItemAvailable(id)
+	eventually(t, "one real delivery error", func() bool { return agent.attemptsFor("target") > refused })
+	settle()
+	if item := h.queueItem(id); item.Status != "pending" || item.Attempts != 1 {
+		t.Fatalf("after one real error item=%+v", item)
+	}
+	agent.failSends("target", nil)
+	h.makeQueueItemAvailable(id)
+	eventually(t, "delivery after refusals", func() bool { return len(agent.deliveredTo("target")) > 0 })
+	settle()
+	if got := agent.deliveredTo("target"); len(got) != 1 {
+		t.Fatalf("delivered=%+v", got)
+	}
+}
+
 func TestUnknownQueuedOutcomeIsDeadLetteredAndNeverResent(t *testing.T) {
 	for name, sendErr := range map[string]error{
 		"outcome unknown": surface.DeliveryOutcomeUnknown(errors.New("connection dropped after write")),
@@ -537,7 +642,7 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	agent.setStatus("target", surface.StatusIdle)
 	eventually(t, "deferred attempt", func() bool { return agent.attemptsFor("target") >= 2 })
 	settle()
-	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts < 1 || item.LastError == "" {
+	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts != 0 || item.LastError == "" {
 		t.Fatalf("unavailable delivery was not kept pending with its failure recorded: %+v", item)
 	}
 	agent.failSends("target", nil)

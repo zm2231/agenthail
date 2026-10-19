@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zm2231/agenthail/internal/delivery"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -27,10 +26,6 @@ func (d *Daemon) drainSteerMessageQueue(ctx context.Context, adapter surface.Sur
 }
 
 func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surface, session *surface.Session, claim func(time.Time) (*registry.QueuedMessage, error)) {
-	if err := surface.ValidateRuntimeTransport(session); err != nil {
-		d.log.Printf("transport for %s unavailable: %s", d.resolveDisplay(session.ID), err)
-		return
-	}
 	now := time.Now()
 	item, err := claim(now)
 	if err != nil {
@@ -58,9 +53,9 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	var sendErr error
 	addressed := *session
 	steered := false
-	route := delivery.RouteFor(adapter, session, item.Author)
+	route := surface.RouteFor(adapter, session, item.Author)
 	options := surface.SendOptions{Model: item.Model, SourceSessionID: item.SourceSessionID, TurnOptions: item.TurnOptions, Author: item.Author}
-	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && surface.EffectiveCapabilities(session, adapter.Capabilities()).Steer {
+	if item.BusyDelivery == "steer" && item.Model == "" && item.TurnOptions.Empty() && session.Status == surface.StatusBusy && session.WaitingOn == nil && surface.EffectiveCapabilities(adapter, session).Steer {
 		sendErr = adapter.Steer(operationCtx, session, item.Message)
 		if sendErr == nil {
 			result = &surface.SendResult{Accepted: true}
@@ -75,7 +70,7 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		d.finishReachedHostOwned(item, session, item.Message, ownedErr)
 		return
 	}
-	peerTransport := delivery.RouteFor(adapter, session, item.Author).TransportOnly()
+	peerTransport := surface.RouteFor(adapter, session, item.Author).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
 		return
@@ -90,8 +85,8 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 	}
 	if !result.Accepted {
 		busyErr := fmt.Errorf("target remained busy")
-		if err := d.Registry.NackMessage(item.ID, busyErr, now, maxDeliveryAttempts); err != nil {
-			d.log.Printf("nack queue item %d: %s", item.ID, err)
+		if err := d.Registry.DeferMessage(item.ID, busyErr, now); err != nil {
+			d.log.Printf("defer queue item %d: %s", item.ID, err)
 		}
 		_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "busy", SessionID: session.ID, QueueID: item.ID, Message: item.Message, Error: busyErr.Error()})
 		return

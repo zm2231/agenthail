@@ -88,7 +88,6 @@ final class AgenthailIOSModel: ObservableObject {
         case "failed": return "Delivery failed"
         case "unknown", nil: return "Submitted"
         case "held": return "Delivery held. Review it in Inbox before retrying."
-        case "expired": return "Instruction expired. Review it in Inbox history."
         case "canceled": return "Instruction canceled."
         default: return "Delivery status: \(evidence ?? "unknown")"
         }
@@ -471,14 +470,13 @@ final class AgenthailIOSModel: ObservableObject {
                 guard let item = items.first(where: { $0.id == queueID && $0.sessionId == sessionID }) else {
                     continue
                 }
-                switch item.isHistorical && item.evidence == "unknown" ? "unknown-expired" : item.isHistorical && item.evidence == "failed" ? "failed-expired" : item.evidence {
+                switch item.isHistorical && item.evidence == "unknown" ? "unknown-history" : item.isHistorical && item.evidence == "failed" ? "failed-history" : item.evidence {
                 case "submitted": deliveryStatus[sessionID] = "Submitted to \(item.target)."
-                case "queued": deliveryStatus[sessionID] = "Queued for \(item.target); sends when current turn ends."
+                case "queued": deliveryStatus[sessionID] = item.queuedReceipt
                 case "unknown": deliveryStatus[sessionID] = "Submitted to \(item.target)."
                 case "failed": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox before retrying."
-                case "unknown-expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
-                case "failed-expired": deliveryStatus[sessionID] = "Delivery failed; the queue entry has expired. Review it in Inbox history."
-                case "expired": deliveryStatus[sessionID] = "Instruction expired. You can review it in Inbox history."
+                case "unknown-history": deliveryStatus[sessionID] = "Delivery was never confirmed. Review it in Inbox history."
+                case "failed-history": deliveryStatus[sessionID] = "Delivery failed. Review it in Inbox history."
                 case "transport_accepted", "delivered": deliveryStatus[sessionID] = "Sent to \(item.target)."
                 case "held": deliveryStatus[sessionID] = "Delivery held. Review it in Inbox before retrying."
                 case "canceled": deliveryStatus[sessionID] = "Instruction canceled."
@@ -584,6 +582,11 @@ final class AgenthailIOSModel: ObservableObject {
         } else if let selected = selectedSessionID, rekeys.resolve(selected) != selected {
             requestedSessionID = rekeys.resolve(selected)
         }
+    }
+
+    func editAndResend(_ text: String) {
+        let edited = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        composer = composer.isEmpty ? edited : edited + "\n\n" + composer
     }
 
     func send(to session: SessionState) {

@@ -87,14 +87,14 @@ type catalogQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-func queueCountTx(tx catalogQuerier, sessionID string, now time.Time) (int, error) {
+func queueCountTx(tx catalogQuerier, sessionID string) (int, error) {
 	var count int
-	err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight') AND (status='inflight' OR expires_at_ms=0 OR expires_at_ms>?)`, sessionID, now.UnixMilli()).Scan(&count)
+	err := tx.QueryRow(`SELECT COUNT(*) FROM message_queue WHERE session_id=? AND status IN ('pending','inflight')`, sessionID).Scan(&count)
 	return count, err
 }
 
 func validateQueueProjectionTx(tx catalogQuerier, sessionID string, fingerprint, eventPayload []byte) error {
-	count, err := queueCountTx(tx, sessionID, time.Now())
+	count, err := queueCountTx(tx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -224,11 +224,17 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 	if err := registerSessionTx(tx, state.Session); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures)
-		VALUES(?,?,?,?,?,?,?,0) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
+	waitingOn := []byte{}
+	if state.Session.WaitingOn != nil {
+		if waitingOn, err = json.Marshal(state.Session.WaitingOn); err != nil {
+			return CatalogEvent{}, false, err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO catalog_sessions(session_id,host_project,checkout,unavailable_reason,observed_at,projection_fingerprint,projection_generation,discovery_failures,waiting_on)
+		VALUES(?,?,?,?,?,?,?,0,?) ON CONFLICT(session_id) DO UPDATE SET host_project=excluded.host_project,
 		checkout=excluded.checkout, unavailable_reason=excluded.unavailable_reason, observed_at=excluded.observed_at, misses=0,
-		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0`,
-		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration); err != nil {
+		projection_fingerprint=excluded.projection_fingerprint, projection_generation=excluded.projection_generation, discovery_failures=0, waiting_on=excluded.waiting_on`,
+		state.Session.ID, []byte(state.HostProject), []byte(state.Checkout), state.UnavailableReason, state.ObservedAt.Format(time.RFC3339Nano), state.ProjectionFingerprint, priorGeneration, waitingOn); err != nil {
 		return CatalogEvent{}, false, err
 	}
 	if len(event.Payload) > 0 {
@@ -601,8 +607,8 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 	if err := tx.QueryRow(`SELECT MAX(seq) FROM catalog_events`).Scan(&latest); err != nil {
 		return CatalogSnapshot{}, err
 	}
-	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
-		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
+	rows, err := tx.Query(`SELECT s.id,s.host_id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,
+		cs.host_project,cs.checkout,cs.unavailable_reason,cs.observed_at,cs.projection_fingerprint,cs.projection_generation,cs.misses,cs.discovery_failures,cs.waiting_on,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + `
 		FROM catalog_sessions cs JOIN sessions s ON s.id=cs.session_id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		ORDER BY s.last_active_ms DESC,s.updated_at DESC,s.id`)
 	if err != nil {
@@ -617,35 +623,9 @@ func (r *Registry) CatalogSnapshot() (CatalogSnapshot, error) {
 		snapshot.CatalogSeq = uint64(latest.Int64)
 	}
 	for rows.Next() {
-		var state CatalogSessionState
-		var kind, status, observedAt string
-		var hasLocal int
-		var lastActiveMS int64
-		var generation, misses, discoveryFailures int64
-		var launcher string
-		var location []byte
-		var focusable int
-		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&state.Session.ID, &state.HostID, &kind, &state.Session.Name, &state.Session.Cwd, &state.Session.PID, &status, &state.Session.Transcript, &hasLocal, &state.Session.Source, &state.Session.Transport, &state.Session.ConfiguredModel, &state.Session.Bridge, &state.Session.ForkedFrom, &lastActiveMS, &state.HostProject, &state.Checkout, &state.UnavailableReason, &observedAt, &state.ProjectionFingerprint, &generation, &misses, &discoveryFailures, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
-			return CatalogSnapshot{}, err
-		}
-		subagent.apply(&state.Session)
-		state.Session.Surface = surface.SurfaceKind(kind)
-		state.Session.Status = surface.SessionStatus(status)
-		state.Session.HasLocal = hasLocal != 0
-		if lastActiveMS > 0 {
-			state.Session.LastActive = time.UnixMilli(lastActiveMS)
-		}
-		parsed, err := time.Parse(time.RFC3339Nano, observedAt)
+		state, err := scanCatalogSession(rows)
 		if err != nil {
-			return CatalogSnapshot{}, fmt.Errorf("parse catalog observation: %w", err)
-		}
-		state.ObservedAt = parsed
-		state.Freshness = CatalogFreshness{Generation: uint64(generation), ObservedAt: parsed, Stale: misses > 0 || discoveryFailures > 0 || (state.HostID != "" && state.UnavailableReason != "")}
-		if runtime, err := runtimeFromColumns(launcher, location, focusable); err != nil {
 			return CatalogSnapshot{}, err
-		} else {
-			state.Session.Runtime = runtime
 		}
 		snapshot.Sessions = append(snapshot.Sessions, state)
 	}

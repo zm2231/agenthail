@@ -57,6 +57,10 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }
 
+func (c *Claude) RuntimeKinds() []surface.RuntimeKind {
+	return []surface.RuntimeKind{surface.RuntimeClaudeCLI}
+}
+
 func (c *Claude) ObserveClaudeRuns(ctx context.Context) ([]surface.ClaudeRunObservation, error) {
 	return ObserveClaudeRuns(ctx, c.home)
 }
@@ -74,6 +78,24 @@ func (c *Claude) Capabilities() surface.Capabilities {
 		Send: true, Stream: true, Reply: true, Goal: false,
 		Compact: true, Model: true, Interrupt: true, Steer: true,
 	}
+}
+
+// SessionCapabilities narrows Capabilities for a session reached over its native
+// peer socket: it streams only from a local transcript, and steer, compact,
+// model and interrupt need its Remote Control bridge.
+func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities {
+	capabilities := c.Capabilities()
+	if sess == nil || sess.Transport != "uds" {
+		return capabilities
+	}
+	capabilities.Stream = sess.HasLocal && sess.Transcript != ""
+	if sess.Bridge == "" {
+		capabilities.Steer = false
+		capabilities.Compact = false
+		capabilities.Model = false
+		capabilities.Interrupt = false
+	}
+	return capabilities
 }
 
 // DisableRemoteControl limits the surface to local Claude Code sessions on an
@@ -438,11 +460,12 @@ func (c *Claude) process(ctx context.Context, m map[string]any, transcript func(
 		return claudeProcess{}, false
 	}
 	sess := surface.Session{
-		ID:      conversation,
-		Bridge:  bridge,
-		Surface: surface.KindClaude,
-		Cwd:     str(m, "cwd"),
-		Status:  surface.SessionStatus(str(m, "status")),
+		ID:          conversation,
+		Bridge:      bridge,
+		Surface:     surface.KindClaude,
+		RuntimeKind: surface.RuntimeClaudeCLI,
+		Cwd:         str(m, "cwd"),
+		Status:      surface.SessionStatus(str(m, "status")),
 	}
 	if pid, ok := m["pid"].(float64); ok {
 		sess.PID = int(pid)
@@ -483,9 +506,11 @@ func (c *Claude) applyRecordStatus(ctx context.Context, sess *surface.Session, r
 		sess.LastActive = time.UnixMilli(int64(ts))
 	}
 	sess.Status = claudePeerStatus(record)
+	sess.WaitingOn = nil
 	if sess.HasLocal {
 		if observation, observeErr := c.Observe(ctx, sess); observeErr == nil && observation.Status != surface.StatusUnknown {
 			sess.Status = observation.Status
+			sess.WaitingOn = observation.WaitingOn
 		}
 	}
 }
@@ -528,7 +553,7 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	switch strings.ToLower(string(status)) {
 	case "idle", "shell":
 		return surface.StatusIdle
-	case "busy", "running", "active", "in_progress", "inprogress":
+	case "busy", "running", "active", "in_progress", "inprogress", "waiting":
 		return surface.StatusBusy
 	case "offline":
 		return surface.StatusOffline
@@ -627,7 +652,54 @@ func (c *Claude) Observe(ctx context.Context, sess *surface.Session) (*surface.T
 	return observation, err
 }
 
+// observe reads the turn from the transcript and what it waits on from the
+// process record. Claude writes a pending tool call to the transcript only
+// once it resolves, so the record is the one place a question, a plan
+// approval or a permission prompt shows while it is open.
 func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
+	observation, err := c.observeTurn(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	if waiting := c.recordWaiting(sess); waiting != nil && observation.Status != surface.StatusOffline {
+		observation.Status = surface.StatusBusy
+		observation.WaitingOn = waiting
+	}
+	return observation, nil
+}
+
+// recordWaiting reads what the session's live process reports it is waiting
+// on: "status":"waiting" with waitingFor "input needed" for AskUserQuestion,
+// and "permission prompt" for a plan approval or a tool permission.
+// statusUpdatedAt is when it started waiting, so it names one question.
+func (c *Claude) recordWaiting(sess *surface.Session) *surface.Waiting {
+	if sess.PID <= 0 {
+		return nil
+	}
+	raw, err := os.ReadFile(c.peerRecordPath(sess.PID))
+	if err != nil {
+		return nil
+	}
+	var record map[string]any
+	if json.Unmarshal(raw, &record) != nil || str(record, "status") != "waiting" {
+		return nil
+	}
+	if str(record, "sessionId") != sess.ID {
+		return nil
+	}
+	kind := surface.WaitingApproval
+	if str(record, "waitingFor") == "input needed" {
+		kind = surface.WaitingQuestion
+	}
+	since, _ := record["statusUpdatedAt"].(float64)
+	waiting := &surface.Waiting{Kind: kind, ID: fmt.Sprintf("%s:%s:%d", sess.ID, kind, int64(since))}
+	if since > 0 {
+		waiting.Since = time.UnixMilli(int64(since)).UTC()
+	}
+	return waiting
+}
+
+func (c *Claude) observeTurn(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -716,9 +788,20 @@ func (c *Claude) postWhenIdle(ctx context.Context, sess *surface.Session, messag
 	return c.postMessage(ctx, sess, message)
 }
 
-// CanSendHumanTurn reports whether the session has a web bridge identity, the
-// only route that records the message as the user's own turn.
-func (c *Claude) CanSendHumanTurn(sess *surface.Session) bool {
+// Route sends a person's message as their own turn when the session has a web
+// bridge identity, the only route that records it as the user's turn. Other
+// messages to a session with a native peer socket take that socket.
+func (c *Claude) Route(sess *surface.Session, author surface.Author) surface.Route {
+	if author == surface.AuthorPerson && c.canSendHumanTurn(sess) {
+		return surface.RouteHumanTurn
+	}
+	if sess != nil && sess.Transport == "uds" {
+		return surface.RoutePeer
+	}
+	return surface.RouteSend
+}
+
+func (c *Claude) canSendHumanTurn(sess *surface.Session) bool {
 	return sess != nil && sess.Surface == surface.KindClaude && !c.localOnly && !nativeClaudeOnly(sess)
 }
 
@@ -728,13 +811,13 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if sess == nil {
 		return nil, surface.DeliveryTerminal(errors.New("Claude session is required"), surface.DeliveryInvalidRequest)
 	}
-	if !c.CanSendHumanTurn(sess) {
+	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
 	}
 	if _, err := c.reach(ctx, sess); err != nil {
 		return nil, err
 	}
-	if !c.CanSendHumanTurn(sess) {
+	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude resumed without its web bridge; the message is routed again on retry"))
 	}
 	return c.postWhenIdle(ctx, sess, message)

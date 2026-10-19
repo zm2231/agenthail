@@ -18,13 +18,13 @@ enum SlashCommand: String, CaseIterable, Identifiable {
         }
     }
 
-    static func available(capabilities: Capabilities, working: Bool) -> [SlashCommand] {
+    static func available(capabilities: Capabilities, working: Bool, waitingOnYou: Bool) -> [SlashCommand] {
         allCases.filter { command in
             switch command {
             case .name: return true
             case .compact: return capabilities.compact
             case .stop: return working && capabilities.interrupt
-            case .steer: return working && capabilities.steer
+            case .steer: return working && !waitingOnYou && capabilities.steer
             case .model: return capabilities.model
             case .goal: return capabilities.goal
             }

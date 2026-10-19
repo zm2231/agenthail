@@ -75,7 +75,7 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 
 func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	codex := NewCodex("http://127.0.0.1:1")
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "cli", Transport: codexTransportReadOnly}
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "cli", Transport: codexTransportReadOnly}
 	_, err := codex.Send(context.Background(), session, "do not deliver")
 	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
@@ -83,9 +83,9 @@ func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 }
 
 func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
-	legacy := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle}
-	unclassifiedDesktopSource := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode"}
-	desktop := &surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "managed"}
+	legacy := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
+	unclassifiedDesktopSource := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode"}
+	desktop := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "managed"}
 	if !surface.IsReadOnlySession(legacy) {
 		t.Fatal("legacy unloaded session was writable")
 	}
@@ -95,7 +95,7 @@ func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 	if surface.IsReadOnlySession(desktop) {
 		t.Fatal("Desktop session was read only")
 	}
-	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
+	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
 	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); !strings.Contains(reason, "agenthail launch codex") {
 		t.Fatalf("reason=%q", reason)
 	}
@@ -184,7 +184,7 @@ func managedDiscovery(method string, _ map[string]any) map[string]any {
 }
 
 func managedSession() *surface.Session {
-	return &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
+	return &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged}
 }
 
 func TestCodexResolveIDKeepsManagedLoadedSessionWritable(t *testing.T) {
@@ -501,6 +501,8 @@ func TestCodexManagedObserveMapsTurnsToObservation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			startManagedCodex(t, func(method string, params map[string]any) map[string]any {
 				switch method {
+				case "thread/read":
+					return map[string]any{"thread": map[string]any{"id": "thread", "status": map[string]any{"type": "active", "activeFlags": []any{}}}}
 				case "thread/turns/list":
 					data := make([]any, len(test.turns))
 					for index, turn := range test.turns {
@@ -530,5 +532,49 @@ func TestCodexManagedObserveMapsTurnsToObservation(t *testing.T) {
 			}
 			test.check(t, observation)
 		})
+	}
+}
+
+func TestCodexObserveReportsPendingApprovalAndUserInputAsWaiting(t *testing.T) {
+	for _, test := range []struct {
+		flags []any
+		want  surface.WaitingKind
+	}{
+		{flags: []any{"waitingOnApproval"}, want: surface.WaitingApproval},
+		{flags: []any{"waitingOnUserInput"}, want: surface.WaitingInput},
+		{flags: []any{}},
+	} {
+		startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+			switch method {
+			case "thread/read":
+				return map[string]any{"thread": map[string]any{"id": "thread", "status": map[string]any{"type": "active", "activeFlags": test.flags}}}
+			case "thread/turns/list":
+				return map[string]any{"data": []any{map[string]any{"id": "turn-1", "status": map[string]any{"type": "inProgress"}, "items": []any{}}}}
+			}
+			return nil
+		})
+		observation, err := isolatedManagedRuntime(t).Observe(context.Background(), managedSession())
+		if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "turn-1" {
+			t.Fatalf("flags=%v observation=%+v err=%v", test.flags, observation, err)
+		}
+		if test.want == "" {
+			if observation.WaitingOn != nil {
+				t.Fatalf("flags=%v waiting=%+v", test.flags, observation.WaitingOn)
+			}
+			continue
+		}
+		if observation.WaitingOn == nil || observation.WaitingOn.Kind != test.want || observation.WaitingOn.ID != "thread:"+string(test.want) {
+			t.Fatalf("flags=%v waiting=%+v", test.flags, observation.WaitingOn)
+		}
+	}
+}
+
+func TestCodexSessionCarriesWaitingFromThreadStatus(t *testing.T) {
+	session := codexSession(map[string]any{"id": "thread", "status": map[string]any{"type": "active", "activeFlags": []any{"waitingOnApproval"}}})
+	if session.Status != surface.StatusBusy || session.WaitingOn == nil || session.WaitingOn.Kind != surface.WaitingApproval {
+		t.Fatalf("session=%+v", session)
+	}
+	if idle := codexSession(map[string]any{"id": "thread", "status": map[string]any{"type": "idle"}}); idle.WaitingOn != nil {
+		t.Fatalf("idle session=%+v", idle)
 	}
 }

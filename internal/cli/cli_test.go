@@ -18,6 +18,7 @@ import (
 
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfacetest"
 )
 
 type cliSurface struct {
@@ -91,6 +92,10 @@ func TestCodexRepairManagedRuntimeRestartsConfiguredRuntime(t *testing.T) {
 }
 
 func (f *cliSurface) Name() surface.SurfaceKind { return f.kind }
+
+func (f *cliSurface) RuntimeKinds() []surface.RuntimeKind {
+	return surfacetest.RuntimeKinds(f.Name())
+}
 func (f *cliSurface) List(context.Context) ([]surface.Session, error) {
 	f.listCalls++
 	return f.listed, f.listErr
@@ -204,12 +209,12 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 	fake := &cliSurface{
 		kind: surface.KindCodex,
 		sessions: map[string]surface.Session{
-			"target": {ID: "target", Name: "Target", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop", Status: surface.StatusBusy},
+			"target": {ID: "target", Name: "Target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: "desktop", Status: surface.StatusBusy},
 		},
 		caps: surface.Capabilities{Steer: true},
 	}
 	app, r := cliFixture(t, fake)
-	source := surface.Session{ID: "source", Name: "Source", Surface: surface.KindCodex, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle}
+	source := surface.Session{ID: "source", Name: "Source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "vscode", Transport: "desktop", Status: surface.StatusIdle}
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +243,7 @@ func TestCmdSteerUsesResolvedSourceAndUnifiedReceipt(t *testing.T) {
 func TestCmdSteerReadsMessageFromStdin(t *testing.T) {
 	fake := &cliSurface{
 		kind:     surface.KindCodex,
-		sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, Transport: "desktop", Status: surface.StatusBusy}},
+		sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Transport: "desktop", Status: surface.StatusBusy}},
 		caps:     surface.Capabilities{Steer: true},
 	}
 	app, r := cliFixture(t, fake)
@@ -282,7 +287,7 @@ func TestSendFlagValidation(t *testing.T) {
 			}
 		})
 	}
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, Status: surface.StatusIdle}}, caps: surface.Capabilities{Send: true}}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"target": {ID: "target", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}}, caps: surface.Capabilities{Send: true}}
 	app, _ := cliFixture(t, fake)
 	if _, err := captureStdout(t, func() error {
 		return app.Run([]string{"send", "codex:target", "message", "--no-queue", "--json"})
@@ -298,7 +303,7 @@ func TestSendFlagValidation(t *testing.T) {
 }
 
 func TestDoctorReportsReachableButUnsupervisedManagedRuntime(t *testing.T) {
-	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "thread", Surface: surface.KindCodex}}}
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}}}
 	runtimeSurface := &runtimeCLISurface{cliSurface: fake, status: surface.RuntimeStatus{Name: "Codex managed app-server", Reachable: true, Backend: "pid", Remediation: "agenthail launch codex"}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = runtimeSurface
@@ -419,9 +424,9 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
 	app, r := cliFixture(t, fake)
 	sessions := []surface.Session{
-		{ID: "caller", Surface: surface.KindCodex, Cwd: "/work/root"},
-		{ID: "nested", Surface: surface.KindCodex, Cwd: "/work/root/nested"},
-		{ID: "other", Surface: surface.KindCodex, Cwd: "/work/other"},
+		{ID: "caller", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/root"},
+		{ID: "nested", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/root/nested"},
+		{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Cwd: "/work/other"},
 	}
 	for _, session := range sessions {
 		fake.sessions[session.ID] = session
@@ -472,7 +477,7 @@ func TestQueueListFiltersByTargetMineAndWorkspaceAncestry(t *testing.T) {
 }
 
 func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
-	session := surface.Session{ID: "fresh", Surface: surface.KindClaude, Status: surface.StatusBusy}
+	session := surface.Session{ID: "fresh", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusBusy}
 	fake := &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{"fresh": session}}
 	app, r := cliFixture(t, fake)
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", "claude:fresh", "later"}) }); err != nil {
@@ -484,7 +489,7 @@ func TestQualifiedTargetRegistersBeforeQueue(t *testing.T) {
 }
 
 func TestCompactUsesTypedControlForWorkingClaudeSession(t *testing.T) {
-	session := surface.Session{ID: "busy", Surface: surface.KindClaude, Name: "busy", Status: surface.StatusBusy}
+	session := surface.Session{ID: "busy", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "busy", Status: surface.StatusBusy}
 	fake := &cliSurface{
 		kind:     surface.KindClaude,
 		sessions: map[string]surface.Session{"busy": session},
@@ -502,7 +507,7 @@ func TestCompactUsesTypedControlForWorkingClaudeSession(t *testing.T) {
 
 func TestQueueRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
-		"plain": {ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
+		"plain": {ID: "plain", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
 	}}
 	app, r := cliFixture(t, fake)
 	err := app.Run([]string{"queue", "codex:plain", "do not queue"})
@@ -516,7 +521,7 @@ func TestQueueRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 
 func TestQueueAllowsUnloadedCodexDesktopSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
-		"desktop": {ID: "desktop", Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"},
+		"desktop": {ID: "desktop", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "desktop"},
 	}}
 	app, r := cliFixture(t, fake)
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"queue", "codex:desktop", "deliver later"}) }); err != nil {
@@ -527,10 +532,36 @@ func TestQueueAllowsUnloadedCodexDesktopSession(t *testing.T) {
 	}
 }
 
+func TestQueueRetryReturnsAnUnconfirmedHostSendToItsReplay(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-thread"
+	if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.QueueHostDelivery("remote-thread", "retry me", "key-retry", []byte(`{"action":"send"}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeadLetterUnknown(id, errors.New("host forge has not confirmed the message")); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err != nil {
+		t.Fatal(err)
+	}
+	deliveries, err := r.HostDeliveries(hostID)
+	if err != nil || len(deliveries) != 1 || deliveries[0].ID != id || deliveries[0].Key != "key-retry" || deliveries[0].Status != "pending" {
+		t.Fatalf("deliveries=%+v err=%v", deliveries, err)
+	}
+}
+
 func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, r := cliFixture(t, fake)
-	session := surface.Session{ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
+	session := surface.Session{ID: "plain", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +578,7 @@ func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 	if err := app.Run([]string{"queue", "retry", strconv.FormatInt(id, 10)}); err == nil || !strings.Contains(err.Error(), "read only") {
 		t.Fatalf("retry err=%v", err)
 	}
-	item, err := r.QueueItem(id)
+	item, err := r.QueueItem(id, nil)
 	if err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -555,8 +586,8 @@ func TestQueueRetryRejectsReadOnlyCodexTerminalSession(t *testing.T) {
 
 func TestRoutingRejectsReadOnlyCodexTerminalDestination(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{
-		"source": {ID: "source", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"},
-		"plain":  {ID: "plain", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
+		"source": {ID: "source", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"},
+		"plain":  {ID: "plain", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "cli", Transport: "readOnly"},
 	}}
 	app, r := cliFixture(t, fake)
 	if _, err := r.CreateChannel("reviewers"); err != nil {
@@ -582,7 +613,7 @@ func TestRelayListShowsDerivedFiringEvidence(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, r := cliFixture(t, fake)
 	register := func(id string) {
-		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex}); err != nil {
+		if err := r.RegisterSession(surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -613,7 +644,7 @@ func TestRelayListShowsDerivedFiringEvidence(t *testing.T) {
 
 func TestNotionNewRegistersPersistedThreadInsteadOfSyntheticTarget(t *testing.T) {
 	const threadID = "3978aba0-0606-80ac-a1ae-00a9eb229fc0"
-	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, Name: "launch-notes", Status: surface.StatusIdle}
+	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "launch-notes", Status: surface.StatusIdle}
 	fake := &cliSurface{
 		kind:       surface.KindNotion,
 		sessions:   map[string]surface.Session{"new:launch-notes": synthetic},
@@ -645,7 +676,7 @@ func TestNotionNewRegistersPersistedThreadInsteadOfSyntheticTarget(t *testing.T)
 }
 
 func TestNotionNewCannotBeQueuedBeforePersistence(t *testing.T) {
-	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, Name: "launch-notes", Status: surface.StatusIdle}
+	synthetic := surface.Session{ID: "new:launch-notes", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "launch-notes", Status: surface.StatusIdle}
 	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"new:launch-notes": synthetic}, caps: surface.Capabilities{Send: true}}
 	app, registry := cliFixture(t, fake)
 	err := app.Run([]string{"queue", "notion:new:launch-notes", "later"})
@@ -658,7 +689,7 @@ func TestNotionNewCannotBeQueuedBeforePersistence(t *testing.T) {
 }
 
 func TestSendReplyFailsClosedWhenBaselineObservationFails(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true, Reply: true}, observeErr: errors.New("cursor unavailable")}
 	app, _ := cliFixture(t, fake)
 	err := app.Run([]string{"send", "codex:s", "hello", "--reply"})
@@ -668,7 +699,7 @@ func TestSendReplyFailsClosedWhenBaselineObservationFails(t *testing.T) {
 }
 
 func TestSendStreamPreservesFragmentBytes(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true, Stream: true}, streamEvents: []surface.StreamEvent{{Kind: "text", Text: "hel"}, {Kind: "text", Text: "lo"}, {Kind: "done"}}}
 	app, _ := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"send", "codex:s", "hello", "--stream"}) })
@@ -681,7 +712,7 @@ func TestSendStreamPreservesFragmentBytes(t *testing.T) {
 }
 
 func TestSendDirectStreamDisplaysNormalizedClaudeTimelineAndFailsTerminal(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindClaude}
+	session := surface.Session{ID: "s", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
 	fake := &cliSurface{
 		kind:       surface.KindClaude,
 		sessions:   map[string]surface.Session{"s": session},
@@ -711,7 +742,7 @@ func TestSendDirectStreamDisplaysNormalizedClaudeTimelineAndFailsTerminal(t *tes
 }
 
 func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{
 		kind:       surface.KindCodex,
 		sessions:   map[string]surface.Session{"s": session},
@@ -732,7 +763,7 @@ func TestSendDirectStreamPreservesAppendThenAuthoritativeFinal(t *testing.T) {
 }
 
 func TestSendTimeoutBoundsDelivery(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Send: true}, sendWait: true}
 	app, _ := cliFixture(t, fake)
 	started := time.Now()
@@ -743,7 +774,7 @@ func TestSendTimeoutBoundsDelivery(t *testing.T) {
 }
 
 func TestReplyRejectsFailedCompletion(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}}
 	app, _ := cliFixture(t, fake)
 	app.Surfaces[0].Surface = &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{}, Reply: &surface.ReplyResult{Text: "partial", Done: true, Error: "turn failed"}, Source: "rpc"}}
@@ -756,7 +787,7 @@ func TestReplyRejectsFailedCompletion(t *testing.T) {
 func TestListJSONUsesDefaultLimit(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
 	for i := 0; i < 20; i++ {
-		fake.listed = append(fake.listed, surface.Session{ID: string(rune('a' + i)), Surface: surface.KindCodex, LastActive: time.Now().Add(-time.Duration(i) * time.Minute)})
+		fake.listed = append(fake.listed, surface.Session{ID: string(rune('a' + i)), Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, LastActive: time.Now().Add(-time.Duration(i) * time.Minute)})
 	}
 	app, _ := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
@@ -787,9 +818,9 @@ func TestListCwdFiltersByCanonicalAncestryInTextAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
-		{ID: "root", Surface: surface.KindCodex, Name: "root", Cwd: project},
-		{ID: "nested", Surface: surface.KindCodex, Name: "nested", Cwd: nested},
-		{ID: "other", Surface: surface.KindCodex, Name: "other", Cwd: other},
+		{ID: "root", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "root", Cwd: project},
+		{ID: "nested", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "nested", Cwd: nested},
+		{ID: "other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "other", Cwd: other},
 	}}
 	app, _ := cliFixture(t, fake)
 	text, err := captureStdout(t, func() error { return app.Run([]string{"list", "--cwd", alias}) })
@@ -830,7 +861,7 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	if err := os.MkdirAll(other, 0700); err != nil {
 		t.Fatal(err)
 	}
-	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex}}}
+	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}}}
 	app, store := cliFixture(t, fake)
 	app.catalogDaemonRunning = func() bool { return true }
 	if err := store.EnsureCatalogState(); err != nil {
@@ -838,9 +869,9 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	}
 	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	for _, item := range []surface.Session{
-		{ID: "catalog-root", Surface: surface.KindCodex, Name: "root", Cwd: root, LastActive: observedAt},
-		{ID: "catalog-nested", Surface: surface.KindCodex, Name: "nested", Cwd: nested, LastActive: observedAt.Add(-time.Minute)},
-		{ID: "catalog-other", Surface: surface.KindCodex, Name: "other", Cwd: other, LastActive: observedAt.Add(-2 * time.Minute)},
+		{ID: "catalog-root", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "root", Cwd: root, LastActive: observedAt},
+		{ID: "catalog-nested", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "nested", Cwd: nested, LastActive: observedAt.Add(-time.Minute)},
+		{ID: "catalog-other", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "other", Cwd: other, LastActive: observedAt.Add(-2 * time.Minute)},
 	} {
 		if _, _, err := store.RecordCatalogSession(registry.CatalogSessionState{
 			Session:               item,
@@ -897,12 +928,12 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 
 func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{
-		{ID: "one", Surface: surface.KindCodex, Name: "one", Cwd: "/work/one/agenthail"},
-		{ID: "two", Surface: surface.KindCodex, Name: "two", Cwd: "/work/two/agenthail"},
-		{ID: "three", Surface: surface.KindCodex, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
+		{ID: "one", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "one", Cwd: "/work/one/agenthail"},
+		{ID: "two", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "two", Cwd: "/work/two/agenthail"},
+		{ID: "three", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "three", Cwd: "/work/three/" + strings.Repeat("other", 12)},
 	}}
 	app, _ := cliFixture(t, fake)
-	output, err := captureStdout(t, func() error { return app.Run([]string{"list"}) })
+	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
 	if err != nil || !strings.Contains(output, "/work/one/agenthail") || !strings.Contains(output, "/work/two/agenthail") || strings.Contains(output, "/work/three/other") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
@@ -913,7 +944,7 @@ func TestListWideAndBasenameCollisionRetainFullCwd(t *testing.T) {
 }
 
 func TestListPartialDiscoveryReturnsSessionsAndWarningsWithoutFailure(t *testing.T) {
-	working := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "live", Surface: surface.KindCodex}}}
+	working := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "live", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}}}
 	optionalFailure := &cliSurface{kind: surface.KindNotion, listErr: errors.New("choose a Notion space")}
 	app := App{Surfaces: []SurfaceEntry{{Name: "codex", Surface: working}, {Name: "notion", Surface: optionalFailure}}}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--json"}) })
@@ -934,7 +965,7 @@ func TestListFailsWhenEverySurfaceDiscoveryFails(t *testing.T) {
 func TestListAllIncludesSavedSessionsWithoutSurfaceDiscovery(t *testing.T) {
 	fake := &cliSurface{kind: surface.KindCodex}
 	app, registry := cliFixture(t, fake)
-	if err := registry.RegisterSession(surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}); err != nil {
+	if err := registry.RegisterSession(surface.Session{ID: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "old project"}); err != nil {
 		t.Fatal(err)
 	}
 	output, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all", "--json"}) })
@@ -944,7 +975,7 @@ func TestListAllIncludesSavedSessionsWithoutSurfaceDiscovery(t *testing.T) {
 }
 
 func TestSearchCodexPrintsAndRegistersHistoryHits(t *testing.T) {
-	hit := surface.Session{ID: "old", Surface: surface.KindCodex, Name: "old project"}
+	hit := surface.Session{ID: "old", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "old project"}
 	fake := &cliSurface{kind: surface.KindCodex, searchResults: []surface.SessionSearchResult{{Session: hit, Snippet: "matched text"}}}
 	app, registry := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"search", "codex", "project"}) })
@@ -966,7 +997,7 @@ func TestSearchCodexRequiresThreeCharacters(t *testing.T) {
 }
 
 func TestLastEmptyJSONIsOneDocument(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindNotion}
+	session := surface.Session{ID: "s", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}
 	fake := &cliSurface{kind: surface.KindNotion, sessions: map[string]surface.Session{"s": session}}
 	app, _ := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "notion:s", "--json"}) })
@@ -980,7 +1011,7 @@ func TestLastEmptyJSONIsOneDocument(t *testing.T) {
 }
 
 func TestLastLabelsTranscriptSourceInTextAndJSON(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "local-transcript"}}}
 	app, _ := cliFixture(t, fake)
 	text, err := captureStdout(t, func() error { return app.Run([]string{"last", "codex:s"}) })
@@ -994,7 +1025,7 @@ func TestLastLabelsTranscriptSourceInTextAndJSON(t *testing.T) {
 }
 
 func TestLastPassesExplicitOlderCursorAndReportsNextPage(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}
 	reader := &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{Assistant: "older", Source: "local-transcript"}}, Source: "local-transcript", NextBefore: 123}}
 	app, _ := cliFixture(t, fake)
@@ -1009,7 +1040,7 @@ func TestLastPassesExplicitOlderCursorAndReportsNextPage(t *testing.T) {
 }
 
 func TestLastKeepsExchangesWhenOnlyDetailIsUnavailableAndSurfacesWarning(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}}
 	reader := &cliReadSurface{cliSurface: fake, result: &surface.SessionReadResult{Items: []surface.TimelineItem{}, Exchanges: []surface.Exchange{{User: "q", Assistant: "a", Source: "rpc"}}, Source: "rpc", UnavailableReason: "no local transcript yet"}}
 	app, _ := cliFixture(t, fake)
@@ -1030,7 +1061,7 @@ func TestLastKeepsExchangesWhenOnlyDetailIsUnavailableAndSurfacesWarning(t *test
 }
 
 func TestReplyLabelsSourceAndBoundsDeadline(t *testing.T) {
-	session := surface.Session{ID: "s", Surface: surface.KindCodex}
+	session := surface.Session{ID: "s", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{"s": session}, caps: surface.Capabilities{Reply: true}, tail: []surface.Exchange{{User: "question", Assistant: "answer", Source: "rpc"}}}
 	app, _ := cliFixture(t, fake)
 	output, err := captureStdout(t, func() error { return app.Run([]string{"reply", "codex:s", "--json"}) })
@@ -1112,7 +1143,7 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	claude := &cliSurface{kind: surface.KindClaude, resolveErr: unreachable}
 	notion := &cliSurface{kind: surface.KindNotion, resolveErr: unreachable}
 	app := &App{Registry: r, Surfaces: []SurfaceEntry{{Name: "claude", Surface: claude}, {Name: "notion", Surface: notion}}, DefaultTimeout: 5 * time.Second, catalogDaemonRunning: func() bool { return false }}
-	for _, session := range []surface.Session{{ID: "shared-claude", Surface: surface.KindClaude, Name: "release"}, {ID: "shared-notion", Surface: surface.KindNotion, Name: "release"}} {
+	for _, session := range []surface.Session{{ID: "shared-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "release"}, {ID: "shared-notion", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Name: "release"}} {
 		if err := r.RegisterSession(session); err != nil {
 			t.Fatal(err)
 		}
@@ -1124,7 +1155,7 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 			t.Fatalf("%s: session=%+v err=%v", target, session, err)
 		}
 	}
-	if err := r.RegisterSession(surface.Session{ID: "shared-claude-2", Surface: surface.KindClaude}); err != nil {
+	if err := r.RegisterSession(surface.Session{ID: "shared-claude-2", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := app.resolveTarget(context.Background(), "claude:shared"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
@@ -1135,5 +1166,59 @@ func TestQualifiedTargetsFallBackWithinTheirSurfaceWhileItIsUnreachable(t *testi
 	}
 	if _, _, err := app.resolveTarget(context.Background(), "claude:missing"); !surface.IsDeliveryUnavailable(err) {
 		t.Fatalf("err=%v, want the surface's unavailable error for an unknown target", err)
+	}
+}
+
+func TestListShowsAPairedHostSessionWaitingOnItsUser(t *testing.T) {
+	app, r := cliFixture(t, &cliSurface{kind: surface.KindCodex})
+	app.catalogDaemonRunning = func() bool { return true }
+	hostID := "h0123456789ab"
+	if _, err := r.AddHost(registry.PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	entity := hostID + "::remote-asking"
+	mirror := func(projection string) {
+		t.Helper()
+		if _, _, err := r.ApplyHostCatalogRow(hostID, registry.HostCatalogRow{Session: surface.Session{ID: "remote-asking", Name: "remote-asking", Surface: surface.KindCodex, Status: surface.StatusBusy}, EntityID: entity, Projection: json.RawMessage(projection), ObservedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mirror(`{"id":"` + entity + `","status":"busy","waitingOn":{"kind":"question","id":"thread:question","since":"2026-10-19T08:00:00Z"}}`)
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || !strings.Contains(listed, "wait") {
+		t.Fatalf("list while the host's session waits=%s err=%v", listed, err)
+	}
+	mirror(`{"id":"` + entity + `","status":"busy"}`)
+	listed, err = captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || strings.Contains(listed, "wait") {
+		t.Fatalf("list after the host's session was answered=%s err=%v", listed, err)
+	}
+}
+
+func TestListAndQueueShowASessionWaitingOnTheUser(t *testing.T) {
+	waiting := &surface.Waiting{Kind: surface.WaitingQuestion, ID: "toolu_synthetic"}
+	asking := surface.Session{ID: "asking", Name: "asking", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "app-server", Status: surface.StatusBusy, WaitingOn: waiting, LastActive: time.Now()}
+	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{asking.ID: asking}, listed: []surface.Session{asking}}
+	app, r := cliFixture(t, fake)
+	if err := r.RegisterSession(asking); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.RecordWaiting(asking.ID, waiting, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.QueueMessageWithOptions(asking.ID, "after the answer", "", surface.SendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := captureStdout(t, func() error { return app.Run([]string{"list", "--all"}) })
+	if err != nil || !strings.Contains(listed, "wait+q") {
+		t.Fatalf("list=%s err=%v", listed, err)
+	}
+	queued, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list"}) })
+	if err != nil || !strings.Contains(queued, "queued just now; held: target is waiting on you") {
+		t.Fatalf("queue list=%s err=%v", queued, err)
+	}
+	document, err := captureStdout(t, func() error { return app.Run([]string{"queue", "list", "--json"}) })
+	if err != nil || !strings.Contains(document, `"heldBy":"waiting"`) {
+		t.Fatalf("queue list --json=%s err=%v", document, err)
 	}
 }

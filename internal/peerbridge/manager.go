@@ -374,7 +374,7 @@ func (m *Manager) ensureLocked(ctx context.Context, id string, send bool) error 
 	var session *surface.Session
 	var err error
 	if id == OperatorID {
-		session = &surface.Session{ID: id, Surface: "agenthail", Name: "operator", Status: surface.StatusIdle}
+		session = &surface.Session{ID: id, Surface: "agenthail", RuntimeKind: surface.RuntimeOperator, Name: "operator", Status: surface.StatusIdle}
 	} else {
 		session, err = m.registry.Session(id)
 		if err != nil {

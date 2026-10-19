@@ -68,7 +68,7 @@ func TestNotionReadSessionUsesBoundedProviderMessageIDs(t *testing.T) {
 		t.Fatalf("provider request=%v", requested)
 	}
 
-	older, err := notion.ReadSession(context.Background(), &surface.Session{ID: "thread-1", Surface: surface.KindNotion}, surface.SessionReadRequest{Limit: 2, Before: read.NextBefore})
+	older, err := notion.ReadSession(context.Background(), &surface.Session{ID: "thread-1", Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb}, surface.SessionReadRequest{Limit: 2, Before: read.NextBefore})
 	if err != nil {
 		t.Fatal(err)
 	}

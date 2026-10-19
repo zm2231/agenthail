@@ -15,7 +15,7 @@ import (
 func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 	d, registry, _, _, _ := daemonFixture(t)
 	for _, sessionID := range []string{"history"} {
-		if err := registry.RegisterSession(surface.Session{ID: sessionID, Surface: surface.KindCodex}); err != nil {
+		if err := registry.RegisterSession(surface.Session{ID: sessionID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,17 +40,14 @@ func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 	}
 	retainedDelivered := queueDeliveredForMobileTest(t, registry, "history", "retained delivered")
 	terminalIDs[retainedDelivered] = struct{}{}
-	expiredID, err := registry.QueueMessageWithKey("history", "expired message", "terminal-expired")
+	canceledID, err := registry.QueueMessageWithKey("history", "canceled message", "terminal-canceled")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.ClaimNextMessage("history", time.Now().Add(2*time.Hour)); err != nil {
+	if err := registry.CancelMessage(canceledID); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.RetryMessage(pendingID); err != nil {
-		t.Fatal(err)
-	}
-	terminalIDs[expiredID] = struct{}{}
+	terminalIDs[canceledID] = struct{}{}
 
 	handler := d.dashboardHandler(&dashboardServer{token: "secret"})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil)
@@ -73,7 +70,6 @@ func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 
 	seen := map[int64]dashboardQueue{}
 	terminalSeen := 0
-	expiredSeen := 0
 	for _, item := range page.Items {
 		if _, exists := seen[item.ID]; exists {
 			t.Fatalf("queue item %d returned more than once", item.ID)
@@ -84,16 +80,13 @@ func TestMobileQueueRetainsActiveItemsAndBoundsTerminalHistory(t *testing.T) {
 		}
 		if _, terminal := terminalIDs[item.ID]; terminal {
 			terminalSeen++
-			if item.Status == "expired" {
-				expiredSeen++
-			}
 		}
 	}
 	if _, found := seen[oldestDelivered]; found {
 		t.Fatalf("oldest terminal item %d was retained", oldestDelivered)
 	}
-	if terminalSeen != 100 || expiredSeen != 1 {
-		t.Fatalf("terminal=%d expired=%d, want terminal=100 expired=1", terminalSeen, expiredSeen)
+	if terminalSeen != 100 {
+		t.Fatalf("terminal=%d, want 100", terminalSeen)
 	}
 	for _, id := range []int64{deadID, inflightID, pendingID} {
 		if _, found := seen[id]; !found {

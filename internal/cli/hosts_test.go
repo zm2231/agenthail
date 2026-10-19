@@ -110,7 +110,7 @@ func TestHostQualifiedSendRoutesThroughDaemon(t *testing.T) {
 
 func TestTargetOnTwoHostsIsAmbiguous(t *testing.T) {
 	app, reg, fake, api := federatedCLIFixture(t, true)
-	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, Name: "local work"}
+	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "local work"}
 	if err := reg.RegisterSession(fake.sessions["local-1"]); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestLocalOnlyCommandRefusesRemoteSession(t *testing.T) {
 
 func TestStoppedDaemonStillRefusesAmbiguityFromMirror(t *testing.T) {
 	app, reg, fake, _ := federatedCLIFixture(t, false)
-	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, Name: "local work"}
+	fake.sessions["local-1"] = surface.Session{ID: "local-1", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "local work"}
 	if err := reg.RegisterSession(fake.sessions["local-1"]); err != nil {
 		t.Fatal(err)
 	}

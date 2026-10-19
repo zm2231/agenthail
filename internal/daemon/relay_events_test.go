@@ -54,7 +54,7 @@ func (d *Daemon) fireRelays(from *surface.Session, id string, hops int, text str
 	if err != nil {
 		panic(err)
 	}
-	d.consumeRelays(context.Background(), d.surfaceForKind(from.Surface), from, routes, nil)
+	d.consumeRelays(context.Background(), d.adapters().ForSurface(from.Surface), from, routes, nil)
 }
 
 func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
@@ -73,6 +73,7 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	appendTurn("baseline")
 	d, r, target, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
@@ -192,7 +193,7 @@ func TestGoalRelayWaitsForExplicitCompletionAndReleasesLatestOnce(t *testing.T) 
 	if r.QueueCount(to.ID) != 1 {
 		t.Fatalf("goal handoffs=%d", r.QueueCount(to.ID))
 	}
-	item, err := r.QueueItem(1)
+	item, err := r.QueueItem(1, nil)
 	if err != nil || !strings.HasSuffix(item.Message, "final") {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -320,6 +321,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	appendTurn("baseline")
 	d, r, _, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
@@ -355,7 +357,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	if len(routes) != 1 || routes[0].FireCount != 1 || routes[0].PendingCount != 0 || routes[0].LastError != "" || r.QueueCount(to.ID) != 1 {
 		t.Fatalf("routes=%+v queued=%d", routes, r.QueueCount(to.ID))
 	}
-	items, err := r.ListQueue(false)
+	items, err := r.ListQueue(false, nil)
 	if err != nil || len(items) != 1 || !strings.Contains(items[0].Message, "answer C") {
 		t.Fatalf("queue=%+v err=%v", items, err)
 	}
@@ -388,6 +390,7 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 	write(prompt("baseline"), text("baseline"), duration)
 	d, r, _, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
@@ -421,7 +424,7 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 	if fires() != 2 || r.QueueCount(to.ID) != 2 {
 		t.Fatalf("split turn: fires=%d queued=%d", fires(), r.QueueCount(to.ID))
 	}
-	items, err := r.ListQueue(false)
+	items, err := r.ListQueue(false, nil)
 	if err != nil || len(items) != 2 || !strings.Contains(items[0].Message, "answer one") || !strings.Contains(items[1].Message, "answer two") {
 		t.Fatalf("queue=%+v err=%v", items, err)
 	}

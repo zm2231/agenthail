@@ -69,9 +69,9 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 		return http.StatusOK, `{}`, nil
 	})}
 	dir := t.TempDir()
-	f.bridged = surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
-	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
-	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, Transport: "managed", Status: surface.StatusIdle}
+	f.bridged = surface.Session{ID: "conversation-bridge", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: process.PID, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "bridged.jsonl")}
+	f.native = surface.Session{ID: "native-only", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", Status: surface.StatusIdle, HasLocal: true, Transcript: filepath.Join(dir, "native.jsonl")}
+	agent := surface.Session{ID: "agent", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: "managed", Status: surface.StatusIdle}
 	for _, session := range []surface.Session{f.bridged, f.native, agent} {
 		if err := r.RegisterSession(session); err != nil {
 			t.Fatal(err)
@@ -178,7 +178,7 @@ func TestPersonSendToBusyBridgedClaudeQueuesHumanTurn(t *testing.T) {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
 	assertHumanTurnPost(t, f.posts[0], "after this turn")
-	item, err := f.r.QueueItem(queueID)
+	item, err := f.r.QueueItem(queueID, nil)
 	if err != nil || item.Status != "delivered" || item.Evidence != surface.EvidenceDelivered {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -229,7 +229,7 @@ func TestUncertainQueuedHumanTurnDeadLettersWithoutRetry(t *testing.T) {
 	if len(f.posts) != 1 || len(f.claude.native) != 0 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
-	item, err := f.r.QueueItem(queueID)
+	item, err := f.r.QueueItem(queueID, nil)
 	if err != nil || item.Status != "dead" || item.Evidence != surface.EvidenceUnknown {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -284,7 +284,7 @@ func TestQueuedPersonMessageWithOptionsIsRejectedAtDrain(t *testing.T) {
 	if len(f.posts) != 0 || len(f.claude.native) != 0 {
 		t.Fatalf("native=%q posts=%q", f.claude.native, f.posts)
 	}
-	if item, err := f.r.QueueItem(queueID); err != nil || item.Status != "dead" {
+	if item, err := f.r.QueueItem(queueID, nil); err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }

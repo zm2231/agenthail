@@ -41,7 +41,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	projection := `{"id":"catalog-session","surface":"codex","name":"Catalog","cwd":"/work","status":"idle"}`
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "catalog-session", Surface: surface.KindCodex, Name: "Catalog", Cwd: "/work"}, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "catalog-session:initial", Type: "session.upserted", EntityID: "catalog-session", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "catalog-session", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Catalog", Cwd: "/work"}, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "catalog-session:initial", Type: "session.upserted", EntityID: "catalog-session", Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
 	events, err := r.MarkCatalogDiscoveryFailure(surface.KindCodex, "provider unavailable", observed.Add(time.Minute))
@@ -76,7 +76,7 @@ func TestCatalogDiscoveryFailureRetainsRowAndAdvancesStaleGeneration(t *testing.
 func TestDiscoveryFailureBreaksSuccessfulOmissionRun(t *testing.T) {
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
-	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-run", Surface: surface.KindCodex}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-run","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-run:initial", Type: "session.upserted", EntityID: "omission-run", Payload: []byte(`{"session":{"id":"omission-run"}}`)}); err != nil {
+	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: "omission-run", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: `{"id":"omission-run","surface":"codex"}`}, CatalogEvent{DedupeKey: "omission-run:initial", Type: "session.upserted", EntityID: "omission-run", Payload: []byte(`{"session":{"id":"omission-run"}}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if events, err := r.RecordCatalogDiscovery(surface.KindCodex, map[string]struct{}{}, time.Now(), true, 2); err != nil || len(events) != 0 {
@@ -107,7 +107,7 @@ func TestCatalogSnapshotPageFiltersAndBoundsRows(t *testing.T) {
 			project = "target"
 		}
 		projection := fmt.Sprintf(`{"id":%q,"surface":"codex","name":%q,"cwd":"/work/%s","status":"idle"}`, id, "worker-"+fmt.Sprint(i), project)
-		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: id, Surface: surface.KindCodex, Name: "worker-" + fmt.Sprint(i), Cwd: "/work/" + project, LastActive: now.Add(-time.Duration(i) * time.Minute)}, HostProject: []byte(fmt.Sprintf(`{"id":%q}`, project)), Checkout: []byte(`{}`), ObservedAt: now, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
+		if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "worker-" + fmt.Sprint(i), Cwd: "/work/" + project, LastActive: now.Add(-time.Duration(i) * time.Minute)}, HostProject: []byte(fmt.Sprintf(`{"id":%q}`, project)), Checkout: []byte(`{}`), ObservedAt: now, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: id, Type: "session.upserted", EntityID: id, Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestCatalogSnapshotPageFiltersAndBoundsRows(t *testing.T) {
 
 func TestCatalogOmissionRequiresTwoSuccessfulReconciliations(t *testing.T) {
 	r := openTestRegistry(t)
-	session := surface.Session{ID: "omitted", Surface: surface.KindCodex}
+	session := surface.Session{ID: "omitted", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ProjectionFingerprint: "initial"}, CatalogEvent{DedupeKey: "omitted:upsert", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestRetainCatalogSurfacesDropsUnregisteredSurfaces(t *testing.T) {
 
 func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	r := openTestRegistry(t)
-	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, Name: "Queued", Status: surface.StatusIdle}
+	session := surface.Session{ID: "queued-claude", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "Queued", Status: surface.StatusIdle}
 	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: time.Now(), ProjectionFingerprint: `{"id":"queued-claude","open":false}`}, CatalogEvent{DedupeKey: "session.upserted:queued-claude", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":{"id":"queued-claude"}}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -254,15 +254,15 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	if drained.CatalogSeq <= claimed.CatalogSeq || len(drained.Sessions) != 0 {
 		t.Fatalf("drain seq=%d->%d sessions=%d", claimed.CatalogSeq, drained.CatalogSeq, len(drained.Sessions))
 	}
-	if err := r.QueueMessage(session.ID, "expires"); err != nil {
+	if err := r.QueueMessage(session.ID, "canceled later"); err != nil {
 		t.Fatal(err)
 	}
-	beforeExpiry := page()
-	if expired, err := r.ExpireMessages(time.Now().Add(365 * 24 * time.Hour)); err != nil || expired != 1 {
-		t.Fatalf("expired=%d err=%v", expired, err)
+	beforeCancel := page()
+	if count, err := r.CancelMessagesForSession(session.ID); err != nil || count != 1 {
+		t.Fatalf("canceled=%d err=%v", count, err)
 	}
 	swept := page()
-	if swept.CatalogSeq <= beforeExpiry.CatalogSeq || len(swept.Sessions) != 0 {
-		t.Fatalf("expiry seq=%d->%d sessions=%d", beforeExpiry.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
+	if swept.CatalogSeq <= beforeCancel.CatalogSeq || len(swept.Sessions) != 0 {
+		t.Fatalf("cancel seq=%d->%d sessions=%d", beforeCancel.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
 	}
 }
