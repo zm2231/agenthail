@@ -94,7 +94,8 @@ const conversation = context.renderTimeline([
 ], session);
 assert(conversation.includes("synthetic line 40 of a long reply") && !conversation.includes("Show full message"), "long replies render in full without a crop");
 assert(conversation.includes(`data-copy-text="${longReply}"`), "Copy on a reply carries its whole Markdown");
-assert(conversation.includes('data-copy-text="Synthetic **request**"') && conversation.includes('data-copy-text="Synthetic peer note"'), "every message offers Copy");
+for (const text of ["Synthetic **request**", "Synthetic handoff", "Synthetic peer note"]) assert(conversation.includes(`data-copy-text="${text}"`), `Copy omitted ${text}`);
+assert.equal((conversation.match(/class="turn-action" type="button" data-copy-text=/g) || []).length, 4, "every message offers Copy");
 assert.equal((conversation.match(/data-edit-message=/g) || []).length, 1, "only your own typed message offers Edit");
 assert(conversation.includes('data-edit-message="Synthetic **request**"'), "Edit carries the message text");
 const quoted = context.renderTimeline([{ id: "result-2", kind: "toolResult", title: "Result", text: `say "hi" <b>` }], session);
@@ -123,6 +124,25 @@ context.app.history = {
 context.renderChat();
 assert(elements["#chat-body"].innerHTML.includes("job-writable"), "writable Claude sessions should render supplied run observations");
 assert(elements["#chat-body"].innerHTML.includes("agent-writable"), "writable Claude sessions should render supplied subagent observations");
+
+context.app.transcriptSignature = null;
+context.app.history = {
+  exchanges: [{ user: "Synthetic fallback request", assistant: "Synthetic fallback reply" }, { user: "[from @peer] Synthetic fallback handoff", assistant: "" }],
+  capabilities: {},
+  readOnly: false,
+  timeline: { items: [] },
+};
+context.renderChat();
+const fallback = elements["#chat-body"].innerHTML;
+for (const text of ["Synthetic fallback request", "Synthetic fallback reply", "Synthetic fallback handoff"]) assert(fallback.includes(`data-copy-text="${text}"`), `exchange fallback Copy omitted ${text}`);
+assert.equal((fallback.match(/data-edit-message=/g) || []).length, 1, "exchange fallback offers Edit only on your typed message");
+assert(fallback.includes('data-edit-message="Synthetic fallback request"'), "exchange fallback Edit carries the message text");
+context.app.history = {
+  exchanges: [],
+  capabilities: { goal: true },
+  readOnly: false,
+  timeline: { items: [{ id: "message-2", kind: "message", role: "assistant", text: "Ready" }] },
+};
 
 const renderGoal = (goal) => {
   context.app.transcriptSignature = null;
