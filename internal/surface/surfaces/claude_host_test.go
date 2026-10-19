@@ -15,11 +15,14 @@ import (
 	"github.com/zm2231/agenthail/internal/claudehost/claudehosttest"
 	"github.com/zm2231/agenthail/internal/claudepeer"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 func hostedClaude(t *testing.T) (*Claude, *claudehosttest.Fixture) {
 	t.Helper()
 	fixture := claudehosttest.New(t, "")
+	// Resuming reads Claude's background job catalog through the claude binary.
+	claudetest.New(t)
 	return NewClaude(nil, fixture.Home), fixture
 }
 

@@ -122,6 +122,7 @@ func TestClaudeResumeLeavesReachableProcessAlone(t *testing.T) {
 
 func TestClaudeHostSessionLifecycle(t *testing.T) {
 	host := claudehosttest.New(t, "")
+	claudetest.New(t)
 	host.Start(t)
 	c := NewClaude(nil, host.Home)
 	session, _, err := c.StartSession(context.Background(), surface.SessionStartOptions{Message: "build it", Cwd: host.Cwd})
