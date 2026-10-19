@@ -35,8 +35,7 @@ func (a *App) cmdThreadOperation(args []string) (operationErr error) {
 	var adapter surface.Surface
 	if operation == "stop" || operation == "resume" || operation == "logs" || operation == "status" {
 		if a.Registry != nil {
-			selector := strings.TrimPrefix(target, "@")
-			selector = strings.TrimPrefix(selector, "claude:")
+			selector := strings.TrimPrefix(target, "claude:")
 			if id, e := a.Registry.ResolveTarget(selector); e == nil {
 				session, _ = a.Registry.Session(id)
 			}

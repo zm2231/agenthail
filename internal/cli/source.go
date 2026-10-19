@@ -25,11 +25,11 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 		return "", nil
 	}
 	if a.Registry != nil {
-		registrySelector := strings.TrimPrefix(selector, "@")
+		registrySelector := selector
 		expectedSurface := ""
 		if kind, target, qualified := strings.Cut(registrySelector, ":"); qualified {
 			expectedSurface = strings.ToLower(kind)
-			registrySelector = strings.TrimPrefix(target, "@")
+			registrySelector = target
 		}
 		if id, err := a.Registry.ResolveTarget(registrySelector); err == nil {
 			kind, _, _, sessionErr := a.Registry.GetSession(id)

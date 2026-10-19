@@ -55,7 +55,7 @@ func (a *App) cmdIdentify(args []string) error {
 	if len(args) != 2 {
 		return fmt.Errorf("usage: agenthail identify <target> <name>")
 	}
-	target := strings.TrimPrefix(args[0], "@")
+	target := args[0]
 	name := strings.TrimPrefix(args[1], "@")
 	ctx := context.Background()
 	sess, _, err := a.resolveTarget(ctx, target)

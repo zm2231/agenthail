@@ -837,13 +837,18 @@ func (r *Registry) ReserveGeneratedAlias(sessionID, base string) (string, error)
 }
 
 // ResolveTarget resolves an alias, an exact ID, a unique ID prefix, or a
-// name/cwd fragment. Name and cwd fragments match only family roots, so a
+// name/cwd fragment; "@<name>" resolves only an alias or exact ID, so a
+// name never reaches another session by substring. Name and cwd fragments
+// match only family roots, so a
 // family resolves to its root. "@<parent>/<child>[/<child>...]" walks
 // subagents: <parent> is any other target form and each <child> is a direct
 // subagent's nickname (case-insensitive), ID, or unique ID prefix.
 func (r *Registry) ResolveTarget(target string) (string, error) {
-	if path, ok := strings.CutPrefix(target, "@"); ok && strings.Contains(path, "/") {
-		return r.resolveSubagentPath(path)
+	if path, ok := strings.CutPrefix(target, "@"); ok {
+		if strings.Contains(path, "/") {
+			return r.resolveSubagentPath(path)
+		}
+		return r.ExactTarget("", path)
 	}
 	return r.resolveTarget(target, "")
 }
@@ -851,6 +856,9 @@ func (r *Registry) ResolveTarget(target string) (string, error) {
 // ResolveSurfaceTarget resolves a target like ResolveTarget, but matches and
 // judges ambiguity only among sessions of the given surface.
 func (r *Registry) ResolveSurfaceTarget(kind surface.SurfaceKind, target string) (string, error) {
+	if name, ok := strings.CutPrefix(target, "@"); ok {
+		return r.ExactTarget(kind, name)
+	}
 	return r.resolveTarget(target, string(kind))
 }
 
