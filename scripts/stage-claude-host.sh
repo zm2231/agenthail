@@ -11,6 +11,9 @@ NPM="${NPM:-npm}"
 
 rm -rf "$DEST"
 mkdir -p "$DEST"
+# npm ci rejects the lock file when the prefix runs through a symlink, as
+# macOS temporary directories under /var do.
+DEST="$(cd "$DEST" && pwd -P)"
 cp "$ROOT/claude-host/host.mjs" "$ROOT/claude-host/package.json" "$ROOT/claude-host/package-lock.json" "$DEST/"
 "$NPM" ci --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund --prefix "$DEST" >/dev/null
 if find "$DEST/node_modules" -name '*.node' -print -quit | grep -q .; then

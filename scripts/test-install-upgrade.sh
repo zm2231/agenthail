@@ -127,7 +127,6 @@ unset AGENTHAIL_INSTALL_TEST_FAIL_AFTER_ACTIVATION
 if ! grep -q "injected post-activation failure" "$TMP/fresh-rollback.log"; then
 	echo "error: the fresh install failed before activation" >&2
 	cat "$TMP/fresh-rollback.log" >&2
-	HOME="$FAILED_HOME" PATH="$SOURCE_GO_BIN:$FAKE_BIN:/opt/homebrew/bin:/usr/bin:/bin" sh -c 'command -v npm node; node --version; npm --version; npm config list; env | grep -i "^npm_config" || true' >&2
 	exit 1
 fi
 FAILED_PID="$(cat "$FAILED_HOME/.fake-agenthail-launchd-last-pid")"
