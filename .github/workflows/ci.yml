@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
+    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -83,7 +83,7 @@ jobs:
         run: scripts/ci-self-hosted.sh cleanup
 
   native:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
+    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
