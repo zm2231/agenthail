@@ -128,7 +128,7 @@ jobs:
           (cd dist && sha256sum -c agenthail-v0.0.0-ci-linux-amd64.tar.gz.sha256 agenthail-v0.0.0-ci-linux-arm64.tar.gz.sha256)
 
   installer:
-    runs-on: macos-latest
+    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-latest' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -147,7 +147,7 @@ jobs:
           scripts/test-install-upgrade.sh
 
   package:
-    runs-on: macos-26
+    runs-on: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'macos-26' || fromJSON('["self-hosted","macOS","ARM64","agenthail-vm"]') }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
