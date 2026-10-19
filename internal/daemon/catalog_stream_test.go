@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -81,9 +82,9 @@ func TestAPICatalogStreamReplaysPersistedEvent(t *testing.T) {
 	}
 }
 
-func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T) {
+func TestActiveCatalogSubscriberReceivesTerminalDeliveryProblemOnce(t *testing.T) {
 	d, store, _, sender, target := daemonFixture(t)
-	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "expiry", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
+	if _, _, err := store.QueueDeliveryWithIntent(target.ID, "deliver later", "terminal", surface.SendOptions{SourceSessionID: sender.ID}); err != nil {
 		t.Fatal(err)
 	}
 	_, events, cancel, err := d.catalog.subscribe(0)
@@ -91,7 +92,11 @@ func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T)
 		t.Fatal(err)
 	}
 	defer cancel()
-	if _, err := store.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
+	item, err := store.ClaimNextMessage(target.ID, time.Now())
+	if err != nil || item == nil {
+		t.Fatalf("claim=%+v err=%v", item, err)
+	}
+	if _, err := store.DeadLetterMessage(item.ID, errors.New("target rejected input")); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.catalog.flushCommitted(); err != nil {
@@ -101,7 +106,7 @@ func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T)
 	if event.Type != "delivery.problem" {
 		t.Fatalf("event=%+v", event)
 	}
-	if _, err := store.ExpireMessages(time.Now().Add(2 * time.Hour)); err != nil {
+	if err := store.ReconcileAttentionItems(time.Now().Add(2 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.catalog.flushCommitted(); err != nil {
@@ -110,7 +115,7 @@ func TestActiveCatalogSubscriberReceivesExpiredDeliveryProblemOnce(t *testing.T)
 	ensureNoCatalogEvent(t, events)
 }
 
-func TestCatalogScanDrainsDeliveryProblemExpiredByQueueCount(t *testing.T) {
+func TestCatalogScanFlushesCommittedDeliveryProblemBeforeObserving(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "registry.db")
 	store, err := registry.Open(path)
 	if err != nil {
@@ -143,11 +148,14 @@ func TestCatalogScanDrainsDeliveryProblemExpiredByQueueCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE message_queue SET expires_at_ms=1 WHERE id=?`, queueID); err != nil {
+	if _, err := db.Exec(`UPDATE message_queue SET status='inflight' WHERE id=?`, queueID); err != nil {
 		db.Close()
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DeadLetterMessage(queueID, errors.New("target rejected input")); err != nil {
 		t.Fatal(err)
 	}
 	if count := store.QueueCount(target.ID); count != 0 {

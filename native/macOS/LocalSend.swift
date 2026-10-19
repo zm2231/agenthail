@@ -8,9 +8,9 @@ struct LocalSend: Identifiable, Equatable {
 
     static let clockSkew: TimeInterval = 5
 
-    static func label(for status: String?) -> String {
+    static func label(for status: String?, waitingOnYou: Bool = false) -> String {
         switch status {
-        case "queued": return "Queued"
+        case "queued": return waitingOnYou ? "Queued · Waiting on you" : "Queued"
         case "submitted": return "Submitted"
         default: return "Sent"
         }

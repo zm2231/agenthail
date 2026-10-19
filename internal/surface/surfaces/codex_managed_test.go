@@ -547,6 +547,8 @@ func TestCodexManagedObserveMapsTurnsToObservation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			startManagedCodex(t, func(method string, params map[string]any) map[string]any {
 				switch method {
+				case "thread/read":
+					return map[string]any{"thread": map[string]any{"id": "thread", "status": map[string]any{"type": "active", "activeFlags": []any{}}}}
 				case "thread/turns/list":
 					data := make([]any, len(test.turns))
 					for index, turn := range test.turns {
@@ -576,5 +578,49 @@ func TestCodexManagedObserveMapsTurnsToObservation(t *testing.T) {
 			}
 			test.check(t, observation)
 		})
+	}
+}
+
+func TestCodexObserveReportsPendingApprovalAndUserInputAsWaiting(t *testing.T) {
+	for _, test := range []struct {
+		flags []any
+		want  surface.WaitingKind
+	}{
+		{flags: []any{"waitingOnApproval"}, want: surface.WaitingApproval},
+		{flags: []any{"waitingOnUserInput"}, want: surface.WaitingInput},
+		{flags: []any{}},
+	} {
+		startManagedCodex(t, func(method string, _ map[string]any) map[string]any {
+			switch method {
+			case "thread/read":
+				return map[string]any{"thread": map[string]any{"id": "thread", "status": map[string]any{"type": "active", "activeFlags": test.flags}}}
+			case "thread/turns/list":
+				return map[string]any{"data": []any{map[string]any{"id": "turn-1", "status": map[string]any{"type": "inProgress"}, "items": []any{}}}}
+			}
+			return nil
+		})
+		observation, err := isolatedManagedRuntime(t).Observe(context.Background(), managedSession())
+		if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "turn-1" {
+			t.Fatalf("flags=%v observation=%+v err=%v", test.flags, observation, err)
+		}
+		if test.want == "" {
+			if observation.WaitingOn != nil {
+				t.Fatalf("flags=%v waiting=%+v", test.flags, observation.WaitingOn)
+			}
+			continue
+		}
+		if observation.WaitingOn == nil || observation.WaitingOn.Kind != test.want || observation.WaitingOn.ID != "thread:"+string(test.want) {
+			t.Fatalf("flags=%v waiting=%+v", test.flags, observation.WaitingOn)
+		}
+	}
+}
+
+func TestCodexSessionCarriesWaitingFromThreadStatus(t *testing.T) {
+	session := codexSession(map[string]any{"id": "thread", "status": map[string]any{"type": "active", "activeFlags": []any{"waitingOnApproval"}}})
+	if session.Status != surface.StatusBusy || session.WaitingOn == nil || session.WaitingOn.Kind != surface.WaitingApproval {
+		t.Fatalf("session=%+v", session)
+	}
+	if idle := codexSession(map[string]any{"id": "thread", "status": map[string]any{"type": "idle"}}); idle.WaitingOn != nil {
+		t.Fatalf("idle session=%+v", idle)
 	}
 }

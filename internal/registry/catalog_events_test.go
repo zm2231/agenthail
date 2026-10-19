@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -261,24 +262,24 @@ func TestQueueMutationsAdvanceCatalogWatermarkWithPageMembership(t *testing.T) {
 	if drained.CatalogSeq <= claimed.CatalogSeq || len(drained.Sessions) != 0 {
 		t.Fatalf("drain seq=%d->%d sessions=%d", claimed.CatalogSeq, drained.CatalogSeq, len(drained.Sessions))
 	}
-	if err := r.QueueMessage(session.ID, "expires"); err != nil {
+	if err := r.QueueMessage(session.ID, "canceled later"); err != nil {
 		t.Fatal(err)
 	}
-	beforeExpiry := page()
-	if expired, err := r.ExpireMessages(time.Now().Add(365 * 24 * time.Hour)); err != nil || expired != 1 {
-		t.Fatalf("expired=%d err=%v", expired, err)
+	beforeCancel := page()
+	if count, err := r.CancelMessagesForSession(session.ID); err != nil || count != 1 {
+		t.Fatalf("canceled=%d err=%v", count, err)
 	}
 	swept := page()
-	if swept.CatalogSeq <= beforeExpiry.CatalogSeq || len(swept.Sessions) != 0 {
-		t.Fatalf("expiry seq=%d->%d sessions=%d", beforeExpiry.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
+	if swept.CatalogSeq <= beforeCancel.CatalogSeq || len(swept.Sessions) != 0 {
+		t.Fatalf("cancel seq=%d->%d sessions=%d", beforeCancel.CatalogSeq, swept.CatalogSeq, len(swept.Sessions))
 	}
 }
 
 func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
 	r := openTestRegistry(t)
 	observed := time.Date(2026, 10, 7, 11, 0, 0, 0, time.UTC)
-	session := surface.Session{ID: "busy-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: observed}
-	projection := `{"id":"busy-thread","surface":"codex","status":"busy","current":true,"currentReason":"working"}`
+	session := surface.Session{ID: "busy-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusBusy, LastActive: observed, WaitingOn: &surface.Waiting{Kind: surface.WaitingQuestion, ID: "busy-thread:question"}}
+	projection := `{"id":"busy-thread","surface":"codex","status":"busy","current":true,"currentReason":"working","waitingOn":{"kind":"question","id":"busy-thread:question"}}`
 	if _, _, err := r.RecordCatalogSession(CatalogSessionState{Session: session, HostProject: []byte(`{}`), Checkout: []byte(`{}`), ObservedAt: observed, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "busy-thread:initial", Type: "session.upserted", EntityID: session.ID, Payload: []byte(`{"session":` + projection + `}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -298,6 +299,13 @@ func TestSessionMissingFromDiscoveryStopsBeingBusyOrCurrent(t *testing.T) {
 	}
 	if count("current") != 0 || count("running") != 0 {
 		t.Fatalf("unobserved session current=%d running=%d", count("current"), count("running"))
+	}
+	page, err := r.CatalogSnapshotPage(CatalogPageRequest{Limit: 10, Now: observed.Add(time.Hour)})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if retired := page.Sessions[0]; retired.Session.WaitingOn != nil || strings.Contains(retired.ProjectionFingerprint, "waitingOn") {
+		t.Fatalf("offline session still waiting: %+v", retired)
 	}
 	if err := r.QueueMessage(session.ID, "held"); err != nil {
 		t.Fatal(err)

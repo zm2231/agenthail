@@ -12,6 +12,7 @@ enum SessionFacts {
     }
 
     static func presenceLabel(_ session: SessionState) -> String {
+        if session.isWaitingOnYou { return "Waiting on you" }
         switch session.currentReason {
         case "working": return "Working"
         case "queued": return "Queued"

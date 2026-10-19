@@ -147,6 +147,40 @@ test("send invalidates registrations created before App Attest enforcement", asy
   assert.equal(env.PUSH_DEVICES.values.has("device:legacy"), false)
 })
 
+test("send asks APNs to collapse a repeated notification into one", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64")
+  const env = environment({ APNS_KEY_P8: `-----BEGIN PRIVATE KEY-----\n${pkcs8}\n-----END PRIVATE KEY-----`, APNS_KEY_ID: "KEY1234567", APNS_TOPIC: "com.agenthail.ios" })
+  const credential = "fixture-credential"
+  env.PUSH_DEVICES.values.set("device:phone", JSON.stringify({
+    token: "ab".repeat(32),
+    environment: "sandbox",
+    attestedAt: Date.now(),
+    appAttestKeyHash: "fixture-key-hash",
+    credentialHash: await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential)).then(value => Buffer.from(value).toString("base64url"))
+  }))
+  const delivered = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    delivered.push({ url, headers: init.headers, payload: JSON.parse(init.body) })
+    return new Response(null, { status: 200 })
+  }
+  try {
+    const notification = { installationId: "phone", credential, title: "builder", message: "builder is waiting on you", eventType: "session.waiting" }
+    for (const collapseId of ["waiting-0123456789abcdef", ""]) {
+      const response = await send(request("POST", { ...notification, collapseId }), env)
+      assert.equal(response.status, 200)
+    }
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.equal(delivered.length, 2)
+  assert.equal(delivered[0].url, `https://api.sandbox.push.apple.com/3/device/${"ab".repeat(32)}`)
+  assert.equal(delivered[0].headers["apns-collapse-id"], "waiting-0123456789abcdef")
+  assert.equal(delivered[0].payload.eventType, "session.waiting")
+  assert.equal("apns-collapse-id" in delivered[1].headers, false)
+})
+
 test("registration rejects malformed APNs tokens", async () => {
   const env = environment()
   const response = await register(request("POST", await registrationBody(env, { deviceToken: "not-a-token" })), env, acceptAttestation)

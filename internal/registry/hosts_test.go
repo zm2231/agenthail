@@ -278,7 +278,7 @@ func TestHostCatalogRowRequiresPairedHost(t *testing.T) {
 	}
 }
 
-func TestHeldHostDeliveryPastItsDeadlineIsNeverClaimed(t *testing.T) {
+func TestHeldHostDeliveryStaysPendingUntilTheHostTakesIt(t *testing.T) {
 	r := openTestRegistry(t)
 	hostID := "h0123456789ab"
 	if _, err := r.AddHost(PairedHost{ID: hostID, Name: "forge", Endpoint: "https://forge.example.ts.net:7412", Address: "100.64.0.2", Token: "ahd_secret"}); err != nil {
@@ -288,54 +288,43 @@ func TestHeldHostDeliveryPastItsDeadlineIsNeverClaimed(t *testing.T) {
 	if _, _, err := r.ApplyHostCatalogRow(hostID, HostCatalogRow{Session: surface.Session{ID: "remote-thread", Surface: surface.KindCodex}, EntityID: entity, Projection: json.RawMessage(`{"id":"` + entity + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := r.QueueHostDelivery("remote-thread", "too late", "key-stale", []byte(`{"action":"send"}`), false)
+	held, err := r.QueueHostDelivery("remote-thread", "while away", "key-held", []byte(`{"action":"send"}`), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, err := r.QueueHostDelivery("remote-thread", "expires mid-drain", "key-race", []byte(`{"action":"send"}`), false)
+	canceled, err := r.QueueHostDelivery("remote-thread", "never mind", "key-canceled", []byte(`{"action":"send"}`), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := r.QueueHostDelivery("remote-thread", "in time", "key-fresh", []byte(`{"action":"send"}`), false)
-	if err != nil {
+	start := time.Now()
+	r.now = func() time.Time { return start.Add(72 * time.Hour) }
+	if _, err := r.RecoverInflight(r.now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReconcileAttentionItems(r.now()); err != nil {
+		t.Fatal(err)
+	}
+	if item, err := r.QueueItem(held, nil); err != nil || item.Status != "pending" || item.HeldBy != QueueHeldHostUnreachable {
+		t.Fatalf("held item after three days=%+v err=%v", item, err)
+	}
+	if err := r.CancelMessage(canceled); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := r.HostDeliveries(hostID)
-	if err != nil || len(pending) != 3 {
-		t.Fatalf("pending=%+v err=%v", pending, err)
+	if err != nil || len(pending) != 1 || pending[0].ID != held {
+		t.Fatalf("deliveries=%+v err=%v", pending, err)
 	}
-	start := time.Now()
-	r.now = func() time.Time { return start.Add(queueMessageTTL + time.Minute) }
-	if _, err := r.db.Exec(`UPDATE message_queue SET expires_at_ms=? WHERE id=?`, start.Add(2*queueMessageTTL).UnixMilli(), fresh); err != nil {
+	if _, claimed, err := r.ClaimHostDelivery(canceled); err != nil || claimed {
+		t.Fatalf("claimed a canceled delivery: claimed=%v err=%v", claimed, err)
+	}
+	if _, claimed, err := r.ClaimHostDelivery(held); err != nil || !claimed {
+		t.Fatalf("held claim=%v err=%v", claimed, err)
+	}
+	if err := r.ReleaseHostDelivery(held); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = r.HostDeliveries(hostID)
-	if err != nil || len(pending) != 1 || pending[0].ID != fresh {
-		t.Fatalf("deliveries past the deadline=%+v err=%v", pending, err)
-	}
-	if _, claimed, err := r.ClaimHostDelivery(stale); err != nil || claimed {
-		t.Fatalf("claimed an expired delivery: claimed=%v err=%v", claimed, err)
-	}
-	if _, err := r.ExpireMessages(r.now()); err != nil {
-		t.Fatal(err)
-	}
-	if _, claimed, err := r.ClaimHostDelivery(selected); err != nil || claimed {
-		t.Fatalf("claimed a delivery expiry already moved: claimed=%v err=%v", claimed, err)
-	}
-	_, claimed, err := r.ClaimHostDelivery(fresh)
-	if err != nil || !claimed {
-		t.Fatalf("fresh claim=%v err=%v", claimed, err)
-	}
-	if err := r.ReleaseHostDelivery(fresh, pending[0].ExpiresAt); err != nil {
-		t.Fatal(err)
-	}
-	item, err := r.QueueItem(fresh)
-	if err != nil || item.Status != "pending" {
+	if item, err := r.QueueItem(held, nil); err != nil || item.Status != "pending" || item.HeldBy != QueueHeldHostUnreachable {
 		t.Fatalf("released item=%+v err=%v", item, err)
-	}
-	expired, err := r.QueueItem(stale)
-	if err != nil || expired.Status == "pending" || expired.Status == "inflight" {
-		t.Fatalf("stale item=%+v err=%v", expired, err)
 	}
 }
 

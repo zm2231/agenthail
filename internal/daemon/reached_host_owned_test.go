@@ -130,7 +130,7 @@ func TestQueuedSendResumingIntoHostOwnedSessionIsUnknownAndNotRetried(t *testing
 	for range 3 {
 		f.daemon.scanAndRelay(context.Background())
 	}
-	item, err := f.r.QueueItem(id)
+	item, err := f.r.QueueItem(id, nil)
 	if err != nil || item.Status != "dead" || !strings.Contains(item.LastError, "forge") {
 		t.Fatalf("item=%+v err=%v", item, err)
 	}
@@ -169,7 +169,7 @@ func TestQueuedCompactResumingIntoHostOwnedSessionIsUnknownAndNotRetried(t *test
 	var item *registry.QueueRow
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if item, err = f.r.QueueItem(id); err == nil && item.Status == "dead" {
+		if item, err = f.r.QueueItem(id, nil); err == nil && item.Status == "dead" {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
