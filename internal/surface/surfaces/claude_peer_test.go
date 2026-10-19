@@ -430,7 +430,7 @@ func TestClaudeResolveExactIDBeatsCwdContainingIt(t *testing.T) {
 	write(os.Getpid(), coordinator, "/fixture")
 	write(worker.Process.Pid, "worker-id", "/scratch/"+coordinator+"/check")
 
-	adapter := NewClaude("", home)
+	adapter := NewClaude(nil, home)
 	resolved, err := adapter.Resolve(context.Background(), coordinator)
 	if err != nil || resolved.ID != coordinator {
 		t.Fatalf("exact id target=%+v err=%v", resolved, err)
