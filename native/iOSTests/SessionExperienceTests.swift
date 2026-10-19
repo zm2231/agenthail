@@ -2,35 +2,6 @@ import XCTest
 @testable import Agenthail
 
 final class SessionExperienceTests: XCTestCase {
-    func testWorkspaceHierarchyNestsComponentAncestorsAndKeepsFullPaths() {
-        let groups = WorkspaceHierarchy.groups(for: [
-            "/workspace/repos/agenthail",
-            "/workspace/repos/companion",
-            "/workspace/repos",
-            "/workspace/repos/agenthail/native",
-            "/workspace-ish/unrelated",
-            "/workspace/repos/agenthail",
-        ])
-        XCTAssertEqual(groups, [
-            WorkspaceGroup(path: "/workspace/repos", depth: 0),
-            WorkspaceGroup(path: "/workspace/repos/agenthail", depth: 1),
-            WorkspaceGroup(path: "/workspace/repos/agenthail/native", depth: 2),
-            WorkspaceGroup(path: "/workspace/repos/companion", depth: 1),
-            WorkspaceGroup(path: "/workspace-ish/unrelated", depth: 0),
-        ])
-    }
-
-    func testWorkspaceHierarchyKeepsSessionsWithoutOrUnnormalizedWorkspaces() {
-        let groups = WorkspaceHierarchy.groups(for: ["", "/work/app/", "/work/app/../app", "/work/app"])
-        XCTAssertEqual(groups, [
-            WorkspaceGroup(path: "", depth: 0),
-            WorkspaceGroup(path: "/work/app", depth: 0),
-        ])
-        XCTAssertEqual(WorkspaceHierarchy.normalize(""), "")
-        XCTAssertEqual(WorkspaceHierarchy.normalize("/work/app/"), "/work/app")
-        XCTAssertEqual(WorkspaceHierarchy.normalize("/work/app/../app"), "/work/app")
-    }
-
     func testRichSessionDecodesContextTimelineAndTools() throws {
         let detail = try JSONDecoder().decode(SessionDetail.self, from: Data(SessionPreview.detailJSON.utf8))
         XCTAssertEqual(detail.timeline?.items.count, 5)

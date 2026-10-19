@@ -649,6 +649,28 @@ final class AgenthailIOSModel: ObservableObject {
         }
     }
 
+    func setArchived(sessionID: String, _ archived: Bool) async {
+        guard let api else { return }
+        do {
+            try await api.action(archived ? "session-archive" : "session-unarchive", sessionID: sessionID)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await refresh(fresh: true)
+    }
+
+    func setProjectArchived(_ projectID: String, _ archived: Bool) async {
+        guard let api else { return }
+        do {
+            _ = try await api.projectAction(archived ? "project-archive" : "project-unarchive", projectID: projectID)
+            operationError = nil
+        } catch {
+            operationError = error.localizedDescription
+        }
+        await refresh(fresh: true)
+    }
+
     func unpair() {
         guard let existingAPI = api else { return }
         let relay = pushRelayURL.map { PushRelayClient(baseURL: $0, session: networkSession) }

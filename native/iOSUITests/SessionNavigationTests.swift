@@ -7,7 +7,7 @@ final class SessionNavigationTests: XCTestCase {
         app.launchArguments = ["--preview-session", "--preview-app", "--preview-voice-entry"]
         app.launch()
         XCTAssertTrue(app.buttons["voice-entry"].waitForExistence(timeout: 10))
-        let workspace = app.buttons["workspace-/Users/demo/projects/fieldnotes"]
+        let workspace = app.buttons["project-project-fieldnotes"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 5))
         workspace.tap()
         XCTAssertFalse(app.buttons["session-demo"].exists)

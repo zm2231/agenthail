@@ -23,6 +23,7 @@ targets:
       - path: TurnSettings.swift
       - path: AgenthailAPI.swift
       - path: SessionSelection.swift
+      - path: SessionTree.swift
       - path: EventRetryBackoff.swift
       - path: ToolPresentation.swift
       - path: VoiceAPI.swift

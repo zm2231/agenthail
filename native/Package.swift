@@ -29,6 +29,7 @@ let package = Package(
                 "TurnSettings.swift",
                 "AgenthailAPI.swift",
                 "SessionSelection.swift",
+                "SessionTree.swift",
                 "EventRetryBackoff.swift",
                 "ToolPresentation.swift",
                 "OperationsRefreshPolicy.swift",
