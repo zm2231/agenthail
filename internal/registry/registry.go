@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 15
+	schemaVersion   = 16
 	queueMessageTTL = time.Hour
 	readConnections = 4
 )
