@@ -3,6 +3,7 @@ package surface
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var ErrTranscriptUnavailable = errors.New("session transcript unavailable")
@@ -129,4 +130,65 @@ func latestReply(session *Session, exchanges []Exchange, source string) *ReplyRe
 		return &ReplyResult{Text: exchanges[index].Assistant, UserText: exchanges[index].User, Done: done, Source: source}
 	}
 	return &ReplyResult{Done: false, Source: source}
+}
+
+// IsPromptItem reports whether item opens a turn: a message from the person or
+// from another agent.
+func IsPromptItem(item TimelineItem) bool {
+	return (item.Kind == "message" || item.Kind == "text") && (item.Role == "user" || item.Role == "peer") && item.Text != ""
+}
+
+func isReplyItem(item TimelineItem) bool {
+	switch item.Kind {
+	case "message", "assistant":
+		return item.Role == "assistant" && item.Text != ""
+	case "text":
+		return (item.Role == "assistant" || item.Role == "") && item.Text != ""
+	}
+	return false
+}
+
+// ExchangesFromItems groups ordered timeline items into turns. An exchange is a
+// prompt and the last assistant message of its turn. A reply from another turn,
+// or before any prompt, forms an exchange without a prompt. An item without a
+// turn ID belongs to the open turn, because transcript pages and live streams do
+// not both record one.
+func ExchangesFromItems(items []TimelineItem, source string) []Exchange {
+	exchanges, _ := groupExchanges(items, source)
+	return exchanges
+}
+
+// ExchangeStarts returns the index of the item that opens each exchange, so a
+// page can begin exactly at an exchange.
+func ExchangeStarts(items []TimelineItem) []int {
+	_, starts := groupExchanges(items, "")
+	return starts
+}
+
+func groupExchanges(items []TimelineItem, source string) ([]Exchange, []int) {
+	exchanges := []Exchange{}
+	starts := []int{}
+	turn, open := "", false
+	for index, item := range items {
+		at, _ := time.Parse(time.RFC3339Nano, item.Timestamp)
+		if IsPromptItem(item) {
+			exchanges = append(exchanges, Exchange{User: item.Text, Timestamp: at, Source: source})
+			starts = append(starts, index)
+			turn, open = item.TurnID, true
+			continue
+		}
+		if !isReplyItem(item) {
+			continue
+		}
+		if !open || (turn != "" && item.TurnID != "" && item.TurnID != turn) {
+			exchanges = append(exchanges, Exchange{Timestamp: at, Source: source})
+			starts = append(starts, index)
+			turn, open = item.TurnID, true
+		}
+		if turn == "" {
+			turn = item.TurnID
+		}
+		exchanges[len(exchanges)-1].Assistant = item.Text
+	}
+	return exchanges, starts
 }

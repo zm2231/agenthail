@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -30,7 +32,7 @@ type claudeBackground struct {
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
 	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
-		return nil, err
+		return nil, surface.DeliveryUnavailable(err)
 	}
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
@@ -99,11 +101,11 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	})
 	session := &surface.Session{ID: id, Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Transport: "uds", PID: opened.PID, Name: options.Name, Cwd: options.Cwd, Status: surface.StatusIdle, Source: "agenthail", ConfiguredModel: options.Model, LastActive: time.Now()}
 	if err != nil {
-		var unknown *claudehost.OutcomeUnknownError
-		if errors.As(err, &unknown) {
-			return session, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude creation: %w", err))
+		failure := claudeHostDeliveryError(fmt.Errorf("Claude creation: %w", err))
+		if surface.IsDeliveryOutcomeUnknown(failure) {
+			return session, nil, failure
 		}
-		return nil, nil, fmt.Errorf("Claude creation: %w", err)
+		return nil, nil, failure
 	}
 	sent, err := c.sendHostTurn(ctx, session, options.Message, "", nil)
 	return session, sent, err
@@ -129,7 +131,7 @@ func (s claudeBackgroundStarter) StartSession(ctx context.Context, options surfa
 	args = append(args, "--", options.Message)
 	data, err := c.backgroundCommand(ctx, options.Cwd, args...)
 	if err != nil {
-		return nil, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude creation: %w: %s", err, string(data)))
+		return nil, nil, claudeBackgroundRunError("Claude creation", err, data)
 	}
 	shortID, parseErr := claudeBackgroundID(string(data))
 	if parseErr != nil {
@@ -186,6 +188,10 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 		}
 		output, err := c.backgroundCommand(ctx, record.Cwd, action, record.ID)
 		if err != nil {
+			var path *fs.PathError
+			if surface.IsDeliveryUnavailable(err) || errors.As(err, &path) {
+				return nil, surface.DeliveryUnavailable(fmt.Errorf("Claude %s: %w", action, err))
+			}
 			if action != "logs" {
 				return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude %s: %w: %s", action, err, string(output)))
 			}
@@ -235,6 +241,27 @@ func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 var claudeBackgroundLine = regexp.MustCompile(`(?m)^backgrounded · ([A-Za-z0-9_-]+)(?: |$)`)
+
+// claudeBackgroundRunError classifies a failed `claude --bg` run. Claude prints
+// the background ID once a job exists, so a run that never started, or exited
+// on its own without printing one, started nothing.
+func claudeBackgroundRunError(action string, err error, output []byte) error {
+	failure := fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(output)))
+	if surface.IsDeliveryUnavailable(err) {
+		return surface.DeliveryUnavailable(failure)
+	}
+	var exit *exec.ExitError
+	var path *fs.PathError
+	switch {
+	case errors.As(err, &exit):
+		if exit.Exited() && !claudeBackgroundLine.MatchString(claudeANSI.ReplaceAllString(string(output), "")) {
+			return surface.DeliveryUnavailable(failure)
+		}
+	case errors.As(err, &path):
+		return surface.DeliveryUnavailable(failure)
+	}
+	return surface.DeliveryOutcomeUnknown(failure)
+}
 
 func claudeBackgroundID(output string) (string, error) {
 	matches := claudeBackgroundLine.FindStringSubmatch(claudeANSI.ReplaceAllString(output, ""))
