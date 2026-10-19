@@ -83,15 +83,31 @@ final class VoiceAPI: VoiceServiceClient {
     private let session: URLSession
 
     init(endpoint: URL, token: String, session: URLSession = URLSession(configuration: .ephemeral, delegate: VoiceRedirectPolicy(), delegateQueue: nil)) throws {
-        guard endpoint.scheme == "https", endpoint.host != nil, endpoint.user == nil,
+        guard Self.secureOrigin(endpoint), endpoint.user == nil,
               endpoint.password == nil, endpoint.query == nil, endpoint.fragment == nil,
               endpoint.path.isEmpty || endpoint.path == "/" else {
+#if os(macOS)
+            throw AgenthailAPIError.unavailable("Voice requires Agenthail's loopback address or an HTTPS address.")
+#else
             throw AgenthailAPIError.unavailable("Voice requires the paired Mac's secure HTTPS address.")
+#endif
         }
         self.endpoint = endpoint
         self.token = token
         self.session = session
     }
+
+    // WebKit treats loopback HTTP as a secure context, so the peer page can still capture audio.
+    static func secureOrigin(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
+        switch url.scheme?.lowercased() {
+        case "https": return true
+        case "http": return ["127.0.0.1", "::1", "localhost"].contains(host)
+        default: return false
+        }
+    }
+
+    static func defaultPort(_ scheme: String?) -> Int { scheme?.lowercased() == "http" ? 80 : 443 }
 
     func request(path: String) -> URLRequest {
         var request = URLRequest(url: endpoint.appendingPathComponent(path))

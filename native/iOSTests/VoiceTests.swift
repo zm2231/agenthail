@@ -314,8 +314,11 @@ final class VoiceTests: XCTestCase {
     }
     @MainActor
     func testNativeVoiceRejectsInsecureOrCredentialBearingOrigins() {
-        for address in ["http://mac.test", "https://user:secret@mac.test", "https://mac.test?token=secret", "https://mac.test/path"] {
+        for address in ["http://mac.test", "http://192.168.1.20:7412", "https://user:secret@mac.test", "https://mac.test?token=secret", "https://mac.test/path"] {
             XCTAssertThrowsError(try VoiceAPI(endpoint: URL(string: address)!, token: "fixture"))
+        }
+        for address in ["https://mac.test", "http://127.0.0.1:7412"] {
+            XCTAssertNoThrow(try VoiceAPI(endpoint: URL(string: address)!, token: "fixture"))
         }
     }
 
