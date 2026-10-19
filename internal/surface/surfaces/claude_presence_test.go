@@ -93,7 +93,12 @@ func TestClaudeObserveTakesIdleFromTheSessionRecord(t *testing.T) {
 	if err != nil || refreshed.Status != surface.StatusIdle {
 		t.Fatalf("idle record status=%s err=%v", refreshed.Status, err)
 	}
-	for _, status := range []string{"busy", "shell", "waiting"} {
+	writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": "shell", "peerFeatures": []any{"notify_idle"}})
+	observation, err = claude.Observe(context.Background(), session)
+	if err != nil || observation.Status != surface.StatusIdle || observation.ActiveTurnID != "" {
+		t.Fatalf("shell record observation=%+v err=%v", observation, err)
+	}
+	for _, status := range []string{"busy", "waiting"} {
 		writePeerRecord(t, home, pid, map[string]any{"pid": pid, "sessionId": "conversation-1", "status": status, "peerFeatures": []any{"notify_idle"}})
 		observation, err = claude.Observe(context.Background(), session)
 		if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "resumed" {

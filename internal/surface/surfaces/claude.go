@@ -556,21 +556,21 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	}
 }
 
-// claudePeerStatus reads busy or idle from a Claude session record. Claude
-// also records shell and waiting, which say neither.
+// claudePeerStatus reads a Claude session record's status. Claude writes
+// "shell" when its prompt is ready but a background shell is still running,
+// and "waiting" while the turn is blocked on the user.
 func claudePeerStatus(record map[string]any) surface.SessionStatus {
-	raw := str(record, "status")
-	if raw != "busy" && raw != "idle" {
+	switch str(record, "status") {
+	case "busy", "waiting":
+		return surface.StatusBusy
+	case "idle", "shell":
+	default:
 		return surface.StatusUnknown
-	}
-	status := claudeStatus(surface.SessionStatus(raw))
-	if status != surface.StatusIdle {
-		return status
 	}
 	features, _ := record["peerFeatures"].([]any)
 	for _, feature := range features {
 		if feature == "notify_idle" {
-			return status
+			return surface.StatusIdle
 		}
 	}
 	return surface.StatusUnknown
