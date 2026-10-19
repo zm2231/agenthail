@@ -54,7 +54,7 @@ func (d *Daemon) fireRelays(from *surface.Session, id string, hops int, text str
 	if err != nil {
 		panic(err)
 	}
-	d.consumeRelays(context.Background(), d.surfaceForKind(from.Surface), from, routes, nil)
+	d.consumeRelays(context.Background(), d.adapters().ForSurface(from.Surface), from, routes, nil)
 }
 
 func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
@@ -73,6 +73,7 @@ func TestDurableRelayClaudeBurstFailureRestartAndOutbox(t *testing.T) {
 	appendTurn("baseline")
 	d, r, target, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
@@ -320,6 +321,7 @@ func TestRelayPreparationLosingToAShorterCaptureStillBaselinesWhatItRead(t *test
 	appendTurn("baseline")
 	d, r, _, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)
@@ -388,6 +390,7 @@ func TestDurableRelayClaudeRelaysReplyTextOnceAfterItsLastContentBlock(t *testin
 	write(prompt("baseline"), text("baseline"), duration)
 	d, r, _, source, to := daemonFixture(t)
 	source.Surface = surface.KindClaude
+	source.RuntimeKind = surface.RuntimeClaudeCLI
 	source.Transcript = path
 	if err := r.RegisterSession(source); err != nil {
 		t.Fatal(err)

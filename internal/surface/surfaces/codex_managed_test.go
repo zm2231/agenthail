@@ -75,7 +75,7 @@ func TestCodexSearchFallsBackToManagedRuntime(t *testing.T) {
 
 func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 	codex := NewCodex("http://127.0.0.1:1")
-	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "cli", Transport: codexTransportReadOnly}
+	session := &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Source: "cli", Transport: codexTransportReadOnly}
 	_, err := codex.Send(context.Background(), session, "do not deliver")
 	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) {
 		t.Fatalf("err=%v", err)
@@ -83,9 +83,9 @@ func TestCodexRejectsMutationsForPlainTerminalSession(t *testing.T) {
 }
 
 func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
-	legacy := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle}
-	unclassifiedDesktopSource := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode"}
-	desktop := &surface.Session{Surface: surface.KindCodex, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "managed"}
+	legacy := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle}
+	unclassifiedDesktopSource := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode"}
+	desktop := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Status: surface.SessionStatus("notLoaded"), Source: "vscode", Transport: "managed"}
 	if !surface.IsReadOnlySession(legacy) {
 		t.Fatal("legacy unloaded session was writable")
 	}
@@ -95,7 +95,7 @@ func TestReadOnlySessionCoversLegacyRowsWithoutBlockingDesktop(t *testing.T) {
 	if surface.IsReadOnlySession(desktop) {
 		t.Fatal("Desktop session was read only")
 	}
-	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
+	unbridgedDesktop := &surface.Session{Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "readOnly"}
 	if reason := surface.ReadOnlySessionReason(unbridgedDesktop); !strings.Contains(reason, "agenthail launch codex") {
 		t.Fatalf("reason=%q", reason)
 	}
@@ -184,7 +184,7 @@ func managedDiscovery(method string, _ map[string]any) map[string]any {
 }
 
 func managedSession() *surface.Session {
-	return &surface.Session{ID: "thread", Surface: surface.KindCodex, Source: "agenthail", Transport: codexTransportManaged}
+	return &surface.Session{ID: "thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Source: "agenthail", Transport: codexTransportManaged}
 }
 
 func TestCodexResolveIDKeepsManagedLoadedSessionWritable(t *testing.T) {

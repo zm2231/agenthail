@@ -347,6 +347,7 @@ func TestAPIV1SessionAttachmentServesReferencedBytesAndRejectsOversize(t *testin
 		t.Fatal(err)
 	}
 	from.Surface, from.Transcript = surface.KindClaude, transcript
+	from.RuntimeKind = surface.RuntimeClaudeCLI
 	if err := registry.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}

@@ -197,7 +197,7 @@ func TestHeadlessCodexDesktopCreatedThreadStaysOnDesktop(t *testing.T) {
 	fixture := newHeadlessCodexFixture(t, desktop.URL)
 	daemon := fixture.lifecycle.Start(t)
 	daemon.AddThread(codextest.Thread{ID: desktopThread, Originator: "Codex Desktop"})
-	if err := fixture.registry.RegisterSession(surface.Session{ID: desktopThread, Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
+	if err := fixture.registry.RegisterSession(surface.Session{ID: desktopThread, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}); err != nil {
 		t.Fatal(err)
 	}
 	if code, body := fixture.action(t, map[string]any{"action": "send", "sessionId": desktopThread, "message": "Through Desktop"}); code != http.StatusOK {

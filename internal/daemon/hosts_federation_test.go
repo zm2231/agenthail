@@ -141,7 +141,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 	sessions := map[string]surface.Session{}
 	cwd := t.TempDir()
 	for _, id := range sessionIDs {
-		session := surface.Session{ID: id, Surface: surface.KindCodex, Name: "work " + id, Cwd: cwd, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now()}
+		session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work " + id, Cwd: cwd, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop", LastActive: time.Now()}
 		sessions[id] = session
 		if err := reg.RegisterSession(session); err != nil {
 			t.Fatal(err)
@@ -1015,11 +1015,11 @@ func TestFederationReconcileKeepsCommittedRowsDespiteCatalogGap(t *testing.T) {
 	local.daemon.federation.lifecycle.Lock()
 	local.daemon.detachHostLocked(record.ID)
 	local.daemon.federation.lifecycle.Unlock()
-	if err := remote.reg.RegisterSession(surface.Session{ID: "remote-c", Surface: surface.KindCodex, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}); err != nil {
+	if err := remote.reg.RegisterSession(surface.Session{ID: "remote-c", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	remote.fake.mu.Lock()
-	remote.fake.sessions["remote-c"] = surface.Session{ID: "remote-c", Surface: surface.KindCodex, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}
+	remote.fake.sessions["remote-c"] = surface.Session{ID: "remote-c", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "work remote-c", Status: surface.StatusIdle, LastActive: time.Now()}
 	remote.fake.mu.Unlock()
 	remote.daemon.discoverCatalog(context.Background())
 	window, err := local.reg.CatalogEventsAfter(0, 1)
