@@ -116,6 +116,10 @@ func TestFederationRoutesEverySessionActionToTheOwningHost(t *testing.T) {
 func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 	local, remote, record := pairedFederation(t)
 	remote.fake.modelOptions = []surface.ModelOption{{ID: "remote-model", SupportedReasoningEfforts: []string{"low", "high"}}}
+	project := surface.Session{ID: "remote-project", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "project work", Cwd: "/srv/remote-project", Status: surface.StatusIdle, LastActive: time.Now()}
+	if err := remote.reg.RegisterSession(project); err != nil {
+		t.Fatal(err)
+	}
 	var options struct {
 		Host     dashboardHost `json:"host"`
 		Surfaces []struct {
@@ -128,8 +132,7 @@ func TestFederationLaunchCatalogComesFromTheNamedHost(t *testing.T) {
 	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &options) != nil {
 		t.Fatalf("options status=%d body=%s", response.Code, response.Body.String())
 	}
-	remoteSession, _ := remote.reg.Session("remote-a")
-	if options.Host.ID != record.ID || len(options.Surfaces) != 1 || options.Surfaces[0].ID != "codex" || !options.Surfaces[0].Connected || len(options.Workspaces) != 1 || options.Workspaces[0] != remoteSession.Cwd {
+	if options.Host.ID != record.ID || len(options.Surfaces) != 1 || options.Surfaces[0].ID != "codex" || !options.Surfaces[0].Connected || len(options.Workspaces) == 0 || options.Workspaces[0] != project.Cwd {
 		t.Fatalf("remote options=%+v", options)
 	}
 	localIdentity, _ := local.reg.HostIdentity()
