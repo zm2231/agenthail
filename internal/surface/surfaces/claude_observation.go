@@ -69,66 +69,28 @@ func (s *claudeObservationState) apply(line []byte) error {
 	}
 	at, _ := time.Parse(time.RFC3339Nano, record.Timestamp)
 	s.applyCompact(record, at)
-	s.applyTurn(record, at)
+	s.applyTurn(record)
 	return nil
 }
 
-func (s *claudeObservationState) applyTurn(record claudeRecord, at time.Time) {
-	switch record.Type {
-	case "user":
-		text := transcriptText(record.Message.Content)
-		if isClaudeInterruptMarker(text) {
-			if s.hasCurrent {
-				s.current.Interrupted = true
-			}
-			return
-		}
-		if !isHumanTranscriptText(text) || record.Message.ToolUseID != "" {
-			return
-		}
-		s.current = claudeTurn{UserID: record.UUID, User: strings.TrimSpace(text)}
-		s.hasCurrent = true
-	case "assistant":
-		if !s.hasCurrent {
-			s.hasCurrent = true
-		}
-		if s.current.MessageID != "" && record.Message.ID != "" && s.current.MessageID != record.Message.ID && s.current.Done {
-			s.current = claudeTurn{}
-		}
-		if record.Message.ID != "" {
-			s.current.MessageID = record.Message.ID
-		} else if s.current.MessageID == "" {
-			s.current.MessageID = record.UUID
-		}
-		if record.Message.Model != "" {
-			s.current.Model = record.Message.Model
-		}
-		if text := strings.TrimSpace(transcriptText(record.Message.Content)); text != "" {
-			if s.current.Assistant == "" {
-				s.current.Assistant = text
-			} else if s.current.Assistant != text && !strings.Contains(s.current.Assistant, text) {
-				s.current.Assistant += "\n" + text
-			}
-		}
-		s.current.Done = record.Message.StopReason == "end_turn"
-		s.current.Interrupted = claudeTerminalInterruption(record.Message.StopReason)
-		if s.current.Done || s.current.Interrupted {
-			s.current.TerminalAt = at
-		}
-		if s.current.Done && s.current.MessageID != "" {
-			s.completed = s.current
-			s.hasCompleted = true
-		}
-	case "system":
-		if record.Subtype == "turn_duration" && s.hasCurrent {
-			s.current.Done = true
-			s.current.TerminalAt = at
-			if s.current.MessageID != "" {
-				s.completed = s.current
-				s.hasCompleted = true
-			}
-		}
+// applyTurn advances the current turn and records it as completed when it
+// closes, so observation and completion capture share one close rule.
+func (s *claudeObservationState) applyTurn(record claudeRecord) {
+	var turns []claudeTurn
+	if s.hasCurrent {
+		turns = []claudeTurn{s.current}
 	}
+	wasDone := s.hasCurrent && s.current.Done
+	turns = appendClaudeTurn(turns, record)
+	if len(turns) == 0 {
+		return
+	}
+	if s.hasCurrent && !wasDone && turns[0].Done && turns[0].MessageID != "" {
+		s.completed = turns[0]
+		s.hasCompleted = true
+	}
+	s.current = turns[len(turns)-1]
+	s.hasCurrent = true
 }
 
 func (s *claudeObservationState) applyCompact(record claudeRecord, at time.Time) {

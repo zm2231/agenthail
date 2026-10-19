@@ -96,8 +96,9 @@ func (f *Fixture) Transcript(conversation, cwd string) string {
 	at := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
 	user, _ := json.Marshal(map[string]any{"type": "user", "uuid": "fixture-user", "sessionId": conversation, "cwd": cwd, "timestamp": at, "message": map[string]any{"role": "user", "content": "fixture question"}})
 	assistant, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "fixture-assistant", "sessionId": conversation, "cwd": cwd, "timestamp": at, "message": map[string]any{"id": "fixture-message", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "fixture answer"}}}})
+	duration, _ := json.Marshal(map[string]any{"type": "system", "subtype": "turn_duration", "sessionId": conversation, "cwd": cwd, "timestamp": at})
 	name := filepath.Join(".claude", "projects", "fixture-project", conversation+".jsonl")
-	f.write(name, string(user)+"\n"+string(assistant)+"\n")
+	f.write(name, string(user)+"\n"+string(assistant)+"\n"+string(duration)+"\n")
 	return filepath.Join(f.Home, name)
 }
 

@@ -23,6 +23,7 @@ func appendCompletionTranscript(t *testing.T, path, id, text, reason string) {
 	for _, record := range []any{
 		map[string]any{"type": "user", "uuid": "input-" + id, "message": map[string]any{"content": "request " + id}},
 		map[string]any{"type": "assistant", "uuid": "record-" + id, "message": map[string]any{"id": id, "stop_reason": reason, "content": []any{map[string]any{"type": "text", "text": text}}}},
+		map[string]any{"type": "system", "subtype": "stop_hook_summary"},
 	} {
 		if err := json.NewEncoder(f).Encode(record); err != nil {
 			t.Fatal(err)

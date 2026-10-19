@@ -308,7 +308,8 @@ func TestClaudeQuestionHoldsMessagesNotifiesOnceAndDeliversAfterTheAnswer(t *tes
 		t.Fatalf("queued message left before the turn ended: %+v", item)
 	}
 
-	appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`)
+	appendClaudeRecords(t, transcript, `{"type":"assistant","uuid":"done","timestamp":"2026-10-18T20:18:30Z","message":{"id":"msg-done","stop_reason":"end_turn","content":[{"type":"text","text":"Released from main."}]}}`,
+		`{"type":"system","subtype":"turn_duration","timestamp":"2026-10-18T20:18:31Z"}`)
 	q.process.RecordStatus("conversation-question", q.process.Home, "session_question", "idle", "", questionAsked.Add(2*time.Hour))
 	eventually(t, "the queued message after the turn ends", func() bool {
 		sent, _ := claude.delivered()

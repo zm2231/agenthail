@@ -20,6 +20,7 @@ import (
 const (
 	idleClaudeTranscript = `{"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"previous"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"turn_duration","timestamp":"2026-07-19T01:00:01Z"}
 `
 	busyClaudeTranscript = `{"type":"user","uuid":"u2","timestamp":"2026-07-19T01:00:02Z","message":{"content":"running"}}
 `
