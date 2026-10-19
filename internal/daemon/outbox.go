@@ -41,10 +41,14 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		return
 	}
 	if item.Operation == registry.QueueOperationCompact {
+		// The compact may resume the session and move it to another process;
+		// it works on its own copy so the observer's session is never written
+		// from this goroutine.
+		compacting := *session
 		d.queueWorkers.Add(1)
 		go func() {
 			defer d.queueWorkers.Done()
-			d.runQueuedCompact(ctx, adapter, session, item)
+			d.runQueuedCompact(ctx, adapter, &compacting, item)
 		}()
 		return
 	}
@@ -66,7 +70,11 @@ func (d *Daemon) drainClaimedMessage(ctx context.Context, adapter surface.Surfac
 		result, sendErr = route.Send(operationCtx, adapter, session, item.Message, options)
 	}
 	cancel()
-	d.dispatcher().RegisterReached(&addressed, session)
+	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
+		*session = addressed
+		d.finishReachedHostOwned(item, session, item.Message, ownedErr)
+		return
+	}
 	peerTransport := delivery.RouteFor(adapter, session, item.Author).TransportOnly()
 	if sendErr != nil {
 		d.finishQueueFailure(item, session, sendErr, now)
@@ -114,7 +122,10 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	defer cancel()
 	addressed := *session
 	err := adapter.Compact(operationCtx, session)
-	d.dispatcher().RegisterReached(&addressed, session)
+	if ownedErr := d.dispatcher().RegisterReached(&addressed, session); ownedErr != nil {
+		d.finishReachedHostOwned(item, &addressed, "compact", ownedErr)
+		return
+	}
 	if err != nil {
 		d.finishQueueFailure(item, session, err, time.Now())
 		return
@@ -126,6 +137,16 @@ func (d *Daemon) runQueuedCompact(ctx context.Context, adapter surface.Surface, 
 	}
 	d.log.Printf("completed compact queue item %d for %s", item.ID, d.resolveDisplay(session.ID))
 	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "delivered", SessionID: session.ID, QueueID: item.ID, Message: "compact", Evidence: surface.EvidenceDelivered})
+}
+
+// finishReachedHostOwned settles a queue item whose send resumed into a
+// session a paired host owns. The provider took it, so it is never retried,
+// and it is recorded only under the session it was addressed to.
+func (d *Daemon) finishReachedHostOwned(item *registry.QueuedMessage, addressed *surface.Session, message string, ownedErr error) {
+	if err := d.Registry.DeadLetterUnknown(item.ID, ownedErr); err != nil {
+		d.log.Printf("dead-letter queue item %d: %s", item.ID, err)
+	}
+	_ = d.Registry.RecordHistory(registry.HistoryEntry{Kind: "unknown", SessionID: addressed.ID, QueueID: item.ID, Message: message, Error: ownedErr.Error(), Evidence: surface.EvidenceUnknown})
 }
 
 func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surface.Session, sendErr error, now time.Time) {

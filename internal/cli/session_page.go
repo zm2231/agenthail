@@ -8,11 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
-	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -44,26 +42,11 @@ func (e *daemonSessionPageError) Error() string {
 }
 
 func newDaemonSessionPageClient() (sessionPageReader, error) {
-	config, err := daemon.LoadDashboardConfig()
+	baseURL, token, err := daemonEndpoint()
 	if err != nil {
 		return nil, err
 	}
-	if !config.Enabled {
-		return nil, errors.New("dashboard is disabled")
-	}
-	tokenBytes, err := os.ReadFile(daemon.DashboardTokenPath())
-	if err != nil {
-		return nil, fmt.Errorf("read dashboard token: %w", err)
-	}
-	token := strings.TrimSpace(string(tokenBytes))
-	if token == "" {
-		return nil, errors.New("dashboard token is empty")
-	}
-	return &daemonSessionPageClient{
-		baseURL:    "http://" + config.Listen,
-		token:      token,
-		httpClient: &http.Client{},
-	}, nil
+	return &daemonSessionPageClient{baseURL: baseURL, token: token, httpClient: &http.Client{}}, nil
 }
 
 func (c *daemonSessionPageClient) ReadSession(ctx context.Context, session *surface.Session, request surface.SessionReadRequest) (*surface.SessionReadResult, error) {

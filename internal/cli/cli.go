@@ -20,6 +20,7 @@ import (
 	"github.com/zm2231/agenthail/internal/codexconfig"
 	"github.com/zm2231/agenthail/internal/daemon"
 	"github.com/zm2231/agenthail/internal/delivery"
+	"github.com/zm2231/agenthail/internal/hosts"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/sessionstream"
 	"github.com/zm2231/agenthail/internal/surface"
@@ -44,6 +45,7 @@ type App struct {
 	update                    *updateDeps
 	daemonSessionPageReader   func() (sessionPageReader, error)
 	daemonSessionStreamReader func() (sessionStreamReader, error)
+	daemonAPIOverride         func() (*daemonAPIClient, error)
 }
 
 func (a *App) Run(args []string) error {
@@ -96,6 +98,8 @@ func (a *App) Run(args []string) error {
 		return a.cmdHistory(rest)
 	case "thread":
 		return a.cmdThread(rest)
+	case "hosts":
+		return a.cmdHosts(rest)
 	case "identify":
 		return a.cmdIdentify(rest)
 	case "channel":
@@ -177,6 +181,14 @@ Automatic handoffs:
   relay list [--json]           Show routing rules and derived firing evidence
   relay rm <id>                 Remove a rule
 
+Hosts:
+  hosts [--json]                 List this host and paired hosts with their health
+  hosts invite                  Print a pairing link for another host's daemon
+  hosts add <link> [--address <tailnet-ip>] [--name <name>]
+                                 Pair a host so its sessions appear here
+  hosts remove <host>            Unpair a host and drop its sessions from this host
+  hosts name [name]              Show or set this host's name
+
 Background service:
   daemon start                  Start Agenthail in the background
   daemon stop                   Stop Agenthail in the background
@@ -205,7 +217,9 @@ Other:
   upgrade [--check] [--json]    Alias for update
   version [--json]              Build and revision information
 
-Targets: @name, PID, session id prefix, cwd/name fragment, or surface:target.
+Targets: @name, PID, session id prefix, cwd/name fragment, surface:target, or host::target.
+        A target that matches on more than one host is an error; qualify it as host::target.
+        send, steer, interrupt, reply, last, stream and thread create --host reach paired hosts.
 Sender: --from resolves a session; otherwise identity comes from AGENTHAIL_SESSION_ID,
         CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID.
         Native Claude peers require the daemon and register automatically before sending.
@@ -459,7 +473,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true}
+	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -493,8 +507,9 @@ func validateCommandFlags(command string, args []string) error {
 		"send":  {values: map[string]bool{"--from": true, "--model": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true}, bools: map[string]bool{"--stream": true, "--reply": true, "--json": true, "--no-queue": true}},
 		"reply": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--json": true}}, "last": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}}, "tail": {values: map[string]bool{"--before": true, "--timeout": true}, bools: map[string]bool{"--full": true, "--json": true}},
 		"goal": {bools: map[string]bool{"--json": true}}, "queue": {}, "history": {bools: map[string]bool{"--json": true}},
-		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
+		"thread":  {values: map[string]bool{"--message": true, "--cwd": true, "--alias": true, "--model": true, "--approval": true, "--timeout": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--name": true, "--worktree": true, "--agent": true, "--permission-mode": true, "--host": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"channel": {},
+		"hosts":   {values: map[string]bool{"--address": true, "--name": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor":  {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
 		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {}, "interrupt": {}, "steer": {}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
@@ -606,9 +621,20 @@ func (a *App) cmdList(args []string) error {
 		return catalogErr
 	}
 	successfulSurfaces := 0
+	remoteRows := map[string]listHostRow{}
 	if catalogBacked {
 		successfulSurfaces = 1
 		for _, record := range catalog.Sessions {
+			if record.HostID != "" {
+				if rootCwd != "" {
+					continue
+				}
+				session, row := listRemoteSession(record)
+				session.Subagents = catalogSubagentRollup(record)
+				remoteRows[session.ID] = row
+				allSessions = append(allSessions, session)
+				continue
+			}
 			session, err := normalizeSessionCwd(record.Session)
 			if err != nil {
 				surfaceErrors[string(record.Session.Surface)] = fmt.Sprintf("normalize session workspace: %s", err)
@@ -658,6 +684,25 @@ func (a *App) cmdList(args []string) error {
 		for _, r := range rows {
 			aliased[r.SessionID] = r.Name
 		}
+	}
+	for id, row := range remoteRows {
+		if row.Alias != "" {
+			aliased[id] = row.Alias
+		}
+	}
+	var localHost *hostRef
+	pairedHosts := 0
+	if a.Registry != nil {
+		identity, err := a.Registry.HostIdentity()
+		if err != nil {
+			return fmt.Errorf("read host identity: %w", err)
+		}
+		localHost = &hostRef{ID: identity.ID, Name: identity.Name, State: "local"}
+		paired, err := a.Registry.ListHosts()
+		if err != nil {
+			return fmt.Errorf("list paired hosts: %w", err)
+		}
+		pairedHosts = len(paired)
 	}
 
 	showAll := hasFlag(args, "--all")
@@ -730,7 +775,16 @@ func (a *App) cmdList(args []string) error {
 		allSessions = append(allSessions, session)
 	}
 	if jsonOut {
-		document := map[string]any{"sessions": allSessions, "errors": surfaceErrors}
+		views := make([]listSessionView, 0, len(allSessions))
+		for _, session := range allSessions {
+			view := listSessionView{Session: session, Host: localHost}
+			if row, remote := remoteRows[session.ID]; remote {
+				host := row.Host
+				view.Host, view.UnavailableReason = &host, row.Unavailable
+			}
+			views = append(views, view)
+		}
+		document := map[string]any{"sessions": views, "errors": surfaceErrors}
 		if catalogBacked {
 			document["catalog"] = listCatalogMetadata(catalog)
 		}
@@ -765,7 +819,14 @@ func (a *App) cmdList(args []string) error {
 		projectHeading = "CWD"
 		projectWidth = 48
 	}
+	showHost := pairedHosts > 0
+	if showHost {
+		fmt.Printf("%-12s ", "HOST")
+	}
 	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "SURFACE", "STAT", "AGENT", "SESSION", projectWidth, projectHeading, "LAST")
+	if showHost {
+		fmt.Printf("%-12s ", "------------")
+	}
 	fmt.Printf("%-7s %-5s %-14s %-28s %-*s %s\n", "-------", "-----", "--------------", "----------------------------", projectWidth, strings.Repeat("-", len(projectHeading)), "----------")
 	queueCounts := map[string]int{}
 	if a.Registry != nil {
@@ -776,7 +837,22 @@ func (a *App) cmdList(args []string) error {
 		}
 	}
 	for index, s := range allSessions {
-		stat := sessStat(s, queueCounts[s.ID])
+		row, remote := remoteRows[s.ID]
+		queued := queueCounts[s.ID]
+		if remote {
+			queued = row.QueueCount
+		}
+		stat := sessStat(s, queued)
+		if remote && row.Unavailable != "" {
+			stat = "down"
+		}
+		if showHost {
+			hostName := localHost.Name
+			if remote {
+				hostName = row.Host.Name
+			}
+			fmt.Printf("%-12s ", truncate(hostName, 12))
+		}
 		agent := ""
 		if alias, ok := aliased[s.ID]; ok {
 			agent = "@" + alias
@@ -852,7 +928,7 @@ func listCatalogMetadata(snapshot registry.CatalogSnapshot) listCatalogMetadataV
 		metadata.Surfaces = append(metadata.Surfaces, listCatalogSurface{Surface: string(record.Surface), Health: record.Health, Detail: record.Detail, ObservedAt: record.ObservedAt})
 	}
 	for _, record := range snapshot.Sessions {
-		metadata.Freshness[record.Session.ID] = listCatalogFreshness{Generation: record.Freshness.Generation, ObservedAt: record.Freshness.ObservedAt, Stale: record.Freshness.Stale, UnavailableReason: record.UnavailableReason}
+		metadata.Freshness[hosts.Qualify(record.HostID, record.Session.ID)] = listCatalogFreshness{Generation: record.Freshness.Generation, ObservedAt: record.Freshness.ObservedAt, Stale: record.Freshness.Stale, UnavailableReason: record.UnavailableReason}
 	}
 	return metadata
 }
@@ -1048,7 +1124,7 @@ func (a *App) resolveSession(ctx context.Context, kind surface.SurfaceKind, adap
 	return registered, false, nil
 }
 
-func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
+func (a *App) resolveLocalTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, error) {
 	if kindText, selector, ok := strings.Cut(target, ":"); ok {
 		kind := surface.SurfaceKind(strings.ToLower(kindText))
 		adapter := a.surfaceByKind(kind)
@@ -1147,7 +1223,7 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 	if len(bridgeErrors) > 0 {
 		return nil, nil, fmt.Errorf("%s\nno session matched '%s' (bridge may be down)", strings.Join(bridgeErrors, "; "), target)
 	}
-	return nil, nil, fmt.Errorf("no session matched '%s'", target)
+	return nil, nil, targetNotFoundError{target: target}
 }
 
 func (a *App) ensureWritableTarget(ctx context.Context, session *surface.Session, adapter surface.Surface) error {
@@ -1405,9 +1481,12 @@ func (a *App) cmdSend(args []string) error {
 		message = fmt.Sprintf("[from %s] %s", fromLabel, message)
 	}
 
-	sess, surf, err := a.resolveTarget(ctx, target)
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, target)
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		return a.sendRemote(ctx, remote, message, args, timeout)
 	}
 	if !surf.Capabilities().Send {
 		return fmt.Errorf("%s does not support send", surf.Name())
@@ -1634,11 +1713,13 @@ func (a *App) cmdReply(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Reply {
+	if remote != nil {
+		sess = remote.session()
+	} else if !surf.Capabilities().Reply {
 		return fmt.Errorf("%s does not support reply", surf.Name())
 	}
 	before, err := sessionReadBefore(args)
@@ -1654,10 +1735,10 @@ func (a *App) cmdReply(args []string) error {
 	}
 	reply := read.Reply
 	if reply == nil {
-		return fmt.Errorf("%s returned an empty reply result", surf.Name())
+		return fmt.Errorf("%s returned an empty reply result", sess.Surface)
 	}
 	if reply.Error != "" {
-		return fmt.Errorf("latest %s turn did not complete successfully: %s", surf.Name(), reply.Error)
+		return fmt.Errorf("latest %s turn did not complete successfully: %s", sess.Surface, reply.Error)
 	}
 	if hasFlag(args, "--json") {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"surface": sess.Surface, "session": sess.ID, "text": reply.Text, "done": reply.Done, "source": read.Source, "journalSeq": read.JournalSeq, "nextBefore": read.NextBefore, "readError": read.UnavailableReason, "warning": read.Warning})
@@ -1685,9 +1766,12 @@ func (a *App) cmdLast(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		sess = remote.session()
 	}
 	n := 1
 	if len(positional) > 1 {
@@ -1721,6 +1805,9 @@ func (a *App) cmdLast(args []string) error {
 		return nil
 	}
 	label := a.resolveDisplay(sess.ID)
+	if remote != nil {
+		label = remote.label()
+	}
 	source := read.Source
 	if source != "" {
 		fmt.Printf("── %s [%s] ──\n", label, source)
@@ -1823,11 +1910,13 @@ func (a *App) cmdStream(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
 	}
-	if !surf.Capabilities().Stream {
+	if remote != nil {
+		sess = remote.session()
+	} else if !surf.Capabilities().Stream {
 		return fmt.Errorf("%s does not support stream", surf.Name())
 	}
 	if a.daemonIsRunning() {
@@ -1947,9 +2036,12 @@ func (a *App) cmdInterrupt(args []string) error {
 		return fmt.Errorf("usage: agenthail interrupt <target>")
 	}
 	ctx := context.Background()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		return a.interruptRemote(ctx, remote)
 	}
 	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Interrupt {
 		return fmt.Errorf("%s does not support interrupt", surf.Name())
@@ -1966,9 +2058,12 @@ func (a *App) cmdSteer(args []string) error {
 		return fmt.Errorf("usage: agenthail steer <target> \"message\" ('-' reads stdin)")
 	}
 	ctx := context.Background()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		return a.steerRemote(ctx, remote, strings.Join(positional[1:], " "))
 	}
 	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Steer {
 		return fmt.Errorf("%s does not support steer", surf.Name())

@@ -442,7 +442,16 @@ struct SessionRowView: View {
             StatusIndicator(session: session, needsYou: needsYou, finishedUnseen: finishedUnseen)
             Text(title ?? session.title)
                 .lineLimit(1)
-                .foregroundStyle(session.open || session.isWorking ? DesktopPalette.text : DesktopPalette.text2)
+                .foregroundStyle(!session.isUnavailable && (session.open || session.isWorking) ? DesktopPalette.text : DesktopPalette.text2)
+            if let host = session.remoteHostName {
+                HStack(spacing: 3) {
+                    Image(systemName: session.isUnavailable ? "wifi.slash" : "server.rack")
+                    Text(host)
+                }
+                .font(.system(size: 10.5))
+                .foregroundStyle(session.isUnavailable ? DesktopPalette.amber : DesktopPalette.text2)
+                .help(session.unavailableReason ?? "On \(host)")
+            }
             Spacer(minLength: 4)
             if let family, family.subagentCount > 0 {
                 HStack(spacing: 3) {

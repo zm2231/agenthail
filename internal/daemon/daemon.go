@@ -46,6 +46,9 @@ type Daemon struct {
 	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
 	transportResolver *SessionTransportResolver
+	identityMu        sync.RWMutex
+	identity          registry.HostIdentity
+	federation        *federation
 }
 
 func (d *Daemon) SetLaunchers(launchers []surface.Launcher) {
@@ -91,7 +94,13 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		sourceHolds:       map[string]map[string]func(){},
 		catalogLive:       map[string]*catalogLiveSession{},
 		catalogIdentities: newCatalogIdentityCache(),
+		federation:        newFederation(),
 	}
+	identity, err := reg.HostIdentity()
+	if err != nil {
+		d.log.Printf("host identity: %s", err)
+	}
+	d.identity = identity
 	d.transportResolver = NewSessionTransportResolver(surface.NewLaunchers(surfaces))
 	if err := reg.EnsureCatalogState(); err != nil {
 		d.log.Printf("catalog state: %s", err)
@@ -196,6 +205,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	} else if recovered > 0 {
 		d.log.Printf("dead-lettered %d message(s) with an uncertain delivery outcome", recovered)
 	}
+	d.startFederation(ctx)
+	defer d.stopFederation()
 	catalogDone := make(chan struct{})
 	go func() {
 		defer close(catalogDone)
