@@ -227,3 +227,16 @@ func TestSendsToAConversationARestartReplacedReachTheCoordinator(t *testing.T) {
 		}
 	}
 }
+
+func TestFilesAttachedToAMessageThatStartsTheCoordinatorAreNamedInItsFirstTurn(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	attached := surface.Uploads{{ID: "fixture-upload", Name: "plan.pdf", Path: "/fixture/uploads/plan.pdf", MediaType: "application/pdf", Bytes: 1}}
+	if _, err := f.r.QueueMessageWithOptions(goneCoordinator, "read the attached plan", "", surface.SendOptions{Uploads: attached}); err != nil {
+		t.Fatal(err)
+	}
+	f.daemon.scanAndRelay(context.Background())
+	turns := f.landed(t, f.current(t), "read the attached plan")
+	if !strings.Contains(turns[0].Text, "Attached file: /fixture/uploads/plan.pdf") {
+		t.Fatalf("first turn=%q", turns[0].Text)
+	}
+}

@@ -26,9 +26,10 @@ func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Sessio
 		}
 		return true
 	}
+	composed, _ := item.Uploads.Compose(item.Message, false)
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	outcome, handled, err := coord.Restart(operationCtx, session, item.Message)
+	outcome, handled, err := coord.Restart(operationCtx, session, composed)
 	if !handled {
 		return false
 	}

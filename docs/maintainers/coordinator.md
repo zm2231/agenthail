@@ -16,7 +16,7 @@ The owning host keeps one row in the `coordinator` table of its registry: the na
 | Running and busy | Steers the current turn when the session can be steered, otherwise queues. A sender that chooses a busy policy keeps it. |
 | Ended, conversation on disk | Delivers through the surface's own resume. For Claude the Claude host resumes it. |
 | Resume failed for now, or Agenthail cannot tell whether the conversation still exists | Queues the message. Agenthail never replaces a conversation because of a transient failure. |
-| Conversation gone, or the name points at no session | Starts a new conversation from the spec, points the alias at it, and moves pending queue items from the old session. The first turn is the instructions, a line saying why it started, and the message. The receipt says it started. |
+| Conversation gone, or the name points at no session | Starts a new conversation from the spec, points the alias at it, and moves pending queue items from the old session. The first turn is the instructions, a line saying why it started, and the message, with any attached files named by their stored paths. The receipt says it started. |
 
 A Claude conversation is gone when it has no transcript and no process holds it. A process that holds it counts because a conversation that has just started has not written its transcript yet. Starting again holds `coordinator.lock` next to the registry, and the alias moves with a compare-and-swap, so concurrent senders in any Agenthail process start at most one conversation. A queued message to a coordinator whose conversation is gone becomes the first turn of the new conversation instead of resuming an empty one.
 

@@ -120,7 +120,10 @@ func (s Service) deliver(ctx context.Context, message string, options surface.Se
 	if session != nil {
 		previous = session.ID
 	}
-	return s.start(ctx, spec, previous, reason, message)
+	// A new conversation's first turn is text, so attached files are named
+	// by their stored paths.
+	composed, _ := options.Uploads.Compose(message, false)
+	return s.start(ctx, spec, previous, reason, composed)
 }
 
 // Restart starts a new conversation for a message the outbox holds for
