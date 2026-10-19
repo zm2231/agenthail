@@ -31,8 +31,9 @@ func branchTranscript(t *testing.T, fixture *claudetest.Fixture, conversation, p
 	t.Helper()
 	first, _ := json.Marshal(map[string]any{"type": "user", "uuid": "fixture-branch", "sessionId": conversation, "cwd": fixture.Home, "forkedFrom": map[string]any{"sessionId": parent, "messageUuid": "fixture-assistant"}, "message": map[string]any{"role": "user", "content": "fixture branch question"}})
 	answer, _ := json.Marshal(map[string]any{"type": "assistant", "uuid": "fixture-branch-answer", "sessionId": conversation, "cwd": fixture.Home, "message": map[string]any{"id": "fixture-branch-message", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": "fixture branch answer"}}}})
+	duration, _ := json.Marshal(map[string]any{"type": "system", "subtype": "turn_duration", "sessionId": conversation, "cwd": fixture.Home})
 	path := filepath.Join(fixture.Home, ".claude", "projects", "fixture-project", conversation+".jsonl")
-	if err := os.WriteFile(path, []byte(string(first)+"\n"+string(answer)+"\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(string(first)+"\n"+string(answer)+"\n"+string(duration)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -683,9 +683,11 @@ func TestClaudeSessionSourceSeedsAndTailsLocalTranscript(t *testing.T) {
 	for _, turn := range []struct{ message, turnID, answer, records string }{
 		{"m2", "u2", "second answer", `{"type":"user","uuid":"u2","message":{"content":"second"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"second answer"}]}}
+{"type":"system","subtype":"turn_duration"}
 `},
 		{"m3", "u3", "third answer", `{"type":"user","uuid":"u3","message":{"content":"third"}}
 {"type":"assistant","uuid":"a3","message":{"id":"m3","stop_reason":"end_turn","content":[{"type":"text","text":"third answer"}]}}
+{"type":"system","subtype":"turn_duration"}
 `},
 	} {
 		appendTranscript(turn.records)
@@ -752,6 +754,7 @@ func TestClaudeSessionSourceJournalsFullTimelineAcrossTransports(t *testing.T) {
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":null,"content":[{"type":"tool_use","id":"call-2","name":"Read","input":{"path":"x"}},{"type":"thinking","thinking":"checking"}]}}
 {"type":"user","uuid":"u2-result","message":{"content":[{"type":"tool_result","tool_use_id":"call-2","content":"contents"}]}}
 {"type":"assistant","uuid":"a3","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"final answer"}]}}
+{"type":"system","subtype":"turn_duration"}
 `)
 			if closeErr := file.Close(); err != nil {
 				t.Fatal(err)
@@ -835,6 +838,7 @@ func TestClaudeSessionSourceJournalsInterruptedTerminalBeforeNextTurn(t *testing
 {"type":"system","subtype":"turn_duration","content":"done"}
 {"type":"user","uuid":"u2","message":{"content":"continue"}}
 {"type":"assistant","uuid":"a2","message":{"id":"m2","stop_reason":"end_turn","content":[{"type":"text","text":"continued"}]}}
+{"type":"system","subtype":"turn_duration"}
 `)
 			if closeErr := file.Close(); err != nil {
 				t.Fatal(err)

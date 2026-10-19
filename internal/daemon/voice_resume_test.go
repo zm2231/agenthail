@@ -201,6 +201,7 @@ func (f *orphanFixture) appendTranscript(t *testing.T, record map[string]any) {
 func (f *orphanFixture) answer(t *testing.T, text string) {
 	t.Helper()
 	f.appendTranscript(t, map[string]any{"type": "assistant", "uuid": "fixture-reply", "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "message": map[string]any{"id": "fixture-reply-message", "role": "assistant", "stop_reason": "end_turn", "content": []map[string]any{{"type": "text", "text": text}}}})
+	f.appendTranscript(t, map[string]any{"type": "system", "subtype": "turn_duration", "timestamp": time.Now().UTC().Format(time.RFC3339Nano)})
 }
 
 func TestVoiceDelegationToEndedBackgroundJobResumesItAndSpeaksTheReply(t *testing.T) {
