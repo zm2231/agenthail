@@ -444,6 +444,8 @@ func readTranscriptPage(ctx context.Context, path, source string, before int64, 
 			continue
 		}
 		if len(items) == 0 {
+			// Records without items still close a Claude turn whose last block was written.
+			records = append(records, transcriptRecord{offset: offset, line: line})
 			continue
 		}
 		for i := range items {

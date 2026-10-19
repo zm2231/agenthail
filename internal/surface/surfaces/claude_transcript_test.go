@@ -111,7 +111,7 @@ func TestClaudeObserveFindsTurnBeforeToolHeavyTail(t *testing.T) {
 	if err != nil || observation.Status != surface.StatusBusy || observation.ActiveTurnID != "human" {
 		t.Fatalf("inflight observation=%+v err=%v", observation, err)
 	}
-	appendTestTranscript(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`)
+	appendTestTranscript(t, path, `{"type":"assistant","uuid":"assistant","timestamp":"2026-08-06T01:00:00Z","message":{"id":"done","stop_reason":"end_turn","content":"complete"}}`, `{"type":"system","subtype":"stop_hook_summary"}`)
 	observation, err = claude.Observe(context.Background(), session)
 	if err != nil || observation.Status != surface.StatusIdle || observation.CompletedTurnID != "done" || observation.Reply == nil || observation.Reply.UserText != "do the work" {
 		t.Fatalf("completed observation=%+v err=%v", observation, err)
@@ -286,7 +286,8 @@ func TestClaudeSourceStreamResumesAtSeedBoundaryWithoutReplayingHistory(t *testi
 func TestClaudeObserveDerivesTurnStateFromTranscript(t *testing.T) {
 	const completed = `
 {"type":"user","uuid":"u1","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`
+{"type":"assistant","uuid":"a1","message":{"id":"m1","model":"model-a","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`
 	live := os.Getpid()
 	notBusy := func(t *testing.T, observation *surface.TurnObservation) {
 		t.Helper()
@@ -396,7 +397,8 @@ func TestClaudeObserveDerivesTurnStateFromTranscript(t *testing.T) {
 			name: "completion older than bridge activity does not clear a new busy turn",
 			transcript: `
 {"type":"user","uuid":"u1","timestamp":"2026-07-19T01:00:00Z","message":{"content":"one"}}
-{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}`,
+{"type":"assistant","uuid":"a1","timestamp":"2026-07-19T01:00:01Z","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}
+{"type":"system","subtype":"stop_hook_summary"}`,
 			session: surface.Session{Status: surface.StatusBusy, LastActive: time.Date(2026, 7, 19, 1, 5, 0, 0, time.UTC)},
 			check: func(t *testing.T, o *surface.TurnObservation) {
 				if o.Status != surface.StatusBusy {
@@ -539,7 +541,7 @@ func TestClaudeStreamUsesSessionTranscriptAndStandaloneActiveTurn(t *testing.T) 
 		time.Sleep(50 * time.Millisecond)
 		file, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 		defer file.Close()
-		file.WriteString("{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"id\":\"m1\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}]}}\n")
+		file.WriteString("{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"id\":\"m1\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}]}}\n{\"type\":\"system\",\"subtype\":\"stop_hook_summary\"}\n")
 	}()
 	var events []surface.StreamEvent
 	err := claude.Stream(context.Background(), session, "u1", func(event surface.StreamEvent) { events = append(events, event) }, time.Second)
@@ -574,7 +576,7 @@ func TestClaudeStreamSupportsUDSTranscriptTail(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		file, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 		defer file.Close()
-		file.WriteString(`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}` + "\n")
+		file.WriteString(`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"answer"}]}}` + "\n" + `{"type":"system","subtype":"stop_hook_summary"}` + "\n")
 	}()
 	var events []surface.StreamEvent
 	streamContext, cancel := context.WithCancel(context.Background())
@@ -616,7 +618,7 @@ func TestClaudeUDSStreamPreservesFutureToolCallAndResultCorrelation(t *testing.T
 		defer file.Close()
 		file.WriteString(`{"type":"assistant","uuid":"a1","message":{"id":"m1","stop_reason":null,"content":[{"type":"tool_use","id":"call-1","name":"Read","input":{"path":"x"}}]}}` + "\n")
 		file.WriteString(`{"type":"user","uuid":"u-tool","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"contents"}]}}` + "\n")
-		file.WriteString(`{"type":"assistant","uuid":"a2","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}` + "\n")
+		file.WriteString(`{"type":"assistant","uuid":"a2","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}` + "\n" + `{"type":"system","subtype":"stop_hook_summary"}` + "\n")
 	}()
 	var events []surface.StreamEvent
 	err := claude.Stream(ctx, &surface.Session{ID: "bridge", Surface: surface.KindClaude, Transport: "uds", Transcript: path}, "", func(event surface.StreamEvent) {
@@ -686,7 +688,7 @@ func TestClaudeStreamKeepsTargetTurnAcrossLongTranscriptOverlap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := file.WriteString(`{"type":"assistant","uuid":"assistant-target","message":{"id":"target-answer","stop_reason":"end_turn","content":[{"type":"text","text":"target answer"}]}}` + "\n"); err != nil {
+	if _, err := file.WriteString(`{"type":"assistant","uuid":"assistant-target","message":{"id":"target-answer","stop_reason":"end_turn","content":[{"type":"text","text":"target answer"}]}}` + "\n" + `{"type":"system","subtype":"stop_hook_summary"}` + "\n"); err != nil {
 		file.Close()
 		t.Fatal(err)
 	}
@@ -765,7 +767,7 @@ func TestClaudeTranscriptPreservesMultiMegabyteUnicodeReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := writeTranscript(t, `{"type":"user","uuid":"u","message":{"content":"long"}}`+"\n"+string(record))
+	path := writeTranscript(t, `{"type":"user","uuid":"u","message":{"content":"long"}}`+"\n"+string(record)+"\n"+`{"type":"system","subtype":"stop_hook_summary"}`)
 	observation, err := NewClaude("Default", t.TempDir()).Observe(context.Background(), &surface.Session{ID: "bridge", Transcript: path})
 	if err != nil || observation.CompletedTurnID != "m" || observation.Reply == nil {
 		t.Fatalf("observation=%+v err=%v", observation, err)
