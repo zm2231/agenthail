@@ -33,17 +33,14 @@ type Outcome struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// Is reports whether sessionID is the coordinator on this host.
+// Is reports whether a send to sessionID belongs to the coordinator: its
+// current session or a conversation a restart replaced.
 func (s Service) Is(sessionID string) bool {
 	if s.Registry == nil {
 		return false
 	}
-	spec, err := s.Registry.Coordinator()
-	if err != nil {
-		return false
-	}
-	current, err := s.Registry.CoordinatorSessionID(spec)
-	return err == nil && current != "" && current == sessionID
+	is, err := s.Registry.IsCoordinatorSession(sessionID)
+	return err == nil && is
 }
 
 // Names reports whether target is @<name> of the coordinator. A bare name
@@ -55,6 +52,23 @@ func (s Service) Names(target string) bool {
 	}
 	spec, err := s.Registry.Coordinator()
 	return err == nil && name == spec.Name
+}
+
+// ReplacedBy returns the coordinator's current session when sessionID is a
+// conversation a restart replaced.
+func (s Service) ReplacedBy(sessionID string) (string, bool) {
+	if !s.Is(sessionID) {
+		return "", false
+	}
+	spec, err := s.Registry.Coordinator()
+	if err != nil {
+		return "", false
+	}
+	current, err := s.Registry.CoordinatorSessionID(spec)
+	if err != nil || current == "" || current == sessionID {
+		return "", false
+	}
+	return current, true
 }
 
 // Named reports whether the coordinator's name points at a session.

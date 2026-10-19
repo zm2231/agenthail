@@ -16,9 +16,16 @@ func (d *Daemon) coordinator() coordinator.Service {
 // restartCoordinator delivers a queued message by starting the coordinator
 // again when its conversation is gone. It reports whether it handled item.
 func (d *Daemon) restartCoordinator(ctx context.Context, session *surface.Session, item *registry.QueuedMessage, now time.Time) bool {
+	coord := d.coordinator()
+	if current, replaced := coord.ReplacedBy(session.ID); replaced {
+		if err := d.Registry.MoveClaimedMessage(item.ID, current); err != nil {
+			d.log.Printf("move queue item %d to coordinator %s: %s", item.ID, current, err)
+		}
+		return true
+	}
 	operationCtx, cancel := context.WithTimeout(ctx, surfaceOperationTimeout)
 	defer cancel()
-	outcome, handled, err := d.coordinator().Restart(operationCtx, session, item.Message)
+	outcome, handled, err := coord.Restart(operationCtx, session, item.Message)
 	if !handled {
 		return false
 	}

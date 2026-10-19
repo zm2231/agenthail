@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS coordinator (
 	permission_mode TEXT NOT NULL DEFAULT '',
 	instructions TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS coordinator_replaced (
+	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
 );`
 
 // A restart holds this lock so concurrent senders in any Agenthail process
@@ -78,14 +81,42 @@ func (r *Registry) SetCoordinator(spec CoordinatorSpec, sessionID string) error 
 }
 
 func (r *Registry) ClearCoordinator() error {
-	res, err := r.db.Exec(`DELETE FROM coordinator WHERE singleton=1`)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM coordinator WHERE singleton=1`)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNoCoordinator
 	}
-	return nil
+	if _, err := tx.Exec(`DELETE FROM coordinator_replaced`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// IsCoordinatorSession reports whether sessionID is the coordinator or a
+// conversation a restart replaced, which senders such as a notification reply
+// may still address.
+func (r *Registry) IsCoordinatorSession(sessionID string) (bool, error) {
+	spec, err := r.Coordinator()
+	if errors.Is(err, ErrNoCoordinator) || sessionID == "" {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	current, err := r.CoordinatorSessionID(spec)
+	if err != nil || current == sessionID {
+		return err == nil, err
+	}
+	var replaced bool
+	err = r.read.QueryRow(`SELECT EXISTS(SELECT 1 FROM coordinator_replaced WHERE session_id=?)`, sessionID).Scan(&replaced)
+	return replaced, err
 }
 
 func (r *Registry) CoordinatorSessionID(spec CoordinatorSpec) (string, error) {
@@ -99,7 +130,7 @@ func (r *Registry) CoordinatorSessionID(spec CoordinatorSpec) (string, error) {
 var ErrCoordinatorMoved = errors.New("the coordinator was moved to another conversation")
 
 // HandOverCoordinator also moves messages still pending for the previous
-// conversation, which can no longer take them.
+// conversation, which can no longer take them, and remembers it was replaced.
 func (r *Registry) HandOverCoordinator(name, previous, next string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -124,6 +155,22 @@ func (r *Registry) HandOverCoordinator(name, previous, next string) error {
 		if _, err := tx.Exec(`UPDATE message_queue SET session_id=?,updated_at=datetime('now') WHERE session_id=? AND status='pending'`, next, previous); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO coordinator_replaced (session_id) VALUES (?)`, previous); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
+}
+
+// MoveClaimedMessage returns a claimed queue item to the queue for sessionID,
+// for a message whose target was replaced while it was in flight.
+func (r *Registry) MoveClaimedMessage(id int64, sessionID string) error {
+	res, err := r.db.Exec(`UPDATE message_queue SET session_id=?,status='pending',attempts=MAX(attempts-1,0),available_at_ms=0,inflight_at_ms=0,updated_at=datetime('now') WHERE id=? AND status='inflight'`, sessionID, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("queue item %d is not inflight", id)
+	}
+	return nil
 }

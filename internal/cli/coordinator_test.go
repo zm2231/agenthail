@@ -93,7 +93,11 @@ func TestDefinedCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 	if !strings.HasSuffix(fixture.Prompt(freshConversation), "first task") {
 		t.Fatalf("prompt=%q", fixture.Prompt(freshConversation))
 	}
-	if started, err := r.Session(freshConversation); err != nil || started.ConfiguredModel != "fixture-model" || started.Cwd != fixture.Home {
+	home, err := filepath.EvalSymlinks(fixture.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started, err := r.Session(freshConversation); err != nil || started.ConfiguredModel != "fixture-model" || mustEvalSymlinks(t, started.Cwd) != home {
 		t.Fatalf("started=%+v err=%v", started, err)
 	}
 	if sid, err := r.LookupAlias("coordinator"); err != nil || sid != freshConversation {
@@ -185,4 +189,13 @@ func TestBareCoordinatorNameIsAFragmentNotTheCoordinator(t *testing.T) {
 	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "for the coordinator"}) }); err != nil || fixture.Starts() != 1 {
 		t.Fatalf("err=%v starts=%d", err, fixture.Starts())
 	}
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }

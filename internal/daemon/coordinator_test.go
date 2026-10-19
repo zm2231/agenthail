@@ -131,3 +131,23 @@ func TestAPISendToACoordinatorClaudeCannotReportOnWaitsInTheQueue(t *testing.T) 
 		t.Fatalf("starts=%d resumes=%d", f.claude.Starts(), f.claude.Invocations("--bg", "--resume", goneCoordinator))
 	}
 }
+
+func TestSendsToAConversationARestartReplacedReachTheCoordinator(t *testing.T) {
+	f := newCoordinatorFixture(t)
+	if code, body := f.send(t, "lead-first", goneCoordinator, "first"); code != http.StatusOK {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	if code, body := f.send(t, "lead-reply", goneCoordinator, "reply to an old notification"); code != http.StatusOK {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	if err := f.r.QueueMessage(goneCoordinator, "queued by an old client"); err != nil {
+		t.Fatal(err)
+	}
+	f.daemon.scanAndRelay(context.Background())
+	if f.claude.Starts() != 1 || f.claude.Invocations("--bg", "--resume", goneCoordinator) != 0 {
+		t.Fatalf("starts=%d resumes=%d", f.claude.Starts(), f.claude.Invocations("--bg", "--resume", goneCoordinator))
+	}
+	if f.r.QueueCount(goneCoordinator) != 0 {
+		t.Fatalf("queued for the replaced conversation=%d", f.r.QueueCount(goneCoordinator))
+	}
+}

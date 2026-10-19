@@ -149,6 +149,7 @@ func seedVersion13(t *testing.T, r *Registry) {
 		t.Fatal(err)
 	}
 	exec(`INSERT INTO channel_members(channel_id,session_id) VALUES(?,?),(?,?)`, channel, rekeyedBridge, channel, collidedBridge)
+	exec(`INSERT INTO coordinator_replaced(session_id) VALUES(?)`, rekeyedBridge)
 	if _, err := r.AddRoute(rekeyedBridge, "codex-peer", ".*"); err != nil {
 		t.Fatal(err)
 	}
