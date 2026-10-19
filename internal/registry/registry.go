@@ -774,6 +774,9 @@ CREATE TABLE IF NOT EXISTS signin_bindings (
 	consumer TEXT PRIMARY KEY,
 	profile_id TEXT NOT NULL REFERENCES signin_profiles(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS signin_off (
+	consumer TEXT PRIMARY KEY
+);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {

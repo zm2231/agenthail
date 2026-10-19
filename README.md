@@ -108,20 +108,21 @@ If a writer lock outlives the process that held it, Agenthail reports an ownersh
 
 ### Notion
 
-Notion is optional. It works as an external workspace for research, notes, and longer-running threads. Sign into Notion in a desktop browser, then tell Agenthail which browser profile to use. After that, Agenthail can find those threads and start new ones.
+Notion is optional. It works as an external workspace for research, notes, and longer-running threads. Sign into Notion in your default browser and Agenthail finds those threads and can start new ones.
 
 ### Browser sign-in
 
-Notion and Claude sessions reached over Remote Control authenticate with the cookies of a browser profile you choose. Agenthail reads cookies only from that profile. Until you choose one, the consumer reports that it is not set up and no cookies are read.
+Notion and Claude sessions reached over Remote Control authenticate with browser cookies. By default they use your system default browser and the profile it last used: Local State's last used profile for Chrome, Brave, Arc, Chromium and Edge, the default profile in profiles.ini for Firefox, and Safari's single profile. Nothing else reads cookies.
 
 ```bash
-agenthail signin list                      # browsers and profiles on this computer
+agenthail signin list                      # what each consumer reads, and the profiles on this computer
 agenthail signin add chrome "Profile 2" --label Work
-agenthail signin use notion Work
-agenthail signin use claude Work           # only for Remote Control sessions
+agenthail signin use notion Work           # pin Notion to that profile
+agenthail signin use claude auto           # back to the system default browser
+agenthail signin use claude none           # turn Claude Remote Control sign-in off
 ```
 
-The same settings are under Settings > Browser Sign-in in the Mac app and the web dashboard. Supported browsers are Chrome, Brave, Arc, Chromium, Edge, Firefox and Safari.
+`signin list`, `agenthail doctor`, Settings > Browser Sign-in in the Mac app and the web dashboard, and Settings on iPhone all show the profile each consumer resolves to. If it cannot be read they say why and how to fix it. Safari keeps its cookies in a protected folder, so on macOS reading them needs Full Disk Access for `/Library/Application Support/Agenthail/agenthail` in System Settings > Privacy & Security > Full Disk Access. Supported browsers are Chrome, Brave, Arc, Chromium, Edge, Firefox and Safari.
 
 ## One place to check in
 
