@@ -76,7 +76,50 @@ struct VoiceCallTest {
         check(VoiceController.loopback(URL(string: "http://0.0.0.0:7412")!).absoluteString == "http://127.0.0.1:7412", "a wildcard listener is reached over loopback")
         check(VoiceController.loopback(URL(string: "http://127.0.0.1:7412")!).absoluteString == "http://127.0.0.1:7412", "a loopback listener is unchanged")
         check(VoicePrivacySettings.microphoneURL.absoluteString.hasSuffix("Privacy_Microphone"), "Open System Settings targets the microphone pane")
+
+        let origin = URL(string: "http://127.0.0.1:7412")
+        check(VoiceAudioBridge.allowsNavigation(to: URL(string: "http://127.0.0.1:7412/api/v1/voice/peer"), from: origin, mainFrame: true), "the main frame may load the peer page")
+        check(!VoiceAudioBridge.allowsNavigation(to: URL(string: "http://127.0.0.1:7412/api/v1/voice/peer"), from: origin, mainFrame: false), "a subframe may not load the peer page")
+        check(!VoiceAudioBridge.allowsNavigation(to: URL(string: "http://127.0.0.1:7413/api/v1/voice/peer"), from: origin, mainFrame: true), "another port is a different origin")
+        check(!VoiceAudioBridge.allowsNavigation(to: URL(string: "http://127.0.0.1:7412/api/v1/snapshot"), from: origin, mainFrame: true), "only the peer page may load")
+        check(VoiceAudioBridge.allowsNavigation(to: URL(string: "https://mac.test/api/v1/voice/peer"), from: URL(string: "https://mac.test:443"), mainFrame: true), "https default port matches an explicit 443")
+
+        await closeBeforeStart()
+        await closeWhileStartIsUnknown()
         print("voice call ok")
+    }
+
+    @MainActor
+    private static func closeBeforeStart() async {
+        let service = FixtureVoiceService()
+        let audio = FixtureAudio()
+        let controller = VoiceController { VoiceOperatorModel(targetID: $0, api: service, audio: audio) }
+        controller.route(to: "")
+        audio.emit("ready")
+        await controller.call?.call()
+        audio.emit("offer", "v=0 fixture-offer")
+        controller.close()
+        await settle()
+        check(!service.names.contains("start"), "closing before the queued start runs submits no host call")
+    }
+
+    @MainActor
+    private static func closeWhileStartIsUnknown() async {
+        let service = FixtureVoiceService()
+        service.holdStart = true
+        let audio = FixtureAudio()
+        let controller = VoiceController { VoiceOperatorModel(targetID: $0, api: service, audio: audio) }
+        controller.route(to: "")
+        audio.emit("ready")
+        await controller.call?.call()
+        audio.emit("offer", "v=0 fixture-offer")
+        await settle()
+        let attempt = service.actions.last(where: { $0.action == "start" })?.attemptId
+        check(attempt != nil && service.pending != nil, "the start request is in flight")
+        controller.close()
+        service.failPending()
+        await settle()
+        check(service.actions.last?.action == "stop" && service.actions.last?.attemptId == attempt, "an unknown start after close is stopped")
     }
 
     @MainActor
@@ -101,13 +144,24 @@ private final class FixtureVoiceService: VoiceServiceClient {
     var actions: [VoiceAction] = []
     var phase = "ready"
     var target: String?
+    var holdStart = false
+    var pending: CheckedContinuation<Void, Error>?
     var names: [String] { actions.map(\.action) }
 
     func request(path: String) -> URLRequest { URLRequest(url: URL(string: "https://mac.test/\(path)")!) }
     func state() async throws -> VoiceState { snapshot() }
     func action(_ action: VoiceAction) async throws -> VoiceState {
         actions.append(action)
+        if action.action == "start" && holdStart {
+            try await withCheckedThrowingContinuation { pending = $0 }
+        }
         return snapshot(attempt: action.attemptId)
+    }
+
+    func failPending() {
+        let continuation = pending
+        pending = nil
+        continuation?.resume(throwing: URLError(.timedOut))
     }
 
     private func snapshot(attempt: String? = nil) -> VoiceState {

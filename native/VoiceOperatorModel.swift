@@ -171,6 +171,7 @@ final class VoiceOperatorModel: ObservableObject {
             guard let api, let id = attemptID else { return }
             let current = generation
             Task {
+                guard !closed, generation == current else { return }
                 startSubmitted = true
                 do {
                     let next = try await api.action(VoiceAction(action: "start", attemptId: id, sdp: value))
@@ -179,7 +180,9 @@ final class VoiceOperatorModel: ObservableObject {
                     }
                     state = next
                 } catch {
-                    guard !closed, generation == current else { return }
+                    guard !closed, generation == current else {
+                        _ = try? await api.action(VoiceAction(action: "stop", attemptId: id)); return
+                    }
                     self.error = error.localizedDescription
                     dialing = false
                     audio.end()
@@ -202,6 +205,7 @@ final class VoiceOperatorModel: ObservableObject {
         dialing = false
         let current = generation
         Task {
+            guard !closed, current == generation else { return }
             do {
                 let next = try await api.action(VoiceAction(action: "connected", attemptId: id))
                 if !closed, current == generation { state = next }

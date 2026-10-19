@@ -109,14 +109,21 @@ final class VoiceAudioBridge: NSObject, ObservableObject, VoiceAudioClient, WKSc
         onMessage?(type, body["value"] ?? "")
     }
 
-    private func sameOrigin(_ url: URL?) -> Bool {
+    private func sameOrigin(_ url: URL?) -> Bool { Self.sameOrigin(url, as: origin) }
+
+    static func sameOrigin(_ url: URL?, as origin: URL?) -> Bool {
         guard let url, let origin, VoiceAPI.secureOrigin(url) else { return false }
         return url.scheme == origin.scheme && url.host == origin.host
             && (url.port ?? VoiceAPI.defaultPort(url.scheme)) == (origin.port ?? VoiceAPI.defaultPort(origin.scheme))
     }
 
+    static func allowsNavigation(to url: URL?, from origin: URL?, mainFrame: Bool) -> Bool {
+        mainFrame && sameOrigin(url, as: origin) && url?.path == "/api/v1/voice/peer"
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(sameOrigin(navigationAction.request.url) && navigationAction.request.url?.path == "/api/v1/voice/peer" ? .allow : .cancel)
+        let mainFrame = navigationAction.targetFrame?.isMainFrame == true
+        decisionHandler(Self.allowsNavigation(to: navigationAction.request.url, from: origin, mainFrame: mainFrame) ? .allow : .cancel)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
