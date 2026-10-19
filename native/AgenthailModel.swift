@@ -25,6 +25,8 @@ final class AgenthailModel: ObservableObject {
     @Published private(set) var pinnedSessions: [SessionState] = []
     private var searchTask: Task<Void, Never>?
     @Published var devices: [DeviceState] = []
+    @Published var signin: SigninState?
+    @Published var signinError: String?
     @Published var pairing: PairingResponse?
     @Published var settings: DashboardSettingsState?
     @Published var audit: [HistoryState] = []
@@ -499,6 +501,53 @@ final class AgenthailModel: ObservableObject {
                 operationError = nil
             } catch {
                 operationError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
+    func loadSignin() async {
+        guard let api else { return }
+        do {
+            signin = try await api.signin()
+            signinError = nil
+        } catch {
+            signinError = AgenthailAPIError.userMessage(error)
+        }
+    }
+
+    func addSigninProfile(browser: String, profile: String, label: String) {
+        guard let api else { return }
+        Task {
+            do {
+                _ = try await api.addSigninProfile(browser: browser, profile: profile, label: label)
+                await loadSignin()
+            } catch {
+                signinError = AgenthailAPIError.userMessage(error)
+            }
+        }
+    }
+
+    func bindSignin(consumer: String, profileID: String?) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.bindSignin(consumer: consumer, profileID: profileID)
+                await loadSignin()
+            } catch {
+                signinError = AgenthailAPIError.userMessage(error)
+                await loadSignin()
+            }
+        }
+    }
+
+    func removeSigninProfile(_ id: String) {
+        guard let api else { return }
+        Task {
+            do {
+                try await api.removeSigninProfile(id: id)
+                await loadSignin()
+            } catch {
+                signinError = AgenthailAPIError.userMessage(error)
             }
         }
     }

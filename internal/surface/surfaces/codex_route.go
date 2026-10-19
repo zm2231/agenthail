@@ -132,7 +132,7 @@ func (r *codexRuntimes) readers() []codexClient {
 // session converts a Codex thread object and routes it.
 func (r *codexRuntimes) session(thread map[string]any) surface.Session {
 	session := codexSession(thread)
-	session.Transport = r.route(session.ID, codexThreadOriginator(thread))
+	setCodexTransport(&session, r.route(session.ID, codexThreadOriginator(thread)))
 	return session
 }
 
@@ -193,7 +193,7 @@ func (c *Codex) resolveRoute(ctx context.Context, runtimes *codexRuntimes, sess 
 	if originator == "" {
 		originator = codexRolloutOriginator(codexTranscriptPath(sess))
 	}
-	sess.Transport = runtimes.route(sess.ID, originator)
+	setCodexTransport(sess, runtimes.route(sess.ID, originator))
 }
 
 // openWriter makes the session's route the thread's live writer and returns a

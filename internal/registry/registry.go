@@ -28,7 +28,7 @@ type Registry struct {
 var generatedAliasCharacters = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 const (
-	schemaVersion   = 14
+	schemaVersion   = 16
 	queueMessageTTL = time.Hour
 	readConnections = 4
 )
@@ -245,6 +245,9 @@ func (r *Registry) migrate() error {
 			return err
 		}
 	}
+	if err := r.recordRuntimeKinds(); err != nil {
+		return err
+	}
 	if version >= schemaVersion {
 		return nil
 	}
@@ -308,6 +311,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status TEXT NOT NULL DEFAULT 'unknown', transcript TEXT NOT NULL DEFAULT '',
 	has_local INTEGER NOT NULL DEFAULT 0,
 	source TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL DEFAULT '',
+	runtime_kind TEXT NOT NULL DEFAULT '',
 	configured_model TEXT NOT NULL DEFAULT '',
 	bridge TEXT NOT NULL DEFAULT '', forked_from TEXT NOT NULL DEFAULT '',
 	last_active_ms INTEGER NOT NULL DEFAULT 0,
@@ -586,6 +590,18 @@ CREATE TABLE IF NOT EXISTS catalog_state (
 	id INTEGER PRIMARY KEY CHECK (id=1),
 	host_epoch TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS signin_profiles (
+	id TEXT PRIMARY KEY,
+	label TEXT NOT NULL UNIQUE,
+	browser TEXT NOT NULL,
+	profile TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	UNIQUE(browser, profile)
+);
+CREATE TABLE IF NOT EXISTS signin_bindings (
+	consumer TEXT PRIMARY KEY,
+	profile_id TEXT NOT NULL REFERENCES signin_profiles(id) ON DELETE CASCADE
+);
 `
 
 func (r *Registry) RegisterSession(s surface.Session) error {
@@ -632,6 +648,9 @@ func (r *Registry) RegisterSessionAndDeletePending(s surface.Session, pendingID 
 }
 
 func registerSessionTx(tx *sql.Tx, s surface.Session) error {
+	if s.RuntimeKind == "" {
+		return fmt.Errorf("register session %s: no runtime kind", s.ID)
+	}
 	var owner string
 	if err := tx.QueryRow(`SELECT host_id FROM sessions WHERE id=?`, s.ID).Scan(&owner); err != nil && err != sql.ErrNoRows {
 		return err
@@ -645,8 +664,8 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 	}
 	parentID, rootID, depth, nickname, role := subagentValues(s)
 	_, err := tx.Exec(
-		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,configured_model,bridge,forked_from,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+		`INSERT INTO sessions (id,surface,name,cwd,pid,status,transcript,has_local,source,transport,runtime_kind,configured_model,bridge,forked_from,last_active_ms,parent_session_id,root_session_id,subagent_depth,agent_nickname,agent_role,updated_at)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET surface=excluded.surface,name=excluded.name,cwd=excluded.cwd,
 		   pid=excluded.pid,status=excluded.status,transcript=excluded.transcript,
 		   has_local=excluded.has_local,
@@ -662,6 +681,11 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		     WHEN excluded.transport<>'' THEN excluded.transport
 		     ELSE sessions.transport
 			   END,
+			   runtime_kind=CASE
+		     WHEN sessions.surface='codex' AND sessions.transport='managed' AND NOT (excluded.source='vscode' AND excluded.transport='desktop') THEN sessions.runtime_kind
+		     WHEN sessions.surface='codex' AND sessions.transport='desktop' AND excluded.source='agenthail' AND excluded.transport='managed' THEN sessions.runtime_kind
+		     ELSE excluded.runtime_kind
+			   END,
 			   configured_model=CASE WHEN excluded.configured_model<>'' THEN excluded.configured_model ELSE sessions.configured_model END,
 			   bridge=excluded.bridge,
 			   forked_from=CASE WHEN sessions.forked_from<>'' THEN sessions.forked_from ELSE excluded.forked_from END,
@@ -672,7 +696,7 @@ func registerSessionTx(tx *sql.Tx, s surface.Session) error {
 		   agent_nickname=CASE WHEN excluded.agent_nickname<>'' THEN excluded.agent_nickname ELSE sessions.agent_nickname END,
 		   agent_role=CASE WHEN excluded.agent_role<>'' THEN excluded.agent_role ELSE sessions.agent_role END,
 		   updated_at=datetime('now')`,
-		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, s.ConfiguredModel, s.Bridge, s.ForkedFrom, lastActiveMS, parentID, rootID, depth, nickname, role)
+		s.ID, string(s.Surface), s.Name, s.Cwd, s.PID, string(s.Status), s.Transcript, b2i(s.HasLocal), s.Source, s.Transport, string(s.RuntimeKind), s.ConfiguredModel, s.Bridge, s.ForkedFrom, lastActiveMS, parentID, rootID, depth, nickname, role)
 	if err != nil {
 		return err
 	}
@@ -2233,8 +2257,8 @@ func (r *Registry) Session(id string) (*surface.Session, error) {
 	var location []byte
 	var focusable int
 	var subagent subagentColumns
-	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
-		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable,
+	err := r.read.QueryRow(`SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.id = ?`, id).Scan(append([]any{
+		&session.ID, &kind, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable,
 	}, subagent.targets()...)...)
 	if err != nil {
 		return nil, err
@@ -2263,7 +2287,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		limit = 20
 	}
 	pattern := "%" + escapeLike(query) + "%"
-	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
+	rows, err := r.read.Query(`SELECT DISTINCT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),`+sessionSubagentSelect+`
 		FROM sessions s LEFT JOIN aliases a ON a.session_id=s.id LEFT JOIN session_runtime sr ON sr.session_id=s.id
 		WHERE s.surface=? AND s.host_id='' AND (s.id LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\' OR s.cwd LIKE ? ESCAPE '\' OR a.name LIKE ? ESCAPE '\')
 		ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id LIMIT ?`, string(kind), pattern, pattern, pattern, pattern, limit)
@@ -2281,7 +2305,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
 		subagent.apply(&session)
@@ -2308,7 +2332,7 @@ func (r *Registry) SearchSessions(kind surface.SurfaceKind, query string, limit 
 }
 
 func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
-	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
+	query := `SELECT s.id,s.surface,s.name,s.cwd,s.pid,s.status,s.transcript,s.has_local,s.source,s.transport,s.runtime_kind,s.configured_model,s.bridge,s.forked_from,s.last_active_ms,COALESCE(sr.runtime_launcher,''),sr.runtime_location,COALESCE(sr.runtime_focusable,0),` + sessionSubagentSelect + ` FROM sessions s LEFT JOIN session_runtime sr ON sr.session_id=s.id WHERE s.host_id='' ORDER BY s.last_active_ms DESC, s.updated_at DESC, s.id`
 	args := []any{}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -2329,7 +2353,7 @@ func (r *Registry) ListSessions(limit int) ([]surface.Session, error) {
 		var location []byte
 		var focusable int
 		var subagent subagentColumns
-		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&session.ID, &kindText, &session.Name, &session.Cwd, &session.PID, &status, &session.Transcript, &hasLocal, &session.Source, &session.Transport, &session.RuntimeKind, &session.ConfiguredModel, &session.Bridge, &session.ForkedFrom, &lastActiveMS, &launcher, &location, &focusable}, subagent.targets()...)...); err != nil {
 			return nil, err
 		}
 		subagent.apply(&session)

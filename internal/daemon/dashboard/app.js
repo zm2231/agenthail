@@ -463,7 +463,9 @@ function renderOverview() {
             : `Past ${app.state.codexRecentHours || 5}h`;
         const healthLabel = surface.health === "degraded"
           ? "Needs attention"
-          : surface.connected
+          : surface.health === "not_configured"
+            ? "Not set up"
+            : surface.connected
             ? "Connected"
             : "Not connected";
         return `<button class="surface-row" type="button" data-surface="${escape(surface.name)}"><div class="surface-identity"><span class="surface-logo ${escape(surface.name)}">${surfaceIcon(surface.name)}</span><div><div class="surface-name">${escape(name)}</div><div class="connection-line ${escape(surface.health || (surface.connected ? "healthy" : "unavailable"))}" title="${escape(surface.healthDetail || surface.error || "")}"><i></i>${escape(healthLabel)}</div></div></div><div class="surface-stat"><span>Working</span><strong>${active}</strong></div><div class="surface-stat"><span>Current</span><strong>${present}</strong><small>${presenceWindow}</small></div><div class="surface-stat"><span>Queued</span><strong>${queued}</strong></div></button>`;
@@ -719,7 +721,66 @@ function renderOperations() {
 function auditKindLabel(kind) {
   return String(kind || "event").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+function signinHint(detail) {
+  const claude = /^Claude Remote Control/.test(detail);
+  const consumer = claude ? "Claude sessions reached over Remote Control need" : "Notion needs";
+  return `${consumer} a browser sign-in profile. Choose one in Settings > Browser Sign-in, or run agenthail signin use ${claude ? "claude" : "notion"} <profile>.`;
+}
+async function signinRequest(path, options = {}) {
+  const response = await fetch(path, { ...options, headers: { "content-type": "application/json", ...(options.headers || {}) } });
+  const text = await response.text();
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = {};
+  }
+  if (!response.ok) throw Error(body.error?.message || text || `HTTP ${response.status}`);
+  return body;
+}
+async function loadSignin() {
+  try {
+    app.signin = await signinRequest("/api/v1/signin");
+    renderSignin();
+  } catch (error) {
+    $("#signin-consumers").innerHTML = `<div class="empty-card">${escape(error.message)}</div>`;
+  }
+}
+function signinProfileLabel(profile) {
+  const browser = (app.signin.browsers || []).find((item) => item.browser === profile.browser);
+  return `${browser?.label || profile.browser} · ${profile.profile}`;
+}
+function renderSignin() {
+  const signin = app.signin;
+  if (!signin) return;
+  const profiles = signin.profiles || [];
+  $("#signin-consumers").innerHTML = (signin.consumers || []).map((consumer) => {
+    const options = [`<option value="">Not set up</option>`, ...profiles.map((profile) => `<option value="${escape(profile.id)}"${consumer.profileId === profile.id ? " selected" : ""}>${escape(profile.label)}</option>`)].join("");
+    const state = consumer.profileId ? "" : '<span class="health-state not_configured">Not set up</span>';
+    return `<div class="signin-consumer"><div><strong>${escape(consumer.label)}</strong>${state}<p>${escape(consumer.purpose)}</p></div><label><span class="sr-only">Sign-in profile for ${escape(consumer.label)}</span><select data-signin-consumer="${escape(consumer.id)}">${options}</select></label></div>`;
+  }).join("");
+  $("#signin-profiles").innerHTML = profiles.map((profile) =>
+    `<article class="operation-item"><div class="operation-main"><div class="operation-title">${escape(profile.label)}</div><div class="operation-detail">${escape(signinProfileLabel(profile))}</div></div><button class="button quiet" data-signin-remove="${escape(profile.id)}" type="button">Remove</button></article>`,
+  ).join("") || '<div class="empty-card">No sign-in profiles yet. Add one from a browser below.</div>';
+  const available = (signin.browsers || []).filter((browser) => browser.available && browser.profiles.some((profile) => !profile.profileId));
+  const browserSelect = $("#signin-browser");
+  const previous = browserSelect.value;
+  browserSelect.innerHTML = available.map((browser) => `<option value="${escape(browser.browser)}">${escape(browser.label)}</option>`).join("") || '<option value="">No browser profiles to add</option>';
+  if (available.some((browser) => browser.browser === previous)) browserSelect.value = previous;
+  renderSigninProfileChoices();
+  const unavailable = (signin.browsers || []).filter((browser) => !browser.available);
+  const note = $("#signin-unavailable");
+  note.hidden = unavailable.length === 0;
+  note.textContent = unavailable.map((browser) => `${browser.label} is unavailable: ${browser.detail}.`).join(" ");
+}
+function renderSigninProfileChoices() {
+  const browser = (app.signin?.browsers || []).find((item) => item.browser === $("#signin-browser").value);
+  const choices = (browser?.profiles || []).filter((profile) => !profile.profileId);
+  $("#signin-profile").innerHTML = choices.map((profile) => `<option value="${escape(profile.profile)}">${escape(profile.name)}${profile.name === profile.profile ? "" : ` (${escape(profile.profile)})`}</option>`).join("");
+  $("#signin-add-form button[type=submit]").disabled = choices.length === 0;
+}
 async function loadSettings() {
+  loadSignin();
   try {
     const response = await fetch("/api/settings");
     if (!response.ok) throw Error(await response.text());
@@ -751,9 +812,11 @@ function renderSurfaceHealth() {
   $("#surface-health-list").innerHTML = surfaces.map((surface) => {
     const name = labels[surface.name] || surface.name;
     const health = surface.health || (surface.connected ? "healthy" : "unavailable");
-    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : "Unavailable";
+    const state = health === "healthy" ? "Healthy" : health === "degraded" ? "Needs attention" : health === "not_configured" ? "Not set up" : "Unavailable";
     const rawDetail = surface.healthDetail || surface.error || "Ready";
-    const detail = /cookie bridge/i.test(rawDetail)
+    const detail = health === "not_configured" || /choose a browser sign-in profile/i.test(rawDetail)
+      ? signinHint(rawDetail)
+      : /cookie bridge/i.test(rawDetail)
       ? "Claude Code needs to reconnect to your signed-in account."
       : /notion.*(?:401|context)/i.test(rawDetail)
         ? "Notion is not signed in on this Mac."
@@ -2061,6 +2124,44 @@ $("#dashboard-settings-form").addEventListener("submit", async (event) => {
     toast("Settings saved.");
   } catch (error) {
     toast(error.message);
+  }
+});
+$("#signin-browser").addEventListener("change", renderSigninProfileChoices);
+$("#signin-add-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const { profile } = await signinRequest("/api/v1/signin/profiles", { method: "POST", body: JSON.stringify({ browser: $("#signin-browser").value, profile: $("#signin-profile").value, label: $("#signin-label").value }) });
+    $("#signin-label").value = "";
+    await loadSignin();
+    toast(`Added ${profile.label}. Choose it for Notion or Claude Remote Control above.`);
+  } catch (error) {
+    toast(error.message);
+  }
+});
+$("#signin-card").addEventListener("change", async (event) => {
+  const select = event.target.closest("[data-signin-consumer]");
+  if (!select) return;
+  select.disabled = true;
+  try {
+    const { profile } = await signinRequest("/api/v1/signin/bindings", { method: "PUT", body: JSON.stringify({ consumer: select.dataset.signinConsumer, profileId: select.value || null }) });
+    await loadSignin();
+    toast(profile ? `Using ${profile.label}.` : "Not set up. No cookies will be read.");
+  } catch (error) {
+    toast(error.message);
+    await loadSignin();
+  }
+});
+$("#signin-card").addEventListener("click", async (event) => {
+  const remove = event.target.closest("[data-signin-remove]");
+  if (!remove) return;
+  remove.disabled = true;
+  try {
+    const { profile } = await signinRequest(`/api/v1/signin/profiles?id=${encodeURIComponent(remove.dataset.signinRemove)}`, { method: "DELETE" });
+    await loadSignin();
+    toast(`Removed ${profile.label}.`);
+  } catch (error) {
+    toast(error.message);
+    remove.disabled = false;
   }
 });
 $("#audit-search").addEventListener("input", (event) => {

@@ -42,7 +42,7 @@ func (f *federatedSurface) GoalClear(context.Context, *surface.Session) error {
 
 func (f *federatedSurface) ForkSession(_ context.Context, session *surface.Session, options surface.ForkOptions) (*surface.Session, error) {
 	f.record("fork:" + options.Model)
-	fork := surface.Session{ID: session.ID + "-fork", Surface: session.Surface, Name: "fork", Cwd: session.Cwd, Status: surface.StatusIdle}
+	fork := surface.Session{ID: session.ID + "-fork", Surface: session.Surface, RuntimeKind: session.RuntimeKind, Name: "fork", Cwd: session.Cwd, Status: surface.StatusIdle}
 	return &fork, nil
 }
 

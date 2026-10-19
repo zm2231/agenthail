@@ -25,7 +25,7 @@ func (a *App) cmdGoal(args []string) error {
 	if remote != nil {
 		return a.goalRemote(ctx, remote, positional, hasFlag(args, "--json"))
 	}
-	if !surf.Capabilities().Goal {
+	if !surface.CapabilitiesFor(surf, sess).Goal {
 		return fmt.Errorf("%s does not support goal management", surf.Name())
 	}
 	if len(positional) == 1 {

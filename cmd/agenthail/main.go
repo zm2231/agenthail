@@ -50,11 +50,10 @@ func main() {
 	defer reg.Close()
 
 	helpers := sidecarAvailable(runtime.GOOS, os.Getenv("AGENTHAIL_SIDECAR"))
-	claude := surfaces.NewClaude(envOr("AGENTHAIL_CHROME_PROFILE", "Default"), home)
+	claude := surfaces.NewClaude(reg, home)
 	if !helpers {
 		claude.DisableRemoteControl()
 	}
-	surfaces.SetChromeProfile(envOr("AGENTHAIL_CHROME_PROFILE", "Default"))
 	codex := surfaces.NewCodex(codexconfig.RemoteDebuggingPort())
 	entries := []cli.SurfaceEntry{
 		{Name: "claude", Surface: claude},
@@ -62,6 +61,7 @@ func main() {
 	}
 	if helpers {
 		entries = append(entries, cli.SurfaceEntry{Name: "notion", Surface: surfaces.NewNotion(
+			reg,
 			envOr("AGENTHAIL_NOTION_SPACE", ""),
 			envOr("AGENTHAIL_NOTION_USER", ""),
 		)})

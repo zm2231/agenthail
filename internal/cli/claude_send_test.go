@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"github.com/zm2231/agenthail/internal/signin"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ type claudePosts struct {
 	bodies []string
 }
 
-func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+func (p *claudePosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {
@@ -50,8 +51,8 @@ func exitedClaudeApp(t *testing.T) (*App, *registry.Registry, *claudetest.Fixtur
 	fixture := claudetest.New(t)
 	posts := &claudePosts{}
 	app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude})
-	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest("", fixture.Home, posts.request)
-	exited := surface.Session{ID: terminalConversation, Bridge: "session_terminal", Surface: surface.KindClaude, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
+	app.Surfaces[0].Surface = surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.Home, posts.request)
+	exited := surface.Session{ID: terminalConversation, Bridge: "session_terminal", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "fixture terminal", PID: exitedPID, Status: surface.StatusBusy, Cwd: fixture.Home, Transcript: fixture.Transcript(terminalConversation, fixture.Home)}
 	if err := r.RegisterSession(exited); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestResolvingARegisteredSessionTheSurfaceCannotGiveDoesNotRefreshIt(t *test
 	for name, resolveErr := range map[string]error{"not listed": surface.ErrSessionNotFound, "surface unavailable": surface.DeliveryUnavailable(errors.New("fixture surface is down"))} {
 		t.Run(name, func(t *testing.T) {
 			app, r := cliFixture(t, &cliSurface{kind: surface.KindClaude, resolveErr: resolveErr})
-			if err := r.RegisterSession(surface.Session{ID: "session_closed", Surface: surface.KindClaude, Status: surface.StatusIdle}); err != nil {
+			if err := r.RegisterSession(surface.Session{ID: "session_closed", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}); err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(1100 * time.Millisecond)

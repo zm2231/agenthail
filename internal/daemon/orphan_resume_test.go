@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"github.com/zm2231/agenthail/internal/signin"
 	"net/http"
 	"strings"
 	"sync"
@@ -26,7 +27,7 @@ type orphanPosts struct {
 	onPost func(body string)
 }
 
-func (p *orphanPosts) request(_ context.Context, method, url string, _ map[string]string, body, _ string, _ string, _ time.Duration) (int, string, error) {
+func (p *orphanPosts) request(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if method == "POST" && strings.Contains(url, "/v1/code/sessions/") {
@@ -82,7 +83,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	}
 	t.Cleanup(func() { _ = r.Close() })
 	fixture.r = r
-	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
+	fixture.session = surface.Session{ID: orphanConversation, Bridge: "session_orphan", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "orphan", PID: orphanPID, Status: surface.StatusBusy, Transport: transport, Cwd: fixture.claude.Home, Transcript: fixture.claude.Transcript(orphanConversation, fixture.claude.Home)}
 	if err := r.RegisterSession(fixture.session); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func newOrphanFixtureOn(t *testing.T, transport string) *orphanFixture {
 	}
 	fixture.claude.Job("fe758937", orphanConversation, fixture.claude.Home, "done", 0)
 	fixture.claude.ResumeBridge("session_orphan")
-	fixture.daemon = New(r, []surface.Surface{surfaces.NewClaudeWithRequest("", fixture.claude.Home, fixture.posts.request)})
+	fixture.daemon = New(r, []surface.Surface{surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, fixture.claude.Home, fixture.posts.request)})
 	fixture.handler = dashboardRouter(fixture.daemon)
 	fixture.token = pairedControlToken(t, r)
 	return fixture
@@ -215,7 +216,7 @@ func TestQueuedRelayToExitedSessionWithUncertainResumeIsNotRetried(t *testing.T)
 
 func TestRelayToExitedClaudeSessionResumesAndDeliversOnce(t *testing.T) {
 	f := newOrphanFixture(t)
-	from := surface.Session{ID: "from", Surface: surface.KindCodex, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
+	from := surface.Session{ID: "from", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Status: surface.StatusIdle, Source: "vscode", Transport: "desktop"}
 	if err := f.r.RegisterSession(from); err != nil {
 		t.Fatal(err)
 	}

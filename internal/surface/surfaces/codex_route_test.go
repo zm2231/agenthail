@@ -58,7 +58,7 @@ func TestCodexDiscoveryAndReadsNeverStartTheDaemon(t *testing.T) {
 	home := codextest.Home(t)
 	lifecycle := codextest.InstallLifecycle(t, home, nil)
 	codex := isolatedManagedRuntime(t)
-	session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, Transport: codexTransportManaged}
+	session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged}
 	if _, err := codex.List(context.Background()); err == nil {
 		t.Fatal("List succeeded without any Codex runtime")
 	}
@@ -108,7 +108,7 @@ func TestCodexDesktopCreatedThreadIsNeverLoadedIntoTheDaemon(t *testing.T) {
 	fake := startManagedCodex(t, nil)
 	fake.AddThread(codextest.Thread{ID: "desktop-thread", Originator: codexDesktopOriginator})
 	codex := isolatedManagedRuntime(t)
-	session := &surface.Session{ID: "desktop-thread", Surface: surface.KindCodex, Transport: codexTransportManaged}
+	session := &surface.Session{ID: "desktop-thread", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged}
 	_, err := codex.Send(context.Background(), session, "must stay with Desktop")
 	if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryOutcomeUnknown(err) || session.Transport != codexTransportReadOnly {
 		t.Fatalf("err=%v transport=%q", err, session.Transport)
@@ -139,7 +139,7 @@ func TestCodexResumeWriterConflictIsTerminalAndOtherFailuresNeverStartATurn(t *t
 				return nil
 			})
 			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
-			_, err := isolatedManagedRuntime(t).Send(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex}, "hello")
+			_, err := isolatedManagedRuntime(t).Send(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "hello")
 			if err == nil || surface.IsDeliveryOutcomeUnknown(err) || len(fake.Calls("turn/start")) != 0 {
 				t.Fatalf("err=%v methods=%v", err, fake.Methods())
 			}
@@ -161,7 +161,7 @@ func TestCodexUncertainTurnWritesAreUnknown(t *testing.T) {
 			})
 			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail", Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
 			codex := isolatedManagedRuntime(t)
-			session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex}
+			session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}
 			var err error
 			if method == "turn/start" {
 				fake.CompleteTurn(managedThreadID, "done")
@@ -205,7 +205,7 @@ func TestCodexUnknownLoadedStateFailsClosedForWrites(t *testing.T) {
 				desktop = startDesktopBridge(t, test.desktop)
 				codex = NewCodex(desktop.URL)
 			}
-			session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, Transport: codexTransportManaged}
+			session := &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Transport: codexTransportManaged}
 			_, err := codex.Send(context.Background(), session, "hello")
 			if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) || !strings.Contains(err.Error(), "cannot tell which Codex runtime owns") {
 				t.Fatalf("err=%v", err)
@@ -289,7 +289,7 @@ func TestCodexWriterConflictIsTerminalForEveryWrite(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fake := startManagedCodex(t, writerConflict)
 			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail", Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
-			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex})
+			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop})
 			requireOwnershipConflict(t, err)
 			requireNoCodexOperation(t, fake)
 		})
@@ -304,7 +304,7 @@ func TestCodexModelChangeWriterConflictIsTerminal(t *testing.T) {
 		return nil
 	})
 	fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail"})
-	_, err := isolatedManagedRuntime(t).Model(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex}, "gpt-5.6-sol")
+	_, err := isolatedManagedRuntime(t).Model(context.Background(), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop}, "gpt-5.6-sol")
 	requireOwnershipConflict(t, err)
 	if resumes := fake.Calls("thread/resume"); len(resumes) != 2 || resumes[1]["model"] != "gpt-5.6-sol" {
 		t.Fatalf("want the preflight resume, then the conflicting model change, got %v", resumes)
@@ -321,7 +321,7 @@ func TestCodexResumedThreadWithoutDirectInputStaysRetryable(t *testing.T) {
 				return nil
 			})
 			fake.AddThread(codextest.Thread{ID: managedThreadID, Originator: "agenthail", Turns: []codextest.Turn{{ID: "turn-1", Status: "inProgress"}}})
-			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex})
+			err := test.write(isolatedManagedRuntime(t), &surface.Session{ID: managedThreadID, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop})
 			if !surface.IsDeliveryUnavailable(err) || surface.IsDeliveryTerminal(err) || surface.IsDeliveryOutcomeUnknown(err) {
 				t.Fatalf("err=%v, want only retryable unavailable", err)
 			}

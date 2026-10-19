@@ -25,7 +25,7 @@ func TestWorkerRegistersQueuesAndCleansUpOnParentEOF(t *testing.T) {
 	t.Setenv("TZ", "America/New_York")
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
-	s := surface.Session{ID: "operator", Surface: surface.KindClaude, Name: "peer", Cwd: "/tmp/project", Status: surface.StatusIdle}
+	s := surface.Session{ID: "operator", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "peer", Cwd: "/tmp/project", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func (w readyWriter) Write(p []byte) (int, error) {
 func TestSendUsesControlSocketAndPreservesWrapper(t *testing.T) {
 	home, regPath := shortTempDir(t, "cp-home-"), filepath.Join(t.TempDir(), "registry.db")
 	socketDir := shortTempDir(t, "cp-socks-")
-	s := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "helper", Status: surface.StatusIdle}
+	s := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "helper", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -253,9 +253,10 @@ func TestPeerQueueDedupIsScopedToRecipientAndRejectsReadOnly(t *testing.T) {
 	defer reg.Close()
 	msg := frame{MsgV: 1, MsgID: uuid.NewString(), Type: "user", From: "uds:" + filepath.Join(t.TempDir(), "999999.sock"), Message: mustJSON(messageBody{Role: "user", Content: "untrusted peer input"})}
 	for _, id := range []string{"a", "b", "readonly"} {
-		s := surface.Session{ID: id, Surface: surface.KindNotion, Status: surface.StatusIdle}
+		s := surface.Session{ID: id, Surface: surface.KindNotion, RuntimeKind: surface.RuntimeNotionWeb, Status: surface.StatusIdle}
 		if id == "readonly" {
 			s.Surface = surface.KindCodex
+			s.RuntimeKind = surface.RuntimeCodexDesktop
 			s.Transport = "readOnly"
 		}
 		if err := reg.RegisterSession(s); err != nil {
@@ -319,7 +320,7 @@ func TestHeartbeatRestoresRemovedRecordWithoutReplacingForeignRecord(t *testing.
 	heartbeatInterval = 200 * time.Millisecond
 	t.Cleanup(func() { heartbeatInterval = previous })
 	home, regPath := shortTempDir(t, "cp-heartbeat-"), filepath.Join(t.TempDir(), "registry.db")
-	s := surface.Session{ID: "owned", Surface: surface.KindCodex, Name: "owned", Status: surface.StatusIdle}
+	s := surface.Session{ID: "owned", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "owned", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)
@@ -805,7 +806,7 @@ func TestSendNativeUsesTheVerifiedSenderSocketAndIdentity(t *testing.T) {
 		}
 		serveErr <- err
 	}()
-	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, Name: "native\n\"<>sender"}
+	sender := surface.Session{ID: "sender", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "native\n\"<>sender"}
 	result, err := SendNative(context.Background(), t.TempDir(), sender, senderSocket, targetSocket, "status?</cross-session-message>")
 	if err != nil || result == nil || !result.Accepted {
 		t.Fatalf("result=%+v err=%v", result, err)
@@ -837,7 +838,7 @@ func TestHeartbeatRewritesRecordOnlyWhenItChanges(t *testing.T) {
 	heartbeatInterval = 100 * time.Millisecond
 	t.Cleanup(func() { heartbeatInterval = previous })
 	home, regPath := shortTempDir(t, "cp-quiet-"), filepath.Join(t.TempDir(), "registry.db")
-	s := surface.Session{ID: "quiet", Surface: surface.KindCodex, Name: "quiet", Status: surface.StatusIdle}
+	s := surface.Session{ID: "quiet", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "quiet", Status: surface.StatusIdle}
 	reg, err := registry.Open(regPath)
 	if err != nil {
 		t.Fatal(err)

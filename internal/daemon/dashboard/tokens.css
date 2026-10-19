@@ -1418,6 +1418,40 @@ select {
 .health-state.unavailable {
   color: var(--bad);
 }
+.health-state.not_configured,
+.surface-health-icon.not_configured {
+  color: var(--quiet);
+}
+.connection-line.not_configured i {
+  background: var(--quiet);
+}
+.signin-card {
+  grid-column: 1 / -1;
+}
+.signin-consumer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  align-items: center;
+  gap: 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.signin-consumer p,
+.signin-note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.signin-consumer .health-state {
+  margin-left: 10px;
+}
+@media (max-width: 720px) {
+  .signin-consumer {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
 .labeled-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

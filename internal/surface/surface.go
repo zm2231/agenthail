@@ -26,10 +26,11 @@ const (
 )
 
 // Session is one conversation. ID is the provider's native conversation id
-// (Claude session id, Codex thread id) and never changes. PID, Transport and
-// Bridge (the Claude Remote Control id) describe the process currently
-// attached to the conversation and can come and go. ForkedFrom is the
-// conversation this one was branched from.
+// (Claude session id, Codex thread id) and never changes. RuntimeKind is what
+// carries it now and picks its adapter. PID, Transport and Bridge (the Claude
+// Remote Control id) describe the process currently attached to the
+// conversation and can come and go. ForkedFrom is the conversation this one was
+// branched from.
 type Session struct {
 	ID                    string            `json:"id"`
 	Surface               SurfaceKind       `json:"surface"`
@@ -41,6 +42,7 @@ type Session struct {
 	HasLocal              bool              `json:"hasLocal"`
 	Source                string            `json:"source,omitempty"`
 	Transport             string            `json:"transport,omitempty"`
+	RuntimeKind           RuntimeKind       `json:"runtimeKind,omitempty"`
 	ConfiguredModel       string            `json:"configuredModel,omitempty"`
 	Bridge                string            `json:"bridge,omitempty"`
 	ForkedFrom            string            `json:"forkedFrom,omitempty"`
@@ -204,6 +206,7 @@ const (
 	DeliveryAccessDenied         DeliveryTerminalKind = "access_denied"
 	DeliveryInvalidRequest       DeliveryTerminalKind = "invalid_request"
 	DeliveryOwnershipConflict    DeliveryTerminalKind = "ownership_conflict"
+	DeliverySigninNotConfigured  DeliveryTerminalKind = "signin_not_configured"
 )
 
 type DeliveryTerminalError struct {
@@ -230,6 +233,8 @@ func deliveryTerminalLabel(kind DeliveryTerminalKind) string {
 		return "invalid request"
 	case DeliveryOwnershipConflict:
 		return "session ownership conflict"
+	case DeliverySigninNotConfigured:
+		return "browser sign-in not set up"
 	default:
 		return "delivery rejected"
 	}
@@ -278,7 +283,6 @@ const AuthorPerson Author = "person"
 // HumanTurnSender delivers a person's message as that session's own user
 // turn, separate from the peer transport agents use to message each other.
 type HumanTurnSender interface {
-	CanSendHumanTurn(sess *Session) bool
 	SendHumanTurn(ctx context.Context, sess *Session, message string) (*SendResult, error)
 }
 
@@ -327,9 +331,6 @@ type SessionAccessChecker interface {
 }
 
 func EnsureWritableSession(ctx context.Context, adapter Surface, sess *Session) error {
-	if err := ValidateRuntimeTransport(sess); err != nil {
-		return err
-	}
 	if checker, ok := adapter.(SessionAccessChecker); ok {
 		if err := checker.EnsureWritable(ctx, sess); err != nil {
 			return err
@@ -543,24 +544,33 @@ type SessionCapabilities struct {
 	ReadOnlyReason string `json:"readOnlyReason,omitempty"`
 }
 
-func EffectiveCapabilities(session *Session, capabilities Capabilities) SessionCapabilities {
-	if session != nil && session.Surface == KindClaude && session.Transport == "uds" {
-		capabilities.Stream = capabilities.Stream && session.HasLocal && session.Transcript != ""
-		if session.Bridge == "" {
-			capabilities.Steer = false
-			capabilities.Compact = false
-			capabilities.Model = false
-			capabilities.Interrupt = false
-		}
+// SessionCapabilitySource is implemented by an adapter whose capabilities
+// differ by session. Every other adapter's sessions have its Capabilities.
+type SessionCapabilitySource interface {
+	SessionCapabilities(session *Session) Capabilities
+}
+
+// CapabilitiesFor is what the adapter can do for the session.
+func CapabilitiesFor(adapter Surface, session *Session) Capabilities {
+	if source, ok := adapter.(SessionCapabilitySource); ok {
+		return source.SessionCapabilities(session)
 	}
+	return adapter.Capabilities()
+}
+
+// EffectiveCapabilities is what may be done to the session: nothing when it is
+// read-only, otherwise what its adapter can do for it.
+func EffectiveCapabilities(adapter Surface, session *Session) SessionCapabilities {
 	if IsReadOnlySession(session) {
 		return SessionCapabilities{ReadOnly: true, ReadOnlyReason: ReadOnlySessionReason(session)}
 	}
-	return SessionCapabilities{Capabilities: capabilities}
+	return SessionCapabilities{Capabilities: CapabilitiesFor(adapter, session)}
 }
 
 type Surface interface {
 	Name() SurfaceKind
+	// RuntimeKinds are the runtimes whose sessions this adapter serves.
+	RuntimeKinds() []RuntimeKind
 	List(ctx context.Context) ([]Session, error)
 	Resolve(ctx context.Context, target string) (*Session, error)
 	Observe(ctx context.Context, sess *Session) (*TurnObservation, error)

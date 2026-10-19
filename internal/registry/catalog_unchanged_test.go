@@ -18,7 +18,7 @@ func totalChanges(t *testing.T, r *Registry) int64 {
 
 func unchangedCatalogState(id string, observedAt time.Time) (CatalogSessionState, CatalogEvent) {
 	projection := `{"id":"` + id + `","surface":"codex","status":"idle"}`
-	session := surface.Session{ID: id, Surface: surface.KindCodex, Name: "Worker", Cwd: "/work", Status: surface.StatusIdle, Transcript: "/work/transcript.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1_790_000_000_000), Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	session := surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: "Worker", Cwd: "/work", Status: surface.StatusIdle, Transcript: "/work/transcript.jsonl", HasLocal: true, Source: "vscode", Transport: "desktop", LastActive: time.UnixMilli(1_790_000_000_000), Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
 	return CatalogSessionState{Session: session, HostProject: []byte(`{"id":"project"}`), Checkout: []byte(`{"id":"checkout"}`), ObservedAt: observedAt, ProjectionFingerprint: projection}, CatalogEvent{DedupeKey: "session.upserted:" + id, Type: "session.upserted", EntityID: id, Payload: []byte(`{"session":` + projection + `}`)}
 }
 
@@ -117,7 +117,7 @@ func TestRecordCatalogDiscoveryStampsOnlySeenFreshRows(t *testing.T) {
 func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testing.T) {
 	r := openTestRegistry(t)
 	original, originalEvent := unchangedCatalogState("conversation-a", time.Now())
-	original.Session = surface.Session{ID: "conversation-a", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Bridge: "session_bridge", Transcript: "/home/test/.claude/projects/-work/conversation-a.jsonl", HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	original.Session = surface.Session{ID: "conversation-a", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/work", PID: 77, Bridge: "session_bridge", Transcript: "/home/test/.claude/projects/-work/conversation-a.jsonl", HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
 	if _, _, err := r.RecordCatalogSession(original, originalEvent); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testi
 		t.Fatalf("unchanged=%v err=%v", unchanged, err)
 	}
 	branch, branchEvent := unchangedCatalogState("conversation-b", time.Now())
-	branch.Session = surface.Session{ID: "conversation-b", Surface: surface.KindClaude, Cwd: "/work", PID: 77, Bridge: "session_bridge", ForkedFrom: "conversation-a", Transcript: "/home/test/.claude/projects/-work/conversation-b.jsonl", HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
+	branch.Session = surface.Session{ID: "conversation-b", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Cwd: "/work", PID: 77, Bridge: "session_bridge", ForkedFrom: "conversation-a", Transcript: "/home/test/.claude/projects/-work/conversation-b.jsonl", HasLocal: true, Runtime: &surface.Runtime{Launcher: surface.LauncherExternal}}
 	if _, _, err := r.RecordCatalogSession(branch, branchEvent); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestDiscoveredBranchDetachesTheProcessAndLeavesTheOriginalItsAlias(t *testi
 
 func TestForkedFromIsSetOnce(t *testing.T) {
 	r := openTestRegistry(t)
-	session := surface.Session{ID: "conversation-b", Surface: surface.KindClaude, ForkedFrom: "conversation-a"}
+	session := surface.Session{ID: "conversation-b", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, ForkedFrom: "conversation-a"}
 	if err := r.RegisterSession(session); err != nil {
 		t.Fatal(err)
 	}

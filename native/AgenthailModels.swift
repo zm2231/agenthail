@@ -811,6 +811,58 @@ struct HistoryPageResponse: Decodable {
     let kinds: [String]
 }
 
+struct SigninProfileState: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let browser: String
+    let profile: String
+    let createdAt: String
+}
+
+struct SigninConsumerState: Codable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let purpose: String
+    let profileId: String?
+}
+
+struct SigninDetectedProfile: Codable, Identifiable, Equatable {
+    let profile: String
+    let name: String
+    let profileId: String?
+
+    var id: String { profile }
+    var choiceLabel: String { name == profile ? name : "\(name) (\(profile))" }
+}
+
+struct SigninBrowserState: Codable, Identifiable, Equatable {
+    let browser: String
+    let label: String
+    let available: Bool
+    let detail: String?
+    let profiles: [SigninDetectedProfile]
+
+    var id: String { browser }
+    var addableProfiles: [SigninDetectedProfile] { profiles.filter { $0.profileId == nil } }
+}
+
+struct SigninState: Codable, Equatable {
+    let profiles: [SigninProfileState]
+    let consumers: [SigninConsumerState]
+    let browsers: [SigninBrowserState]
+
+    func browserLabel(_ browser: String) -> String {
+        browsers.first { $0.browser == browser }?.label ?? browser
+    }
+
+    var addableBrowsers: [SigninBrowserState] { browsers.filter { $0.available && !$0.addableProfiles.isEmpty } }
+    var unavailableBrowsers: [SigninBrowserState] { browsers.filter { !$0.available } }
+}
+
+struct SigninProfileResponse: Decodable {
+    let profile: SigninProfileState?
+}
+
 struct PairingResponse: Decodable {
     let id: String
     let expiresAt: String
