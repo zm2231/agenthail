@@ -59,24 +59,22 @@ func (a *App) compactRemote(ctx context.Context, remote *remoteTarget) error {
 	return nil
 }
 
-func (a *App) modelRemote(ctx context.Context, remote *remoteTarget, name string) error {
+func (a *App) modelRemote(ctx context.Context, remote *remoteTarget, name string, args []string) error {
+	if name != "" {
+		return a.controlRemote(ctx, remote, "model", name, args)
+	}
+	metadata, err := a.remoteMetadata(ctx, remote)
+	if err != nil {
+		return err
+	}
+	raw, found := metadata["model"]
+	if !found {
+		return fmt.Errorf("%s does not report a model", remote.label())
+	}
 	var current string
-	if name == "" {
-		metadata, err := a.remoteMetadata(ctx, remote)
-		if err != nil {
-			return err
-		}
-		raw, found := metadata["model"]
-		if !found {
-			return fmt.Errorf("%s does not report a model", remote.label())
-		}
-		_ = json.Unmarshal(raw, &current)
-	} else {
-		result, err := a.remoteAction(ctx, remote, "set the model of", map[string]any{"action": "model", "model": name})
-		if err != nil {
-			return err
-		}
-		_ = json.Unmarshal(result, &current)
+	_ = json.Unmarshal(raw, &current)
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"sessionId": remote.ID, "model": current})
 	}
 	if current != "" {
 		fmt.Println(current)
@@ -271,4 +269,26 @@ func (a *App) queueSessionID(ctx context.Context, target string) (string, error)
 		return raw, nil
 	}
 	return session.ID, nil
+}
+
+// controlRemote runs a control on another host and shows the evidence that
+// host reported.
+func (a *App) controlRemote(ctx context.Context, remote *remoteTarget, action, value string, args []string) error {
+	payload := map[string]any{"action": action, "message": value}
+	if action == "model" {
+		payload["model"] = value
+	}
+	data, err := a.remoteAction(ctx, remote, action, payload)
+	if err != nil {
+		return err
+	}
+	var result surface.ControlResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("decode %s answer for %s: %w", action, remote.label(), err)
+	}
+	if hasFlag(args, "--json") {
+		return json.NewEncoder(os.Stdout).Encode(result)
+	}
+	printControl(remote.label(), &result)
+	return nil
 }

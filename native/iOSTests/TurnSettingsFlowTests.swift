@@ -155,6 +155,35 @@ final class TurnSettingsFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testClaudeControlsSendTheirValueAndShowTheRequestLinkedResult() async throws {
+        let fixture = try makeFixture(status: "idle")
+        for (action, value) in [("context", nil), ("status", nil), ("usage", nil), ("effort", "medium"), ("rename", "Parser worker")] as [(String, String?)] {
+            TurnSettingsFlowProtocol.state.reset()
+            let model = makeModel()
+            model.action(action, session: fixture.session, message: value)
+            try await waitUntil { model.pendingControls.isEmpty && TurnSettingsFlowProtocol.state.actions.count >= 1 }
+            XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["action"] as? String, action)
+            XCTAssertEqual(TurnSettingsFlowProtocol.state.actions[0]["message"] as? String, value)
+            XCTAssertEqual(model.controlOutput[fixture.session.id], "Context Usage 41%\nRequest request-proof")
+        }
+    }
+
+    @MainActor
+    func testTransportAcceptedSteerIsNotShownAsSent() async throws {
+        let fixture = try makeFixture(status: "busy")
+        TurnSettingsFlowProtocol.state.reset()
+        let model = makeModel()
+        model.selectedSessionID = fixture.session.id
+        model.selectedDetail = fixture.detail
+        model.composer = "Steer over Remote Control"
+
+        model.send(to: fixture.session)
+        try await waitUntil { model.sendingSessionIDs.isEmpty && TurnSettingsFlowProtocol.state.actions.count == 1 }
+
+        XCTAssertEqual(model.deliveryStatus[fixture.session.id], "Accepted; not yet confirmed")
+    }
+
+    @MainActor
     private func makeModel() -> AgenthailIOSModel {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [TurnSettingsFlowProtocol.self]
@@ -225,6 +254,12 @@ private final class TurnSettingsFlowProtocol: URLProtocol, @unchecked Sendable {
         func record(_ body: [String: Any], idempotencyKey: String?) -> (Int, String) {
             condition.lock(); records.append(body); actionKeys.append(idempotencyKey); condition.broadcast(); condition.unlock()
             if failActions { return (502, #"{"error":{"message":"unavailable"}}"#) }
+            if ["context", "status", "usage", "effort", "rename"].contains(body["action"] as? String ?? "") {
+                return (200, #"{"ok":true,"result":{"evidence":"reply_observed","requestId":"request-proof","output":"Context Usage 41%"}}"#)
+            }
+            if body["message"] as? String == "Steer over Remote Control" {
+                return (200, #"{"ok":true,"result":{"evidence":"transport_accepted","status":"sent","requestId":"posted-steer"}}"#)
+            }
             return (200, #"{"ok":true}"#)
         }
         func recordNonAction(idempotencyKey: String?) {
