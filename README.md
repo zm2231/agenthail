@@ -85,9 +85,9 @@ agenthail send claude:<session-id> "Here are the findings" --from @builder --jso
 agenthail history @builder 25
 ```
 
-A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to have a live Remote Control attachment and are never placed in the ordinary message queue.
+A socket acknowledgement means transport acceptance, not model completion. Claude's inbound policy can still hold or deny the message. Agenthail does not invent a permission-mode attestation. Native sends do not support `--reply`, `--stream`, or slash commands; read the transcript with `last` or receive a native `SendMessage` reply. Compact, model, interrupt, and steer are typed controls. They require the target session to have a live Remote Control attachment, except that a session the Claude host runs takes interrupt and steer through the host, and they are never placed in the ordinary message queue.
 
-A message you type in the web dashboard or the Mac or iPhone app goes to a Claude session's Remote Control attachment, so Claude records it as your own turn rather than a peer message. The apps mark it with `"author": "person"` on the `send` action. Sessions without Remote Control receive it over the native socket. A send that does not declare an author, including any script calling the API, and all agent, relay, channel, CLI and voice sends, use the native socket whenever the session has one. Sessions that expose only Remote Control receive every send through it, as before. A steer you send from the composer is also your own turn. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
+A message you type in the web dashboard or the Mac or iPhone app, or speak to a session by voice, is your own turn, so Claude records it as yours rather than a peer message. The apps mark it with `"author": "person"` on the `send` action. A session the Claude host runs takes it through the host, and so does an exited session, which resumes in the host. A running session with Remote Control takes it through that attachment. A running session with only a native socket receives it over the socket. A send that does not declare an author, including any script calling the API, and all agent, relay, channel and CLI sends, use the native socket whenever the session has one. Sessions that expose only Remote Control receive every send through it, as before. A steer you send from the composer is also your own turn. A composer message to a busy session follows your busy-delivery setting, and a queued one is still delivered as your turn.
 
 ### Codex
 
@@ -184,14 +184,14 @@ agenthail channel send launch "The release date moved to Friday"
 
 ## Start work without opening another window
 
-An agent or script can start a Codex thread or Claude background session directly:
+An agent or script can start a Codex thread or Claude session directly:
 
 ```bash
 agenthail thread create codex "Implement the verified fix" --alias builder --json
 agenthail thread create claude "Investigate the build failure" --alias investigator --json
 ```
 
-The session starts in your current folder unless you choose another project with `--cwd`. Claude background sessions support status, logs, stop and resume. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
+The session starts in your current folder unless you choose another project with `--cwd`. Claude sessions run in the Claude host and support status, stop and resume; read their transcript with `agenthail last`, since a host session has no background log. Codex supports forks, its native input queue, reasoning effort, plan mode, service tier and structured output. These controls are available in the CLI and web dashboard; the Mac app offers one-click forks, the native queue, effort and plan mode; see [session operations](docs/maintainers/session-operations.md) for commands and retry behavior.
 
 Notion threads can start the same way:
 

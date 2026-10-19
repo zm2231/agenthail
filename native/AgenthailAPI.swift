@@ -166,12 +166,12 @@ final class AgenthailAPI: @unchecked Sendable {
         return response.models
     }
 
-    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, host: String? = nil) throws -> Data {
-        if launcher != nil && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
+    static func creationBody(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil) throws -> Data {
+        if launcher?.isTerminal == true && (!turnSettings.isEmpty || !claude.fields.isEmpty) {
             throw AgenthailAPIError.unavailable("Terminal sessions do not support advanced launch settings.")
         }
         var body: [String: Any] = ["action": surface == "notion" ? "notion-create" : "session-create", "surface": surface, "message": message, "cwd": cwd, "model": model]
-        if let launcher { body["launcher"] = launcher }
+        if let launcher { body["launcher"] = launcher.id }
         if let host { body["host"] = host }
         if surface == "codex" {
             if let effort = turnSettings.effort { body["effort"] = effort }
@@ -182,7 +182,7 @@ final class AgenthailAPI: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
     }
 
-    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: String? = nil, host: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
+    func createSession(surface: String, message: String, cwd: String, model: String, turnSettings: TurnSettings = .init(), claude: ClaudeCreationSettings = .init(), launcher: LauncherOption? = nil, host: String? = nil, idempotencyKey: String? = nil, failureReceipts: Bool = false) async throws -> SessionCreationReceipt {
         try await createSession(body: Self.creationBody(surface: surface, message: message, cwd: cwd, model: model, turnSettings: turnSettings, claude: claude, launcher: launcher, host: host), idempotencyKey: idempotencyKey, failureReceipts: failureReceipts)
     }
 

@@ -38,7 +38,7 @@ struct NewSessionSheet: View {
 
     private var canStart: Bool {
         !starting && submitted == nil && form.isComplete && hosts.canStart
-            && (form.launcher == nil || launchers.contains { $0.id == form.launcher && $0.available })
+            && (form.launcher == nil || launchers.contains { $0.id == form.launcher?.id && $0.available })
     }
 
     var body: some View {
@@ -60,9 +60,9 @@ struct NewSessionSheet: View {
                         ForEach(agents, id: \.self) { Text($0.capitalized).tag($0) }
                     }
                     if !launchers.isEmpty {
-                        Picker("Runs in", selection: Binding(get: { form.launcher }, set: { form.selectLauncher($0) })) {
+                        Picker("Runs in", selection: Binding(get: { form.launcher?.id }, set: { id in form.selectLauncher(launchers.first { $0.id == id }) })) {
                             Text("Default").tag(nil as String?)
-                                .help("Starts the agent in the background on \(startsOnThisMac ? "this Mac" : hosts.selectedHost?.name ?? "the host").")
+                                .help("Starts the agent on \(startsOnThisMac ? "this Mac" : hosts.selectedHost?.name ?? "the host") without a terminal.")
                             ForEach(launchers) { option in
                                 Text(option.available ? option.label : "\(option.label) (unavailable)")
                                     .tag(Optional(option.id))

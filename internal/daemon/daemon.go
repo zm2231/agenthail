@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/claudehost"
 	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
@@ -56,6 +57,7 @@ type Daemon struct {
 	sourceHolds       map[string]map[string]func()
 	dashboard         *dashboardServer
 	transportResolver *SessionTransportResolver
+	claudeHost        *claudehost.Manager
 	identityMu        sync.RWMutex
 	identity          registry.HostIdentity
 	federation        *federation
@@ -220,6 +222,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer close(catalogDone)
 		d.runCatalog(ctx)
 	}()
+	go d.superviseClaudeHost(ctx)
 	observerTicker := time.NewTicker(d.pollInterval)
 	defer observerTicker.Stop()
 	d.scanAndRelay(ctx)

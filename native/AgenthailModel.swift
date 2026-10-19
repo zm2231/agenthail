@@ -291,7 +291,7 @@ final class AgenthailModel: ObservableObject {
         do {
             let body = try form.creationBody()
             let receipt = try await api.createSession(body: body, idempotencyKey: actionKeys.key(for: body, scope: .creation), failureReceipts: true)
-            let decision = SessionLaunchDecision(receipt, launcher: form.launcher, agent: form.agent)
+            let decision = SessionLaunchDecision(receipt, launcher: form.launcher?.id, agent: form.agent)
             switch decision {
             case .open(let id):
                 operationError = nil

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/surface/surfaces/claudetest"
 )
 
 func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
@@ -23,13 +24,7 @@ func TestClaudeDiscoversSocketWithoutBridgeAndExcludesProxies(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(os.Getpid())+".sock")
-	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(socket); !os.IsNotExist(err) {
-		t.Fatal("test PID socket already exists")
-	}
+	socket := claudetest.ClaimSocket(t, os.Getpid())
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -105,10 +100,7 @@ func TestLaterProcessSharingAConversationLeavesTheFirstAttached(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(pid)+".sock")
-		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
-			t.Fatalf("test socket already exists %s: %v", socket, err)
-		}
+		socket := claudetest.ClaimSocket(t, pid)
 		listener, err := net.Listen("unix", socket)
 		if err != nil {
 			t.Fatal(err)
@@ -156,13 +148,8 @@ func TestNativeClaudeSenderUsesItsOwnSocket(t *testing.T) {
 	if err := os.MkdirAll("/tmp/cc-socks", 0700); err != nil {
 		t.Fatal(err)
 	}
-	sourceSocket := filepath.Join("/tmp/cc-socks", strconv.Itoa(os.Getpid())+".sock")
-	targetSocket := filepath.Join("/tmp/cc-socks", strconv.Itoa(process.Process.Pid)+".sock")
-	for _, socket := range []string{sourceSocket, targetSocket} {
-		if _, err := os.Lstat(socket); !os.IsNotExist(err) {
-			t.Fatalf("test socket already exists %s: %v", socket, err)
-		}
-	}
+	sourceSocket := claudetest.ClaimSocket(t, os.Getpid())
+	targetSocket := claudetest.ClaimSocket(t, process.Process.Pid)
 	sourceListener, err := net.Listen("unix", sourceSocket)
 	if err != nil {
 		t.Fatal(err)
@@ -339,13 +326,7 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join("/tmp/cc-socks", strconv.Itoa(os.Getpid())+".sock")
-	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(socket); !os.IsNotExist(err) {
-		t.Fatal("test PID socket already exists")
-	}
+	socket := claudetest.ClaimSocket(t, os.Getpid())
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -389,9 +370,11 @@ func TestClaudeWithoutRemoteControlIgnoresBridgeIDs(t *testing.T) {
 
 func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
 	adapter := NewClaude(nil, t.TempDir())
-	bridged := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
-	socketOnly := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
-	bridgeOnly := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI}
+	live := os.Getpid()
+	bridged := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live}
+	socketOnly := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds", PID: live}
+	exited := &surface.Session{ID: "local-id", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Transport: "uds"}
+	bridgeOnly := &surface.Session{ID: "local-id", Bridge: "session_bridge", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, PID: live}
 	for _, tc := range []struct {
 		name    string
 		session *surface.Session
@@ -401,6 +384,8 @@ func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
 		{"person with bridge", bridged, surface.AuthorPerson, surface.RouteHumanTurn},
 		{"unattributed with bridge and socket", bridged, "", surface.RoutePeer},
 		{"person with socket only", socketOnly, surface.AuthorPerson, surface.RoutePeer},
+		{"person to an exited session", exited, surface.AuthorPerson, surface.RouteHumanTurn},
+		{"unattributed to an exited session", exited, "", surface.RoutePeer},
 		{"unattributed with bridge only", bridgeOnly, "", surface.RouteSend},
 	} {
 		if got := adapter.Route(tc.session, tc.author); got != tc.want {
@@ -410,6 +395,9 @@ func TestClaudeRouteDecidesByAuthorBridgeAndSocket(t *testing.T) {
 	adapter.DisableRemoteControl()
 	if got := adapter.Route(bridged, surface.AuthorPerson); got != surface.RoutePeer {
 		t.Fatalf("local-only install routed a person's message to Remote Control: %v", got)
+	}
+	if got := adapter.Route(exited, surface.AuthorPerson); got != surface.RouteHumanTurn {
+		t.Fatalf("local-only install did not resume an exited session for a person's message: %v", got)
 	}
 }
 
