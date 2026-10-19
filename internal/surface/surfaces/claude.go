@@ -955,6 +955,9 @@ func (c *Claude) postContent(ctx context.Context, sess *surface.Session, content
 	status, respBody, err := request(ctx, "POST",
 		"https://claude.ai/v1/code/sessions/"+cse+"/events",
 		headers, string(bodyBytes), cookies, 30*time.Second)
+	if surface.IsDeliveryUnavailable(err) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(err)
 	}
