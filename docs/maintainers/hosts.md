@@ -81,12 +81,30 @@ decides which host a session belongs to. Session reads, streams, metadata,
 model lists, attachments and actions are wrapped so that a host-qualified id,
 a `host` query field, or a raw id owned by a paired host is forwarded to that
 host with its raw id; the answer comes back with every session reference
-re-qualified. An action cannot span two hosts, and actions that only make
-sense on one daemon (channels, relays, queue and delivery records, a message
-from a local source session) are refused for remote sessions. A qualifier
+re-qualified. An action cannot span two hosts. Actions that are not yet
+available across hosts (channels, relays, queue and delivery records, a
+message from one session to another, voice) are refused for remote sessions
+with a reason, and opening a session's terminal is refused because the
+terminal is on the other machine. The mirror stores remote rows with
+`runtime.focusable` cleared, and the web, Mac and iPhone hide voice and leave
+remote sessions out of relay and channel pickers, so no client shows a
+control the router refuses. A qualifier
 naming this daemon on a raw id a paired host owns is an ownership conflict,
 never a local action, and a `host` field that disagrees with the qualifier is
 `host_mismatch`.
+
+## Starting a session on a host
+
+`GET /api/v1/session-options?host=<host>` is that host's launch catalog: the
+host it came from, the agents it can start and whether each is connected, its
+launchers, and the newest folders its own sessions ran in.
+`GET /api/v1/models?surface=<agent>&host=<host>` lists that host's models
+with their reasoning efforts. `session-create` with `host` starts the
+session there. The web dashboard, the Mac app and the iPhone app show one
+host button in the new session form once a host is paired. It opens a short
+list of this machine and each paired host (hosts that are not connected are
+listed with their state and cannot be chosen) and defaults to the selected
+session's host. Choosing a host reloads the form from that host's catalog.
 
 ## Unreachable hosts and delivery
 
@@ -125,9 +143,15 @@ one is an error listing each `host::target`, never a pick. With the daemon
 stopped, the CLI still checks mirrored rows by exact id and alias so a local
 match cannot shadow a remote one silently.
 
-`send`, `steer`, `interrupt`, `reply`, `last`, `stream` and
-`thread create --host <host>` reach paired hosts. Other commands refuse a
-remote session by name. `list` adds a HOST column once a host is paired and
+Every session command reaches paired hosts through the local daemon:
+`send`, `steer`, `interrupt`, `reply`, `last`, `stream`, `compact`, `model`,
+`goal`, `identify`, `history`, `queue <target> "message"` (a send the host
+queues while busy), `thread fork`, `thread queue`, `thread status`, `stop`,
+`resume` and `logs`, and `thread create --host <host>`. A send this daemon
+holds for an unreachable host is local queue data: `queue list`, `queue
+clear`, `queue cancel` and `queue retry` act on it. `relay` and `channel`
+refuse a remote session.
+`list` adds a HOST column once a host is paired and
 marks an unreachable host's rows `down`.
 
 ## Where an empty host_id means local
