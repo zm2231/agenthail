@@ -2113,7 +2113,7 @@ func (r *Registry) NackMessage(id int64, cause error, now time.Time, maxAttempts
 // their own count for backoff. A deferral the target refused marks the message
 // refused, and the first one since the message was last not refused tells an
 // agent sender why its message waits. It reports whether that refusal still
-// needs announcing to the user.
+// needs announcing to the user; MarkRefusalAnnounced records that it was.
 func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (bool, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -2121,8 +2121,8 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (bool, err
 	}
 	defer tx.Rollback()
 	var deferrals int
-	var announced bool
-	if err := tx.QueryRow(`SELECT deferrals,refusal_announced FROM message_queue WHERE id=?`, id).Scan(&deferrals, &announced); err != nil {
+	var wasRefused, announced bool
+	if err := tx.QueryRow(`SELECT deferrals,refused,refusal_announced FROM message_queue WHERE id=?`, id).Scan(&deferrals, &wasRefused, &announced); err != nil {
 		return false, err
 	}
 	shift := min(deferrals, 6)
@@ -2131,21 +2131,28 @@ func (r *Registry) DeferMessage(id int64, cause error, now time.Time) (bool, err
 		message = cause.Error()
 	}
 	refused := surface.IsDeliveryRefused(cause)
-	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?,available_at_ms=?,inflight_at_ms=0,refused=?,refusal_announced=?,updated_at=datetime('now') WHERE id=? AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), refused, refused, id)
+	res, err := tx.Exec(`UPDATE message_queue SET status='pending',attempts=MAX(attempts-1,0),deferrals=deferrals+1,last_error=?1,available_at_ms=?2,inflight_at_ms=0,refused=?3,refusal_announced=CASE WHEN ?3 THEN refusal_announced ELSE 0 END,updated_at=datetime('now') WHERE id=?4 AND status='inflight'`, message, now.Add(5*time.Second*time.Duration(1<<shift)).UnixMilli(), refused, id)
 	if err != nil {
 		return false, err
 	}
-	announce := false
-	if n, _ := res.RowsAffected(); n == 1 && refused && !announced {
+	n, _ := res.RowsAffected()
+	if n == 1 && refused && !wasRefused {
 		if err := queueDeliveryRefusalNotice(tx, id, message); err != nil {
 			return false, err
 		}
-		announce = true
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	return announce, r.ReconcileAttentionItems(now)
+	return n == 1 && refused && !announced, r.ReconcileAttentionItems(now)
+}
+
+// MarkRefusalAnnounced records that the user was told a queued message waits
+// on a refusal, once both notifications were attempted, so a daemon stopped
+// before then announces it on the next refused attempt.
+func (r *Registry) MarkRefusalAnnounced(id int64) error {
+	_, err := r.db.Exec(`UPDATE message_queue SET refusal_announced=1 WHERE id=? AND refused=1`, id)
+	return err
 }
 
 func (r *Registry) DeadLetterUnknown(id int64, cause error) error {

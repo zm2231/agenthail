@@ -193,17 +193,38 @@ func (d *Daemon) finishQueueFailure(item *registry.QueuedMessage, session *surfa
 }
 
 // announceRefusal tells the user, on the desktop and on paired devices, that a
-// queued message waits because its target refused to start. It runs once per
-// refusal; the queue row and its attention item carry the reason.
+// queued message waits because its target refused to start. The queue row and
+// its attention item carry the reason. The refusal is marked announced only
+// after both were attempted, so a daemon stopped in between announces it on
+// the next refused attempt rather than never; both carry a key per message, so
+// a repeat replaces the one already shown.
 func (d *Daemon) announceRefusal(sessionID string, queueID int64) {
+	d.announceMu.Lock()
+	if d.announcingRefusal == nil {
+		d.announcingRefusal = map[int64]bool{}
+	}
+	if d.announcingRefusal[queueID] {
+		d.announceMu.Unlock()
+		return
+	}
+	d.announcingRefusal[queueID] = true
+	d.announceMu.Unlock()
 	desktopMessage := fmt.Sprintf("%s refused to start; a queued message is waiting", d.resolveDisplay(sessionID))
 	key := fmt.Sprintf("refused-%d", queueID)
 	go func() {
+		defer func() {
+			d.announceMu.Lock()
+			delete(d.announcingRefusal, queueID)
+			d.announceMu.Unlock()
+		}()
 		if err := Notify("Agenthail", desktopMessage, sessionID, "agenthail-"+key); err != nil {
 			d.log.Printf("desktop notification: %s", err)
 		}
 		notificationCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		d.notifyPairedDevices(notificationCtx, mobileNotification{Title: "Agenthail", Message: "A session refused to start; a queued message is waiting", SessionID: sessionID, EventType: "delivery.refused", CollapseID: key})
+		if err := d.Registry.MarkRefusalAnnounced(queueID); err != nil {
+			d.log.Printf("mark refusal announced %d: %s", queueID, err)
+		}
 	}()
 }

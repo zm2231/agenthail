@@ -1413,6 +1413,12 @@ func TestRefusedDeferralHoldsTheMessageAndAnnouncesOncePerRefusal(t *testing.T) 
 	if notices() != 1 || !attention() {
 		t.Fatalf("notices=%d attention=%v after the first refusal", notices(), attention())
 	}
+	if !attempt(refusal) || notices() != 1 {
+		t.Fatalf("a refusal whose announcement never completed was not announced again, or the sender was told twice: notices=%d", notices())
+	}
+	if err := r.MarkRefusalAnnounced(id); err != nil {
+		t.Fatal(err)
+	}
 	if attempt(refusal) || notices() != 1 || !attention() {
 		t.Fatalf("a repeated refusal announced again: notices=%d attention=%v", notices(), attention())
 	}
