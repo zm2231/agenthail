@@ -564,7 +564,7 @@ struct SessionScreen: View {
                     VStack(spacing: 2) {
                         Text(displayTitle).font(.body.weight(.semibold)).lineLimit(1)
                         if let cwd = detail?.session.cwd, !cwd.isEmpty {
-                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · Mac").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(URL(fileURLWithPath: cwd).lastPathComponent + " · " + (session.remoteHostID == nil ? "Mac" : session.host?.name ?? "Mac")).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                 }
