@@ -25,23 +25,46 @@ func (d *Daemon) superviseClaudeHost(ctx context.Context) {
 	}
 	ticker := time.NewTicker(claudeHostCheckInterval)
 	defer ticker.Stop()
-	reported := ""
+	var last claudeHostCheck
 	for {
-		ensureCtx, cancel := context.WithTimeout(ctx, claudeHostEnsureTimeout)
-		_, err := d.claudeHost.Ensure(ensureCtx)
-		cancel()
-		status := "running"
-		if err != nil {
-			status = err.Error()
-		}
-		if status != reported && ctx.Err() == nil {
-			d.log.Printf("Claude host: %s", status)
-			reported = status
-		}
+		last = d.checkClaudeHost(ctx, last)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
 	}
+}
+
+type claudeHostCheck struct {
+	status string
+	pid    int
+}
+
+// checkClaudeHost ensures the host runs and logs what changed since the last
+// check. A host that was running and is replaced by another one exited
+// without being asked to, so the log names both and where the old one wrote.
+func (d *Daemon) checkClaudeHost(ctx context.Context, last claudeHostCheck) claudeHostCheck {
+	ensureCtx, cancel := context.WithTimeout(ctx, claudeHostEnsureTimeout)
+	defer cancel()
+	check := claudeHostCheck{status: "running"}
+	client, err := d.claudeHost.Ensure(ensureCtx)
+	if err == nil {
+		var hello claudehost.Hello
+		hello, err = client.Hello(ensureCtx)
+		check.pid = hello.PID
+	}
+	if err != nil {
+		check.status = err.Error()
+	}
+	if ctx.Err() != nil {
+		return last
+	}
+	if last.status == "running" && check.status == "running" && check.pid != last.pid {
+		d.log.Printf("Claude host: pid %d is gone and pid %d now runs; see %s", last.pid, check.pid, d.claudeHost.LogPath())
+	}
+	if check.status != last.status {
+		d.log.Printf("Claude host: %s", check.status)
+	}
+	return check
 }

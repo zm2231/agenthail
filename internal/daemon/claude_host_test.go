@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -214,5 +216,33 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 	}
 	if starts := strings.Count(string(log), "listening"); starts != 1 {
 		failf("host started %d times", starts)
+	}
+}
+
+func TestAHostThatExitsWhileRunningIsLoggedWithItsLogPath(t *testing.T) {
+	fixture := claudehosttest.New(t, "")
+	d := New(hostRegistry(t), nil)
+	manager := fixture.Manager(t, "test")
+	d.SetClaudeHost(manager)
+	var logged strings.Builder
+	d.log = log.New(&logged, "", 0)
+	ctx := context.Background()
+
+	first := d.checkClaudeHost(ctx, claudeHostCheck{})
+	if again := d.checkClaudeHost(ctx, first); again != first {
+		t.Fatalf("second check = %+v, want the same host %+v", again, first)
+	}
+	if logged.String() != "Claude host: running\n" {
+		t.Fatalf("log while the host runs:\n%s", logged.String())
+	}
+
+	fixture.KillHost(t)
+	replaced := d.checkClaudeHost(ctx, first)
+	if replaced.status != "running" || replaced.pid == first.pid {
+		t.Fatalf("check after the host exited = %+v, want a new running host", replaced)
+	}
+	want := fmt.Sprintf("Claude host: pid %d is gone and pid %d now runs; see %s\n", first.pid, replaced.pid, manager.LogPath())
+	if !strings.HasSuffix(logged.String(), want) {
+		t.Fatalf("log after the host exited:\n%s\nwant it to end with:\n%s", logged.String(), want)
 	}
 }
