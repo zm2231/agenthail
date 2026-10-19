@@ -452,7 +452,8 @@ CREATE TABLE IF NOT EXISTS message_queue (
 	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 	busy_delivery TEXT NOT NULL DEFAULT '',
 	author TEXT NOT NULL DEFAULT '',
-	host_request BLOB NOT NULL DEFAULT ''
+	host_request BLOB NOT NULL DEFAULT '',
+	uploads TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS session_runtime (
 	session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
