@@ -73,11 +73,11 @@ func (a *App) resolveTarget(ctx context.Context, target string) (*surface.Sessio
 // unqualified target across this host and every paired host. A target that
 // matches on more than one host is an error, never a pick.
 func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Session, surface.Surface, *remoteTarget, error) {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		session, adapter, err := a.resolveLocalTarget(ctx, target)
 		return session, adapter, nil, err
 	}
-	identity, err := a.Registry.HostIdentity()
+	identity, err := a.registry().HostIdentity()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read host identity: %w", err)
 	}
@@ -86,7 +86,7 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 			session, adapter, err := a.resolveLocalTarget(ctx, rest)
 			return session, adapter, nil, err
 		}
-		host, err := a.Registry.Host(hostText)
+		host, err := a.registry().Host(hostText)
 		if errors.Is(err, registry.ErrHostNotFound) {
 			return nil, nil, nil, fmt.Errorf("no paired host is named %q; see 'agenthail hosts'", hostText)
 		}
@@ -105,7 +105,7 @@ func (a *App) resolveAnyTarget(ctx context.Context, target string) (*surface.Ses
 		}
 		return nil, nil, nil, ambiguousTargetError(target, nil, matches)
 	}
-	paired, err := a.Registry.ListHosts()
+	paired, err := a.registry().ListHosts()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("list paired hosts: %w", err)
 	}
@@ -171,11 +171,11 @@ func (a *App) remoteMatches(ctx context.Context, hostID, target string) ([]remot
 		}
 		return answer.Matches, nil
 	}
-	found, err := a.Registry.MatchHostSessions(hostID, target)
+	found, err := a.registry().MatchHostSessions(hostID, target)
 	if err != nil {
 		return nil, fmt.Errorf("match mirrored sessions: %w", err)
 	}
-	paired, err := a.Registry.ListHosts()
+	paired, err := a.registry().ListHosts()
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +331,7 @@ func (a *App) interruptRemote(ctx context.Context, remote *remoteTarget) error {
 }
 
 func (a *App) isLocalHost(ref string) (bool, error) {
-	identity, err := a.Registry.HostIdentity()
+	identity, err := a.registry().HostIdentity()
 	if err != nil {
 		return false, fmt.Errorf("read host identity: %w", err)
 	}
@@ -656,7 +656,7 @@ type hostRelays struct {
 // pairedHostRelays reads each paired host's relays through the daemon. A
 // host that cannot answer is listed with why.
 func (a *App) pairedHostRelays(ctx context.Context) ([]hostRelays, error) {
-	paired, err := a.Registry.ListHosts()
+	paired, err := a.registry().ListHosts()
 	if err != nil || len(paired) == 0 {
 		return nil, err
 	}
@@ -684,28 +684,28 @@ func (a *App) pairedHostRelays(ctx context.Context) ([]hostRelays, error) {
 // mirrored id or a host-qualified id reads as host::@alias or
 // host::surface/name, the way its host lists it.
 func (a *App) sessionDisplay(id string) string {
-	if a.Registry == nil {
+	if a.registry() == nil {
 		return truncate(id, 24)
 	}
 	hostID, raw, qualified := hosts.Split(id)
 	if !qualified {
-		owner, err := a.Registry.SessionHost(id)
+		owner, err := a.registry().SessionHost(id)
 		if err != nil || owner == "" {
 			return a.resolveDisplay(id)
 		}
 		hostID = owner
-	} else if identity, err := a.Registry.HostIdentity(); err == nil && identity.ID == hostID {
+	} else if identity, err := a.registry().HostIdentity(); err == nil && identity.ID == hostID {
 		return a.resolveDisplay(raw)
 	}
 	name := hostID
-	if paired, err := a.Registry.ListHosts(); err == nil {
+	if paired, err := a.registry().ListHosts(); err == nil {
 		for _, host := range paired {
 			if host.ID == hostID {
 				name = host.Name
 			}
 		}
 	}
-	rows, err := a.Registry.HostCatalogRows(hostID)
+	rows, err := a.registry().HostCatalogRows(hostID)
 	if err == nil {
 		for _, record := range rows {
 			if record.Session.ID != raw {

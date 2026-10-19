@@ -71,7 +71,7 @@ func (a *App) daemonRun() error {
 	for _, e := range a.Surfaces {
 		_ = e
 	}
-	d := daemon.New(a.Registry, a.allSurfaces())
+	d := daemon.New(a.registry(), a.allSurfaces())
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
