@@ -155,7 +155,7 @@ func (c *Claude) nativeCaller(ctx context.Context, id string) (*surface.Session,
 			continue
 		}
 		candidate, present := c.peerRecord(process.session.PID)
-		if !present || str(candidate, "agenthail") == "peer-worker" {
+		if !present || str(candidate, "agenthail") != "" {
 			continue
 		}
 		if sender != nil {

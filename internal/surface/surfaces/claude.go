@@ -415,7 +415,7 @@ func (c *Claude) processes(ctx context.Context) ([]claudeProcess, error) {
 }
 
 // records returns the session records of Claude processes that are alive,
-// excluding Agenthail's own peer workers.
+// excluding the records Agenthail writes for its own peer workers and relays.
 func (c *Claude) records() ([]map[string]any, error) {
 	sessionsDir := filepath.Join(surface.ClaudeConfigDir(c.home), "sessions")
 	entries, err := os.ReadDir(sessionsDir)
@@ -435,7 +435,7 @@ func (c *Claude) records() ([]map[string]any, error) {
 			continue
 		}
 		var m map[string]any
-		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") == "peer-worker" {
+		if json.Unmarshal(raw, &m) != nil || str(m, "agenthail") != "" {
 			continue
 		}
 		if pid, ok := m["pid"].(float64); ok && pid > 0 && !claudeRecordLive(m) {
@@ -556,8 +556,14 @@ func claudeStatus(status surface.SessionStatus) surface.SessionStatus {
 	}
 }
 
+// claudePeerStatus reads busy or idle from a Claude session record. Claude
+// also records shell and waiting, which say neither.
 func claudePeerStatus(record map[string]any) surface.SessionStatus {
-	status := claudeStatus(surface.SessionStatus(str(record, "status")))
+	raw := str(record, "status")
+	if raw != "busy" && raw != "idle" {
+		return surface.StatusUnknown
+	}
+	status := claudeStatus(surface.SessionStatus(raw))
 	if status != surface.StatusIdle {
 		return status
 	}
