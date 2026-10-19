@@ -100,10 +100,37 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
 	t.Helper()
 	fresh := openTestRegistry(t)
-	want, got := schemaColumns(t, fresh), schemaColumns(t, migrated)
+	assertSameColumns(t, schemaColumns(t, fresh.db), schemaColumns(t, migrated.db))
+	want, got := schemaIndexes(t, fresh.db), schemaIndexes(t, migrated.db)
+	for name, definition := range want {
+		if got[name] != definition {
+			t.Errorf("index %s migrated=%q fresh=%q", name, got[name], definition)
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("index %s exists only in the migrated registry", name)
+		}
+	}
+}
+
+func TestSchemaDeclaresEveryColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schema.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	assertSameColumns(t, schemaColumns(t, openTestRegistry(t).db), schemaColumns(t, db))
+}
+
+func assertSameColumns(t *testing.T, want, got map[string]map[string]string) {
+	t.Helper()
 	for table, columns := range want {
 		if got[table] == nil {
-			t.Errorf("migrated registry is missing table %s", table)
+			t.Errorf("missing table %s", table)
 			continue
 		}
 		for name, declaration := range columns {
@@ -112,23 +139,49 @@ func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
 				migrated = migrated[:max(strings.LastIndex(migrated, " default="), 0)] + " default=expression"
 			}
 			if migrated != declaration {
-				t.Errorf("%s.%s migrated=%q fresh=%q", table, name, migrated, declaration)
+				t.Errorf("%s.%s got=%q want=%q", table, name, migrated, declaration)
 			}
 		}
 		for name := range got[table] {
 			if _, ok := columns[name]; !ok {
-				t.Errorf("%s.%s exists only in the migrated registry", table, name)
+				t.Errorf("%s.%s is unexpected", table, name)
 			}
 		}
 	}
+	for table := range got {
+		if want[table] == nil {
+			t.Errorf("table %s is unexpected", table)
+		}
+	}
+}
+
+func schemaIndexes(t *testing.T, db *sql.DB) map[string]string {
+	t.Helper()
+	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	indexes := map[string]string{}
+	for rows.Next() {
+		var name, definition string
+		if err := rows.Scan(&name, &definition); err != nil {
+			t.Fatal(err)
+		}
+		indexes[name] = strings.Join(strings.Fields(definition), " ")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return indexes
 }
 
 // schemaColumns reports each column's declaration. ALTER TABLE cannot add a
 // column whose default is an expression, so upgraded rows carry a constant
 // default there; every writer sets those columns explicitly.
-func schemaColumns(t *testing.T, r *Registry) map[string]map[string]string {
+func schemaColumns(t *testing.T, db *sql.DB) map[string]map[string]string {
 	t.Helper()
-	rows, err := r.db.Query(`SELECT m.name, p.name, p.type, p."notnull", COALESCE(p.dflt_value, '') FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'`)
+	rows, err := db.Query(`SELECT m.name, p.name, p.type, p."notnull", COALESCE(p.dflt_value, '') FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'`)
 	if err != nil {
 		t.Fatal(err)
 	}
