@@ -988,3 +988,160 @@ func TestProcStatStartTimeSkipsCommandNamesWithSpaces(t *testing.T) {
 		t.Fatal("malformed stat accepted")
 	}
 }
+
+// listenAsSender stands in for a sending Claude session: it listens on a
+// socket in the Claude namespace and collects every frame sent back to it.
+func listenAsSender(t *testing.T, socketDir string) (string, <-chan map[string]any) {
+	t.Helper()
+	stand := exec.Command("sleep", "30")
+	if err := stand.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stand.Process.Kill(); _ = stand.Wait() })
+	socket := filepath.Join(socketDir, strconv.Itoa(stand.Process.Pid)+".sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	frames := make(chan map[string]any, 16)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			scanner := bufio.NewScanner(conn)
+			for scanner.Scan() {
+				var decoded map[string]any
+				if json.Unmarshal(scanner.Bytes(), &decoded) == nil && decoded["type"] != "auth" {
+					frames <- decoded
+				}
+			}
+			conn.Close()
+		}
+	}()
+	return socket, frames
+}
+
+func nextFrame(t *testing.T, frames <-chan map[string]any) map[string]any {
+	t.Helper()
+	select {
+	case f := <-frames:
+		return f
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sender received nothing")
+		return nil
+	}
+}
+
+func TestPeerMessageToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
+	regPath := filepath.Join(t.TempDir(), "registry.db")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	if err := reg.EnsureOperatorSession(); err != nil {
+		t.Fatal(err)
+	}
+	unrepliable, err := reg.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		target string
+		reason []string
+	}{
+		{target: registry.OperatorSessionID, reason: []string{"not delivered", "Agenthail operator", "no session reads it"}},
+		{target: unrepliable, reason: []string{"not delivered", "forge/builder", "agenthail send h0123456789ab::worker-1"}},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			session, err := reg.Session(test.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			socketDir := shortTempDir(t, "cp-socks-")
+			senderSocket, received := listenAsSender(t, socketDir)
+			worker, stop := startWorker(t, Config{Home: shortTempDir(t, "cp-home-"), RegistryPath: regPath, Session: *session, SocketDir: socketDir})
+			defer stop()
+			first, second := uuid.NewString(), uuid.NewString()
+			sendFrames(t, worker.SocketPath,
+				frame{MsgV: 1, MsgID: first, Type: "user", From: "uds:" + senderSocket, Message: mustJSON(messageBody{Role: "user", Content: "please rerun the build"})},
+				frame{MsgV: 1, MsgID: second, Type: "user", From: "uds:" + senderSocket, Message: mustJSON(messageBody{Role: "user", Content: "did you see this?"})},
+			)
+			var receipts []map[string]any
+			var notices []string
+			deadline := time.After(5 * time.Second)
+			for len(receipts) < 2 || len(notices) < 1 {
+				select {
+				case f := <-received:
+					if f["type"] == "control" {
+						receipts = append(receipts, f)
+					} else {
+						notices = append(notices, f["message"].(map[string]any)["content"].(string))
+					}
+				case <-deadline:
+					t.Fatalf("receipts=%v notices=%v", receipts, notices)
+				}
+			}
+			for i, id := range []string{first, second} {
+				if receipts[i]["action"] != "peer_message_status" || receipts[i]["status"] != "refused" || receipts[i]["orig_msg_id"] != id {
+					t.Fatalf("receipt %d=%v", i, receipts[i])
+				}
+			}
+			for _, part := range append(test.reason, first) {
+				if !strings.Contains(notices[0], part) {
+					t.Fatalf("notice does not say %q: %s", part, notices[0])
+				}
+			}
+			select {
+			case f := <-received:
+				t.Fatalf("the reason was sent more than once: %v", f)
+			case <-time.After(200 * time.Millisecond):
+			}
+			history, err := reg.ListHistory(10, test.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed := 0
+			for _, entry := range history {
+				if entry.Kind == "peer_received" {
+					t.Fatalf("refused frame recorded as received: %+v", entry)
+				}
+				if entry.Kind == "peer_rejected" && entry.SourceSessionID == "uds:"+senderSocket && strings.Contains(entry.Error, "not delivered") {
+					failed++
+				}
+			}
+			if failed != 2 {
+				t.Fatalf("history=%+v", history)
+			}
+		})
+	}
+}
+
+func TestPeerMessageToAClaudeSessionIsStillQueuedAndReceived(t *testing.T) {
+	regPath := filepath.Join(t.TempDir(), "registry.db")
+	reg, err := registry.Open(regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	target := surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "reviewer", Status: surface.StatusIdle}
+	if err := reg.RegisterSession(target); err != nil {
+		t.Fatal(err)
+	}
+	socketDir := shortTempDir(t, "cp-socks-")
+	senderSocket, received := listenAsSender(t, socketDir)
+	worker, stop := startWorker(t, Config{Home: shortTempDir(t, "cp-home-"), RegistryPath: regPath, Session: target, SocketDir: socketDir})
+	defer stop()
+	id := uuid.NewString()
+	sendFrames(t, worker.SocketPath, frame{MsgV: 1, MsgID: id, Type: "user", From: "uds:" + senderSocket, Message: mustJSON(messageBody{Role: "user", Content: "please rerun the build"})})
+	receipt := nextFrame(t, received)
+	if receipt["status"] != "received" || receipt["orig_msg_id"] != id {
+		t.Fatalf("receipt=%v", receipt)
+	}
+	if reg.QueueCount(target.ID) != 1 {
+		t.Fatalf("queue count=%d", reg.QueueCount(target.ID))
+	}
+}

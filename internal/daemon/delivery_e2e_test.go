@@ -771,3 +771,34 @@ func TestRelayToBusyTargetQueuesOnceThenDeliversOnce(t *testing.T) {
 		t.Fatalf("relayed=%+v", got)
 	}
 }
+
+func TestSendToASessionWithNoReplyRouteIsRefusedWithItsReason(t *testing.T) {
+	h := startRunningDaemon(t, newScriptedAgent("target"))
+	if err := h.store.EnsureOperatorSession(); err != nil {
+		t.Fatal(err)
+	}
+	unrepliable, err := h.store.EnsureUnrepliableSender("h0123456789ab", "worker-1", "forge/builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, reason := range map[string]string{
+		registry.OperatorSessionID: "Agenthail operator",
+		unrepliable:                "agenthail send h0123456789ab::worker-1",
+	} {
+		status, body := h.request(http.MethodPost, "/api/v1/actions", map[string]any{"action": "send", "sessionId": target, "message": "please rerun the build"})
+		var decoded struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("send %s body=%s: %v", target, body, err)
+		}
+		if status != http.StatusConflict || !strings.Contains(decoded.Error.Message, "not delivered") || !strings.Contains(decoded.Error.Message, reason) {
+			t.Fatalf("send %s status=%d body=%s", target, status, body)
+		}
+	}
+	if count := h.store.QueueCount(registry.OperatorSessionID) + h.store.QueueCount(unrepliable); count != 0 {
+		t.Fatalf("queued %d messages for sessions nothing reads", count)
+	}
+}

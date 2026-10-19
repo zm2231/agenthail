@@ -30,8 +30,8 @@ func (r *Registry) EnsureOperatorSession() error {
 
 // EnsureUnrepliableSender records a session on a host this daemon has not
 // paired, so a message it forwarded keeps its sender's name. Like the
-// operator it is a sink: no catalog row, and peer replies to it are recorded
-// but go nowhere, because there is no route back to that host.
+// operator it is a sink: no catalog row, and a message to it is refused with
+// the original sender's address, because there is no route back to that host.
 func (r *Registry) EnsureUnrepliableSender(hostID, sessionID, name string) (string, error) {
 	if !ValidHostID(hostID) || strings.TrimSpace(sessionID) == "" {
 		return "", fmt.Errorf("an unrepliable sender needs its host and session ids")
@@ -43,8 +43,8 @@ func (r *Registry) EnsureUnrepliableSender(hostID, sessionID, name string) (stri
 	if runes := []rune(name); len(runes) > 80 {
 		name = string(runes[:80])
 	}
-	id := "unrepliable:" + hostID + ":" + sessionID
-	return id, r.RegisterSession(surface.Session{ID: id, Surface: surface.SurfaceKind("agenthail"), RuntimeKind: surface.RuntimeOperator, Name: name + " (no reply address)", Status: surface.StatusIdle})
+	sender := surface.UnrepliableSender(hostID, sessionID, name)
+	return sender.ID, r.RegisterSession(sender)
 }
 
 const (
