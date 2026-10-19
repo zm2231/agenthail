@@ -171,15 +171,19 @@ async function open(params) {
         pathToClaudeCodeExecutable: args.claude,
         ...(params.resume ? { resume: id } : { sessionId: id }),
         ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
-        ...(params.permissionMode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
         ...(params.model ? { model: params.model } : {}),
         ...(params.effort ? { effort: params.effort } : {}),
         ...(params.agent ? { agent: params.agent } : {}),
         extraArgs,
-        canUseTool: async (toolName, _input, { toolUseID }) => {
-          emit(id, 'permission_denied', { tool: toolName, toolUseId: toolUseID, reason: DENIED });
-          return { behavior: 'deny', message: DENIED };
-        },
+        // bypassPermissions approves every tool before canUseTool is consulted.
+        ...(params.permissionMode === 'bypassPermissions'
+          ? { allowDangerouslySkipPermissions: true }
+          : {
+              canUseTool: async (toolName, _input, { toolUseID }) => {
+                emit(id, 'permission_denied', { tool: toolName, toolUseId: toolUseID, reason: DENIED });
+                return { behavior: 'deny', message: DENIED };
+              },
+            }),
         spawnClaudeCodeProcess: (options) => spawnDetached(s, options, exited),
       },
     });

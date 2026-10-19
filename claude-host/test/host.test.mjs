@@ -165,6 +165,7 @@ test('bypassPermissions opens with explicit consent to skip permissions', async 
   const spawnRecord = JSON.parse(fs.readFileSync(path.join(f.claudeDir, 'spawns.jsonl'), 'utf8').trim());
   assert.ok(spawnRecord.argv.some((a) => a.includes('bypassPermissions')), spawnRecord.argv.join(' '));
   assert.ok(spawnRecord.argv.includes('--allow-dangerously-skip-permissions'), spawnRecord.argv.join(' '));
+  assert.ok(!spawnRecord.argv.some((a) => a.startsWith('--permission-prompt-tool')), spawnRecord.argv.join(' '));
   c.close();
 });
 
