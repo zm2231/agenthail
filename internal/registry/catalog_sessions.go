@@ -112,9 +112,6 @@ func validateQueueProjectionTx(tx catalogQuerier, sessionID string, fingerprint,
 }
 
 func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event CatalogEvent) (CatalogEvent, bool, error) {
-	if err := r.EnsureCatalogState(); err != nil {
-		return CatalogEvent{}, false, err
-	}
 	if state.Surface == "" || state.Health == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog surface and health are required")
 	}
@@ -156,9 +153,6 @@ func (r *Registry) RecordCatalogSurface(state CatalogSurfaceState, event Catalog
 // RetainCatalogSurfaces drops the health rows of surfaces this host no longer
 // registers, so a removed surface does not report its last health forever.
 func (r *Registry) RetainCatalogSurfaces(kinds []surface.SurfaceKind) error {
-	if err := r.EnsureCatalogState(); err != nil {
-		return err
-	}
 	query := `DELETE FROM catalog_surfaces`
 	args := make([]any, 0, len(kinds))
 	if len(kinds) > 0 {
@@ -172,9 +166,6 @@ func (r *Registry) RetainCatalogSurfaces(kinds []surface.SurfaceKind) error {
 }
 
 func (r *Registry) RecordCatalogSession(state CatalogSessionState, event CatalogEvent) (CatalogEvent, bool, error) {
-	if err := r.EnsureCatalogState(); err != nil {
-		return CatalogEvent{}, false, err
-	}
 	if state.Session.ID == "" {
 		return CatalogEvent{}, false, fmt.Errorf("catalog session id is required")
 	}
@@ -355,9 +346,6 @@ func sessionRowMatchesTx(tx catalogQuerier, s surface.Session) (bool, error) {
 // MarkCatalogDiscoveryFailure preserves the last discovered rows while making
 // the failed observation visible to snapshot readers and catalog subscribers.
 func (r *Registry) MarkCatalogDiscoveryFailure(kind surface.SurfaceKind, reason string, observedAt time.Time) ([]CatalogEvent, error) {
-	if err := r.EnsureCatalogState(); err != nil {
-		return nil, err
-	}
 	if kind == "" || strings.TrimSpace(reason) == "" {
 		return nil, fmt.Errorf("catalog discovery failure surface and reason are required")
 	}
@@ -491,9 +479,6 @@ func (r *Registry) UpdateCatalogSessionProjection(sessionID, priorFingerprint, n
 // row's projection. When the listing is complete, rows it omitted count a miss
 // and are removed once they reach the threshold.
 func (r *Registry) RecordCatalogDiscovery(kind surface.SurfaceKind, seen map[string]struct{}, observedAt time.Time, complete bool, threshold int) ([]CatalogEvent, error) {
-	if err := r.EnsureCatalogState(); err != nil {
-		return nil, err
-	}
 	if threshold < 1 {
 		return nil, fmt.Errorf("catalog omission threshold must be positive")
 	}

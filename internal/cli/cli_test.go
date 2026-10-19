@@ -833,9 +833,6 @@ func TestListUsesDaemonCatalogWithoutProviderCallsAndPreservesFilters(t *testing
 	fake := &cliSurface{kind: surface.KindCodex, listed: []surface.Session{{ID: "provider-call-would-be-a-bug", Surface: surface.KindCodex}}}
 	app, store := cliFixture(t, fake)
 	app.catalogDaemonRunning = func() bool { return true }
-	if err := store.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	observedAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	for _, item := range []surface.Session{
 		{ID: "catalog-root", Surface: surface.KindCodex, Name: "root", Cwd: root, LastActive: observedAt},

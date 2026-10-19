@@ -1155,9 +1155,6 @@ func TestReadsDoNotWaitForAWriterBlockedOnAnotherProcess(t *testing.T) {
 	}
 	defer r.Close()
 	register(t, r, "session")
-	if err := r.EnsureCatalogState(); err != nil {
-		t.Fatal(err)
-	}
 	other, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(15000)")
 	if err != nil {
 		t.Fatal(err)

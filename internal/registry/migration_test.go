@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,11 +84,69 @@ func TestOpenMigratesHistoricalSchemas(t *testing.T) {
 				fixture.check(t, r)
 			}
 			assertMigratedRegistryAcceptsCurrentWrites(t, r)
+			assertSchemaMatchesFreshRegistry(t, r)
 			if identity, err := r.HostIdentity(); err != nil || !ValidHostID(identity.ID) || !ValidHostName(identity.Name) {
 				t.Fatalf("host identity=%+v err=%v", identity, err)
 			}
 		})
 	}
+}
+
+func assertSchemaMatchesFreshRegistry(t *testing.T, migrated *Registry) {
+	t.Helper()
+	fresh := openTestRegistry(t)
+	want, got := schemaColumns(t, fresh), schemaColumns(t, migrated)
+	for table, columns := range want {
+		if got[table] == nil {
+			t.Errorf("migrated registry is missing table %s", table)
+			continue
+		}
+		for name, declaration := range columns {
+			migrated := got[table][name]
+			if strings.HasSuffix(declaration, " default=expression") {
+				migrated = migrated[:max(strings.LastIndex(migrated, " default="), 0)] + " default=expression"
+			}
+			if migrated != declaration {
+				t.Errorf("%s.%s migrated=%q fresh=%q", table, name, migrated, declaration)
+			}
+		}
+		for name := range got[table] {
+			if _, ok := columns[name]; !ok {
+				t.Errorf("%s.%s exists only in the migrated registry", table, name)
+			}
+		}
+	}
+}
+
+// schemaColumns reports each column's declaration. ALTER TABLE cannot add a
+// column whose default is an expression, so upgraded rows carry a constant
+// default there; every writer sets those columns explicitly.
+func schemaColumns(t *testing.T, r *Registry) map[string]map[string]string {
+	t.Helper()
+	rows, err := r.db.Query(`SELECT m.name, p.name, p.type, p."notnull", COALESCE(p.dflt_value, '') FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	tables := map[string]map[string]string{}
+	for rows.Next() {
+		var table, name, kind, fallback string
+		var notNull int
+		if err := rows.Scan(&table, &name, &kind, &notNull, &fallback); err != nil {
+			t.Fatal(err)
+		}
+		if tables[table] == nil {
+			tables[table] = map[string]string{}
+		}
+		if strings.HasPrefix(fallback, "datetime(") {
+			fallback = "expression"
+		}
+		tables[table][name] = fmt.Sprintf("%s notnull=%d default=%s", kind, notNull, fallback)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tables
 }
 
 func assertMigratedSessionsAndRoutes(t *testing.T, r *Registry) {

@@ -73,16 +73,16 @@ func (r *Registry) HostIdentity() (HostIdentity, error) {
 
 // ensureHostIdentity creates this daemon's host id once, when the registry is
 // opened, so reading the identity never writes.
-func (r *Registry) ensureHostIdentity() error {
+func ensureHostIdentity(tx *sql.Tx) error {
 	var exists bool
-	if err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM host_identity WHERE id=1)`).Scan(&exists); err != nil || exists {
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM host_identity WHERE id=1)`).Scan(&exists); err != nil || exists {
 		return err
 	}
 	raw := make([]byte, 6)
 	if _, err := rand.Read(raw); err != nil {
 		return fmt.Errorf("generate host id: %w", err)
 	}
-	_, err := r.db.Exec(`INSERT OR IGNORE INTO host_identity(id,host_id,name) VALUES(1,?,?)`, "h"+hex.EncodeToString(raw), defaultHostName())
+	_, err := tx.Exec(`INSERT OR IGNORE INTO host_identity(id,host_id,name) VALUES(1,?,?)`, "h"+hex.EncodeToString(raw), defaultHostName())
 	return err
 }
 
@@ -307,9 +307,6 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 	}
 	if row.ObservedAt.IsZero() {
 		row.ObservedAt = time.Now().UTC()
-	}
-	if err := r.EnsureCatalogState(); err != nil {
-		return CatalogEvent{}, false, err
 	}
 	tx, err := r.db.Begin()
 	if err != nil {
