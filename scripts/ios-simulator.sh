@@ -7,6 +7,7 @@ case "$kind" in
   ipad) name="Agenthail iPad"; family="iPad" ;;
   *) echo "usage: $0 [iphone|ipad] [--boot]" >&2; exit 2 ;;
 esac
+name="${AGENTHAIL_SIMULATOR_NAME:-$name}"
 
 devices="$(xcrun simctl list devices available --json)"
 udid="$(jq -r --arg name "$name" '[.devices[][] | select(.name == $name)] | first | .udid // empty' <<<"$devices")"
