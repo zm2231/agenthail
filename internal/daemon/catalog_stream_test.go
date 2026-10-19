@@ -764,22 +764,32 @@ func TestSnapshotListsTopLevelSessionsAndOnlyActiveSubagents(t *testing.T) {
 	if got := children[resting.ID].Subagents; got == nil || got.Count != 1 {
 		t.Fatalf("resting child rollup=%+v, want its resting grandchild", got)
 	}
+
+	response := serveDashboardRequest(dashboardRouter(d), http.MethodGet, "/api/v1/snapshot?limit=50&parentId="+working.ID, "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"sessions":[]`) {
+		t.Fatalf("empty parent page status=%d body=%.300s, want an empty sessions array", response.Code, response.Body.String())
+	}
 }
 
 func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 	d, store, fake, lead, _ := daemonFixture(t)
-	child := func(id string, status surface.SessionStatus) surface.Session {
-		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Status: status, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: lead.ID, RootID: lead.ID, Depth: 1}}
+	child := func(id, parent string, status surface.SessionStatus) surface.Session {
+		return surface.Session{ID: id, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop, Name: id, Status: status, Source: "subAgent", Transport: "desktop", Subagent: &surface.Subagent{ParentID: parent, RootID: lead.ID, Depth: 1}}
 	}
-	working, resting := child("working-child", surface.StatusBusy), child("resting-child", surface.SessionStatus("notLoaded"))
-	fake.sessions = map[string]surface.Session{lead.ID: lead, working.ID: working, resting.ID: resting}
+	working, resting := child("working-child", lead.ID, surface.StatusBusy), child("resting-child", lead.ID, surface.SessionStatus("notLoaded"))
+	buried := child("busy-under-resting", resting.ID, surface.StatusBusy)
+	fake.sessions = map[string]surface.Session{lead.ID: lead, working.ID: working, resting.ID: resting, buried.ID: buried}
 	d.discoverCatalog(context.Background())
 	d.publishCatalogPresence()
-	window, err := store.CatalogEventsAfter(0, 200)
-	if err != nil {
-		t.Fatal(err)
+	latestSeq := func() uint64 {
+		t.Helper()
+		_, seq, err := store.CatalogState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
 	}
-	latest := window.LatestSeq
+	latest := latestSeq()
 
 	token := func(name string, scopes []string) string {
 		pairing, err := store.CreateDevicePairing(name, scopes, time.Minute)
@@ -792,13 +802,15 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 		}
 		return secret
 	}
+	deviceToken := token("Phone", []string{"read", "control"})
+	hostToken := token("Agenthail host", []string{"read", "control", registry.HostScope})
 	server := httptest.NewServer(d.dashboardHandler(&dashboardServer{token: "dashboard-secret"}))
 	defer server.Close()
-	stream := func(bearer string) []catalogStreamEnvelope {
+	stream := func(bearer string, after, until uint64) []catalogStreamEnvelope {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/catalog-events?after=0", nil)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/catalog-events?after=%d", server.URL, after), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -813,14 +825,15 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 		}
 		reader := bufio.NewReader(response.Body)
 		var events []catalogStreamEnvelope
-		for len(events) == 0 || events[len(events)-1].Seq < latest {
+		for len(events) == 0 || events[len(events)-1].Seq < until {
 			events = append(events, receiveCatalogSSE(t, reader))
 		}
 		return events
 	}
 	type seen struct {
-		types     map[string]string
-		subagents *surface.SubagentRollup
+		types        map[string]string
+		leadUpserted bool
+		subagents    *surface.SubagentRollup
 	}
 	read := func(events []catalogStreamEnvelope) seen {
 		result := seen{types: map[string]string{}}
@@ -839,7 +852,7 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 			if event.Type == "session.upserted" {
 				id = data.Session.ID
 				if id == lead.ID {
-					result.subagents = data.Session.Subagents
+					result.leadUpserted, result.subagents = true, data.Session.Subagents
 				}
 			}
 			if id != "" {
@@ -848,16 +861,96 @@ func TestCatalogStreamShowsDevicesTheSessionListAndHostsEveryRow(t *testing.T) {
 		}
 		return result
 	}
+	snapshotIDs := func(bearer string) map[string]bool {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/snapshot?fresh=1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+bearer)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var state struct {
+			Sessions []dashboardSession `json:"sessions"`
+		}
+		if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&state) != nil {
+			t.Fatalf("snapshot status=%d", response.StatusCode)
+		}
+		ids := map[string]bool{}
+		for _, session := range state.Sessions {
+			ids[session.ID] = true
+		}
+		return ids
+	}
 
-	device := read(stream(token("Phone", []string{"read", "control"})))
-	if device.types[resting.ID] != "session.removed" || device.types[working.ID] != "session.upserted" {
-		t.Fatalf("device stream=%v, want the resting subagent removed and the working one listed", device.types)
+	device := read(stream(deviceToken, 0, latest))
+	if device.types[resting.ID] != "session.removed" || device.types[buried.ID] != "session.removed" || device.types[working.ID] != "session.upserted" {
+		t.Fatalf("device stream=%v, want the subagents under a resting one removed and the working one listed", device.types)
 	}
-	if device.subagents == nil || *device.subagents != (surface.SubagentRollup{Count: 1}) {
-		t.Fatalf("device lead rollup=%+v, want the resting subagent counted", device.subagents)
+	if device.subagents == nil || *device.subagents != (surface.SubagentRollup{Count: 2, Working: 1}) {
+		t.Fatalf("device lead rollup=%+v, want the resting subagent and its busy child counted", device.subagents)
 	}
-	host := read(stream(token("Agenthail host", []string{"read", "control", registry.HostScope})))
-	if host.types[resting.ID] != "session.upserted" || host.types[working.ID] != "session.upserted" {
+	host := read(stream(hostToken, 0, latest))
+	if host.types[resting.ID] != "session.upserted" || host.types[buried.ID] != "session.upserted" || host.types[working.ID] != "session.upserted" {
 		t.Fatalf("host stream=%v, want every row", host.types)
 	}
+	if ids := snapshotIDs(deviceToken); ids[resting.ID] || ids[buried.ID] || !ids[working.ID] {
+		t.Fatalf("device snapshot=%v, want the session list", ids)
+	}
+	if ids := snapshotIDs(hostToken); !ids[resting.ID] || !ids[buried.ID] || !ids[working.ID] {
+		t.Fatalf("host snapshot=%v, want every row", ids)
+	}
+
+	resting.Status = surface.StatusBusy
+	fake.sessions[resting.ID] = resting
+	d.discoverCatalog(context.Background())
+	d.publishCatalogPresence()
+	reopened := read(stream(deviceToken, latest, latestSeq()))
+	if reopened.types[resting.ID] != "session.upserted" || reopened.types[buried.ID] != "session.upserted" {
+		t.Fatalf("device stream after the subagent resumed=%v, want it and its already busy child listed", reopened.types)
+	}
+	if !reopened.leadUpserted || reopened.subagents != nil {
+		t.Fatalf("lead rollup after its subagents were listed=%+v (upserted=%v), want none hidden", reopened.subagents, reopened.leadUpserted)
+	}
+}
+
+func TestSnapshotKeepsTheSubagentCountStoredBeforeHiddenCounts(t *testing.T) {
+	d, store, fake, lead, _ := daemonFixture(t)
+	lead.Subagents = &surface.SubagentRollup{Count: 3, Working: 1}
+	fake.sessions = map[string]surface.Session{lead.ID: lead}
+	d.discoverCatalog(context.Background())
+	db, err := sql.Open("sqlite", store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE catalog_sessions SET projection_fingerprint=json_remove(projection_fingerprint,'$.observedSubagents','$.hiddenSubagents','$.listed') WHERE session_id=?`, lead.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := registry.Open(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	d = New(reopened, []surface.Surface{&daemonSurface{sessions: map[string]surface.Session{}, observations: map[string]*surface.TurnObservation{}}})
+	d.publishCatalogPresence()
+	state, err := d.dashboardState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range state.Sessions {
+		if session.ID == lead.ID {
+			if session.Subagents == nil || *session.Subagents != (surface.SubagentRollup{Count: 3, Working: 1}) {
+				t.Fatalf("lead rollup=%+v, want the stored count", session.Subagents)
+			}
+			return
+		}
+	}
+	t.Fatal("snapshot dropped the lead")
 }

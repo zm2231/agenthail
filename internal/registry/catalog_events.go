@@ -66,6 +66,12 @@ func (r *Registry) migrateCatalog() error {
 	if err := r.ensureColumn("catalog_sessions", "host_queue_count", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	// A projection that predates the hidden subagent count holds only the
+	// subagents its surface observed.
+	if _, err := r.db.Exec(`UPDATE catalog_sessions SET projection_fingerprint=json_set(projection_fingerprint,'$.observedSubagents',json_extract(projection_fingerprint,'$.subagents'))
+		WHERE json_valid(projection_fingerprint) AND json_type(projection_fingerprint,'$.subagents')='object' AND json_type(projection_fingerprint,'$.observedSubagents') IS NULL AND json_type(projection_fingerprint,'$.hiddenSubagents') IS NULL`); err != nil {
+		return err
+	}
 	if _, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS catalog_surfaces (
 		surface TEXT PRIMARY KEY,
 		health TEXT NOT NULL,

@@ -111,6 +111,7 @@ type dashboardSession struct {
 	Subagents         *surface.SubagentRollup    `json:"subagents,omitempty"`
 	ObservedSubagents *surface.SubagentRollup    `json:"observedSubagents,omitempty"`
 	HiddenSubagents   *surface.SubagentRollup    `json:"hiddenSubagents,omitempty"`
+	Listed            bool                       `json:"listed"`
 	Host              *dashboardHost             `json:"host,omitempty"`
 }
 
@@ -463,10 +464,11 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		writeAPIError(w, http.StatusBadRequest, code, pageErr.Error())
 		return
 	}
+	mirror := catalogMirror(r.Context())
 	hostEpoch, catalogSeq, catalogErr := d.Registry.CatalogState()
 	dashboard.stateMu.Lock()
 	version := dashboard.stateVersion.Load()
-	if page == nil && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
+	if page == nil && !mirror && catalogErr == nil && r.URL.Query().Get("fresh") != "1" && dashboard.cachedVersion == version && dashboard.state.HostEpoch == hostEpoch && dashboard.state.CatalogSeq == catalogSeq && !dashboard.stateAt.IsZero() && time.Since(dashboard.stateAt) < dashboardStateCacheTTL {
 		state := dashboard.state
 		dashboard.stateMu.Unlock()
 		d.writeDashboardSnapshot(w, r, state)
@@ -499,7 +501,7 @@ func (d *Daemon) dashboardStateCached(dashboard *dashboardServer, w http.Respons
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if page == nil {
+	if page == nil && !mirror {
 		dashboard.stateMu.Lock()
 		dashboard.state = state
 		dashboard.stateAt = time.Now()
@@ -777,7 +779,7 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	if err != nil {
 		return dashboardState{}, fmt.Errorf("read session rekeys: %w", err)
 	}
-	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
+	state := dashboardState{UpdatedAt: now.UTC(), EventCursor: eventCursor, HostEpoch: catalogSnapshot.HostEpoch, CatalogSeq: catalogSnapshot.CatalogSeq, Daemon: map[string]any{"running": true, "pid": os.Getpid(), "host": d.localHost(), "hosts": d.hostSummaries()}, Surfaces: make([]dashboardSurface, 0, len(d.Surfaces)), Sessions: []dashboardSession{}, Queue: make([]dashboardQueue, 0, len(queue)), Channels: make([]dashboardChannel, 0, len(channels)), Relays: make([]dashboardRelay, 0, len(routes)), History: make([]dashboardHistory, 0, len(history)), Attention: make([]dashboardAttention, 0, len(attention)), DeliveryProblems: deliveryProblems, CodexRecentHours: config.CodexRecentHours, BusyDelivery: string(config.BusyDelivery), Rekeyed: rekeyed}
 	if page != nil {
 		state.catalogPageApplied = true
 		state.catalogPageFilter = pageRequest[0].Scope + "\x00" + pageRequest[0].ProjectID + "\x00" + pageRequest[0].Query + "\x00" + pageRequest[0].ParentID
@@ -830,8 +832,9 @@ func (d *Daemon) dashboardState(ctx context.Context, pageRequest ...registry.Cat
 	}
 	catalogSessions := map[string]registry.CatalogSessionState{}
 	sessions := make([]surface.Session, 0, len(catalogSnapshot.Sessions))
+	mirror := catalogMirror(ctx)
 	for _, record := range catalogSnapshot.Sessions {
-		if catalogSnapshot.Listing.Hidden[record.Session.ID] {
+		if !mirror && catalogSnapshot.Listing.Hidden[record.Session.ID] {
 			continue
 		}
 		catalogSessions[record.Session.ID] = record
