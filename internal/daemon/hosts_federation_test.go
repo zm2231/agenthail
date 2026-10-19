@@ -147,7 +147,7 @@ func newFederationNode(t *testing.T, sessionIDs ...string) *federationNode {
 			t.Fatal(err)
 		}
 	}
-	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true}}}
+	fake := &federatedSurface{daemonSurface: &daemonSurface{sessions: sessions, observations: map[string]*surface.TurnObservation{}, accepted: true, caps: surface.Capabilities{Send: true, Steer: true, Interrupt: true, Stream: true, Compact: true, Model: true, Goal: true}}}
 	d := New(reg, []surface.Surface{fake})
 	node := &federationNode{daemon: d, reg: reg, fake: fake, gate: &actionGate{}}
 	node.handler = d.dashboardHandler(&dashboardServer{token: dashboardTestToken})

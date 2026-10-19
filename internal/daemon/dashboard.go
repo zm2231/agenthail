@@ -264,7 +264,7 @@ func (d *Daemon) dashboardHandler(dashboard *dashboardServer) http.Handler {
 	mux.HandleFunc("/api/session-stream", dashboard.guard(d.hostRouted("id", d.apiSessionStreamHandler)))
 	mux.HandleFunc("/api/models", dashboard.guard(d.hostRouted("id", d.dashboardModelsHandler)))
 	mux.HandleFunc("/api/search", dashboard.guard(d.dashboardSearchHandler))
-	mux.HandleFunc("/api/history", dashboard.guard(d.dashboardHistoryHandler))
+	mux.HandleFunc("/api/history", dashboard.guard(d.hostRouted("sessionId", d.dashboardHistoryHandler)))
 	mux.HandleFunc("/api/action", dashboard.guard(d.idempotentActionHandler(d.hostRoutedAction(d.dashboardActionHandler))))
 	mux.HandleFunc("/api/settings", dashboard.guard(d.dashboardSettingsHandler))
 	mux.HandleFunc("/api/settings/remote-qr", dashboard.guard(d.dashboardRemoteQRHandler))
@@ -414,7 +414,18 @@ func (d *Daemon) dashboardHistoryHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "history filters are too long", http.StatusBadRequest)
 		return
 	}
-	entries, hasMore, err := d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	var entries []registry.HistoryEntry
+	hasMore := false
+	var err error
+	if sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId")); sessionID != "" {
+		if beforeID != 0 || kind != "" || queryText != "" {
+			http.Error(w, "a session's history takes only a limit", http.StatusBadRequest)
+			return
+		}
+		entries, err = d.Registry.ListHistory(limit, sessionID)
+	} else {
+		entries, hasMore, err = d.Registry.ListHistoryPage(limit, beforeID, kind, queryText)
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("read delivery history: %s", err), http.StatusInternalServerError)
 		return
@@ -1314,14 +1325,18 @@ func (d *Daemon) dashboardActionHandler(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, targetErr.Error(), http.StatusBadRequest)
 			return
 		}
-		adapter := d.surfaceForKind(target.Surface)
-		if adapter == nil {
-			http.Error(w, "target surface is not configured", http.StatusConflict)
-			return
-		}
-		if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
+		// A held send for a paired host's session is replayed to that host,
+		// which decides whether the session takes it.
+		if owner, _ := d.Registry.SessionHost(target.ID); owner == "" {
+			adapter := d.surfaceForKind(target.Surface)
+			if adapter == nil {
+				http.Error(w, "target surface is not configured", http.StatusConflict)
+				return
+			}
+			if err := d.ensureDashboardWritable(r.Context(), adapter, target); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 		}
 		if err := d.Registry.RetryMessage(request.QueueID); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

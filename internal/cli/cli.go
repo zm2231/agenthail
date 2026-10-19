@@ -1973,9 +1973,12 @@ func (a *App) cmdCompact(args []string) error {
 		return fmt.Errorf("usage: agenthail compact <target>")
 	}
 	ctx := context.Background()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		return a.compactRemote(ctx, remote)
 	}
 	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Compact {
 		return fmt.Errorf("%s does not support compact", surf.Name())
@@ -2001,9 +2004,16 @@ func (a *App) cmdModel(args []string) error {
 		return fmt.Errorf("usage: agenthail model <target> [name]")
 	}
 	ctx := context.Background()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		name := ""
+		if len(positional) > 1 {
+			name = positional[1]
+		}
+		return a.modelRemote(ctx, remote, name)
 	}
 	if !surface.EffectiveCapabilities(sess, surf.Capabilities()).Model {
 		return fmt.Errorf("%s does not support model switching", surf.Name())
@@ -2153,12 +2163,14 @@ func (a *App) cmdQueue(args []string) error {
 		if err != nil {
 			return err
 		}
-		adapter := a.surfaceByKind(session.Surface)
-		if adapter == nil {
-			return errors.New(surface.ReadOnlySessionReason(session))
-		}
-		if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
-			return err
+		if owner, _ := a.Registry.SessionHost(session.ID); owner == "" {
+			adapter := a.surfaceByKind(session.Surface)
+			if adapter == nil {
+				return errors.New(surface.ReadOnlySessionReason(session))
+			}
+			if err := a.ensureWritableTarget(context.Background(), session, adapter); err != nil {
+				return err
+			}
 		}
 		if err := a.Registry.RetryMessage(id); err != nil {
 			return err
@@ -2184,15 +2196,15 @@ func (a *App) cmdQueue(args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: agenthail queue clear <target>")
 		}
-		sess, _, err := a.resolveTarget(context.Background(), args[1])
+		sessionID, err := a.queueSessionID(context.Background(), args[1])
 		if err != nil {
 			return err
 		}
-		count, err := a.Registry.CancelMessagesForSession(sess.ID)
+		count, err := a.Registry.CancelMessagesForSession(sessionID)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("canceled %d queued message(s) for %s\n", count, a.resolveDisplay(sess.ID))
+		fmt.Printf("canceled %d queued message(s) for %s\n", count, a.resolveDisplay(sessionID))
 		return nil
 	}
 	positional := stripFlags(args)
@@ -2200,9 +2212,19 @@ func (a *App) cmdQueue(args []string) error {
 		return fmt.Errorf("usage: agenthail queue <target> \"message\"")
 	}
 	ctx := context.Background()
-	sess, surf, err := a.resolveTarget(ctx, positional[0])
+	sess, surf, remote, err := a.resolveAnyTarget(ctx, positional[0])
 	if err != nil {
 		return err
+	}
+	if remote != nil {
+		message, err := messageText(strings.Join(positional[1:], " "))
+		if err != nil {
+			return err
+		}
+		if message == "" {
+			return fmt.Errorf("message is empty")
+		}
+		return a.queueRemote(ctx, remote, message)
 	}
 	if a.Registry == nil {
 		return fmt.Errorf("queue requires the registry")
@@ -2236,11 +2258,11 @@ func (a *App) cmdQueue(args []string) error {
 func (a *App) filterQueueRows(ctx context.Context, rows []registry.QueueRow, targetSelector string, mine bool, cwd string) ([]registry.QueueRow, error) {
 	targetID := ""
 	if targetSelector != "" {
-		session, _, err := a.resolveTarget(ctx, targetSelector)
+		sessionID, err := a.queueSessionID(ctx, targetSelector)
 		if err != nil {
 			return nil, fmt.Errorf("resolve --target: %w", err)
 		}
-		targetID = session.ID
+		targetID = sessionID
 	}
 	mineID := ""
 	if mine {
@@ -2318,16 +2340,20 @@ func (a *App) cmdHistory(args []string) error {
 				sessionID = ""
 			}
 		}
-		if sessionID != "" {
-			resolved, err := a.Registry.ResolveTarget(sessionID)
-			if err != nil {
-				return fmt.Errorf("resolve history target %q: %w", sessionID, err)
-			}
-			sessionID = resolved
-		}
 	}
 	if limit > 200 {
 		return fmt.Errorf("count must be 200 or less")
+	}
+	if sessionID != "" {
+		ctx := context.Background()
+		session, _, remote, err := a.resolveAnyTarget(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("resolve history target %q: %w", sessionID, err)
+		}
+		if remote != nil {
+			return a.historyRemote(ctx, remote, limit, hasFlag(args, "--json"))
+		}
+		sessionID = session.ID
 	}
 	entries, err := a.Registry.ListHistory(limit, sessionID)
 	if err != nil {

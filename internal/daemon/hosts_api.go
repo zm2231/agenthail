@@ -680,11 +680,15 @@ func (d *Daemon) routeActionRequest(request map[string]any) (*pairedHost, bool, 
 		}
 	}
 	if host != nil {
-		if action, _ := request["action"].(string); strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") || strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
-			return nil, false, fmt.Errorf("%s is not available for sessions on host %s", action, host.record.Name)
+		action, _ := request["action"].(string)
+		if action == "session-focus" {
+			return nil, false, fmt.Errorf("opening the terminal of a session on host %s is only possible on that host", host.record.Name)
+		}
+		if strings.HasPrefix(action, "channel-") || strings.HasPrefix(action, "relay-") || strings.HasPrefix(action, "queue-") || action == "delivery-dismiss" {
+			return nil, false, fmt.Errorf("%s is not available for sessions on another host yet", action)
 		}
 		if source, _ := request["sourceSessionId"].(string); source != "" {
-			return nil, false, fmt.Errorf("a message from a session cannot be relayed to host %s", host.record.Name)
+			return nil, false, fmt.Errorf("a message from one session to another is not available for sessions on another host yet")
 		}
 	}
 	return host, rewritten, nil
