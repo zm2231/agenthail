@@ -18,7 +18,6 @@ SESSION = {
     "capabilities": CAPABILITIES,
     "transport": "uds",
     "project": {"id": "fixture-project", "displayName": "fixture-project", "rootPath": "/tmp/fixture-project", "kind": "git"},
-    "recent": True,
     "checkout": {"id": "fixture-checkout", "path": "/tmp/fixture-project", "branch": "main", "dirty": False, "isMain": True},
     "observedAt": NOW,
     "runtime": {"focusable": False, "launcher": "terminal"},
