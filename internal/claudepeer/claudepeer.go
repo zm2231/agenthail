@@ -1108,13 +1108,41 @@ func recordRejection(reg *registry.Registry, c Config, f frame, raw []byte, err 
 
 // noRouteNoticeInterval bounds how often one sender is told why its messages
 // to a session with no reply route are refused, so a model that answers the
-// notice cannot start an endless exchange with it.
-const noRouteNoticeInterval = 10 * time.Minute
+// notice cannot start an endless exchange with it. At most
+// noRouteNoticeSenders senders are remembered; past that the oldest is
+// forgotten and may be told again.
+const (
+	noRouteNoticeInterval = 10 * time.Minute
+	noRouteNoticeSenders  = 256
+)
 
 var noRouteNotices = struct {
 	sync.Mutex
 	sent map[string]time.Time
 }{sent: map[string]time.Time{}}
+
+// takeNoRouteNotice reports whether the sender is due a notice now, and
+// records it when it is.
+func takeNoRouteNotice(from string, now time.Time) bool {
+	noRouteNotices.Lock()
+	defer noRouteNotices.Unlock()
+	if last, ok := noRouteNotices.sent[from]; ok && now.Sub(last) < noRouteNoticeInterval {
+		return false
+	}
+	oldest, oldestAt := "", time.Time{}
+	for sender, last := range noRouteNotices.sent {
+		if now.Sub(last) >= noRouteNoticeInterval {
+			delete(noRouteNotices.sent, sender)
+		} else if oldest == "" || last.Before(oldestAt) {
+			oldest, oldestAt = sender, last
+		}
+	}
+	if len(noRouteNotices.sent) >= noRouteNoticeSenders {
+		delete(noRouteNotices.sent, oldest)
+	}
+	noRouteNotices.sent[from] = now
+	return true
+}
 
 // rejectFrame tells a sender its frame was not delivered. Claude shows its
 // model a fixed notice for each receipt status and never the receipt's
@@ -1131,18 +1159,9 @@ func rejectFrame(c Config, f frame, ownSocket string, err error) {
 	if validateTargetSocket(c.SocketDir, target) != nil {
 		return
 	}
-	noRouteNotices.Lock()
-	if last, ok := noRouteNotices.sent[f.From]; ok && time.Since(last) < noRouteNoticeInterval {
-		noRouteNotices.Unlock()
+	if !takeNoRouteNotice(f.From, time.Now()) {
 		return
 	}
-	for from, last := range noRouteNotices.sent {
-		if time.Since(last) >= noRouteNoticeInterval {
-			delete(noRouteNotices.sent, from)
-		}
-	}
-	noRouteNotices.sent[f.From] = time.Now()
-	noRouteNotices.Unlock()
 	notice := fmt.Sprintf("Agenthail could not deliver your message %s. %s Messages to this address are refused the same way.", f.MsgID, err)
 	payload, _ := json.Marshal(frame{MsgV: peerProtocol, MsgID: uuid.New().String(), Type: "user", Message: mustJSON(messageBody{Role: "user", Content: peerContent(c.HostName, c.Session, ownSocket, notice)}), Priority: "next", From: "uds:" + ownSocket})
 	_ = sendAuthenticatedFrame(c.Home, target, payload)

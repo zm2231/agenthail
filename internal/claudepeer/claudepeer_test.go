@@ -1145,3 +1145,29 @@ func TestPeerMessageToAClaudeSessionIsStillQueuedAndReceived(t *testing.T) {
 		t.Fatalf("queue count=%d", reg.QueueCount(target.ID))
 	}
 }
+
+func TestNoRouteNoticesStayBoundedAndOncePerSender(t *testing.T) {
+	now := time.Now()
+	senders := noRouteNoticeSenders + 50
+	for i := 0; i < senders; i++ {
+		from := "uds:/bounded-test/" + strconv.Itoa(i) + ".sock"
+		if !takeNoRouteNotice(from, now.Add(time.Duration(i)*time.Millisecond)) {
+			t.Fatalf("sender %d was not told on its first refusal", i)
+		}
+		if takeNoRouteNotice(from, now.Add(time.Duration(i)*time.Millisecond)) {
+			t.Fatalf("sender %d was told twice within the interval", i)
+		}
+		noRouteNotices.Lock()
+		size := len(noRouteNotices.sent)
+		noRouteNotices.Unlock()
+		if size > noRouteNoticeSenders {
+			t.Fatalf("remembered %d senders, cap is %d", size, noRouteNoticeSenders)
+		}
+	}
+	if !takeNoRouteNotice("uds:/bounded-test/0.sock", now.Add(time.Duration(senders)*time.Millisecond)) {
+		t.Fatal("the oldest sender was not forgotten when the cap was reached")
+	}
+	if !takeNoRouteNotice("uds:/bounded-test/late.sock", now.Add(noRouteNoticeInterval)) || takeNoRouteNotice("uds:/bounded-test/late.sock", now.Add(noRouteNoticeInterval)) {
+		t.Fatal("a new sender after the interval was not told exactly once")
+	}
+}
