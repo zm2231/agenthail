@@ -221,6 +221,10 @@ func IsDeliveryUnavailable(err error) bool {
 // cannot accept a message yet; the message waits in the queue until it can.
 var ErrDeliveryHeld = errors.New("target is running but not reachable yet")
 
+// ErrNothingToSteer is a steer that found the session idle: its turn ended
+// before the steer reached it.
+var ErrNothingToSteer = errors.New("session idle; nothing to steer")
+
 func IsDeliveryHeld(err error) bool {
 	return IsDeliveryUnavailable(err) && errors.Is(err, ErrDeliveryHeld)
 }
