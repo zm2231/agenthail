@@ -120,20 +120,24 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 		}
 	}
 	client := claudehost.NewClient(fixture.Home)
-	hello := func() claudehost.Hello {
-		var out claudehost.Hello
-		claudehosttest.WaitFor(t, "the host", func() bool {
+	hello := func(expected int) claudehost.Hello {
+		t.Helper()
+		var lastErr error
+		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
 			got, err := client.Hello(ctx)
-			out = got
-			return err == nil
-		})
-		return out
+			cancel()
+			if err == nil {
+				return got
+			}
+			lastErr = err
+		}
+		t.Fatalf("timed out waiting for the host\n%s", fixture.Diagnose(expected, lastErr))
+		return claudehost.Hello{}
 	}
 
 	stop := run(fixture.Manager(t, "1.0.0"))
-	first := hello()
+	first := hello(0)
 	id := uuid.NewString()
 	opened := fixture.Open(t, client, id)
 	stop()
@@ -144,7 +148,7 @@ func TestARestartedDaemonAttachesToTheRunningHostAndKeepsItsSessions(t *testing.
 	stop = run(fixture.Manager(t, "1.0.0"))
 	defer stop()
 	time.Sleep(300 * time.Millisecond)
-	if again := hello(); again.PID != first.PID {
+	if again := hello(first.PID); again.PID != first.PID {
 		t.Fatalf("restarted daemon reached host %d, want the running host %d", again.PID, first.PID)
 	}
 	lock, err := os.Open(filepath.Join(fixture.Home, ".agenthail", "claude-host", "lock"))
