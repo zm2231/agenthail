@@ -230,3 +230,14 @@ func TestReplyToAReplacedCoordinatorConversationFollowsTheCurrentOne(t *testing.
 		t.Fatalf("starts=%d resumes=%d", fixture.Starts(), fixture.Invocations("--bg", "--resume", goneConversation))
 	}
 }
+
+func TestQueuedSendToAReplacedCoordinatorConversationNamesTheCurrentOne(t *testing.T) {
+	app, r, _ := goneCoordinatorApp(t)
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "first"}) }); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return app.Run([]string{"send", goneConversation, "second"}) })
+	if err != nil || r.QueueCount(freshConversation) != 1 || !strings.Contains(output, "agenthail steer "+freshConversation) {
+		t.Fatalf("output=%q err=%v queued=%d", output, err, r.QueueCount(freshConversation))
+	}
+}

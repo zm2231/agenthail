@@ -1613,6 +1613,13 @@ func (a *App) cmdSend(args []string) error {
 				return printCoordinatorStart(outcome, target, jsonOut)
 			}
 			receipt = outcome.Receipt
+			if outcome.Session != nil && outcome.Session.ID != addressed.ID {
+				if wantStream || wantReply {
+					fmt.Fprintf(os.Stderr, "the coordinator moved to %s while this message was sent, so this send cannot follow its turns; read the reply with 'agenthail last %s'\n", outcome.Session.ID, outcome.Session.ID)
+					wantStream, wantReply = false, false
+				}
+				sess = outcome.Session
+			}
 		}
 	} else if hasFlag(args, "--no-queue") || syntheticNotion {
 		receipt, err = dispatcher.DeliverWithoutQueue(ctx, surf, sess, message, "", options)
@@ -1636,7 +1643,11 @@ func (a *App) cmdSend(args []string) error {
 			if receipt.WaitingOn != nil {
 				fmt.Printf("queued #%d for %s, which is waiting on you; it delivers after you answer\n", receipt.QueueID, a.resolveDisplay(sess.ID))
 			} else {
-				fmt.Printf("target is active; queued #%d for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", receipt.QueueID, a.resolveDisplay(sess.ID), target)
+				steerTarget := target
+				if coordinated && !coord.Names(target) {
+					steerTarget = sess.ID
+				}
+				fmt.Printf("target is active; queued #%d for %s and will deliver when the current turn finishes (use 'agenthail steer %s \"message\"' to affect the current turn)\n", receipt.QueueID, a.resolveDisplay(sess.ID), steerTarget)
 			}
 		}
 		return nil
