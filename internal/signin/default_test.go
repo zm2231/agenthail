@@ -29,10 +29,14 @@ func setDefaultBrowser(t *testing.T, home, id string) {
 
 func browserID(browser Browser) string {
 	if runtime.GOOS == "linux" {
+		shortest := ""
 		for id, candidate := range linuxBrowsers {
-			if candidate == browser && !strings.HasSuffix(id, "-stable") && !strings.HasSuffix(id, "-browser") {
-				return id + ".desktop"
+			if candidate == browser && (shortest == "" || len(id) < len(shortest)) {
+				shortest = id
 			}
+		}
+		if shortest != "" {
+			return shortest + ".desktop"
 		}
 	}
 	for id, candidate := range macBrowsers {
