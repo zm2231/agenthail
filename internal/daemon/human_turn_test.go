@@ -45,6 +45,7 @@ type humanTurnFixture struct {
 	postErr error
 	bridged surface.Session
 	native  surface.Session
+	home    string
 }
 
 func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
@@ -56,6 +57,7 @@ func newHumanTurnFixture(t *testing.T) *humanTurnFixture {
 	t.Cleanup(func() { r.Close() })
 	f := &humanTurnFixture{r: r}
 	process := claudetest.New(t)
+	f.home = process.Home
 	process.Listen()
 	process.Record("conversation-bridge", process.Home, "session_bridge")
 	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaudeWithRequest(signin.Fixed{Browser: signin.Chrome}, process.Home, func(_ context.Context, method, url string, _ map[string]string, body string, _ surfaces.CookieSource, _ time.Duration) (int, string, error) {
@@ -286,5 +288,46 @@ func TestQueuedPersonMessageWithOptionsIsRejectedAtDrain(t *testing.T) {
 	}
 	if item, err := f.r.QueueItem(queueID); err != nil || item.Status != "dead" {
 		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+// withoutWebBridgeSidecar routes the fixture's web requests through the real
+// request path with no sidecar installed, so they fail before sending.
+func (f *humanTurnFixture) withoutWebBridgeSidecar(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGENTHAIL_SIDECAR", "")
+	t.Setenv("PATH", "/usr/bin:/bin")
+	f.claude = &nativeRecordingClaude{Claude: surfaces.NewClaude(signin.Fixed{Browser: signin.Chrome}, f.home)}
+	f.d.Surfaces = []surface.Surface{f.claude}
+}
+
+func TestPersonSendThatCannotStartFailsVisiblyWithoutAPeerCopy(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	f.withoutWebBridgeSidecar(t)
+	response := serveDashboardRequest(dashboardRouter(f.d), http.MethodPost, "/api/action", `{"action":"send","author":"person","sessionId":"conversation-bridge","message":"never sent"}`)
+	if response.Code == http.StatusOK || !strings.Contains(response.Body.String(), "sidecar not found") || strings.Contains(response.Body.String(), string(surface.EvidenceSubmitted)) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	if len(f.claude.native) != 0 {
+		t.Fatalf("a person's message was copied to the peer socket: %q", f.claude.native)
+	}
+	history, err := f.r.ListHistory(5, f.bridged.ID)
+	if err != nil || len(history) == 0 || history[0].Kind != "failed" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestQueuedPersonSendThatCannotStartIsDeferredForRetry(t *testing.T) {
+	f := newHumanTurnFixture(t)
+	f.transcript(t, f.bridged, idleClaudeTranscript+busyClaudeTranscript)
+	receipt := f.send(t, `{"action":"send","author":"person","sessionId":"conversation-bridge","busyDelivery":"queue","message":"queued until it can start"}`)
+	queueID := int64(receipt["queueId"].(float64))
+	f.transcript(t, f.bridged, idleClaudeTranscript)
+	f.withoutWebBridgeSidecar(t)
+	f.d.drainMessageQueue(context.Background(), f.claude, &f.bridged)
+	f.d.queueWorkers.Wait()
+	item, err := f.r.QueueItem(queueID)
+	if err != nil || item.Status == "dead" || item.Evidence == surface.EvidenceUnknown || !strings.Contains(item.LastError, "did not start") || len(f.claude.native) != 0 {
+		t.Fatalf("item=%+v err=%v native=%q", item, err, f.claude.native)
 	}
 }

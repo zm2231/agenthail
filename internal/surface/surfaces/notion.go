@@ -430,6 +430,9 @@ func (n *Notion) SendWithOptions(ctx context.Context, sess *surface.Session, mes
 	status, respBody, err := notionInferenceRequest(ctx, "POST",
 		notionAPI("runInferenceTranscript"),
 		headers, string(bodyBytes), account.cookies, 60*time.Second)
+	if surface.IsDeliveryUnavailable(err) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("notion send: %w", err))
 	}

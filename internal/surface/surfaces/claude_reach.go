@@ -165,7 +165,7 @@ func (c *Claude) resume(ctx context.Context, conversation, cwd string, job *clau
 	started := time.Now()
 	output, err := c.backgroundCommand(ctx, cwd, "--bg", "--resume", conversation)
 	if err != nil {
-		return nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude resume: %w: %s", err, string(output)))
+		return nil, claudeBackgroundRunError("Claude resume", err, output)
 	}
 	id, err := claudeBackgroundID(string(output))
 	if err != nil {

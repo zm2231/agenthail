@@ -3,8 +3,11 @@ package surfaces
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -27,7 +30,7 @@ type claudeBackground struct {
 func (c *Claude) backgroundCommand(ctx context.Context, cwd string, args ...string) ([]byte, error) {
 	binary, err := surface.ClaudeBinary(c.home)
 	if err != nil {
-		return nil, err
+		return nil, surface.DeliveryUnavailable(err)
 	}
 	cmd := processGroupCommand(ctx, binary, args...)
 	cmd.WaitDelay = time.Second
@@ -87,7 +90,7 @@ func (c *Claude) StartSession(ctx context.Context, options surface.SessionStartO
 	args = append(args, "--", options.Message)
 	data, err := c.backgroundCommand(ctx, options.Cwd, args...)
 	if err != nil {
-		return nil, nil, surface.DeliveryOutcomeUnknown(fmt.Errorf("Claude creation: %w: %s", err, string(data)))
+		return nil, nil, claudeBackgroundRunError("Claude creation", err, data)
 	}
 	shortID, parseErr := claudeBackgroundID(string(data))
 	if parseErr != nil {
@@ -170,6 +173,27 @@ func (c *Claude) backgroundJob(id string) (claudeJob, bool) {
 
 var claudeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 var claudeBackgroundLine = regexp.MustCompile(`(?m)^backgrounded · ([A-Za-z0-9_-]+)(?: |$)`)
+
+// claudeBackgroundRunError classifies a failed `claude --bg` run. Claude prints
+// the background ID once a job exists, so a run that never started, or exited
+// on its own without printing one, started nothing.
+func claudeBackgroundRunError(action string, err error, output []byte) error {
+	failure := fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(string(output)))
+	if surface.IsDeliveryUnavailable(err) {
+		return surface.DeliveryUnavailable(failure)
+	}
+	var exit *exec.ExitError
+	var path *fs.PathError
+	switch {
+	case errors.As(err, &exit):
+		if exit.Exited() && !claudeBackgroundLine.MatchString(claudeANSI.ReplaceAllString(string(output), "")) {
+			return surface.DeliveryUnavailable(failure)
+		}
+	case errors.As(err, &path):
+		return surface.DeliveryUnavailable(failure)
+	}
+	return surface.DeliveryOutcomeUnknown(failure)
+}
 
 func claudeBackgroundID(output string) (string, error) {
 	matches := claudeBackgroundLine.FindStringSubmatch(claudeANSI.ReplaceAllString(output, ""))

@@ -39,7 +39,8 @@ takes `RoutePeer`. Everything else takes `RouteSend`. `Dispatcher.deliver` and
 the CLI and voice checks that reject reply correlation on a peer route. The
 route is derived each time a message is sent and never stored, so a queued
 message follows the target's bridge state at drain time. The choice is made
-before sending and is never revised after a failure.
+before sending and is never revised after a failure that may have reached the
+provider. A person's message never falls back to the native socket.
 
 Options never change authorship. On `RouteHumanTurn`, a per-message model or
 turn option is rejected as an invalid request: the bridge user event has no
@@ -59,7 +60,10 @@ and the drain replays a person's message through `SendHumanTurn` once the
 session is idle. `Claude.Send`'s bridge branch and `SendHumanTurn` share
 `postWhenIdle`, so both apply the same busy check. Outcome semantics are
 unchanged. An uncertain POST is `unknown` and becomes a submitted intent or a
-dead letter, and it is never retried.
+dead letter, and it is never retried. A failure before the request is sent
+(no sidecar, no usable Python, or a cookie bridge that fails or returns no
+cookies) means delivery did not start: a direct send returns that error and
+records it as failed, and a queued send is deferred and retried.
 
 The primitive does not authenticate the person behind a composer. The trust
 boundary is the dashboard's control authority (the dashboard token or a paired

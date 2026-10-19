@@ -108,3 +108,49 @@ func TestMobileQueuePreservesIntegratedTurnSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeCreationThatNeverStartedIsAFailureNotUnknown(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		binary func(home string) string
+		want   string
+	}{
+		{name: "untrusted workspace", want: "Workspace not trusted", binary: func(home string) string {
+			executable := filepath.Join(home, "claude")
+			script := "#!/bin/sh\nprintf 'Workspace not trusted. Run `claude` in %s once and accept the trust prompt, then retry.\\n' \"$PWD\" >&2\nexit 1\n"
+			if err := os.WriteFile(executable, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			return executable
+		}},
+		{name: "missing executable", want: "is not executable", binary: func(home string) string { return filepath.Join(home, "missing-claude") }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, registry, _, _, _ := daemonFixture(t)
+			home := t.TempDir()
+			t.Setenv("AGENTHAIL_CLAUDE_BIN", test.binary(home))
+			d := New(registry, []surface.Surface{surfaces.NewClaude(nil, home)})
+			handler := d.dashboardHandler(&dashboardServer{token: "secret"})
+			body, _ := json.Marshal(map[string]string{"action": "session-create", "surface": "claude", "message": "fixture instruction", "cwd": home})
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/actions", bytes.NewReader(body))
+			request.Header.Set("Authorization", "Bearer secret")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			var receipt struct {
+				OK      bool   `json:"ok"`
+				Unknown bool   `json:"unknown"`
+				Error   string `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+				t.Fatal(response.Body.String(), err)
+			}
+			if receipt.OK || receipt.Unknown || !strings.Contains(receipt.Error, test.want) || strings.Contains(receipt.Error, "ambiguous") {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			history, err := registry.ListHistory(5, "")
+			if err != nil || len(history) == 0 || history[0].Kind != "failed" {
+				t.Fatalf("history=%+v err=%v", history, err)
+			}
+		})
+	}
+}
