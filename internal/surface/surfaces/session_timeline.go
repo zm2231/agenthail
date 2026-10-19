@@ -292,7 +292,7 @@ func codexOpaqueTimelineItem(record map[string]any) *surface.TimelineItem {
 		return nil
 	}
 	switch typ {
-	case "message", "agent_message", "reasoning", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "web_search_call", "user_message", "token_count":
+	case "message", "agent_message", "reasoning", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "web_search_call", "user_message", "token_count", "task_started", "turn_started":
 		return nil
 	}
 	text := typ + ": " + timelineValue(payload)

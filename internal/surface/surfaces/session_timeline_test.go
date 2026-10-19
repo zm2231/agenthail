@@ -218,6 +218,24 @@ func TestCodexTimelineUsesResponseItemsWithoutDuplicateEventMessages(t *testing.
 	}
 }
 
+func TestCodexTurnStartIsNotAnActivityItem(t *testing.T) {
+	path := timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","model_context_window":258400,"collaboration_mode_kind":"default"}}
+{"timestamp":"2026-09-07T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run the checks"}]}}
+{"timestamp":"2026-09-07T12:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Checks pass"}]}}
+{"timestamp":"2026-09-07T12:00:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}
+`)
+	page, err := readTimeline(context.Background(), path, "codex", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 3 || page.Items[0].Text != "Run the checks" || page.Items[1].Text != "Checks pass" || page.Items[2].Kind != "done" {
+		t.Fatalf("%+v", page.Items)
+	}
+	if page.Items[0].TurnID != "turn-1" || page.Items[1].TurnID != "turn-1" {
+		t.Fatalf("turn identity was lost with the start record: %+v", page.Items)
+	}
+}
+
 func TestCodexEventUserContextSurvivesAlongsideTools(t *testing.T) {
 	path := timelineFixture(t, `{"timestamp":"2026-09-07T12:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Keep the worktree isolated"}}
 {"timestamp":"2026-09-07T12:01:00Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{}"}}
