@@ -253,7 +253,9 @@ agenthail steer @builder "Prioritize the failing test."
 agenthail interrupt @builder
 agenthail compact @builder
 agenthail model @builder
-agenthail model @builder <model-name>
+agenthail model @builder <model-name> --json
+agenthail control @builder context --json
+agenthail control @builder effort medium
 agenthail goal @builder --json
 agenthail goal @builder set "Ship the verified fix."
 agenthail goal @builder pause
@@ -262,6 +264,15 @@ agenthail goal @builder budget 50000
 agenthail goal @builder budget clear
 agenthail goal @builder clear
 ```
+
+Claude controls over Remote Control report request-linked evidence. `model` and
+`interrupt` wait for Claude's `control_response` to their own request id;
+`interrupt` also waits for the active turn to end. A steer is only
+`transport_accepted`, with the posted message id: Claude has not confirmed it
+reached the turn. `control <target> context|usage|status|effort|rename` runs one
+allowlisted Claude command and returns its output joined to the request. An
+accepted control whose effect was not observed reports `unknown` with its request
+id; check the session before retrying. Arbitrary slash commands are not exposed.
 
 `compact` is a typed control, never a queued message. Claude sessions with a Remote Control attachment compact through the authenticated Claude bridge immediately; native socket-only Claude peers report compact as unsupported. Codex uses its native compact operation.
 

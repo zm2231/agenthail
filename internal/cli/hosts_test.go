@@ -215,7 +215,7 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	app, _, fake, api := federatedCLIFixture(t, true)
 	api.responses = map[string]string{
 		"compact":                  `{"ok":true,"result":{"evidence":"delivered","status":"sent"}}`,
-		"model":                    `{"ok":true,"result":"gpt-next"}`,
+		"model":                    `{"ok":true,"result":{"sessionId":"remote-builder","action":"model","evidence":"delivered","source":"codex","output":"gpt-next"}}`,
 		"session-fork":             `{"ok":true,"result":{"session":{"id":"` + hosts.Qualify(forgeHostID, "fork-1") + `","surface":"codex"}}}`,
 		"native-queue":             `{"ok":true,"result":{"items":[]}}`,
 		"session-lifecycle-status": `{"ok":true,"result":{"state":"running"}}`,
@@ -237,7 +237,7 @@ func TestRemoteSessionCommandsRouteThroughDaemon(t *testing.T) {
 	if output := run("model", "forge::@builder"); strings.TrimSpace(output) != "gpt-remote" {
 		t.Fatalf("model read output=%q", output)
 	}
-	if output := run("model", "forge::@builder", "gpt-next"); strings.TrimSpace(output) != "gpt-next" {
+	if output := run("model", "forge::@builder", "gpt-next"); !strings.Contains(output, "model delivered") || !strings.HasSuffix(strings.TrimSpace(output), "gpt-next") {
 		t.Fatalf("model set output=%q", output)
 	}
 	if output := run("goal", "forge::@builder"); !strings.Contains(output, "ship the remote picker") {

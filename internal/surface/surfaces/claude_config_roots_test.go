@@ -108,6 +108,14 @@ func TestClaudeConversationInTwoConfigRootsIsRefused(t *testing.T) {
 	if _, err := c.Model(ctx, session, "opus"); !ambiguous(err) {
 		t.Fatalf("model err=%v", err)
 	}
+	if _, err := c.Model(ctx, session, ""); !ambiguous(err) {
+		t.Fatalf("model read err=%v", err)
+	}
+	for _, action := range []string{"status", "context", "usage"} {
+		if _, err := c.Control(ctx, session, surface.ControlRequest{Action: action}); !ambiguous(err) {
+			t.Fatalf("%s control err=%v", action, err)
+		}
+	}
 }
 
 func TestClaudeHostedConversationInTwoConfigRootsIsRefused(t *testing.T) {
@@ -140,6 +148,9 @@ func TestClaudeHostedConversationInTwoConfigRootsIsRefused(t *testing.T) {
 	}
 	if err := c.Interrupt(ctx, session); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
 		t.Fatalf("interrupt err=%v", err)
+	}
+	if _, err := c.Control(ctx, session, surface.ControlRequest{Action: "status"}); err == nil || !strings.Contains(err.Error(), "more than one Claude config directory") {
+		t.Fatalf("status control err=%v", err)
 	}
 	if !claudehosttest.Alive(session.PID) || len(host.Spawns(t, session.ID)) != 1 {
 		t.Fatal("a refused lifecycle action reached the host")
