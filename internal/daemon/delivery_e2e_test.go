@@ -362,6 +362,25 @@ func (h *runningDaemon) relays() []dashboardRelay {
 	return decoded.Relays
 }
 
+// awaitQueueItem waits for the queue item to reach the state want describes.
+// The daemon records an attempt's outcome after the target has seen the
+// attempt, so the row can still be inflight just after the target saw it.
+func (h *runningDaemon) awaitQueueItem(id int64, what string, want func(dashboardQueue) bool) {
+	h.t.Helper()
+	var item dashboardQueue
+	deadline := time.Now().Add(5 * time.Second)
+	for item = h.queueItem(id); !want(item); item = h.queueItem(id) {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("timed out waiting for %s: queue item=%+v", what, item)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func delivered(item dashboardQueue) bool {
+	return item.Historical && item.Evidence == surface.EvidenceDelivered
+}
+
 func (h *runningDaemon) queueItem(id int64) dashboardQueue {
 	h.t.Helper()
 	for _, item := range h.queue() {
@@ -393,8 +412,11 @@ func (h *runningDaemon) ageQueueItem(id int64, age time.Duration) {
 	h.execStore(`UPDATE message_queue SET queued_at=?,updated_at=? WHERE id=?`, stamp, stamp, id)
 }
 
+// makeQueueItemAvailable ends the item's backoff once its last attempt is
+// recorded; ending it earlier would be overwritten by that attempt's backoff.
 func (h *runningDaemon) makeQueueItemAvailable(id int64) {
 	h.t.Helper()
+	h.awaitQueueItem(id, "the last attempt recorded", func(item dashboardQueue) bool { return item.Status == "pending" })
 	h.execStore(`UPDATE message_queue SET available_at_ms=0 WHERE id=? AND status='pending'`, id)
 }
 
@@ -457,7 +479,12 @@ func waitForCatalogEvent(t *testing.T, reader *bufio.Reader, eventType string) m
 
 func eventually(t *testing.T, what string, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	eventuallyWithin(t, what, 5*time.Second, condition)
+}
+
+func eventuallyWithin(t *testing.T, what string, wait time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(wait)
 	for !condition() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
@@ -510,9 +537,7 @@ func TestBusySessionQueuesThenRunLoopDeliversOnceWithOptions(t *testing.T) {
 	if len(got) != 1 || got[0].text != "after this turn" || got[0].model != "gpt-test" || got[0].source != "sender" {
 		t.Fatalf("delivered=%+v", got)
 	}
-	if item := h.queueItem(id); !item.Historical || item.Evidence != surface.EvidenceDelivered {
-		t.Fatalf("queue item=%+v", item)
-	}
+	h.awaitQueueItem(id, "the delivery recorded", delivered)
 }
 
 func TestQueuedMessageToLongBusySessionStaysPendingThenDeliversOnce(t *testing.T) {
@@ -535,9 +560,7 @@ func TestQueuedMessageToLongBusySessionStaysPendingThenDeliversOnce(t *testing.T
 	if got := agent.deliveredTo("target"); len(got) != 1 || got[0].text != "report after a long turn" {
 		t.Fatalf("delivered=%+v", got)
 	}
-	if item := h.queueItem(id); !item.Historical || item.Evidence != surface.EvidenceDelivered {
-		t.Fatalf("queue item=%+v", item)
-	}
+	h.awaitQueueItem(id, "the delivery recorded", delivered)
 	if notices := agent.deliveredTo("sender"); len(notices) != 0 {
 		t.Fatalf("sender notices=%+v", notices)
 	}
@@ -556,19 +579,17 @@ func TestBusyRefusalNeverExhaustsTheQueuedMessage(t *testing.T) {
 		}
 		eventually(t, fmt.Sprintf("refused attempt %d", attempt), func() bool { return agent.attemptsFor("target") >= attempt })
 	}
-	settle()
-	if item := h.queueItem(id); item.Status != "pending" || item.Historical || item.Evidence != surface.EvidenceQueued || item.Attempts != 0 {
-		t.Fatalf("refused item=%+v", item)
-	}
+	h.awaitQueueItem(id, "the refused item back in the queue", func(item dashboardQueue) bool {
+		return item.Status == "pending" && !item.Historical && item.Evidence == surface.EvidenceQueued && item.Attempts == 0
+	})
 	agent.refuseSends("target", false)
 	agent.failSends("target", errors.New("transport closed"))
 	refused := agent.attemptsFor("target")
 	h.makeQueueItemAvailable(id)
 	eventually(t, "one real delivery error", func() bool { return agent.attemptsFor("target") > refused })
-	settle()
-	if item := h.queueItem(id); item.Status != "pending" || item.Attempts != 1 {
-		t.Fatalf("after one real error item=%+v", item)
-	}
+	h.awaitQueueItem(id, "one counted attempt after the real error", func(item dashboardQueue) bool {
+		return item.Status == "pending" && item.Attempts == 1
+	})
 	agent.failSends("target", nil)
 	h.makeQueueItemAvailable(id)
 	eventually(t, "delivery after refusals", func() bool { return len(agent.deliveredTo("target")) > 0 })
@@ -621,10 +642,9 @@ func TestTerminalQueuedFailureNotifiesSenderOnceAndPublishesProblem(t *testing.T
 		t.Fatal("missing delivery.problem")
 	}
 	eventually(t, "sender notice", func() bool { return len(agent.deliveredTo("sender")) > 0 })
-	settle()
-	if item := h.queueItem(id); item.Status != "dead" || item.Evidence != surface.EvidenceFailed {
-		t.Fatalf("queue item=%+v", item)
-	}
+	h.awaitQueueItem(id, "the dead letter", func(item dashboardQueue) bool {
+		return item.Status == "dead" && item.Evidence == surface.EvidenceFailed
+	})
 	if notices := agent.deliveredTo("sender"); len(notices) != 1 {
 		t.Fatalf("sender notices=%+v", notices)
 	}
@@ -641,19 +661,18 @@ func TestUnavailableTargetKeepsQueuedMessageAndDeliversOnceAfterRecovery(t *test
 	agent.failSends("target", surface.DeliveryUnavailable(errors.New("bridge restarting")))
 	agent.setStatus("target", surface.StatusIdle)
 	eventually(t, "deferred attempt", func() bool { return agent.attemptsFor("target") >= 2 })
-	settle()
-	if item := h.queueItem(id); item.Historical || item.Status != "pending" || item.Attempts != 0 || item.LastError == "" {
-		t.Fatalf("unavailable delivery was not kept pending with its failure recorded: %+v", item)
-	}
+	h.awaitQueueItem(id, "the unavailable delivery kept pending with its failure recorded", func(item dashboardQueue) bool {
+		return !item.Historical && item.Status == "pending" && item.Attempts == 0 && item.LastError != ""
+	})
 	agent.failSends("target", nil)
-	eventually(t, "recovered delivery", func() bool { return len(agent.deliveredTo("target")) > 0 })
+	// Nothing retries an unavailable target early: the message is tried again
+	// once its backoff ends.
+	eventuallyWithin(t, "recovered delivery", registry.QueueRetryBackoff+5*time.Second, func() bool { return len(agent.deliveredTo("target")) > 0 })
 	settle()
 	if got := agent.deliveredTo("target"); len(got) != 1 {
 		t.Fatalf("delivered=%+v", got)
 	}
-	if item := h.queueItem(id); !item.Historical || item.Evidence != surface.EvidenceDelivered {
-		t.Fatalf("queue item=%+v", item)
-	}
+	h.awaitQueueItem(id, "the delivery recorded", delivered)
 }
 
 func TestQueuedMessageWaitsThroughObservationOutageAndDeliversOnce(t *testing.T) {
