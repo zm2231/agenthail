@@ -207,10 +207,10 @@ func (a *App) cmdChannel(args []string) error {
 			if owner, err := a.Registry.SessionHost(mid); err == nil && owner != "" {
 				if _, err := a.Registry.QueueHostSend(registry.HostSend{SessionID: mid, Message: payload, Key: "channel:" + channelName + ":" + mid + ":" + uuid.NewString(), SourceSessionID: sourceID}); err != nil {
 					failed++
-					fmt.Printf("  [FAIL] %s: %s\n", a.resolveDisplay(mid), err)
+					fmt.Printf("  [FAIL] %s: %s\n", a.sessionDisplay(mid), err)
 				} else {
 					queued++
-					fmt.Printf("  [QUEUE] %s (held for its host)\n", a.resolveDisplay(mid))
+					fmt.Printf("  [QUEUE] %s (held for its host)\n", a.sessionDisplay(mid))
 				}
 				continue
 			}
@@ -334,7 +334,7 @@ func (a *App) cmdRelay(args []string) error {
 				state = "complete"
 			}
 			fmt.Printf("%s#%-3d %s -> %s /%s/ %s %s fires=%d last-fired=%s when=%s pending=%d error=%q\n",
-				prefix, r.ID, a.resolveDisplay(r.FromSession), a.resolveDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired, r.Handoff, r.PendingCount, r.LastError)
+				prefix, r.ID, a.sessionDisplay(r.FromSession), a.sessionDisplay(r.ToSession), r.Pattern, mode, state, r.FireCount, lastFired, r.Handoff, r.PendingCount, r.LastError)
 		}
 		listed := len(routes)
 		for _, r := range routes {

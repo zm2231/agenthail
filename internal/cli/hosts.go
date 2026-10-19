@@ -678,3 +678,46 @@ func (a *App) pairedHostRelays(ctx context.Context) ([]hostRelays, error) {
 	}
 	return result, nil
 }
+
+// sessionDisplay names a session on this host or a paired host: a raw
+// mirrored id or a host-qualified id reads as host::@alias or
+// host::surface/name, the way its host lists it.
+func (a *App) sessionDisplay(id string) string {
+	if a.Registry == nil {
+		return truncate(id, 24)
+	}
+	hostID, raw, qualified := hosts.Split(id)
+	if !qualified {
+		owner, err := a.Registry.SessionHost(id)
+		if err != nil || owner == "" {
+			return a.resolveDisplay(id)
+		}
+		hostID = owner
+	} else if identity, err := a.Registry.HostIdentity(); err == nil && identity.ID == hostID {
+		return a.resolveDisplay(raw)
+	}
+	name := hostID
+	if paired, err := a.Registry.ListHosts(); err == nil {
+		for _, host := range paired {
+			if host.ID == hostID {
+				name = host.Name
+			}
+		}
+	}
+	rows, err := a.Registry.HostCatalogRows(hostID)
+	if err == nil {
+		for _, record := range rows {
+			if record.Session.ID != raw {
+				continue
+			}
+			session, row := listRemoteSession(record)
+			if row.Alias != "" {
+				return name + hosts.Separator + "@" + row.Alias
+			}
+			if session.Name != "" {
+				return name + hosts.Separator + fmt.Sprintf("%s/%s", session.Surface, truncate(session.Name, 20))
+			}
+		}
+	}
+	return name + hosts.Separator + truncate(raw, 24)
+}

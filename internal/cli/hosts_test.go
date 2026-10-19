@@ -189,6 +189,13 @@ func TestChannelsAndRelaysReachARemoteSession(t *testing.T) {
 	if err != nil || len(members) != 1 || members[0] != "remote-1" {
 		t.Fatalf("members=%v err=%v", members, err)
 	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	if output, err := captureStdout(t, func() error { return app.Run([]string{"channel", "send", "ops", "status?"}) }); err != nil || !strings.Contains(output, "[QUEUE] forge::@builder (held for its host)") {
+		t.Fatalf("channel send output=%q err=%v", output, err)
+	}
+	if held, err := app.Registry.HostDeliveries(forgeHostID); err != nil || len(held) != 1 || held[0].SessionID != "remote-1" {
+		t.Fatalf("held=%+v err=%v", held, err)
+	}
 	if output, err := captureStdout(t, func() error { return app.Run([]string{"relay", "add", "forge::@builder", "forge::@builder", "done"}) }); err != nil || !strings.Contains(output, "relay on host forge") {
 		t.Fatalf("relay add output=%q err=%v", output, err)
 	}
