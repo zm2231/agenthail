@@ -611,6 +611,10 @@ type Capabilities struct {
 	Interrupt bool `json:"interrupt"`
 	Steer     bool `json:"steer"`
 	Attach    bool `json:"attach"`
+	// Respond and PermissionMode are a session whose open requests a person
+	// answers here and whose permission mode changes while it runs.
+	Respond        bool `json:"respond"`
+	PermissionMode bool `json:"permissionMode"`
 }
 
 type SessionCapabilities struct {

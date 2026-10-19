@@ -159,6 +159,12 @@ func (a *App) Run(args []string) (err error) {
 		return a.cmdCompact(rest)
 	case "model":
 		return a.cmdModel(rest)
+	case "permission-mode":
+		return a.cmdPermissionMode(rest)
+	case "requests":
+		return a.cmdRequests(rest)
+	case "answer":
+		return a.cmdAnswer(rest)
 	case "control":
 		return a.cmdControl(rest)
 	case "interrupt":
@@ -236,6 +242,11 @@ Session commands:
   compact <target>              Compress context (typed control; unsupported for socket-only Claude peers)
   model <target> [name] [--json] [--timeout 30s]
                                  Get or set model; Claude waits for its own control response
+  permission-mode <target> [mode] [--json]
+                                 Get or set the permission mode of a session the Claude host runs
+  requests <target> [--json]     List the tool approvals and questions a session waits on you for
+  answer <target> <allow|always|deny|"answer"> [--request id] [--reason text] [--answers json]
+                                 Answer the oldest open request, or the one --request names
   interrupt <target> [--json] [--timeout 30s]
                                  Stop current turn; Claude waits for the turn to end
   steer <target> "message" [--json] [--timeout 30s]
@@ -560,7 +571,7 @@ func flagVal(args []string, flag string) string {
 }
 
 func stripFlags(args []string) []string {
-	valueFlags := map[string]bool{"--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true}
+	valueFlags := map[string]bool{"--request": true, "--reason": true, "--answers": true, "--when": true, "--effort": true, "--mode": true, "--service-tier": true, "--output-schema": true, "--cwd": true, "--target": true, "--alias": true, "--before": true, "--last-turn": true, "--id": true, "--ids": true, "--client-id": true, "--cursor": true, "--from": true, "--model": true, "--timeout": true, "--codex-recent-hours": true, "--tailscale": true, "--address": true, "--name": true, "--host": true, "--label": true, "--project": true}
 	var out []string
 	positionalOnly := false
 	for i := 0; i < len(args); i++ {
@@ -601,7 +612,9 @@ func validateCommandFlags(command string, args []string) error {
 		"signin": {values: map[string]bool{"--label": true}, bools: map[string]bool{"--json": true, "--help": true}},
 		"doctor": {bools: map[string]bool{"--json": true}}, "version": {bools: map[string]bool{"--json": true}}, "--version": {bools: map[string]bool{"--json": true}},
 		"update": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}}, "upgrade": {bools: map[string]bool{"--check": true, "--json": true, "--help": true}},
-		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
+		"stream": {values: map[string]bool{"--timeout": true}}, "compact": {}, "model": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
+		"permission-mode": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "requests": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}},
+		"answer": {values: map[string]bool{"--timeout": true, "--request": true, "--reason": true, "--answers": true}, bools: map[string]bool{"--json": true}}, "interrupt": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "steer": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "control": {values: map[string]bool{"--timeout": true}, bools: map[string]bool{"--json": true}}, "identify": {}, "relay": {}, "daemon": {}, "daemon-run": {}, "launch": {}, "dashboard": {values: map[string]bool{"--codex-recent-hours": true, "--tailscale": true}, bools: map[string]bool{"--no-open": true, "--json": true}}, "help": {}, "-h": {}, "--help": {},
 	}
 	spec, known := specs[command]
 	if !known {
@@ -2194,6 +2207,9 @@ func (a *App) cmdModel(args []string) error {
 	}
 	if controller, ok := surf.(surface.Controller); ok && name != "" {
 		result, controlErr := controller.Control(ctx, sess, surface.ControlRequest{Action: "model", Value: name})
+		if controlErr == nil {
+			a.recordHistory(registry.HistoryEntry{Kind: "model", SessionID: sess.ID, Message: name, Result: "changed by " + cliActor})
+		}
 		if controlErr == nil && a.registry() != nil {
 			if err := a.registry().RegisterSession(*sess); err != nil {
 				return fmt.Errorf("persist Claude model state: %w", err)

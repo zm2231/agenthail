@@ -93,7 +93,8 @@ func (c *Claude) SessionCapabilities(sess *surface.Session) surface.Capabilities
 	if claudeHosted(sess) {
 		capabilities.Stream = sess.HasLocal && sess.Transcript != ""
 		capabilities.Compact = false
-		capabilities.Model = false
+		capabilities.Respond = true
+		capabilities.PermissionMode = true
 		return capabilities
 	}
 	if sess == nil || sess.Transport != "uds" {
@@ -834,15 +835,20 @@ func (c *Claude) applyRecordObservation(sess *surface.Session, observation *surf
 }
 
 // observe reads the turn from the transcript and what it waits on from the
-// process record. Claude writes a pending tool call to the transcript only
-// once it resolves, so the record is the one place a question, a plan
-// approval or a permission prompt shows while it is open.
+// process record, or for a session the host runs, from the host, which holds
+// its open requests. Claude writes a pending tool call to the transcript only
+// once it resolves, so those are the one place a question, a plan approval or
+// a permission prompt shows while it is open.
 func (c *Claude) observe(ctx context.Context, sess *surface.Session) (*surface.TurnObservation, error) {
 	observation, err := c.observeTurn(ctx, sess)
 	if err != nil {
 		return nil, err
 	}
-	if waiting := c.recordWaiting(sess); waiting != nil && observation.Status != surface.StatusOffline {
+	waiting := c.recordWaiting(sess)
+	if claudeHosted(sess) {
+		waiting = c.hostWaiting(ctx, sess)
+	}
+	if waiting != nil && observation.Status != surface.StatusOffline {
 		observation.Status = surface.StatusBusy
 		observation.WaitingOn = waiting
 	}
