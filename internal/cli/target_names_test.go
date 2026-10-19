@@ -39,4 +39,3 @@ func TestNamedTargetIsExactForEveryCommandThatTakesOne(t *testing.T) {
 		t.Fatalf("an unprefixed fragment no longer matches by name: sid=%q err=%v", sid, err)
 	}
 }
-

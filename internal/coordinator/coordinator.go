@@ -46,13 +46,15 @@ func (s Service) Is(sessionID string) bool {
 	return err == nil && current != "" && current == sessionID
 }
 
-// Names reports whether target addresses the coordinator by its name.
+// Names reports whether target is @<name> of the coordinator. A bare name
+// stays a fragment like any other target.
 func (s Service) Names(target string) bool {
-	if s.Registry == nil {
+	name, ok := strings.CutPrefix(target, "@")
+	if s.Registry == nil || !ok {
 		return false
 	}
 	spec, err := s.Registry.Coordinator()
-	return err == nil && strings.TrimPrefix(target, "@") == spec.Name
+	return err == nil && name == spec.Name
 }
 
 // Named reports whether the coordinator's name points at a session.

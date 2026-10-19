@@ -171,3 +171,18 @@ func TestCodexCoordinatorStartsOnItsFirstMessage(t *testing.T) {
 		t.Fatalf("thread=%+v ok=%v", thread, ok)
 	}
 }
+
+func TestBareCoordinatorNameIsAFragmentNotTheCoordinator(t *testing.T) {
+	app, _, fixture, _ := coordinatorApp(t)
+	if _, err := captureStdout(t, func() error {
+		return app.Run([]string{"coordinator", "new", "claude", "--cwd", fixture.Home, "--name", "lead"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "lead", "not for the coordinator"}) }); err == nil || fixture.Starts() != 0 {
+		t.Fatalf("a bare name started the coordinator: err=%v starts=%d", err, fixture.Starts())
+	}
+	if _, err := captureStdout(t, func() error { return app.Run([]string{"send", "@lead", "for the coordinator"}) }); err != nil || fixture.Starts() != 1 {
+		t.Fatalf("err=%v starts=%d", err, fixture.Starts())
+	}
+}
