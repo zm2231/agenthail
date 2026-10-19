@@ -117,7 +117,7 @@ func TestLastCountReadsOlderPagesUntilItHasThatManyExchanges(t *testing.T) {
 }
 
 func TestLastResolvesAnExitedSessionByItsName(t *testing.T) {
-	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, resolveErr: surface.ErrSessionNotFound}}
+	provider := &cliReadSurface{cliSurface: &cliSurface{kind: surface.KindClaude, sessions: map[string]surface.Session{}, resolveErr: surface.ErrSessionNotFound, caps: surface.Capabilities{Reply: true}}}
 	app, r := cliFixture(t, provider.cliSurface)
 	app.Surfaces[0].Surface = provider
 	if err := r.RegisterSession(surface.Session{ID: "11111111-2222-3333-4444-555555555555", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Name: "pairing-fixture", Status: surface.StatusIdle}); err != nil {
@@ -128,8 +128,18 @@ func TestLastResolvesAnExitedSessionByItsName(t *testing.T) {
 		return sessionPageFixture{result: &surface.SessionReadResult{Source: "journal", Exchanges: []surface.Exchange{{User: "fixture question", Assistant: "fixture answer"}}}}, nil
 	}
 
-	output, err := captureStdout(t, func() error { return app.Run([]string{"last", "pairing-fixture", "--json"}) })
-	if err != nil || !strings.Contains(output, `"session":"11111111-2222-3333-4444-555555555555"`) || !strings.Contains(output, "fixture answer") {
-		t.Fatalf("output=%s err=%v", output, err)
+	if err := r.SetAlias("pairing-alias", "11111111-2222-3333-4444-555555555555"); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"pairing-fixture", "claude:pairing-fixture", "claude:@pairing-alias", "claude:11111111-2222", "@pairing-alias"} {
+		for _, command := range []string{"last", "reply"} {
+			output, err := captureStdout(t, func() error { return app.Run([]string{command, target, "--json"}) })
+			if err != nil || !strings.Contains(output, `"session":"11111111-2222-3333-4444-555555555555"`) || !strings.Contains(output, "fixture answer") {
+				t.Fatalf("%s %s: output=%s err=%v", command, target, output, err)
+			}
+		}
+	}
+	if len(provider.sent) != 0 {
+		t.Fatalf("a read sent %q", provider.sent)
 	}
 }

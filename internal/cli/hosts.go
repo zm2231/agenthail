@@ -79,7 +79,13 @@ func (a *App) resolveReadTarget(ctx context.Context, target string) (*surface.Se
 	if err == nil || a.Registry == nil || !errors.Is(err, surface.ErrSessionNotFound) {
 		return session, adapter, remote, err
 	}
-	sid, lookupErr := a.Registry.ResolveTarget(target)
+	var sid string
+	var lookupErr error
+	if kindText, selector, qualified := strings.Cut(target, ":"); qualified && a.adapters().ForSurface(surface.SurfaceKind(strings.ToLower(kindText))) != nil {
+		sid, lookupErr = a.Registry.ResolveSurfaceTarget(surface.SurfaceKind(strings.ToLower(kindText)), selector)
+	} else {
+		sid, lookupErr = a.Registry.ResolveTarget(target)
+	}
 	if lookupErr != nil {
 		return nil, nil, nil, err
 	}
