@@ -12,13 +12,14 @@ import (
 // call time so a Claude /branch or /resume is attributed to the conversation
 // that is running now.
 func (a *App) sourceSessionID(ctx context.Context, selector string) (string, error) {
+	envVar := ""
 	if selector == "" {
 		if id := os.Getenv("AGENTHAIL_SESSION_ID"); id != "" {
-			selector = id
+			selector, envVar = id, "AGENTHAIL_SESSION_ID"
 		} else if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
-			selector = "claude:" + id
+			selector, envVar = "claude:"+id, "CLAUDE_CODE_SESSION_ID"
 		} else if id := os.Getenv("CODEX_THREAD_ID"); id != "" {
-			selector = "codex:" + id
+			selector, envVar = "codex:"+id, "CODEX_THREAD_ID"
 		}
 	}
 	if selector == "" {
@@ -39,6 +40,9 @@ func (a *App) sourceSessionID(ctx context.Context, selector string) (string, err
 		}
 	}
 	session, _, err := a.resolveTarget(ctx, selector)
+	if err != nil && envVar != "" {
+		return "", fmt.Errorf("resolve sender: %s=%s is not a session of the Agenthail whose registry is %s; pass --from with one of its sessions, or unset %s to send without a reply address: %w", envVar, os.Getenv(envVar), a.registry().Path(), envVar, err)
+	}
 	if err != nil {
 		return "", fmt.Errorf("resolve sender (use --from surface:session): %w", err)
 	}

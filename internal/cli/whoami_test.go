@@ -58,10 +58,26 @@ func TestWhoamiReportsUnboundShellWithoutGuessingFromCWD(t *testing.T) {
 	}
 }
 
-func TestWhoamiReportsUnregisteredBoundSession(t *testing.T) {
-	fake := &cliSurface{kind: surface.KindCodex, sessions: map[string]surface.Session{}}
-	app, _ := cliFixture(t, fake)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "missing")
+func TestSessionFromAnotherAgenthailIsRefusedWithRemedies(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	worker := surface.Session{ID: "worker", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeCLI, Status: surface.StatusIdle}
+	fake := &cliSurface{kind: surface.KindClaude, caps: surface.Capabilities{Send: true}, sessions: map[string]surface.Session{"worker": worker}}
+	app, store := cliFixture(t, fake)
+	if err := store.RegisterSession(worker); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "foreign-conversation")
+	want := []string{"CLAUDE_CODE_SESSION_ID=foreign-conversation", store.Path(), "--from", "unset CLAUDE_CODE_SESSION_ID"}
+
+	err := app.Run([]string{"send", "worker", "hello"})
+	for _, part := range want {
+		if err == nil || !strings.Contains(err.Error(), part) {
+			t.Fatalf("send error %v does not contain %q", err, part)
+		}
+	}
+	if len(fake.sent) != 0 {
+		t.Fatalf("a refused sender still sent: %v", fake.sent)
+	}
 
 	output, err := captureStdout(t, func() error { return app.Run([]string{"whoami", "--json"}) })
 	if err != nil {
@@ -71,7 +87,9 @@ func TestWhoamiReportsUnregisteredBoundSession(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Resolved || !strings.Contains(got.Reason, "resolve sender") {
-		t.Fatalf("whoami=%+v", got)
+	for _, part := range want {
+		if got.Resolved || !strings.Contains(got.Reason, part) {
+			t.Fatalf("whoami reason %q does not contain %q", got.Reason, part)
+		}
 	}
 }
